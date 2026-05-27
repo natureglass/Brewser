@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<title>Test fixture: canvas</title>
+<style>
+  body { background-color: #14202d; color: #e0e8f4; }
+  h2 { color: #ffd35e; margin-top: 22px; }
+</style>
+</head>
+<body>
+<h1>&lt;canvas&gt; layout</h1>
+<p>Validates that every <code>&lt;canvas&gt;</code> reserves its
+declared attribute size in the page flow even without a script
+drawing into it. The slot stays at the declared dimensions so
+surrounding content lays out the same as on a real browser. Page
+scripts ARE executed on <code>browser://</code> pages; this fixture
+intentionally omits one so the empty-slot case is exercised.</p>
+
+<h2>Explicit dimensions</h2>
+<p>400×200 canvas:</p>
+<canvas width="400" height="200"></canvas>
+
+<h2>HTML defaults (300×150)</h2>
+<p>No <code>width</code> / <code>height</code> attributes — falls
+back to the HTML spec's 300×150:</p>
+<canvas></canvas>
+
+<h2>Spec-defined fallback children</h2>
+<p>The text inside a <code>&lt;canvas&gt;</code> is the fallback for
+browsers without canvas support. We always show the placeholder, so
+the fallback children are ignored (not double-rendered):</p>
+<canvas width="500" height="100">
+This text would only show on a browser without &lt;canvas&gt; support.
+You should NOT see this line — only the placeholder above.
+</canvas>
+
+<h2>Oversized — scaled down</h2>
+<p>2000×500 canvas: wider than the content area, so the layout
+scales the placeholder down to fit (preserving aspect ratio) while
+the label still reports the attribute-declared size:</p>
+<canvas width="2000" height="500"></canvas>
+
+<p><a href="browser://html-experiments/">back to hello</a></p>
+</body>
+</html>

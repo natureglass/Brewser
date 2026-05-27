@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>DOM Phase 2.1 &mdash; text in non-canvas elements</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>DOM Phase 2.1 &mdash; text in non-canvas live elements</h1>
+<p class="lead">Validates that the live-overlay painter now draws
+<code>textContent</code> / <code>innerHTML</code> inside non-canvas
+<code>position:fixed</code> elements with the resolved
+<code>font-family</code> / <code>font-size</code> / <code>color</code> /
+<code>text-align</code> + synthesized bold (double-draw) + italic
+(0.2 rad shear). Static parser assertions render into the lower
+status canvas; visual paint tests appear as a vertical column of
+labelled bars on the right side of the screen, drawn over the page
+content as <code>position:fixed</code> overlays. Each bar's expected
+appearance is described in the status canvas &mdash; tally
+visual-vs-expected by eyeballing the column.</p>
+
+<div class="stage">
+  <canvas id="d21-stage" width="640" height="200"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('d21-stage').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 200);
+    pre.fillStyle = '#fff';
+    pre.font = '20px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE marker - running M2.1 visual paint tests...', 12, 12);
+    pre.font = '14px system-ui';
+    pre.fillStyle = '#9bb1d6';
+    pre.fillText('Look at the column of 13 labelled bars on the RIGHT', 12, 48);
+    pre.fillText('side of the screen. Each one tests one text property.', 12, 66);
+    pre.fillStyle = '#7eda9f';
+    pre.fillText('Lower status canvas lists what each bar should show.', 12, 100);
+  }
+</script>
+
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="d21-status" width="900" height="780"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('d21-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(String(value), 460, y);
+  }
+  // A row is "passing" UNLESS its result string starts with "FAIL:".
+  // Anything else (numeric like `18`, descriptive like `monospace`, or
+  // `(indirect via visual)`) is a successful assertion result.
+  function passing(v) {
+    if (v === undefined || v === null) return false;
+    const s = String(v);
+    if (s === '(not run)' || s.indexOf('(pending') === 0) return false;
+    return s.indexOf('FAIL:') !== 0;
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 780);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const r = globalThis.__d21Results || {};
+    let y = 14;
+    function check(label, key) {
+      const v = key in r ? r[key] : '(not run)';
+      row(y, label, v, passing(v));
+      y += 20;
+    }
+    // Parser assertions
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Parser assertions (programmatic):', 14, y); y += 20;
+    check('font-size from cssText:', 'parse_fontSize');
+    check('font-family from cssText:', 'parse_fontFamily');
+    check('font-weight bold parsed:', 'parse_fontWeight_bold');
+    check('font-weight numeric parsed:', 'parse_fontWeight_num');
+    check('font-style italic parsed:', 'parse_fontStyle_italic');
+    check('text-align center parsed:', 'parse_textAlign');
+    check('line-height parsed:', 'parse_lineHeight');
+    check('color parsed (rgb hex):', 'parse_color');
+    check('resolveCanvasFont default:', 'resolve_default');
+    check('resolveCanvasFont sized:', 'resolve_sized');
+    check('resolveCanvasFont custom family:', 'resolve_family');
+    check('isBoldWeight true on bold:', 'bold_bold');
+    check('isBoldWeight true on 700:', 'bold_700');
+    check('isBoldWeight false on 400:', 'bold_400');
+    check('isItalicStyle true on italic:', 'italic_italic');
+    check('isItalicStyle false on normal:', 'italic_normal');
+    check('cssText round-trip preserves font:', 'roundtrip');
+    check('style.fontFamily setter:', 'setter_family');
+    check('style.fontSize setter:', 'setter_size');
+
+    y += 8;
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Visual paint tests (right column of screen):', 14, y); y += 20;
+    st.fillStyle = '#9bb1d6';
+    st.font = '13px system-ui';
+    const visualTests = [
+      'Bar 1  (top:30):  plain 14px white text, left-aligned',
+      'Bar 2  (top:70):  22px white text, larger glyphs',
+      'Bar 3  (top:110): BOLD via double-draw (thicker strokes)',
+      'Bar 4  (top:150): italic via 0.2 rad shear (slanted right)',
+      'Bar 5  (top:190): BOLD + italic together',
+      'Bar 6  (top:230): red text (#ff5555)',
+      'Bar 7  (top:270): green text (#55ff55)',
+      'Bar 8  (top:310): "<-- left" left-aligned (text at left edge)',
+      'Bar 9  (top:350): "-- center --" centered in box',
+      'Bar 10 (top:390): "right -->" right-aligned (text at right edge)',
+      'Bar 11 (top:430): long text CLIPPED to box edge (no spill)',
+      'Bar 12 (top:470): tiny 11px text in slightly brighter box',
+      'Bar 13 (top:510): big 32px text in 60-tall box',
+    ];
+    for (const line of visualTests) {
+      st.fillText(line, 14, y);
+      y += 18;
+    }
+    y += 8;
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Regression: tap Bar 1 to fire click event:', 14, y); y += 20;
+    st.font = '14px system-ui';
+    check('Bar 1 tap cycle:', 'bar1_tap');
+  }
+  renderStatus();
+  // rAF heartbeat so (a) the live-overlay painter repaints every
+  // frame — tap feedback on the TAP ME bar (textContent update)
+  // becomes visible immediately rather than waiting for an unrelated
+  // input event to trigger a repaint, AND (b) the status canvas
+  // reflects new results (including the tap row) on every tick.
+  // Throttled to a ~250 ms cadence for the status canvas redraw to
+  // avoid stomping on read-back cost on slow paints.
+  let lastStatusMs = 0;
+  function heartbeat() {
+    requestAnimationFrame(heartbeat);
+    const now = performance.now();
+    if (now - lastStatusMs > 250) {
+      try { renderStatus(); } catch (_) { /* swallow */ }
+      lastStatusMs = now;
+    }
+  }
+  requestAnimationFrame(heartbeat);
+</script>
+
+<p class="note">Visual check: 13 bars stack vertically along the right
+side of the screen (left=900, width=280). Each bar tests one
+text-rendering property. Bold should look noticeably thicker than
+plain (1-px-offset double-draw); italic should slant clearly to the
+right (0.2 rad column shear); colored text should match the labelled
+hex; clipped text (bar 11) should NOT spill outside the box.
+<br><br>
+<strong>Pre-authorized deviations from upstream:</strong>
+(1) Bold synthesized via 1-px-offset double-draw &mdash; nx.js's font
+parser rejects the <code>bold</code> prefix and falls back to a
+different (larger) font per [[nxjs-font-no-bold-italic]].
+(2) Italic synthesized via 0.2 rad column shear &mdash; same parser
+issue with the <code>italic</code> prefix.</p>
+
+<p class="footer"><a href="browser://threejs-demos/">back to ThreeJS Demos</a></p>
+</body>
+</html>

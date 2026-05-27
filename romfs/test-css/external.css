@@ -1,0 +1,24 @@
+/* External stylesheet served from romfs:/test-css/external.css */
+body {
+  background-color: #0f1830;
+  color: #d8e1f2;
+}
+h1 {
+  color: #8ed8ff;
+  background-color: #1e3050;
+}
+h2 {
+  color: #b0a8ff;
+  font-style: italic;
+}
+.tag {
+  font-weight: bold;
+  color: #7eda9f;
+}
+a {
+  color: #ffd35e;
+}
+.notice {
+  background-color: #2a4a3a;
+  color: #d0ffd0;
+}

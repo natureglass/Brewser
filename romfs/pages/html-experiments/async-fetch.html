@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+<title>Test fixture: async fetch in inline script</title>
+<style>
+  body { background-color: #14202d; color: #e0e8f4; }
+  h2 { color: #ffd35e; margin-top: 22px; }
+  p.note { color: #9bb1d6; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Async inline &lt;script&gt;</h1>
+<p>Each &lt;script&gt; body is wrapped in an <code>AsyncFunction</code>
+so top-level <code>await</code> works. The page below fetches its own
+history via <code>browser://history/</code> and draws the list on a
+canvas.</p>
+
+<h2>Recent history (via fetch)</h2>
+<canvas id="hist" width="800" height="320"></canvas>
+<script>
+  const ctx = document.getElementById('hist').getContext('2d');
+  ctx.fillStyle = '#1c2c3d';
+  ctx.fillRect(0, 0, 800, 320);
+  ctx.fillStyle = '#ffd35e';
+  ctx.font = '20px system-ui';
+  ctx.textBaseline = 'top';
+  ctx.fillText('await fetch("browser://history/") …', 16, 16);
+
+  try {
+    const response = await fetch('browser://history/');
+    const entries = await response.json();
+    ctx.fillStyle = '#7eda9f';
+    ctx.fillText(`Got ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`, 16, 48);
+    ctx.fillStyle = '#e0e8f4';
+    ctx.font = '14px system-ui';
+    const max = Math.min(entries.length, 10);
+    for (let i = 0; i < max; i++) {
+      const e = entries[i];
+      const label = (e.title && e.title !== e.url) ? `${e.title}` : e.url;
+      ctx.fillText(`${i + 1}. ${label}`.slice(0, 90), 16, 88 + i * 20);
+    }
+    if (entries.length === 0) {
+      ctx.fillStyle = '#9bb1d6';
+      ctx.fillText('(no entries yet — visit some pages, then come back)', 16, 88);
+    }
+  } catch (err) {
+    ctx.fillStyle = '#ff8a6c';
+    ctx.fillText('fetch failed: ' + err, 16, 48);
+  }
+</script>
+
+<h2>Sequential awaits</h2>
+<p class="note">Scripts run in document order. The script below
+awaits a tiny Promise chain, then draws — proving the painter
+waits for all scripts to settle before rendering.</p>
+<canvas id="seq" width="400" height="80"></canvas>
+<script>
+  const ctx = document.getElementById('seq').getContext('2d');
+  let n = 0;
+  for (let i = 0; i < 3; i++) {
+    n = await Promise.resolve(n + 1);
+  }
+  ctx.fillStyle = '#1c2c3d';
+  ctx.fillRect(0, 0, 400, 80);
+  ctx.fillStyle = '#7aa2ff';
+  ctx.font = '20px system-ui';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`Awaited 3 promises, n = ${n}`, 16, 24);
+</script>
+
+<p><a href="browser://html-experiments/">back to hello</a></p>
+</body>
+</html>

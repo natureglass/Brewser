@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Network diagnostic</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
+  h1 { color: #ffd35e; }
+  h2 { color: #7aa2ff; margin-top: 22px; font-size: 20px; }
+  p.lead { color: #9bb1d6; }
+  p.hint { color: #9bb1d6; font-size: 15px; }
+  code { color: #c2e0ff; }
+  a { color: #7eda9f; }
+</style>
+</head>
+<body>
+<h1>Network diagnostic</h1>
+<p class="lead">Five live fetches plus the boot probe result. Press
+<code>Y</code> to reload and re-test.</p>
+
+<p class="hint">Failure patterns: all HTTPS fail but HTTP succeeds → TLS layer;
+hostnames fail but IPs succeed → DNS; only <code>romfs:</code> succeeds →
+sockets / Wi-Fi.</p>
+
+<h2>Boot probe</h2>
+<canvas id="boot" width="1100" height="120"></canvas>
+<script>
+  // Hoist a small helper used by every test script. Each <script> is an
+  // independent AsyncFunction body, so globals are how we share.
+  globalThis.__diagRunTest = async function (url, label, ctx, timeoutMs) {
+    ctx.fillStyle = '#1c2c3d';
+    ctx.fillRect(0, 0, 1100, 80);
+    ctx.fillStyle = '#9bb1d6';
+    ctx.font = '16px system-ui';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${label}  testing…`, 12, 12);
+
+    const start = performance.now();
+    const timeoutMarker = Symbol('timeout');
+    let timeoutId;
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve(timeoutMarker), timeoutMs);
+    });
+
+    let outcome;
+    try {
+      const raced = await Promise.race([fetch(url), timeoutPromise]);
+      const ms = Math.round(performance.now() - start);
+      if (raced === timeoutMarker) {
+        outcome = { ok: false, color: '#ff8a6c',
+          line1: `TIMEOUT after ${timeoutMs}ms`,
+          line2: url };
+      } else {
+        let bytes = null;
+        try { bytes = (await raced.text()).length; } catch (_) {}
+        const ok = raced.ok;
+        outcome = {
+          ok, color: ok ? '#7eda9f' : '#ffd35e',
+          line1: `${ok ? 'OK' : 'HTTP'} ${raced.status} ${raced.statusText || ''}  ·  ${bytes ?? '—'} bytes  ·  ${ms}ms`,
+          line2: url,
+        };
+      }
+    } catch (err) {
+      const ms = Math.round(performance.now() - start);
+      const name = (err && err.name) || '(no name)';
+      const msg = (err && err.message) || String(err);
+      outcome = {
+        ok: false, color: '#ff8a6c',
+        line1: `FAIL  ${name}: ${msg || '(empty)'}  ·  ${ms}ms`,
+        line2: url,
+      };
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+
+    ctx.fillStyle = '#1c2c3d';
+    ctx.fillRect(0, 0, 1100, 80);
+    ctx.fillStyle = outcome.color;
+    ctx.font = '18px system-ui';
+    ctx.fillText(`${label}`, 12, 10);
+    ctx.fillStyle = '#e0e8f4';
+    ctx.font = '15px system-ui';
+    ctx.fillText(outcome.line1.slice(0, 130), 12, 34);
+    ctx.fillStyle = '#9bb1d6';
+    ctx.fillText(outcome.line2.slice(0, 130), 12, 56);
+  };
+
+  const ctx = document.getElementById('boot').getContext('2d');
+  ctx.fillStyle = '#1c2c3d';
+  ctx.fillRect(0, 0, 1100, 120);
+  const probe = globalThis.__browserNetworkStatus;
+  ctx.font = '18px system-ui';
+  ctx.textBaseline = 'top';
+  if (!probe) {
+    ctx.fillStyle = '#9bb1d6';
+    ctx.fillText('Boot probe not yet stashed (shell still warming up?).', 12, 12);
+  } else {
+    ctx.fillStyle = probe.overallReachable ? '#7eda9f' : '#ff8a6c';
+    ctx.fillText(
+      `overallReachable: ${probe.overallReachable}  ·  ${probe.attempts.length} attempt(s)`,
+      12, 12,
+    );
+    ctx.font = '14px system-ui';
+    ctx.fillStyle = '#e0e8f4';
+    for (let i = 0; i < probe.attempts.length && i < 4; i++) {
+      const a = probe.attempts[i];
+      const tag = a.reachable ? 'OK ' : 'FAIL';
+      const detail = a.reachable
+        ? `${a.httpStatus ?? '—'}  ${a.bytes ?? '—'}B  ${a.latencyMs}ms`
+        : `${a.errorName ?? 'error'}: ${(a.message || '').slice(0, 60)}  ${a.latencyMs}ms`;
+      ctx.fillText(`  ${tag}  ${a.url}  ·  ${detail}`, 12, 40 + i * 18);
+    }
+  }
+</script>
+
+<h2>1. HTTPS to Cloudflare DNS — <code>https://one.one.one.one/</code></h2>
+<p class="hint">Tests TLS + DNS + socket against a minimal hostname target.
+Using <code>one.one.one.one</code> instead of <code>1.1.1.1</code> avoids the
+mbedtls iPAddress-SAN matching limitation that makes raw-IP HTTPS targets
+fail with a generic X509 verify error even when the chain is trusted.</p>
+<canvas id="t1" width="1100" height="80"></canvas>
+<script>
+  const ctx = document.getElementById('t1').getContext('2d');
+  await globalThis.__diagRunTest('https://one.one.one.one/', 'HTTPS → CF', ctx, 5000);
+</script>
+
+<h2>2. HTTP to IP — <code>http://1.1.1.1/</code></h2>
+<p class="hint">Tests bare socket without TLS. If this works but HTTPS to IP
+fails, TLS is the problem.</p>
+<canvas id="t2" width="1100" height="80"></canvas>
+<script>
+  const ctx = document.getElementById('t2').getContext('2d');
+  await globalThis.__diagRunTest('http://1.1.1.1/', 'HTTP  → IP', ctx, 5000);
+</script>
+
+<h2>3. HTTPS to hostname — <code>https://example.com/</code></h2>
+<p class="hint">Tests DNS + TLS + socket end-to-end.</p>
+<canvas id="t3" width="1100" height="80"></canvas>
+<script>
+  const ctx = document.getElementById('t3').getContext('2d');
+  await globalThis.__diagRunTest('https://example.com/', 'HTTPS → host', ctx, 5000);
+</script>
+
+<h2>4. HTTP to hostname — <code>http://example.com/</code></h2>
+<p class="hint">Tests DNS + socket without TLS.</p>
+<canvas id="t4" width="1100" height="80"></canvas>
+<script>
+  const ctx = document.getElementById('t4').getContext('2d');
+  await globalThis.__diagRunTest('http://example.com/', 'HTTP  → host', ctx, 5000);
+</script>
+
+<h2>5. romfs control — <code>romfs:/main.js</code></h2>
+<p class="hint">Bypasses the socket layer entirely; should always succeed.
+If even this fails, the runtime fetch wrapper itself is broken.</p>
+<canvas id="t5" width="1100" height="80"></canvas>
+<script>
+  const ctx = document.getElementById('t5').getContext('2d');
+  await globalThis.__diagRunTest('romfs:/main.js', 'romfs (ctrl)', ctx, 5000);
+</script>
+
+<p><a href="browser://welcome/">back to welcome</a></p>
+</body>
+</html>

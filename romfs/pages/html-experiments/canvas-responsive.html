@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+<title>Test fixture: responsive canvas + fullscreen</title>
+<style>
+  body { background-color: #14202d; color: #e0e8f4; }
+  h2 { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Responsive canvas</h1>
+<p>This canvas's script reads <code>canvas.width</code> and
+<code>canvas.height</code> and draws something that fills the entire
+surface at any size. Use the buttons below to toggle either fullscreen
+mode (exit with <b>L + R</b> on the controller).</p>
+
+<button data-action="fullscreen-page">Toggle full-screen</button>
+<button data-action="fullscreen-canvas">Toggle full-screen canvas</button>
+
+<canvas id="responsive" width="640" height="320"></canvas>
+<script>
+  const cnv = document.getElementById('responsive');
+  const ctx = cnv.getContext('2d');
+  const w = cnv.width;
+  const h = cnv.height;
+  // Diagonal background gradient.
+  const g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, '#1c2c3d');
+  g.addColorStop(1, '#3a2c5a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  // Concentric rings centred in the canvas.
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxR = Math.min(w, h) / 2 - 20;
+  for (let i = 0; i < 10; i++) {
+    const r = (maxR * (i + 1)) / 10;
+    ctx.strokeStyle = i % 2 === 0 ? '#7eda9f' : '#ffd35e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // A few crosshair lines so the centring is obvious.
+  ctx.strokeStyle = '#7aa2ff';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, cy); ctx.lineTo(w, cy);
+  ctx.moveTo(cx, 0); ctx.lineTo(cx, h);
+  ctx.stroke();
+  // Size readout.
+  ctx.fillStyle = '#e0e8f4';
+  ctx.font = Math.max(18, Math.round(h / 12)) + 'px system-ui';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(w + ' x ' + h, cx, cy);
+</script>
+
+<h2>What to look for</h2>
+<ul>
+<li>Inline (this page): canvas at 640x320 with the rings filling its space.</li>
+<li>Tap <b>Toggle full-screen canvas</b>: chrome hides, canvas fills the screen at 1280x720, the readout changes to match. Rings stay centred and proportional.</li>
+<li>Tap <b>Toggle full-screen</b>: chrome hides, the page itself fills the screen. Scroll still works (right stick / D-pad).</li>
+<li>Press <b>L + R</b> at any time to return to normal.</li>
+</ul>
+
+<p><a href="browser://html-experiments/">back to hello</a></p>
+</body>
+</html>

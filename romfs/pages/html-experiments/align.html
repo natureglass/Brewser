@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+<title>Test fixture: text-align</title>
+<style>
+  body { background-color: #14202d; color: #e0e8f4; }
+  h1 { text-align: center; color: #ffd35e; }
+  .right { text-align: right; color: #7eda9f; }
+  .center { text-align: center; color: #d77ee0; }
+  .justify { text-align: justify; background-color: #1c2c3d; padding: 8px 12px; }
+  /* Inheritance: descendants of this div pick up center alignment. */
+  .center-block { text-align: center; }
+  /* Direct match wins over inherited even though source is later. */
+  .center-block .opt-out { text-align: left; color: #ff8a6c; }
+</style>
+</head>
+<body>
+<h1>Centered heading</h1>
+<p>This paragraph is left-aligned (the default). It exists to anchor
+the eye while you compare it against the alignment variants below.</p>
+<p class="right">Right-aligned: this whole paragraph hugs the right
+edge. Wrapping happens normally; the trailing slack of each line is
+moved to the left side.</p>
+<p class="center">Centered paragraph. Each line is individually
+centered within the content box, so the line breaks the layout chose
+look symmetric around the middle.</p>
+<p class="justify">Justified paragraph: every non-final line is
+stretched to fill the full content width by widening the inter-word
+spaces. The last line stays left-aligned so a short trailing run
+doesn't get visually shredded. The longer this paragraph runs, the
+more lines you'll see participating in the justification, which makes
+the effect easier to spot.</p>
+<div class="center-block">
+<p>Inherited center: this div sets text-align: center, and these
+paragraphs pick it up via inheritance.</p>
+<p class="opt-out">Direct override: this paragraph has its own
+<code>text-align: left</code> rule, so it wins over the inherited
+center despite the descendant selector being more specific.</p>
+<p>Still centered: back to inherited.</p>
+</div>
+<p><a href="browser://html-experiments/">back to hello</a></p>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head><title>Test fixture: images</title></head>
+<body>
+<h1>Image rendering tests</h1>
+<p>Snowflake 1 at natural size, then forced 120×120, then a missing src
+becomes a placeholder.</p>
+<img src="romfs:/test-images/snowflake1.png">
+<img src="romfs:/test-images/snowflake2.png" width="120" height="120">
+<img src="romfs:/test-images/missing.png" alt="placeholder">
+<h2>Inline image</h2>
+<p>A 16×16 icon next to text:
+<img src="romfs:/test-images/snowflake1.png" width="16" height="16">
+inline within a paragraph. The icon should sit on the text baseline.</p>
+<p>Larger 48×48 inline image:
+<img src="romfs:/test-images/snowflake2.png" width="48" height="48">
+which makes its line taller than the surrounding text.</p>
+<p><a href="browser://html-experiments/">back to hello</a></p>
+</body>
+</html>

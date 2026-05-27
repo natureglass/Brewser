@@ -1,0 +1,32 @@
+{
+  "toolbar": {
+    "background": "#1a0e00",
+    "image": "assets/toolbar_back.png",
+    "border": "#3d2300",
+    "divider": "#2a1700",
+    "urlText": "#ffd35e",
+    "hintText": "#a07000",
+    "glyphActive": "#ffd35e",
+    "glyphInactive": "#7a5400",
+    "starActive": "#ff8a00"
+  },
+  "page": {
+    "background": "#0f0700"
+  },
+  "keyboard": {
+    "panelBorder": "#3d2300",
+    "panelBg": "#1a0e00",
+    "image": "assets/keyboard_back.png",
+    "transparency": 0.4,
+    "editBg": "#2a1700",
+    "editText": "#ffd35e",
+    "editCursor": "#ff8a00",
+    "keyBg": "#2a1700",
+    "keyFocusBg": "#5a3300",
+    "keyText": "#ffd35e",
+    "keyActionBg": "#3d2300",
+    "keyActionFocusBg": "#8a5400",
+    "keyActionText": "#ffe69e",
+    "helpText": "#a07000"
+  }
+}

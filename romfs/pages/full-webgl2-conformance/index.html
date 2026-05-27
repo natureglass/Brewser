@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Full WebGL 2 Conformance Runner</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 15px; }
+  h1 { color: #ffd35e; text-align: center; margin: 8px 0; }
+  p.lead { color: #9bb1d6; font-size: 13px; text-align: center; margin: 4px 0; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 4px 0; }
+  .note { background-color: #14202d; padding: 8px 12px; margin-top: 8px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; font-size: 13px; }
+  kbd { background-color: #1a2840; padding: 1px 6px; border-radius: 3px;
+        font-family: monospace; color: #ffd35e; }
+  .footer { margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Full WebGL 2 Conformance Runner</h1>
+<p class="lead">Runs the full Khronos WebGL 2 conformance corpus inline within
+this page. Press <kbd>A</kbd> to start; press <kbd>+</kbd> (Plus) to abort mid-run.</p>
+
+<div class="stage">
+  <canvas id="webgl-canvas" width="64" height="64"></canvas>
+</div>
+
+<!-- The runner's status UI is drawn directly to Switch.screen (the full
+1280x720 framebuffer) instead of going through an HTML <canvas> that the
+browser shell overlay-composites every tick. Without this bypass the
+shell's compositor would stop firing after ~400 frames mid-run and the UI
+would freeze on screen while the test loop continued in the background.
+The webgl-canvas above is still a real HTML element so tests that look
+it up via document.getElementById('webgl-canvas') keep working. -->
+
+<script src="assets/runner.js"></script>
+
+<p class="note">Many Khronos tests assume browser APIs (Image, video,
+document.createElement, etc.) we don't implement. Failures here are
+expected and reported as data, not bugs. Per-test logs are written under
+<code>sdmc:/switch/webprofiles/default/khronos-logs/full-webgl2-conformance/</code>;
+the aggregated summary lands at
+<code>sdmc:/switch/webprofiles/default/khronos-logs/full-webgl2-conformance.log</code>.</p>
+
+<p class="footer"><a href="browser://welcome/">back to welcome</a></p>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "toolbar": {
+    "background": "#f4f4f5",
+    "image": "",
+    "border": "#c8cbd1",
+    "divider": "#d1d4da",
+    "urlText": "#1a1a1f",
+    "hintText": "#6b7280",
+    "glyphActive": "#1a1a1f",
+    "glyphInactive": "#9ca3af",
+    "starActive": "#f59e0b"
+  },
+  "page": {
+    "background": "#ffffff"
+  },
+  "keyboard": {
+    "panelBorder": "#c8cbd1",
+    "panelBg": "#f4f4f5",
+    "image": "",
+    "transparency": 0,
+    "editBg": "#ffffff",
+    "editText": "#1a1a1f",
+    "editCursor": "#6b7280",
+    "keyBg": "#e5e7eb",
+    "keyFocusBg": "#cbd5e1",
+    "keyText": "#1a1a1f",
+    "keyActionBg": "#d1d4da",
+    "keyActionFocusBg": "#9ca3af",
+    "keyActionText": "#1a1a1f",
+    "helpText": "#6b7280"
+  }
+}

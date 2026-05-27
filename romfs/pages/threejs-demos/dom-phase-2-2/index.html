@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>DOM Phase 2.2 &mdash; CSS cascade + pseudo-classes + pseudo-elements</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>DOM Phase 2.2 &mdash; CSS cascade + pseudo-classes + pseudo-elements</h1>
+<p class="lead">Validates the M2.2 live-CSS engine: a
+<code>&lt;style&gt;</code> tag at runtime registers rules; selectors
+(tag, class, id, compound, descendant, child, attribute) match
+LiveElements; <code>:active</code> / <code>:disabled</code> /
+<code>:checked</code> / <code>:empty</code> / <code>:not()</code>
+pseudo-classes resolve; <code>:before</code> / <code>:after</code>
+pseudo-elements paint their <code>content</code> string;
+<code>var(--name)</code> resolves up the parent chain;
+<code>@media (pointer:coarse)</code> activates rules while
+<code>@media (hover:hover)</code> skips them. Visual bars on the right
+plus parser/match assertions in the lower status canvas.</p>
+
+<div class="stage">
+  <canvas id="d22-stage" width="640" height="200"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('d22-stage').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 200);
+    pre.fillStyle = '#fff';
+    pre.font = '20px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE marker - running M2.2 cascade tests...', 12, 12);
+    pre.font = '14px system-ui';
+    pre.fillStyle = '#9bb1d6';
+    pre.fillText('Right column: bars styled by RUNTIME <style> rules', 12, 48);
+    pre.fillText('(no inline style on most). Tap purple bar for :active.', 12, 66);
+    pre.fillStyle = '#7eda9f';
+    pre.fillText('Lower status canvas: assertion grid + visual checklist.', 12, 102);
+  }
+</script>
+
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="d22-status" width="900" height="900"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('d22-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(String(value), 460, y);
+  }
+  function passing(v) {
+    if (v === undefined || v === null) return false;
+    const s = String(v);
+    if (s === '(not run)' || s.indexOf('(pending') === 0) return false;
+    return s.indexOf('FAIL:') !== 0;
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 900);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const r = globalThis.__d22Results || {};
+    let y = 14;
+    function check(label, key) {
+      const v = key in r ? r[key] : '(not run)';
+      row(y, label, v, passing(v));
+      y += 20;
+    }
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Visual bars (right column of screen):', 14, y); y += 20;
+    st.fillStyle = '#9bb1d6';
+    st.font = '13px system-ui';
+    const vis = [
+      'Bar A: red bg (.boxA via tag selector)',
+      'Bar B: blue bg + bold (.boxB via class)',
+      'Bar C: green bg from var(--accent) cascade',
+      'Bar D: purple bg, brightens on tap (:active state)',
+      'Bar E: dim 50% (:disabled via toggleAttribute)',
+      'Bar F: "BEFORE" prepended via :before content',
+      'Bar G: "AFTER" appended via :after content',
+      'Bar H: yellow text inherited from parent .boxH-parent',
+      'Bar I: bg only via [data-skin=alt] attribute selector',
+      'Bar J: descendant rule (.boxJ .inner) on inner shows pink bg',
+      'Bar K: child combinator (.boxK > .child) styles direct child only',
+      'Bar L: hover-only rule does NOT apply (touch device)',
+      'Bar M: pointer-coarse rule applies (Switch is coarse)',
+      'Bar N: :not(.skip) rule applies; bar Q skipped',
+      'Bar O: :empty applies bg when no children',
+      'Bar P: selector list — .boxP1, .boxP2 both green',
+    ];
+    st.font = '13px system-ui';
+    for (const line of vis) {
+      st.fillStyle = '#9bb1d6';
+      st.fillText(line, 14, y);
+      y += 17;
+    }
+    y += 6;
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Parser + match assertions:', 14, y); y += 20;
+    st.font = '14px system-ui';
+    check('<style> tag registered:', 'style_registered');
+    check('tag selector matches:', 'sel_tag');
+    check('class selector matches:', 'sel_class');
+    check('id selector matches:', 'sel_id');
+    check('compound (class+class):', 'sel_compound');
+    check('descendant combinator:', 'sel_descendant');
+    check('child combinator (>):', 'sel_child');
+    check('selector list (,):', 'sel_list');
+    check('attribute selector [name]:', 'sel_attr_has');
+    check('attribute selector [name=val]:', 'sel_attr_eq');
+    check('attribute selector [name~=val]:', 'sel_attr_word');
+    check(':active fires on tap:', 'pseudo_active');
+    check(':disabled via toggleAttribute:', 'pseudo_disabled');
+    check(':empty matches no children:', 'pseudo_empty');
+    check(':not() excludes match:', 'pseudo_not');
+    check(':before content cascaded:', 'pseudo_before_content');
+    check(':after content cascaded:', 'pseudo_after_content');
+    check('var(--name) resolves:', 'var_resolves');
+    check('var() inherits from parent:', 'var_inherit');
+    check('@media (pointer:coarse) applies:', 'media_coarse_applies');
+    check('@media (hover:hover) skipped:', 'media_hover_skipped');
+    check('inheritance: color flows down:', 'inherit_color');
+    check('specificity: id > class:', 'spec_id_over_class');
+    check('classList toggle invalidates cache:', 'invalidate_classlist');
+    check('attribute change invalidates cache:', 'invalidate_attr');
+  }
+  renderStatus();
+  let lastStatusMs = 0;
+  function heartbeat() {
+    requestAnimationFrame(heartbeat);
+    const now = performance.now();
+    if (now - lastStatusMs > 250) {
+      try { renderStatus(); } catch (_) { /* swallow */ }
+      lastStatusMs = now;
+    }
+  }
+  requestAnimationFrame(heartbeat);
+</script>
+
+<p class="note">The visual bars test cascade-driven styling: most bars
+have NO inline style — their background / color / bold / etc. come
+from the runtime <code>&lt;style&gt;</code> rules.
+<br><br>
+Interactive checks: tap <strong>Bar D</strong> (purple) — should
+brighten while held (cascade picks up <code>:active</code> rule).
+Tap <strong>Bar Q</strong> (the "I'm Q" bar near the bottom) —
+should toggle its <code>data-skin</code> attribute and flip
+backgrounds via the attribute-selector rule.
+<br><br>
+<strong>Pre-authorized deviations from upstream:</strong> none beyond
+the M2.2 surface limitations documented in <code>swb-live-dom-phase-2-2</code>:
+no <code>+</code> / <code>~</code> sibling combinators, no
+<code>::-webkit-*</code> pseudo-elements, no <code>@font-face</code>
+(M2.6), no <code>calc()</code>, no <code>:hover</code> (touch device),
+no <code>:nth-*</code>.</p>
+
+<p class="footer"><a href="browser://threejs-demos/">back to ThreeJS Demos</a></p>
+</body>
+</html>

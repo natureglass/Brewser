@@ -1,0 +1,8 @@
+node_modules/
+romfs/main.js
+romfs/main.js.map
+switch-web-browser.nro
+switch-web-browser.nsp
+icon.jpg
+*.log
+.DS_Store

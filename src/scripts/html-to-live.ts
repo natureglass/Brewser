@@ -1,0 +1,145 @@
+// Parser adapter: grafts the parsed HtmlElement tree into the
+// singleton LiveRoot used as `document.body`. Page scripts running
+// concurrently see `document.body` already populated with the parsed
+// page. Also returns the parsed→live map the shell uses to wire
+// runner-managed `<canvas>` offscreens into the live tree.
+
+import type { HtmlElement, HtmlNode } from '../html/html-parser.js';
+import { getLiveRoot, LiveElement } from './live-dom.js';
+
+/** Tags dropped during conversion. <script> is also dropped — page-
+ * script execution still walks the parsed HtmlElement tree directly
+ * via runPageScripts. */
+const SKIP_TAGS = new Set([
+	'head', 'title', 'meta', 'link', 'noscript', 'template', 'script',
+]);
+
+/** Graft the converted content into the existing singleton
+ * `document.body` (LiveRoot). The caller is responsible for calling
+ * `resetLiveRoot()` beforehand if it wants a clean slate.
+ *
+ * Why graft instead of replace the root? Page scripts persist their
+ * `document.body` reference across calls; replacing the singleton would
+ * break them. Grafting children + applying the source body's attrs to
+ * the existing root preserves identity.
+ *
+ * Returns the parsed→live mapping so the caller can wire `<canvas>`
+ * offscreens (created by `runPageScripts` from the parsed tree) into
+ * the corresponding live elements. */
+export function populateLiveRoot(parsed: HtmlElement): Map<HtmlElement, LiveElement> {
+	const liveRoot = getLiveRoot();
+	const byParsed = new Map<HtmlElement, LiveElement>();
+	// Step 1: register every `<style>` block in the parsed tree, including
+	// any in `<head>`. The body walk below only reaches body's descendants,
+	// but real browsers register stylesheets from `<head>` and `<link
+	// rel=stylesheet>` too. Attach the style LiveElements as `display:none`
+	// children of the live root so their lifecycle matches the page (they
+	// get cleaned up when `resetLiveRoot` runs on the next navigation).
+	attachHeadStyles(parsed, liveRoot);
+	const sourceBody = findBody(parsed);
+	if (sourceBody) {
+		// Apply the source <body>'s attrs to the existing live root so
+		// `body { ... }` rules in inline styles + `class="..."` /
+		// `style="..."` on body land correctly.
+		for (const [name, value] of Object.entries(sourceBody.attrs)) {
+			liveRoot.setAttribute(name, value);
+		}
+		// Map the source body to the live root so canvas wiring can find
+		// it (rare — canvases are usually deeper, but harmless).
+		byParsed.set(sourceBody, liveRoot);
+		for (const child of sourceBody.children) {
+			appendConverted(liveRoot, child, byParsed);
+		}
+	} else {
+		// No <body> — append every non-skipped top-level child to the
+		// live root directly.
+		for (const child of parsed.children) {
+			appendConverted(liveRoot, child, byParsed);
+		}
+	}
+	return byParsed;
+}
+
+/** Walk the parsed tree (skipping `<body>` since its descendants are
+ * processed by the main converter) and register every `<style>` block
+ * we find with the live cascade. Each style becomes a `display:none`
+ * LiveElement child of the live root so `resetLiveRoot` on the next
+ * navigation tears it down cleanly. */
+function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement): void {
+	const visit = (n: HtmlElement) => {
+		if (n.tag === 'body') return; // body styles register via the normal walk
+		if (n.tag === 'style') {
+			let cssText = '';
+			for (const child of n.children) {
+				if (child.type === 'text') cssText += child.text;
+			}
+			if (!cssText) return;
+			const styleEl = new LiveElement('style');
+			styleEl.style.display = 'none';
+			liveRoot.appendChild(styleEl);
+			styleEl.textContent = cssText; // triggers registerStyleSheet
+			return;
+		}
+		for (const child of n.children) {
+			if (child.type === 'element') visit(child);
+		}
+	};
+	visit(node);
+}
+
+/** Locate the first `<body>` in the parsed tree. Most pages have one;
+ * fragment-only sources don't. */
+function findBody(node: HtmlElement): HtmlElement | null {
+	if (node.tag === 'body') return node;
+	for (const child of node.children) {
+		if (child.type !== 'element') continue;
+		const found = findBody(child);
+		if (found) return found;
+	}
+	return null;
+}
+
+/** Convert one HtmlElement (recursively) into a LiveElement, recording
+ * each (parsed → live) mapping in `byParsed`. */
+function convertElement(
+	source: HtmlElement,
+	byParsed: Map<HtmlElement, LiveElement>,
+): LiveElement {
+	const live = new LiveElement(source.tag);
+	byParsed.set(source, live);
+	for (const [name, value] of Object.entries(source.attrs)) {
+		live.setAttribute(name, value);
+	}
+	if (source.tag === 'style') {
+		let cssText = '';
+		for (const child of source.children) {
+			if (child.type === 'text') cssText += child.text;
+		}
+		if (cssText) live.textContent = cssText;
+		return live;
+	}
+	for (const child of source.children) {
+		appendConverted(live, child, byParsed);
+	}
+	return live;
+}
+
+/** Append a converted child to `parent`. Handles the text / element
+ * branch and the SKIP_TAGS filter. Text-only whitespace already culled
+ * by the parser; empty strings still hit here from inline-only nodes,
+ * dropped silently. */
+function appendConverted(
+	parent: LiveElement,
+	source: HtmlNode,
+	byParsed: Map<HtmlElement, LiveElement>,
+): void {
+	if (source.type === 'text') {
+		if (!source.text) return;
+		const textNode = new LiveElement('#text');
+		textNode.data = source.text;
+		parent.appendChild(textNode);
+		return;
+	}
+	if (SKIP_TAGS.has(source.tag)) return;
+	parent.appendChild(convertElement(source, byParsed));
+}

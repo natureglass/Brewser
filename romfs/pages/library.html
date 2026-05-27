@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Library — switch-web-browser</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
+  h1 { color: #ffd35e; }
+  h2 { color: #7aa2ff; margin-top: 28px; }
+  a { color: #9bb1d6; text-decoration: none; }
+  .lead { color: #9bb1d6; }
+  .empty { color: #6a7c95; font-style: italic; }
+  ul.library-list { list-style-type: none; }
+  ul.library-list li {
+    background-color: #14202d;
+    padding: 8px 14px;
+    margin-top: 4px;
+    border-left: 3px solid #1f2c4d;
+  }
+  /* Template rows are full-width buttons. The currently-active row
+     carries the `.active` class and (in the loader's output) lacks a
+     data-action, so tapping it is a no-op. Greyed-out colours make
+     the "disabled" status obvious. */
+  button.template-row {
+    background-color: #1f2c4d;
+    color: #e0e8f4;
+    margin-top: 6px;
+  }
+  button.template-row.active {
+    background-color: #14202d;
+    color: #6a7c95;
+  }
+  button.template-row .path { color: #9bb1d6; }
+  button.template-row.active .path { color: #6a7c95; }
+</style>
+</head>
+<body>
+<h1>Library</h1>
+<p class="lead">Tap a template to switch designs, or tap a bookmark /
+history row to open it.</p>
+
+<h2>Templates</h2>
+<!-- The loader replaces <browser-templates> with a list of the
+     entries registered in `templates.json`. The active row (per
+     `config.json`) is rendered as a non-clickable "disabled" button;
+     every other row is a `<button data-action="select-template:...">`
+     whose tap the shell intercepts to rewrite `config.json` and
+     reload. -->
+<browser-templates></browser-templates>
+
+<h2>Bookmarks</h2>
+<!-- The loader replaces <browser-bookmarks> with a rendered list of
+     saved bookmarks (most recent first). Add `limit="N"` to cap the
+     count; default is all of them. -->
+<browser-bookmarks></browser-bookmarks>
+
+<h2>History</h2>
+<!-- Same shape: replaced with a list of recent visits. `limit="N"`
+     caps the count; default is 50. -->
+<browser-history limit="30"></browser-history>
+</body>
+</html>

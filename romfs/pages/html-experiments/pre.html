@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head><title>Test fixture: pre</title></head>
+<body>
+<h1>Preformatted text</h1>
+<p>The block below should preserve whitespace, newlines, and indentation,
+and render in monospace:</p>
+<pre>function greet(name) {
+    if (!name) {
+        return "hello, friend";
+    }
+    return "hello, " + name + "!";
+}</pre>
+<p>End of the <code>pre</code> block. The
+<code>pre</code> tag's text node is verbatim, while
+<code>code</code> outside <code>pre</code> stays in normal flow with
+collapsed whitespace.</p>
+<p><a href="browser://html-experiments/">back to hello</a></p>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>DOM Phase 2.3 &mdash; flex + block layout</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+</style>
+</head>
+<body>
+<h1>DOM Phase 2.3 &mdash; flex + block layout</h1>
+<p class="lead">Validates the M2.3 layout engine. 6 panel demos
+(<code>position:fixed</code> roots with no inline child positions —
+all geometry derived by the layout pass).</p>
+
+<div class="stage">
+  <canvas id="d23-stage" width="640" height="160"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('d23-stage').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f'; pre.fillRect(0, 0, 640, 160);
+    pre.fillStyle = '#fff'; pre.font = '20px system-ui'; pre.textBaseline = 'top';
+    pre.fillText('PRE marker — running M2.3 layout tests...', 12, 12);
+    pre.font = '13px system-ui'; pre.fillStyle = '#9bb1d6';
+    pre.fillText('6 panels on the right: each shows one layout feature.', 12, 46);
+    pre.fillText('Status canvas below has 20 assertions + 6 visual descriptions.', 12, 64);
+  }
+</script>
+
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="d23-status" width="900" height="640"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('d23-status').getContext('2d');
+  function passing(v) {
+    if (v === undefined || v === null) return false;
+    const s = String(v);
+    if (s === '(not run)' || s.indexOf('(pending') === 0) return false;
+    return s.indexOf('FAIL:') !== 0;
+  }
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6'; st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c'; st.fillText(String(value), 470, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d'; st.fillRect(0, 0, 900, 640);
+    st.font = '14px system-ui'; st.textBaseline = 'top';
+    const r = globalThis.__d23Results || {};
+    let y = 14;
+    function check(label, key) {
+      const v = key in r ? r[key] : '(not run)';
+      row(y, label, v, passing(v));
+      y += 20;
+    }
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Visual panels (right column):', 14, y); y += 20;
+    st.fillStyle = '#9bb1d6'; st.font = '13px system-ui';
+    const vis = [
+      'Panel 1 (block): 3 children stack vertically full-width',
+      'Panel 2 (flex column): 3 children stack with 6px gap',
+      'Panel 3 (flex row): 3 children stack horizontally; middle has flex:1',
+      'Panel 4 (padding 8): content inset 8px from box edges',
+      'Panel 5 (justify-content center): 2 children centered horizontally',
+      'Panel 6 (margin 4): rows have 4px margin = 12px between',
+    ];
+    for (const line of vis) {
+      st.fillStyle = '#9bb1d6'; st.fillText(line, 14, y); y += 17;
+    }
+    y += 6;
+    st.fillStyle = '#7aa2ff'; st.font = '14px system-ui';
+    st.fillText('Assertions:', 14, y); y += 20;
+    check('block: panel1 has 3 children', 'block_count');
+    check('block: stacked vertically (y2>y1>y0)', 'block_stacked');
+    check('block: full-width children', 'block_full_width');
+    check('flex col: 3 children with gap', 'flexcol_gap');
+    check('flex col: 6px gap measured', 'flexcol_gap_size');
+    check('flex row: middle child stretched', 'flexrow_stretch');
+    check('flex row: 3 children side-by-side', 'flexrow_count');
+    check('padding 8: contentX = boxX + 8', 'pad_contentX');
+    check('padding 8: contentW = boxW - 16', 'pad_contentW');
+    check('justify-content center: leading offset', 'justify_center');
+    check('margin 4: 4px before each child', 'margin_4');
+    check('width clamps to maxWidth', 'max_width_clamp');
+    check('height clamps to minHeight', 'min_height_clamp');
+    check('flex-grow distributes leftover', 'flex_grow_distribute');
+    check('boxSizing border-box subtracts padding', 'box_sizing_border');
+    check('getBoundingClientRect from layout', 'gbcr_layout');
+    check('display:none excludes from layout', 'display_none');
+    check('flex column intrinsic height', 'intrinsic_height');
+    check('cascade-driven padding (via class)', 'cascade_padding');
+    check('Tap regression: button still fires click', 'click_regression');
+  }
+  renderStatus();
+  let lastStatusMs = 0;
+  function heartbeat() {
+    requestAnimationFrame(heartbeat);
+    const now = performance.now();
+    if (now - lastStatusMs > 250) {
+      try { renderStatus(); } catch (_) {}
+      lastStatusMs = now;
+    }
+  }
+  requestAnimationFrame(heartbeat);
+</script>
+
+<p class="note">All 6 panels are <code>position:fixed</code> at fixed
+top/left coordinates but their CHILDREN get geometry from the M2.3
+layout pass — no inline width/height/top/left on the children except
+where explicitly noted. Tap Panel 3's middle "flex:1" button to test
+the click regression.</p>
+</body>
+</html>

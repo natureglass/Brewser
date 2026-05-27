@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Welcome to SwitchSurf!</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
+  h1 { color: #ffd35e; margin-bottom: 4px; line-height: 1.12; }
+  h2 { color: #7aa2ff; margin-top: 26px; }
+  a { color: #7eda9f; }
+  .lead { color: #9bb1d6; margin-top: 0; margin-bottom: 24px; }
+  code, kbd { color: #c2e0ff; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 14px;
+          border-left: 3px solid #7aa2ff; }
+  .quick-links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px;
+    margin: 18px 0 16px;
+    max-width: 1280px;
+  }
+  .switchsurf-links {
+    margin-top: 12px;
+    margin-bottom: 26px;
+  }
+  .quick-card {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    padding: 18px 18px 16px;
+    min-height: 92px;
+    color: #eaf2ff;
+    text-decoration: none;
+    background:
+      radial-gradient(circle at top left, rgba(122, 162, 255, 0.28), transparent 36%),
+      linear-gradient(135deg, #14202d, #10192a 72%);
+    border: 1px solid rgba(122, 162, 255, 0.34);
+    border-radius: 16px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  .quick-card strong {
+    display: block;
+    color: #ffd35e;
+    font-size: 1.15em;
+    margin-bottom: 8px;
+  }
+  .quick-card span {
+    display: block;
+    color: #9bb1d6;
+    line-height: 1.35;
+  }
+  .quick-card::after {
+    content: "›";
+    position: absolute;
+    right: 18px;
+    bottom: 12px;
+    color: #7eda9f;
+    font-size: 34px;
+    line-height: 1;
+  }
+</style>
+</head>
+<body>
+<h1>Welcome to SwitchSurf!</h1>
+<p class="lead">Enjoy a modern browser on your Switch</p>
+
+<div class="quick-links" aria-label="Featured game links">
+<a class="quick-card" href="https://play.unity.com/">
+<strong>Unity Play</strong>
+<span>Jump into Unity-made browser games and experiments.</span>
+</a>
+<a class="quick-card" href="https://itch.io/games/">
+<strong>itch.io</strong>
+<span>Explore indie games, prototypes, and creative web builds.</span>
+</a>
+<a class="quick-card" href="https://www.spatial.io/categories/webgl">
+<strong>spatial.io</strong>
+<span>Discover immersive WebGL spaces and browser experiences.</span>
+</a>
+</div>
+
+<div class="quick-links switchsurf-links" aria-label="SwitchSurf links">
+<a class="quick-card" href="browser://switchsurf-player/">
+<strong>SwitchSurf Player</strong>
+<span>Open the built-in player experience.</span>
+</a>
+<a class="quick-card" href="browser://about/">
+<strong>SwitchSurf Experiments</strong>
+<span>Try demos, tests, and creative browser experiments.</span>
+</a>
+<a class="quick-card" href="browser://library/">
+<strong>Library options</strong>
+<span>Open bookmarks, history, and saved browsing items.</span>
+</a>
+</div>
+
+<h2>Controls</h2>
+<ul>
+<li><kbd>ZR</kbd> — open the URL bar</li>
+<li><kbd>B</kbd> / <kbd>X</kbd> — back / forward</li>
+<li><kbd>Y</kbd> — reload</li>
+<li><kbd>L + R</kbd> — exit any fullscreen mode</li>
+<li>Hold <kbd>L + R + −</kbd> for ~1 second — exit the shell</li>
+</ul>
+</body>
+</html>

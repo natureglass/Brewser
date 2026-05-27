@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Error — switch-web-browser</title>
+<style>
+  body { background-color: #1a0d0d; color: #ffcccc; font-size: 18px; }
+  h1 { color: #ff7676; }
+  a { color: #ff8a8a; }
+  .hint { color: #d7a4a4; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Page could not be loaded</h1>
+<p class="hint">Details below. <kbd>ZR</kbd> retry &nbsp;·&nbsp;
+<kbd>B</kbd> back &nbsp;·&nbsp; <kbd>X</kbd> forward &nbsp;·&nbsp;
+<kbd>Y</kbd> reload &nbsp;·&nbsp; hold <kbd>L + R + −</kbd> exit.</p>
+
+<canvas id="error-detail" width="1180" height="540"></canvas>
+<script>
+  // BrowserNavigation stashes `LastErrorDetail` on `globalThis.__browserLastError`
+  // before navigating here; we draw the captured fields into the canvas
+  // above so the user sees the exact failure (URL, error name + type,
+  // message, own properties, and stack).
+  const cnv = document.getElementById('error-detail');
+  const ctx = cnv.getContext('2d');
+  const W = cnv.width;
+  const H = cnv.height;
+
+  ctx.fillStyle = '#2a1414';
+  ctx.fillRect(0, 0, W, H);
+
+  const last = globalThis.__browserLastError;
+  let y = 24;
+  const maxLineWidth = W - 32;
+
+  function label(text, color) {
+    ctx.fillStyle = color || '#ffffff';
+    ctx.font = '16px system-ui';
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, 16, y);
+    y += 22;
+  }
+
+  function value(text, color, font) {
+    ctx.fillStyle = color || '#e0e8f4';
+    ctx.font = font || '15px system-ui';
+    const lines = wrapLines(String(text == null ? '(empty)' : text), maxLineWidth);
+    for (let i = 0; i < lines.length && y < H - 24; i++) {
+      ctx.fillText(lines[i], 16, y); y += 19;
+    }
+    y += 6;
+  }
+
+  function wrapLines(text, max) {
+    const words = String(text).split(/\s+/);
+    const out = [];
+    let cur = '';
+    for (const word of words) {
+      const cand = cur ? cur + ' ' + word : word;
+      if (ctx.measureText(cand).width <= max) {
+        cur = cand;
+      } else {
+        if (cur) out.push(cur);
+        cur = word;
+        while (ctx.measureText(cur).width > max && cur.length > 1) {
+          let cut = cur.length;
+          while (cut > 1 && ctx.measureText(cur.slice(0, cut)).width > max) cut--;
+          out.push(cur.slice(0, cut));
+          cur = cur.slice(cut);
+        }
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  if (last && typeof last === 'object') {
+    label('URL');
+    value(last.url, '#7aa2ff');
+
+    const headline = (last.errorName && last.errorName !== 'Error')
+      ? 'Error  (' + last.errorName + ', errorType=' + last.errorType + ')'
+      : 'Error  (errorType=' + last.errorType + ')';
+    label(headline);
+    value(last.message, '#ffcccc');
+
+    if (last.errorJson) {
+      label('Own properties');
+      value(last.errorJson, '#d7a4d7');
+    }
+
+    if (last.errorStack) {
+      label('Stack');
+      const stackLines = String(last.errorStack).split(/\r?\n/);
+      ctx.fillStyle = '#a8b6c8';
+      ctx.font = '13px system-ui';
+      for (let i = 0; i < stackLines.length && y < H - 24; i++) {
+        const wrapped = wrapLines(stackLines[i], maxLineWidth);
+        for (let j = 0; j < wrapped.length && y < H - 24; j++) {
+          ctx.fillText(wrapped[j], 16, y); y += 17;
+        }
+      }
+    }
+  } else {
+    ctx.fillStyle = '#d7a4a4';
+    ctx.font = '16px system-ui';
+    ctx.fillText('No error detail recorded for this load.', 16, y);
+  }
+</script>
+</body>
+</html>
