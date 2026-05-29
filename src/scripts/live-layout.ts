@@ -179,7 +179,20 @@ export function layoutFixedRoot(
 	const contentX = originX + pad.left;
 	const contentY = originY + pad.top;
 	const contentWGuess = Math.max(0, w - pad.left - pad.right);
-	const intrinsicH = layoutChildren(root, contentX, contentY, contentWGuess, initialH - pad.top - pad.bottom);
+	let intrinsicH = layoutChildren(root, contentX, contentY, contentWGuess, initialH - pad.top - pad.bottom);
+	// Childless form controls (range/text inputs, button, select) reserve a
+	// line box for their height in the full flow layout (see intrinsicCross /
+	// intrinsicContentHeight). The pinned-root relayout used by the partial-
+	// repaint path has no children to measure, so without this fallback a
+	// re-laid-out <input> collapses to height 0 and then paints nothing
+	// ("skip no-box") — which made the audio player's range seek bar vanish
+	// on the first 4 Hz timeline poll after playback started.
+	if (intrinsicH <= 0 && explicitH === undefined) {
+		const tag = root.tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+			intrinsicH = cs.lineHeight ?? (cs.fontSize ?? 14) * 1.2;
+		}
+	}
 	const h = clampSize(explicitH ?? (pad.top + intrinsicH + pad.bottom), cs.minHeight, cs.maxHeight, availableHeight);
 	const contentH = Math.max(0, h - pad.top - pad.bottom);
 	const box: LayoutBox = {
@@ -248,35 +261,79 @@ export function layoutAbsoluteRoot(
 	cbContentH: number,
 ): LayoutBox {
 	const cs = getComputedLiveStyle(el);
-	const csLeft = cs.left ?? el.style.left;
-	const csRight = cs.right ?? el.style.right;
-	const csTop = cs.top ?? el.style.top;
-	const csBottom = cs.bottom ?? el.style.bottom;
+	// Resolve each edge to px: an explicit px offset wins, else a `%`
+	// offset resolves against the containing block (width for left/right,
+	// height for top/bottom). `left: 50%` → half the container width.
+	const edge = (px: number | undefined, pct: number | undefined, basis: number): number | undefined =>
+		px !== undefined ? px : pct !== undefined ? (pct / 100) * basis : undefined;
+	const csLeft = edge(cs.left ?? el.style.left, cs.leftPct, cbContentW);
+	const csRight = edge(cs.right ?? el.style.right, cs.rightPct, cbContentW);
+	const csTop = edge(cs.top ?? el.style.top, cs.topPct, cbContentH);
+	const csBottom = edge(cs.bottom ?? el.style.bottom, cs.bottomPct, cbContentH);
 	const explicitW = resolveLength(cs.width, cbContentW)
 		?? resolveLength(el.style.width, cbContentW);
 	const explicitH = resolveLength(cs.height, cbContentH)
 		?? resolveLength(el.style.height, cbContentH);
-	// Resolve x. `left` wins if set; else `right + width` anchors from
-	// the right edge; else default to content origin.
-	let x = cbContentX;
-	if (csLeft !== undefined) {
-		x = cbContentX + csLeft;
-	} else if (csRight !== undefined && explicitW !== undefined) {
-		x = cbContentX + cbContentW - explicitW - csRight;
-	}
-	let y = cbContentY;
-	if (csTop !== undefined) {
-		y = cbContentY + csTop;
-	} else if (csBottom !== undefined && explicitH !== undefined) {
-		y = cbContentY + cbContentH - explicitH - csBottom;
-	}
 	const availW = explicitW !== undefined
 		? explicitW
 		: csLeft !== undefined && csRight !== undefined
 			? Math.max(0, cbContentW - csLeft - csRight)
 			: Math.max(0, cbContentW - (csLeft ?? 0));
-	const availH = explicitH ?? Math.max(0, cbContentH - (csTop ?? 0));
-	return layoutFixedRoot(el, x, y, availW, availH);
+	// Height: an explicit height wins; an element anchored on BOTH top
+	// and bottom stretches between them; otherwise the height is auto =
+	// shrink-to-fit, so pass 0 and let `layoutFixedRoot` grow it to its
+	// content. Previously this defaulted to `cbContentH - top`, which
+	// gave an auto-height absolute (e.g. a top-anchored status-bar
+	// overlay with `top:22px` only) the entire remaining card height —
+	// and a flex row inside it with the default `align-items: stretch`
+	// then stretched its children to that full height (the giant
+	// status-pill bug).
+	const availH = explicitH !== undefined
+		? explicitH
+		: csTop !== undefined && csBottom !== undefined
+			? Math.max(0, cbContentH - csTop - csBottom)
+			: 0;
+	// An auto-width absolute (no explicit width, not anchored on BOTH left
+	// and right) is SHRINK-TO-FIT per CSS, not full-width: size it to its
+	// max-content, capped by the available band and `max-width`. Without
+	// this a block-level overlay (e.g. the player's toast) stretched across
+	// the whole available width instead of hugging its text.
+	let useW = availW;
+	const autoWidth = explicitW === undefined
+		&& !(csLeft !== undefined && csRight !== undefined);
+	if (autoWidth) {
+		useW = Math.min(availW, intrinsicContentWidth(el, cs));
+		const maxW = resolveLength(cs.maxWidth, cbContentW);
+		if (maxW !== undefined) useW = Math.min(useW, maxW);
+		if (useW < 0) useW = 0;
+	}
+	// First (measure) pass at the content origin so we know the resolved
+	// box size — needed to anchor right/bottom for an AUTO-size box (no
+	// explicit width/height) and to resolve a `transform: translate(%)`
+	// against the element's own box. Cheap: absolutes are few.
+	let box = layoutFixedRoot(el, cbContentX, cbContentY, useW, availH);
+	// Resolve x: `left` wins; else `right` anchors the box's right edge
+	// (works for auto-width now that `box.w` is measured); else origin.
+	let x = cbContentX;
+	if (csLeft !== undefined) x = cbContentX + csLeft;
+	else if (csRight !== undefined) x = cbContentX + cbContentW - box.w - csRight;
+	let y = cbContentY;
+	if (csTop !== undefined) y = cbContentY + csTop;
+	else if (csBottom !== undefined) y = cbContentY + cbContentH - box.h - csBottom;
+	// Bake `transform: translate(...)` into the position. `%` resolves
+	// against the element's own box, so `left:50%` + `translateX(-50%)`
+	// centers a shrink-to-fit overlay (e.g. the audio player's toast).
+	const tf = cs.transform;
+	if (tf) {
+		if (tf.tx !== undefined) x += resolveLength(tf.tx, box.w) ?? 0;
+		if (tf.ty !== undefined) y += resolveLength(tf.ty, box.h) ?? 0;
+	}
+	// Re-lay-out at the final position so the subtree's boxes are correct
+	// (the measure pass placed them at the origin).
+	if (x !== cbContentX || y !== cbContentY) {
+		box = layoutFixedRoot(el, x, y, useW, availH);
+	}
+	return box;
 }
 
 /**
@@ -325,15 +382,25 @@ function layoutChildren(
 		// long text wraps at the content-box edge. Without this, p/div/
 		// li/etc. with textContent would clip at the right edge.
 		if (hasOwnText) {
-			return layoutInline(parent, [], cs, originX, originY, contentW);
+			return layoutInline(parent, [], cs, originX, originY, contentW, contentH);
 		}
 		return 0;
 	}
 
-	if (cs.display === 'flex') {
+	if (cs.display === 'flex' || cs.display === 'inline-flex') {
 		return layoutFlex(parent, kids, cs, originX, originY, contentW, contentH);
 	}
 	if (cs.display === 'grid') {
+		// A grid box whose only children are text nodes is really a text
+		// box (e.g. `<span class="num">01</span>` with `display:grid;
+		// place-items:center`). Route it to the inline path so the text
+		// centers via justify-items/align-items, instead of treating the
+		// text node as a grid item placed at the cell's top-left. (Flex
+		// text buttons are intentionally NOT rerouted — they center their
+		// label via justify-content in layoutFlex.)
+		if (kids.every((k) => k.tagName === '#text')) {
+			return layoutInline(parent, kids, cs, originX, originY, contentW, contentH);
+		}
 		return layoutGrid(parent, kids, cs, originX, originY, contentW, contentH);
 	}
 	if (cs.display === 'table') {
@@ -352,7 +419,7 @@ function layoutChildren(
 		if (ccs.display !== 'inline') { allInline = false; break; }
 	}
 	if (allInline) {
-		return layoutInline(parent, kids, cs, originX, originY, contentW);
+		return layoutInline(parent, kids, cs, originX, originY, contentW, contentH);
 	}
 	return layoutBlock(kids, originX, originY, contentW, contentH, cs);
 }
@@ -385,6 +452,7 @@ function layoutInline(
 	originX: number,
 	originY: number,
 	contentW: number,
+	contentH?: number,
 ): number {
 	const parentFontSize = parentCs.fontSize ?? 14;
 	const parentFontFamily = parentCs.fontFamily || 'sans-serif';
@@ -540,9 +608,13 @@ function layoutInline(
 	if (current.items.length > 0) lines.push(current);
 
 	// Place atoms into final InlineLayout. y advances by line height per
-	// line; x by atom width within each line. text-align positions the
-	// line horizontally within contentW.
-	const align = parentCs.textAlign ?? 'start';
+	// line; x by atom width within each line. text-align (or grid
+	// `justify-items`, which wins when set — the `place-items: center`
+	// badge idiom) positions the line horizontally within contentW.
+	let align: string = parentCs.textAlign ?? 'start';
+	if (parentCs.justifyItems === 'center') align = 'center';
+	else if (parentCs.justifyItems === 'end') align = 'right';
+	else if (parentCs.justifyItems === 'start') align = 'left';
 	const placed: InlineAtom[] = [];
 	let y = originY;
 	for (const line of lines) {
@@ -582,6 +654,13 @@ function layoutInline(
 		y += lh;
 	}
 	const total = y - originY;
+	// Vertical centering: `align-items: center` on a fixed-height text box
+	// (the `place-items: center` badge idiom) centers the inline content
+	// block within the box. Shift every placed atom down by half the slack.
+	if (parentCs.alignItems === 'center' && contentH !== undefined && contentH > total) {
+		const dy = (contentH - total) / 2;
+		for (const atom of placed) atom.y += dy;
+	}
 	const layout: InlineLayout = { atoms: placed, height: total };
 	inlineCache.set(parent, layout);
 	inlineCacheTouched.add(parent);
@@ -773,7 +852,18 @@ function layoutFlex(
 				it.base += leftover * (it.grow / totalGrow);
 			}
 		}
-	} else if (leftover < 0) {
+	} else if (leftover < 0 && mainAvail > 0) {
+		// Only shrink when there's a REAL positive space constraint. When
+		// `mainAvail <= 0` the container is being measured for its auto
+		// (content) size — there's no space to shrink into, so shrinking
+		// here collapses every item to 0 and the container reports ~0
+		// height. That's what made the audio player's `.transport` /
+		// `.right-controls` flex COLUMNS (laid out by the grid with no
+		// height hint, i.e. contentH = 0) collapse — the buttons then
+		// rendered full-size but anchored at a zero-height container's top,
+		// so the whole controls row sat high. Treat mainAvail<=0 as
+		// content-sizing (keep each item's base), which also removes the
+		// need for per-page `flex-shrink: 0` floors on column children.
 		const totalShrinkWeight = items.reduce((acc, i) => acc + i.shrink * i.base, 0);
 		if (totalShrinkWeight > 0) {
 			for (const it of items) {
@@ -886,6 +976,16 @@ function layoutGrid(
 	contentH: number,
 ): number {
 	const gap = parentCs.gap ?? 0;
+	// Explicit 2D grid: when `grid-template-rows` is set, resolve BOTH
+	// axes to fixed track sizes and place each child by its
+	// `grid-column` / `grid-row` lines (auto-flowing any unplaced child).
+	// This is what full-viewport app layouts need (e.g. a visualizer /
+	// controls / library three-panel grid). Without grid-template-rows
+	// we keep the simpler column-only row-major auto-flow below, whose
+	// rows are sized to the tallest child (welcome / apps cards).
+	if (parentCs.gridTemplateRows) {
+		return layoutGridExplicit(parent, kids, parentCs, originX, originY, contentW, contentH, gap);
+	}
 	const tracks = resolveGridTracks(parentCs.gridTemplateColumns, contentW, gap, kids.length);
 	const colCount = tracks.length;
 	if (colCount === 0) {
@@ -900,53 +1000,189 @@ function layoutGrid(
 			xCursor += tracks[i] + gap;
 		}
 	}
-	let y = originY;
-	let row: LiveElement[] = [];
-	let rowHeight = 0;
-	const flushRow = () => {
-		if (row.length === 0) return;
-		// Equalise heights: extend each child's LayoutBox to rowHeight so
-		// backgrounds (including gradients) fill the visual row uniformly,
-		// even when one card has shorter text than its siblings.
-		for (const el of row) {
-			const box = cache.get(el);
-			if (box && box.h < rowHeight) {
-				const dh = rowHeight - box.h;
-				box.h = rowHeight;
-				box.contentH += dh;
+	// Run the row-major flow from a given top, returning the consumed
+	// height. Extracted so it can be re-run shifted for vertical centering
+	// (below) without duplicating the placement logic.
+	const runFlow = (startY: number): number => {
+		let y = startY;
+		let row: LiveElement[] = [];
+		let rowHeight = 0;
+		const flushRow = () => {
+			if (row.length === 0) return;
+			// Equalise heights: extend each child's LayoutBox to rowHeight so
+			// backgrounds (including gradients) fill the visual row uniformly,
+			// even when one card has shorter text than its siblings.
+			for (const el of row) {
+				const box = cache.get(el);
+				if (box && box.h < rowHeight) {
+					const dh = rowHeight - box.h;
+					box.h = rowHeight;
+					box.contentH += dh;
+				}
 			}
+			y += rowHeight + gap;
+			row = [];
+			rowHeight = 0;
+		};
+		for (let i = 0; i < kids.length; i++) {
+			const child = kids[i];
+			const ccs = getComputedLiveStyle(child);
+			const slotIdx = i % colCount;
+			const slotW = tracks[slotIdx];
+			const x = colX[slotIdx];
+			const h = layoutLeaf(child, ccs, x, y, slotW);
+			row.push(child);
+			if (h > rowHeight) rowHeight = h;
+			if (slotIdx === colCount - 1) flushRow();
 		}
-		y += rowHeight + gap;
-		row = [];
-		rowHeight = 0;
+		if (row.length > 0) {
+			// Partial last row — no trailing gap added.
+			for (const el of row) {
+				const box = cache.get(el);
+				if (box && box.h < rowHeight) {
+					const dh = rowHeight - box.h;
+					box.h = rowHeight;
+					box.contentH += dh;
+				}
+			}
+			y += rowHeight;
+		} else if (kids.length > 0) {
+			// Last action was a flushRow which appended a trailing gap; undo it.
+			y -= gap;
+		}
+		return y - startY;
 	};
-	for (let i = 0; i < kids.length; i++) {
-		const child = kids[i];
-		const ccs = getComputedLiveStyle(child);
-		const slotIdx = i % colCount;
-		const slotW = tracks[slotIdx];
-		const x = colX[slotIdx];
-		const h = layoutLeaf(child, ccs, x, y, slotW);
-		row.push(child);
-		if (h > rowHeight) rowHeight = h;
-		if (slotIdx === colCount - 1) flushRow();
+	const consumed = runFlow(originY);
+	// Vertical centering: a FIXED-height grid container (contentH known)
+	// with `align-items: center` should center its content block — in CSS
+	// the implicit single row stretches to the container (default
+	// align-content) and `align-items: center` centers items within it.
+	// The plain top-aligned flow left the controls bar sitting high with a
+	// big empty band below; re-run shifted by half the slack to center it.
+	// Only fires for fixed-height containers (auto-height grids pass
+	// contentH = 0, so this never touches the welcome/apps card grids).
+	if (parentCs.alignItems === 'center' && contentH > consumed + 0.5) {
+		runFlow(originY + (contentH - consumed) / 2);
 	}
-	if (row.length > 0) {
-		// Partial last row — no trailing gap added.
-		for (const el of row) {
-			const box = cache.get(el);
-			if (box && box.h < rowHeight) {
-				const dh = rowHeight - box.h;
-				box.h = rowHeight;
-				box.contentH += dh;
-			}
+	return consumed;
+}
+
+/** Explicit 2D CSS Grid: resolve fixed column + row track sizes, then
+ * place each child into its grid area. A child with both `grid-column`
+ * and `grid-row` lines is placed (and may span tracks, e.g.
+ * `grid-row: 1 / 3`); children without explicit placement auto-flow into
+ * the first free cells (row-major). Each placed child is laid out at its
+ * area's exact width AND height (passed as the leaf height hint) so the
+ * panels fill the viewport grid instead of collapsing to content height.
+ * Returns the grid's total content height. */
+function layoutGridExplicit(
+	parent: LiveElement,
+	kids: LiveElement[],
+	parentCs: ComputedLiveStyle,
+	originX: number,
+	originY: number,
+	contentW: number,
+	contentH: number,
+	gap: number,
+): number {
+	const cols = resolveGridTracks(parentCs.gridTemplateColumns, contentW, gap, kids.length);
+	const rows = resolveGridTracks(parentCs.gridTemplateRows, contentH, gap, kids.length);
+	const colCount = cols.length;
+	const rowCount = rows.length;
+	if (colCount === 0 || rowCount === 0) {
+		return layoutBlock(kids, originX, originY, contentW, contentH, parentCs);
+	}
+	const colX: number[] = new Array(colCount);
+	{ let c = originX; for (let i = 0; i < colCount; i++) { colX[i] = c; c += cols[i] + gap; } }
+	const rowY: number[] = new Array(rowCount);
+	{ let r = originY; for (let i = 0; i < rowCount; i++) { rowY[i] = r; r += rows[i] + gap; } }
+
+	const occupied: boolean[][] = Array.from({ length: rowCount }, () => new Array(colCount).fill(false));
+	const mark = (r0: number, rs: number, c0: number, cs: number) => {
+		for (let r = r0; r < r0 + rs && r < rowCount; r++) {
+			for (let c = c0; c < c0 + cs && c < colCount; c++) occupied[r][c] = true;
 		}
-		y += rowHeight;
-	} else if (kids.length > 0) {
-		// Last action was a flushRow which appended a trailing gap; undo it.
-		y -= gap;
+	};
+	// Pixel extent of `span` tracks starting at `start`, including the
+	// inter-track gaps that the span swallows.
+	const spanExtent = (tracks: number[], start: number, span: number): number => {
+		const usable = Math.min(span, tracks.length - start);
+		let sum = 0;
+		for (let i = start; i < start + usable; i++) sum += tracks[i];
+		if (usable > 1) sum += (usable - 1) * gap;
+		return sum;
+	};
+
+	interface Placed { el: LiveElement; ccs: ComputedLiveStyle; r0: number; rs: number; c0: number; cs: number }
+	const placed: Placed[] = [];
+	const autoKids: { el: LiveElement; ccs: ComputedLiveStyle }[] = [];
+	for (const child of kids) {
+		const ccs = getComputedLiveStyle(child);
+		const col = parseGridLine(ccs.gridColumn, colCount);
+		const row = parseGridLine(ccs.gridRow, rowCount);
+		if (col && row) {
+			const c0 = clampIdx(col.start, colCount);
+			const r0 = clampIdx(row.start, rowCount);
+			const cs = Math.max(1, Math.min(col.span, colCount - c0));
+			const rs = Math.max(1, Math.min(row.span, rowCount - r0));
+			mark(r0, rs, c0, cs);
+			placed.push({ el: child, ccs, r0, rs, c0, cs });
+		} else {
+			autoKids.push({ el: child, ccs });
+		}
 	}
-	return y - originY;
+	const cellCount = rowCount * colCount;
+	let scan = 0;
+	for (const a of autoKids) {
+		while (scan < cellCount && occupied[Math.floor(scan / colCount)][scan % colCount]) scan++;
+		const r0 = scan < cellCount ? Math.floor(scan / colCount) : 0;
+		const c0 = scan < cellCount ? scan % colCount : 0;
+		if (scan < cellCount) occupied[r0][c0] = true;
+		placed.push({ el: a.el, ccs: a.ccs, r0, rs: 1, c0, cs: 1 });
+		scan++;
+	}
+	for (const p of placed) {
+		const w = spanExtent(cols, p.c0, p.cs);
+		const h = spanExtent(rows, p.r0, p.rs);
+		layoutLeaf(p.el, p.ccs, colX[p.c0], rowY[p.r0], w, h);
+	}
+	let total = 0;
+	for (const r of rows) total += r;
+	return total + Math.max(0, rowCount - 1) * gap;
+}
+
+/** Parse a `grid-column` / `grid-row` value into a 0-based start track
+ * index + span count. Supports `<n>`, `<start> / <end>`,
+ * `<start> / span <n>`, and `span <n>`. 1-based grid lines convert to
+ * 0-based track indices (`1 / 3` → start 0, span 2). Returns null for
+ * `auto` / unparseable values so the caller auto-flows the child. */
+function parseGridLine(value: string | undefined, _trackCount: number): { start: number; span: number } | null {
+	if (!value) return null;
+	const v = value.trim().toLowerCase();
+	if (!v || v === 'auto') return null;
+	const parts = v.split('/').map((s) => s.trim());
+	const startTok = parts[0];
+	const endTok = parts[1];
+	const spanOnly = /^span\s+(\d+)$/.exec(startTok);
+	if (spanOnly) return { start: 0, span: Math.max(1, parseInt(spanOnly[1], 10)) };
+	const startLine = parseInt(startTok, 10);
+	if (!Number.isFinite(startLine)) return null;
+	let span = 1;
+	if (endTok) {
+		const spanEnd = /^span\s+(\d+)$/.exec(endTok);
+		if (spanEnd) span = Math.max(1, parseInt(spanEnd[1], 10));
+		else {
+			const endLine = parseInt(endTok, 10);
+			if (Number.isFinite(endLine)) span = Math.max(1, endLine - startLine);
+		}
+	}
+	return { start: Math.max(0, startLine - 1), span };
+}
+
+function clampIdx(i: number, n: number): number {
+	if (i < 0) return 0;
+	if (i > n - 1) return Math.max(0, n - 1);
+	return i;
 }
 
 /** Resolve a `grid-template-columns` value into concrete pixel widths.
@@ -987,32 +1223,102 @@ function resolveGridTracks(value: string | undefined, contentW: number, gap: num
 		const trackStr = fixedRepeat[2].trim();
 		return distributeTrackList(new Array(n).fill(trackStr), contentW, gap);
 	}
-	// Explicit track list (space-separated). Tokens may be `<len>px` or
-	// `<n>fr` or `auto`.
-	const tokens = v.split(/\s+/).filter((t) => t.length > 0);
+	// Explicit track list (space-separated). Tokens may be `<len>` / `%`
+	// / `<n>fr` / `auto` / `minmax(a, b)`. Split on top-level whitespace
+	// so a `minmax(...)`'s internal space doesn't shatter the token.
+	const tokens = splitTopLevelSpaces(v);
 	if (tokens.length === 0) return [contentW];
 	return distributeTrackList(tokens, contentW, gap);
 }
 
-/** Resolve a mixed track list (px lengths + Nfr + auto) to pixel widths.
- * Fixed tracks take their declared px; remaining space is split among
- * fr tracks by their weight; `auto` is treated as `1fr` (good enough
- * approximation without a separate intrinsic-pass). */
-function distributeTrackList(tokens: string[], contentW: number, gap: number): number[] {
+/** Split a track list on top-level whitespace, keeping parenthesised
+ * groups intact so `minmax(0, 1fr) minmax(280px, 360px)` splits into two
+ * tokens (not four). The old `split(/\s+/)` broke every `minmax(a, b)`
+ * apart at its internal space. */
+function splitTopLevelSpaces(s: string): string[] {
+	const out: string[] = [];
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (ch === '(') depth++;
+		else if (ch === ')') depth = Math.max(0, depth - 1);
+		else if (depth === 0 && (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r')) {
+			if (i > start) out.push(s.slice(start, i));
+			start = i + 1;
+		}
+	}
+	if (s.length > start) out.push(s.slice(start));
+	return out.filter((t) => t.length > 0);
+}
+
+interface GridTrackDesc { kind: 'fixed' | 'fr'; v: number; min: number }
+
+/** Parse one length-ish grid track token (no fr / minmax) to px. `basis`
+ * is the track-resolution extent used for `%`. */
+function parseGridTrackLen(s: string, basis: number): number | undefined {
+	const t = s.trim();
+	const pct = /^(-?\d+(?:\.\d+)?)%$/.exec(t);
+	if (pct) return parseFloat(pct[1]) * 0.01 * basis;
+	const px = /^(-?\d+(?:\.\d+)?)px$/.exec(t);
+	if (px) return parseFloat(px[1]);
+	if (/^-?\d/.test(t)) {
+		const n = parseFloat(t);
+		if (Number.isFinite(n)) return n;
+	}
+	return undefined;
+}
+
+/** Parse a grid track token into a descriptor. `basis` (container content
+ * size minus gaps) resolves `%`. Handles `<len>` / `%` / `<n>fr` / `auto`
+ * / `minmax(<min>, <max>)` — `minmax(px, Nfr)` is a flexible track with a
+ * px floor; `minmax(px, px)` is fixed, preferring its max. Returns null
+ * for unparseable tokens (caller falls back to `1fr`). */
+function parseGridTrackToken(tok: string, basis: number): GridTrackDesc | null {
+	const t = tok.trim();
+	const mm = /^minmax\(\s*([^,]+?)\s*,\s*(.+?)\s*\)$/i.exec(t);
+	if (mm) {
+		const min = parseGridTrackLen(mm[1], basis) ?? 0;
+		const maxTok = mm[2].trim();
+		const fr = /^(\d+(?:\.\d+)?)fr$/i.exec(maxTok);
+		if (fr) return { kind: 'fr', v: parseFloat(fr[1]), min };
+		const maxPx = parseGridTrackLen(maxTok, basis);
+		return { kind: 'fixed', v: Math.max(min, maxPx ?? min), min };
+	}
+	const fr = /^(\d+(?:\.\d+)?)fr$/i.exec(t);
+	if (fr) return { kind: 'fr', v: parseFloat(fr[1]), min: 0 };
+	const low = t.toLowerCase();
+	if (low === 'auto' || low === 'min-content' || low === 'max-content') {
+		return { kind: 'fr', v: 1, min: 0 };
+	}
+	const px = parseGridTrackLen(t, basis);
+	if (px !== undefined) return { kind: 'fixed', v: px, min: px };
+	return null;
+}
+
+/** Resolve a mixed track list (px / % / Nfr / auto / minmax) to pixel
+ * sizes against `contentExtent` (the container content width for columns
+ * or content height for rows). Fixed tracks take their declared size;
+ * remaining space is split among fr tracks by weight, each floored at its
+ * `minmax` minimum. `%` tracks resolve against the post-gap available
+ * extent so a `70% 30%` pair fills the container exactly with the gap
+ * sitting between them. */
+function distributeTrackList(tokens: string[], contentExtent: number, gap: number): number[] {
 	const totalGap = Math.max(0, tokens.length - 1) * gap;
+	const avail = Math.max(0, contentExtent - totalGap);
+	const descs: GridTrackDesc[] = tokens.map(
+		(t) => parseGridTrackToken(t, avail) ?? { kind: 'fr', v: 1, min: 0 },
+	);
 	let frTotal = 0;
 	let fixedTotal = 0;
-	const parsed: { kind: 'fixed' | 'fr'; v: number }[] = tokens.map((t) => {
-		const px = /^(\d+(?:\.\d+)?)px$/.exec(t);
-		if (px) { fixedTotal += parseFloat(px[1]); return { kind: 'fixed', v: parseFloat(px[1]) }; }
-		const fr = /^(\d+(?:\.\d+)?)fr$/.exec(t);
-		if (fr) { frTotal += parseFloat(fr[1]); return { kind: 'fr', v: parseFloat(fr[1]) }; }
-		// 'auto' and unknowns → 1fr equivalent
-		frTotal += 1;
-		return { kind: 'fr', v: 1 };
-	});
-	const frSpace = Math.max(0, contentW - totalGap - fixedTotal);
-	return parsed.map((p) => p.kind === 'fixed' ? p.v : (frTotal > 0 ? frSpace * (p.v / frTotal) : 0));
+	for (const d of descs) {
+		if (d.kind === 'fixed') fixedTotal += d.v;
+		else frTotal += d.v;
+	}
+	const frSpace = Math.max(0, avail - fixedTotal);
+	return descs.map((d) =>
+		d.kind === 'fixed' ? d.v : Math.max(d.min, frTotal > 0 ? frSpace * (d.v / frTotal) : 0),
+	);
 }
 
 /** Auto-layout `<table>` rendering on the live-DOM stack. Two-pass:
@@ -1290,6 +1596,7 @@ function layoutLeaf(
 	w: number,
 	hHint?: number,
 ): number {
+	try {
 	const pad = padding(cs);
 	// Height percentages resolve against the parent's content-box height.
 	// We don't have a direct parent-height handle here, so fall back to
@@ -1332,8 +1639,17 @@ function layoutLeaf(
 		// when no CSS-explicit width was set. Without this, layoutBlock
 		// stretches a 16×16 snowflake to 1280×16.
 		if (explicitW === undefined) {
-			if (Number.isFinite(attrW) && attrW > 0) w = attrW;
-			else if (naturalW > 0) w = naturalW;
+			if (explicitH !== undefined && naturalW > 0 && naturalH > 0) {
+				// `width: auto` + explicit height → preserve the image's
+				// aspect ratio (width = naturalAspect × height). Lets a
+				// wide wordmark logo render at the right width instead of
+				// being squished into a fixed square box.
+				w = Math.round((naturalW / naturalH) * explicitH);
+			} else if (Number.isFinite(attrW) && attrW > 0) {
+				w = attrW;
+			} else if (naturalW > 0) {
+				w = naturalW;
+			}
 		}
 	}
 	// Phase 3b (2026-05-26): `<canvas>` is a replaced element with
@@ -1443,6 +1759,32 @@ function layoutLeaf(
 	};
 	storeBox(el, box);
 	return h;
+	} catch (err) {
+		// Robustness: one element's layout must NEVER abort the whole
+		// layout pass. Before this, a throw deep in a subtree (e.g. an
+		// inline <svg> inside a flex <button>) aborted layout for every
+		// element AFTER it in tree order, blanking most of the page. Log
+		// which element failed (console.debug — never the
+		// render-mode-flipping error/log/warn/info) and store a minimal
+		// fallback box so siblings + ancestors keep laying out. The
+		// element's own subtree is skipped (its children get no box).
+		try {
+			const cls = el && el.getAttribute && el.getAttribute('class');
+			const id = el && el.getAttribute && el.getAttribute('id');
+			console.debug('[live-layout] layoutLeaf threw, using fallback box for',
+				'<' + ((el && el.tagName) || '?').toLowerCase() + (id ? ' id=' + id : '') + (cls ? ' class=' + cls : '') + '>',
+				err);
+		} catch (_) { /* ignore */ }
+		const fb = hHint ?? 0;
+		try {
+			storeBox(el, {
+				x, y, w, h: fb,
+				contentX: x, contentY: y, contentW: w, contentH: fb,
+				intrinsicContentH: fb, intrinsicContentW: w,
+			});
+		} catch (_) { /* ignore */ }
+		return fb;
+	}
 }
 
 // =========================================================================
@@ -1522,20 +1864,204 @@ function crossExplicit(cs: ComputedLiveStyle, isRow: boolean): boolean {
  * "no explicit size" per the CSS spec on intrinsic resolution. */
 function intrinsicMain(el: LiveElement, cs: ComputedLiveStyle, isRow: boolean): number {
 	if (isRow) {
-		if (typeof cs.width === 'number') return cs.width;
-		if (el.textContent && measureCtx) {
-			measureCtx.save();
-			try {
-				measureCtx.font = (cs.fontSize ?? 14) + 'px ' + (cs.fontFamily || 'sans-serif');
-				return measureCtx.measureText(el.textContent).width + (cs.paddingLeft ?? 0) + (cs.paddingRight ?? 0);
-			} catch (_) { /* fall through */ }
-			finally { measureCtx.restore(); }
-		}
-		return 0;
+		return intrinsicContentWidth(el, cs);
 	}
 	if (typeof cs.height === 'number') return cs.height;
 	if (el.textContent) return (cs.fontSize ?? 14) * 1.2 + (cs.paddingTop ?? 0) + (cs.paddingBottom ?? 0);
 	return 0;
+}
+
+/** Intrinsic border-box width of an element. Explicit `width` wins;
+ * otherwise compute from children (a row flex/inline-flex container
+ * SUMS child outer widths + gaps; block / grid / column-flex take the
+ * MAX child width), falling back to a text measurement for leaf
+ * elements. Clamped up to `min-width`. Replaces the old text-only
+ * measurement that under-sized flex containers like a nav bar whose
+ * width comes from its pill children's box model, not its raw text —
+ * which made the parent's `space-between` overshoot and push the nav
+ * off the right edge. */
+/** Intrinsic content-box size of a replaced `<svg>`: CSS explicit
+ * width/height win, else the `width`/`height` HTML attrs, else the
+ * `viewBox` aspect resolves the missing axis from the known one (16px
+ * default when neither is given). Mirrors `layoutLeaf`'s SVG sizing so an
+ * inline icon reports a real box as a flex item / intrinsic child instead
+ * of collapsing to its zero-extent shape children (polygon/rect/…) — that
+ * collapse made `<svg>` icons inside `display:flex` buttons lay out at
+ * w=h=0 and paint invisibly. */
+function svgIntrinsicContentSize(el: LiveElement, cs: ComputedLiveStyle): { w: number; h: number } {
+	let w = typeof cs.width === 'number' ? cs.width : undefined;
+	let h = typeof cs.height === 'number' ? cs.height : undefined;
+	if (w === undefined) {
+		const a = parseFloat(el.getAttribute('width') ?? '');
+		if (Number.isFinite(a) && a > 0) w = a;
+	}
+	if (h === undefined) {
+		const a = parseFloat(el.getAttribute('height') ?? '');
+		if (Number.isFinite(a) && a > 0) h = a;
+	}
+	let vbAspect: number | undefined;
+	const vbRaw = el.getAttribute('viewBox') ?? el.getAttribute('viewbox');
+	if (vbRaw) {
+		const p = vbRaw.trim().split(/[\s,]+/).map(parseFloat);
+		if (p.length === 4 && p.every((n) => Number.isFinite(n)) && p[2] > 0 && p[3] > 0) vbAspect = p[2] / p[3];
+	}
+	if (w === undefined && h !== undefined) w = vbAspect ? Math.round(h * vbAspect) : h;
+	if (h === undefined && w !== undefined) h = vbAspect ? Math.round(w / vbAspect) : w;
+	return { w: w ?? 16, h: h ?? 16 };
+}
+
+function intrinsicContentWidth(el: LiveElement, cs: ComputedLiveStyle): number {
+	const padL = cs.paddingLeft ?? 0;
+	const padR = cs.paddingRight ?? 0;
+	if (el.tagName === 'SVG') {
+		let w = svgIntrinsicContentSize(el, cs).w;
+		const minW = typeof cs.minWidth === 'number' ? cs.minWidth : undefined;
+		if (minW !== undefined && w < minW) w = minW;
+		return w;
+	}
+	const explicit = typeof cs.width === 'number' ? cs.width : undefined;
+	let w: number;
+	if (explicit === undefined && el.tagName === 'IMG') {
+		// `width: auto` image: width follows the natural aspect ratio
+		// against the explicit height (matches the layoutLeaf IMG path),
+		// so a flex item like a logo gets the right base size. Falls
+		// back to natural width, then a square (height) before the image
+		// has loaded.
+		const loaded = el.getLoadedImage();
+		const nW = loaded?.naturalWidth ?? loaded?.width ?? 0;
+		const nH = loaded?.naturalHeight ?? loaded?.height ?? 0;
+		const explicitH = typeof cs.height === 'number' ? cs.height : undefined;
+		let iw: number;
+		if (explicitH !== undefined && nW > 0 && nH > 0) iw = Math.round((nW / nH) * explicitH);
+		else if (nW > 0) iw = nW;
+		else if (explicitH !== undefined) iw = explicitH;
+		else iw = 0;
+		iw += padL + padR;
+		const minW = typeof cs.minWidth === 'number' ? cs.minWidth : undefined;
+		return minW !== undefined && iw < minW ? minW : iw;
+	}
+	if (explicit !== undefined) {
+		w = explicit;
+	} else {
+		const kids = el.children.filter((c) => {
+			const ccs = getComputedLiveStyle(c);
+			if (ccs.display === 'none') return false;
+			const pos = ccs.position ?? c.style.position;
+			return pos !== 'fixed' && pos !== 'absolute';
+		});
+		let inner = 0;
+		if (kids.length > 0) {
+			const dir = cs.flexDirection || 'row';
+			const isFlexRow = (cs.display === 'flex' || cs.display === 'inline-flex')
+				&& (dir === 'row' || dir === 'row-reverse');
+			const gap = cs.gap ?? 0;
+			if (isFlexRow) {
+				let count = 0;
+				for (const c of kids) {
+					const ccs = getComputedLiveStyle(c);
+					inner += outerIntrinsicWidth(c, ccs);
+					count++;
+				}
+				inner += gap * Math.max(0, count - 1);
+			} else {
+				for (const c of kids) {
+					const ccs = getComputedLiveStyle(c);
+					inner = Math.max(inner, outerIntrinsicWidth(c, ccs));
+				}
+			}
+		} else if (el.textContent && measureCtx) {
+			measureCtx.save();
+			try {
+				measureCtx.font = (cs.fontSize ?? 14) + 'px ' + (cs.fontFamily || 'sans-serif');
+				inner = measureCtx.measureText(el.textContent).width;
+			} catch (_) { /* leave 0 */ }
+			finally { measureCtx.restore(); }
+		}
+		w = inner + padL + padR;
+	}
+	// `min-width` floors the intrinsic size (px only — % min-width has no
+	// basis at intrinsic-measure time).
+	const minW = typeof cs.minWidth === 'number' ? cs.minWidth : undefined;
+	if (minW !== undefined && w < minW) w = minW;
+	return w;
+}
+
+function outerIntrinsicWidth(el: LiveElement, cs: ComputedLiveStyle): number {
+	const mL = cs.marginLeft ?? 0;
+	const mR = cs.marginRight ?? 0;
+	return intrinsicContentWidth(el, cs) + mL + mR;
+}
+
+/** Intrinsic border-box height of an element. Explicit `height` wins;
+ * otherwise compute from children (a ROW flex/inline-flex container
+ * takes the MAX child outer height; block / column-flex / grid SUM
+ * them), falling back to a text line for leaves. Clamped up to
+ * `min-height`. The height analogue of `intrinsicContentWidth` —
+ * needed so a row-flex bar (e.g. logo + label) reports the tall
+ * child's height instead of just the text line-height, which made
+ * `align-items: center` center the label against a too-short row. */
+function intrinsicContentHeight(el: LiveElement, cs: ComputedLiveStyle): number {
+	const padT = cs.paddingTop ?? 0;
+	const padB = cs.paddingBottom ?? 0;
+	if (el.tagName === 'SVG') {
+		let h = svgIntrinsicContentSize(el, cs).h;
+		const minH = typeof cs.minHeight === 'number' ? cs.minHeight : undefined;
+		if (minH !== undefined && h < minH) h = minH;
+		return h;
+	}
+	const explicit = typeof cs.height === 'number' ? cs.height : undefined;
+	let h: number;
+	if (explicit !== undefined) {
+		h = explicit;
+	} else {
+		const kids = el.children.filter((c) => {
+			const ccs = getComputedLiveStyle(c);
+			if (ccs.display === 'none') return false;
+			const pos = ccs.position ?? c.style.position;
+			return pos !== 'fixed' && pos !== 'absolute';
+		});
+		let inner = 0;
+		if (kids.length > 0) {
+			const dir = cs.flexDirection || 'row';
+			const isFlex = cs.display === 'flex' || cs.display === 'inline-flex';
+			const isFlexRow = isFlex && (dir === 'row' || dir === 'row-reverse');
+			const isFlexCol = isFlex && (dir === 'column' || dir === 'column-reverse');
+			const gap = cs.gap ?? 0;
+			if (isFlexRow) {
+				// Cross axis is vertical → row height is the tallest child.
+				for (const c of kids) {
+					const ccs = getComputedLiveStyle(c);
+					inner = Math.max(inner, outerIntrinsicHeight(c, ccs));
+				}
+			} else {
+				// Block / column-flex / grid → children stack vertically.
+				let count = 0;
+				for (const c of kids) {
+					const ccs = getComputedLiveStyle(c);
+					inner += outerIntrinsicHeight(c, ccs);
+					count++;
+				}
+				if (isFlexCol) inner += gap * Math.max(0, count - 1);
+			}
+		} else if (el.textContent) {
+			inner = cs.lineHeight ?? (cs.fontSize ?? 14) * 1.2;
+		} else {
+			const tag = el.tagName;
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+				inner = cs.lineHeight ?? (cs.fontSize ?? 14) * 1.2;
+			}
+		}
+		h = inner + padT + padB;
+	}
+	const minH = typeof cs.minHeight === 'number' ? cs.minHeight : undefined;
+	if (minH !== undefined && h < minH) h = minH;
+	return h;
+}
+
+function outerIntrinsicHeight(el: LiveElement, cs: ComputedLiveStyle): number {
+	const mT = cs.marginTop ?? 0;
+	const mB = cs.marginBottom ?? 0;
+	return intrinsicContentHeight(el, cs) + mT + mB;
 }
 
 /** M2.6 helper: walk a subtree looking for the max display-width of any
@@ -1558,9 +2084,32 @@ function canvasIntrinsicWidth(root: LiveElement): number {
 }
 
 function intrinsicCross(el: LiveElement, cs: ComputedLiveStyle, isRow: boolean): number {
+	if (el.tagName === 'SVG') {
+		const s = svgIntrinsicContentSize(el, cs);
+		return isRow ? s.h : s.w;
+	}
 	if (isRow) {
 		if (typeof cs.height === 'number') return cs.height;
-		if (el.textContent) return (cs.fontSize ?? 14) * 1.2 + (cs.paddingTop ?? 0) + (cs.paddingBottom ?? 0);
+		const padV = (cs.paddingTop ?? 0) + (cs.paddingBottom ?? 0);
+		const lineH = cs.lineHeight ?? (cs.fontSize ?? 14) * 1.2;
+		// Element-children containers (e.g. a logo+label flex row) get
+		// their height from the children's box model — measuring just
+		// `textContent` line-height ignored a tall child (the logo) and
+		// made `align-items: center` center the label in a too-short row.
+		const hasElementKids = el.children.some((c) => {
+			const ccs = getComputedLiveStyle(c);
+			return ccs.display !== 'none';
+		});
+		if (hasElementKids) return intrinsicContentHeight(el, cs);
+		if (el.textContent) return lineH + padV;
+		// Form controls reserve a line box even when empty — an empty
+		// `<input>` has no textContent (its placeholder is an attribute),
+		// so without this it collapsed to 0 height and rendered as a thin
+		// line instead of a field.
+		const tag = el.tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') {
+			return lineH + padV;
+		}
 		return 0;
 	}
 	if (typeof cs.width === 'number') return cs.width;

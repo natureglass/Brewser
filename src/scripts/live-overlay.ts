@@ -58,7 +58,7 @@ import {
 	type InlineAtom, type InlineLayout, type LayoutBox,
 } from './live-layout.js';
 import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
-import { isKeyboardOpen, requestFullRepaint } from './live-paint-control.js';
+import { clearLiveDirty, drainLiveDirty, isKeyboardOpen, requestFullRepaint } from './live-paint-control.js';
 
 /** Viewport rectangle for the live overlay. `x` / `y` are the
  * top-left offset into the screen surface; `width` / `height` are
@@ -109,9 +109,46 @@ export function patchLiveCacheRegion(el: LiveElement): void {
 	// each frame so this is belt-and-suspenders.
 	cacheCtx.save();
 	try {
-		cacheCtx.clearRect(box.x, box.y, box.w, box.h);
 		setLayoutMeasureCtx(cacheCtx);
-		paintSubtreeLaid(cacheCtx, el);
+		const rect: DirtyRect = { x: box.x, y: box.y, w: box.w, h: box.h };
+		cacheCtx.beginPath();
+		cacheCtx.rect(rect.x, rect.y, rect.w, rect.h);
+		cacheCtx.clip();
+		cacheCtx.clearRect(rect.x, rect.y, rect.w, rect.h);
+		// Repaint the FULL back-to-front stack inside the region — body bg
+		// + every op (ancestor backgrounds, then this element) whose box
+		// intersects it, in tree order — not just this element. Otherwise a
+		// transparent element (e.g. a logo PNG) clears to a hole and its
+		// see-through pixels show the flat page bg instead of the real
+		// backdrop behind it (body bg + any colored ancestor like the
+		// search bar's gradient). Mirrors patchLiveDirtyRegions' bg-stack
+		// repaint + the full build's layering, so there's no seam.
+		const root = lastPaintedRoot;
+		if (root) {
+			const bodyCs = getComputedLiveStyle(root);
+			const bodyBox = getLayoutBox(root);
+			if (bodyCs.background) {
+				cacheCtx.fillStyle = bodyCs.background;
+				cacheCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
+			}
+			if (bodyBox) paintBoxedElement(cacheCtx, root, bodyCs, bodyBox);
+			const ops: PaintOp[] = [];
+			collectPaintOps(root, ops, /* skipBgOfRoot */ true);
+			for (const op of ops) {
+				const b: DirtyRect | undefined = op.kind === 'atom' ? op.atom : op.box;
+				if (!b || !rectsIntersect(b, rect)) continue;
+				try {
+					if (op.kind === 'bg' && op.cs && op.box) {
+						paintBoxedElement(cacheCtx, op.el, op.cs, op.box);
+					} else if (op.kind === 'atom' && op.atom) {
+						paintOneInlineAtom(cacheCtx, op.atom);
+					}
+				} catch (_) { /* skip a bad op, as the build loop does */ }
+			}
+		} else {
+			// No painted-root handle yet — element-only fallback.
+			paintSubtreeLaid(cacheCtx, el);
+		}
 	} finally { cacheCtx.restore(); }
 }
 
@@ -123,6 +160,198 @@ export function patchLiveCacheRegion(el: LiveElement): void {
  * overwritten by a full rebuild. */
 export function syncLiveCacheVersion(): void {
 	lastBodyVersion = getLiveTreeVersion();
+}
+
+interface DirtyRect { x: number; y: number; w: number; h: number; }
+function rectsIntersect(a: DirtyRect, b: DirtyRect): boolean {
+	return a.x < b.x + b.w && a.x + a.w > b.x
+		&& a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// TEMPORARY diagnostic (2026-05-28): trace why a tap patches vs full-
+// rebuilds. Writes to sdmc:/swb_partial.log. Remove once partial repaint
+// is verified on-device. Capped so a stuck loop can't fill the SD card.
+const PARTIAL_DEBUG = false;
+let _partialDbgCount = 0;
+function _partialDbg(msg: string): void {
+	if (!PARTIAL_DEBUG || _partialDbgCount >= 400) return;
+	_partialDbgCount++;
+	try {
+		const sw = (globalThis as { Switch?: { appendFileSync?: (p: string, d: string) => void } }).Switch;
+		sw?.appendFileSync?.('sdmc:/swb_partial.log', msg + '\n');
+	} catch (_) { /* ignore */ }
+}
+function _tagOf(el: LiveElement): string {
+	const cls = el.getAttribute?.('class');
+	const id = el.getAttribute?.('id');
+	return `${(el.tagName || '?').toLowerCase()}${id ? '#' + id : ''}${cls ? '.' + cls.trim().split(/\s+/).join('.') : ''}`;
+}
+
+/** Phase 2.6 (2026-05-28): targeted partial cache repaint for tap-driven
+ * mutations. Drains the per-element dirty set (populated by
+ * `markLiveDirty` from every paint-affecting mutation), re-lays-out, and
+ * for each change finds the nearest ancestor whose box stayed put across
+ * the re-layout ("stable container") — the region that bounds any reflow
+ * the change caused. It then repaints just those regions instead of the
+ * whole page. Returns true when it patched (caller can rely on the next
+ * blit showing the change); false when it punted to the normal full
+ * rebuild (the version is left ahead of `lastBodyVersion`, so the next
+ * `paintLiveOverlay` rebuilds).
+ *
+ * Correctness for the live cache's LAYERED, semi-transparent backgrounds
+ * (e.g. the audio player's body gradient → card → row, translucent
+ * buttons): we don't just clear+repaint each element — we re-paint, in
+ * tree order and CLIPPED to the changed regions, the body background plus
+ * every paint op whose box intersects a changed region. That rebuilds the
+ * full back-to-front stack inside those regions exactly as the full build
+ * would, so there are no transparent holes or seams. Faithful because it
+ * reuses the same `paintBoxedElement` / `paintOneInlineAtom` /
+ * `collectPaintOps` the build uses; the only difference is the clip + the
+ * intersection filter.
+ *
+ * Safe-by-construction: any uncertainty (no cache, build in flight, a
+ * dirty element with no box, or a reflow that reached the root with no
+ * stable container) returns false → the unchanged full-rebuild path runs. */
+export function patchLiveDirtyRegions(): boolean {
+	const dirty = drainLiveDirty();
+	if (dirty.length === 0) return false;
+	_partialDbg('--- tap: drained ' + dirty.length + ' dirty: [' + dirty.map(_tagOf).join(', ') + ']');
+	// Mutations happened, so a repaint is needed no matter what — whether we
+	// patch below or punt to the full rebuild. Schedule it once here so every
+	// punt path (and the caller) gets a repaint without repeating the call.
+	requestFullRepaint();
+	if (!liveCacheOffscreen || cacheBuilding) {
+		_partialDbg('  PUNT: ' + (!liveCacheOffscreen ? 'no-cache' : 'cache-building') + ' → full rebuild');
+		return false;
+	}
+	const root = lastPaintedRoot;
+	if (!root) { _partialDbg('  PUNT: no-root → full rebuild'); return false; }
+	const vpW = lastBodyViewportW;
+	const vpH = lastBodyViewportH;
+	if (vpW <= 0 || vpH <= 0) { _partialDbg('  PUNT: bad-viewport ' + vpW + 'x' + vpH); return false; }
+	const cacheCtx = liveCacheOffscreen.getContext('2d');
+	if (!cacheCtx) { _partialDbg('  PUNT: no-ctx'); return false; }
+
+	// LOCALIZED re-layout (perf-critical). For each dirty element, re-lay-out
+	// only ITS OWN subtree, in place, pinned to its cached border-box — NOT
+	// the whole page. A full `layoutFixedRoot(root)` here re-lays-out the
+	// entire page; on the heavy audio-player page that costs SECONDS and was
+	// the multi-second freeze on every tap. Re-laying out just the changed
+	// elements is ~instant, and because the box is pinned to the cached dims
+	// it can't reflow siblings. We deliberately do NOT resetLayoutCache, so
+	// every OTHER element keeps its already-correct box for the
+	// collectPaintOps walk below. Pure style changes (the RED/GREEN class
+	// toggle) work too: the cascade was invalidated on mutation and
+	// re-resolves at paint; the relayout just refreshes changed text atoms /
+	// freshly-inserted children (e.g. the "Play"/"Stop" label).
+	setLayoutMeasureCtx(cacheCtx);
+	const rects: DirtyRect[] = [];
+	const pushRect = (b: LayoutBox | undefined): boolean => {
+		if (!b || b.w <= 0 || b.h <= 0) return false;
+		rects.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+		return true;
+	};
+	for (const el of dirty) {
+		const cs = getComputedLiveStyle(el);
+		const pos = cs.position ?? el.style.position;
+		const oldB = getLayoutBox(el);
+		if (pos === 'absolute') {
+			// An absolutely-positioned element's box can MOVE and RESIZE when
+			// its content changes (e.g. the toast: empty → "Bars visualizer"
+			// re-runs shrink-to-fit, which widens it and re-centers it). The
+			// pinned `layoutFixedRoot(cached box)` path below would reuse the
+			// stale (empty-content) width and clip the text. Re-run the
+			// absolute layout against its containing block instead, and mark
+			// BOTH the old and new boxes dirty so the region covers the move.
+			const cb = findAbsoluteContainingBlock(el, root);
+			const cbBox = cb ? getLayoutBox(cb) : undefined;
+			if (cbBox) {
+				try {
+					// Padding box (== border box; borders are layout-ignored),
+					// not the content box — see the full-rebuild pass above.
+					layoutAbsoluteRoot(el, cbBox.x, cbBox.y, cbBox.w, cbBox.h);
+				} catch (_) { /* keep cached layout on throw */ }
+			}
+			const newB = getLayoutBox(el);
+			const a = pushRect(oldB);
+			const bAdded = newB !== oldB ? pushRect(newB) : false;
+			if (!a && !bAdded) { _partialDbg('  skip no-box abs ' + _tagOf(el)); }
+			else _partialDbg('  ' + _tagOf(el) + ' abs-relaid');
+			continue;
+		}
+		if (!oldB || oldB.w <= 0 || oldB.h <= 0) {
+			// Non-visual (e.g. <audio> whose src changed) or collapsed — paints
+			// nothing, so nothing to patch.
+			_partialDbg('  skip no-box ' + _tagOf(el));
+			continue;
+		}
+		const rect = { x: oldB.x, y: oldB.y, w: oldB.w, h: oldB.h };
+		try {
+			layoutFixedRoot(el, oldB.x, oldB.y, oldB.w, oldB.h);
+		} catch (_) { /* keep the cached layout if a localized relayout throws */ }
+		rects.push(rect);
+		_partialDbg('  ' + _tagOf(el) + ' relaid ['
+			+ Math.round(rect.x) + ',' + Math.round(rect.y) + ' '
+			+ Math.round(rect.w) + 'x' + Math.round(rect.h) + ']');
+	}
+	if (rects.length === 0) {
+		// Only non-visual mutations — layout/paint unchanged; sync so we don't
+		// trigger a pointless full rebuild.
+		_partialDbg('  PATCH ok: 0 visible regions');
+		syncLiveCacheVersion();
+		requestFullRepaint();
+		return true;
+	}
+
+	const ops: PaintOp[] = [];
+	collectPaintOps(root, ops, /* skipBgOfRoot */ true);
+	let _painted = 0;
+	const bodyCs = getComputedLiveStyle(root);
+	const bodyBox = getLayoutBox(root);
+
+	cacheCtx.save();
+	try {
+		// Clip to the union of changed regions; everything below paints only
+		// inside them, leaving the rest of the cache (still valid, since no
+		// box moved) untouched.
+		cacheCtx.beginPath();
+		for (const r of rects) cacheCtx.rect(r.x, r.y, r.w, r.h);
+		cacheCtx.clip();
+		// Rebuild the background stack inside the regions, mirroring the
+		// build: clear, fill body bg color, paint the body box (gradients /
+		// box-shadow / borders via paintBoxedElement at absolute coords →
+		// identical pixels to the build, no seam), then every intersecting
+		// op in tree order.
+		for (const r of rects) cacheCtx.clearRect(r.x, r.y, r.w, r.h);
+		if (bodyCs.background) {
+			cacheCtx.fillStyle = bodyCs.background;
+			for (const r of rects) cacheCtx.fillRect(r.x, r.y, r.w, r.h);
+		}
+		if (bodyBox) paintBoxedElement(cacheCtx, root, bodyCs, bodyBox);
+		for (const op of ops) {
+			const b: DirtyRect | undefined = op.kind === 'atom' ? op.atom : op.box;
+			if (!b) continue;
+			let hit = false;
+			for (const r of rects) { if (rectsIntersect(b, r)) { hit = true; break; } }
+			if (!hit) continue;
+			try {
+				if (op.kind === 'bg' && op.cs && op.box) {
+					paintBoxedElement(cacheCtx, op.el, op.cs, op.box);
+					_painted++;
+				} else if (op.kind === 'atom' && op.atom) {
+					paintOneInlineAtom(cacheCtx, op.atom);
+					_painted++;
+				}
+			} catch (_) { /* skip a bad op, same as the build loop */ }
+		}
+	} finally {
+		cacheCtx.restore();
+	}
+
+	_partialDbg('  PATCH ok: ' + rects.length + ' region(s), ' + _painted + '/' + ops.length + ' ops painted');
+	syncLiveCacheVersion();
+	requestFullRepaint();
+	return true;
 }
 
 // Phase 1.5 + 1.6 cache (2026-05-25): body-flow layout is computed at
@@ -186,6 +415,24 @@ interface PaintOp {
 }
 let buildOps: PaintOp[] = [];
 let buildOpIndex = 0;
+/** Scrollable containers (`overflow:auto/scroll`) found during the last
+ * cache build. Excluded from the static cache; their children are drawn
+ * into a per-container offscreen (below) and the visible slice blitted on
+ * top of the cache each frame. Repopulated on every full build. */
+let scrollOverlayEls: LiveElement[] = [];
+
+/** Per-scrollable-container content cache: the element's CHILDREN rendered
+ * once into an offscreen of (contentW × intrinsicContentH), re-rendered
+ * only when the tree version or size changes — NOT per frame. Scrolling
+ * just re-blits a different source slice, so a swipe is a cheap drawImage
+ * and steady-state animation pays nothing for the list. WeakMap so a
+ * removed container's cache is collected. */
+interface ScrollContentCache { canvas: OffscreenCanvas; version: number; w: number; h: number; }
+const scrollContentCaches = new WeakMap<LiveElement, ScrollContentCache>();
+/** The body root of the most recent flow paint. `patchLiveDirtyRegions`
+ * (driven by tap handlers, which run outside the paint loop) needs a
+ * handle to it to re-run layout. */
+let lastPaintedRoot: LiveElement | null = null;
 
 /** True iff a cache build is in progress (chunked). Image / form-tap
  * handlers consult this so they don't try to patch a region that the
@@ -213,7 +460,7 @@ export function isLiveCacheReady(): boolean {
  * cache is valid when it's actually structurally stale.
  *
  * Symptom of NOT calling this: the second navigation to the same
- * page after a mutation (e.g. Library template select → reload)
+ * page after a mutation (e.g. Settings template select → reload)
  * appears visually correct (cache pixels happen to match), but
  * `hitTestLive` returns null because the layout WeakMap has no
  * entries for the freshly-populated LiveElements. */
@@ -233,6 +480,8 @@ export function resetLiveOverlayCache(): void {
 	cachedFixed = [];
 	cachedFixedVersion = -1;
 	lastLiveContentBottom = 0;
+	lastPaintedRoot = null;
+	clearLiveDirty();
 }
 // Phase 1.6.2: fixed-element walk cache keyed by liveTreeVersion. Lets
 // the scroll-hot path skip the tree walk + sort entirely when nothing
@@ -299,6 +548,9 @@ export function paintLiveOverlay(
 	if (options.skipFlow) {
 		// no-op
 	} else if (hasFlowKids) {
+		// Remember the body root + measure ctx so an out-of-paint tap handler
+		// can drive a targeted partial repaint (patchLiveDirtyRegions).
+		lastPaintedRoot = root;
 		const version = getLiveTreeVersion();
 		const viewportChanged = viewport.width !== lastBodyViewportW
 			|| viewport.height !== lastBodyViewportH;
@@ -308,10 +560,39 @@ export function paintLiveOverlay(
 		if (cacheBuilding && (version !== buildVersion || viewportChanged)) {
 			cacheBuilding = false;
 		}
-		const dirty = !cacheBuilding
+		let dirty = !cacheBuilding
 			&& (version !== lastBodyVersion || viewportChanged);
+		// Stage 5 (2026-05-28): drive the targeted partial patch from the
+		// PAINT path, not just from tap handlers. A mutation that lands AFTER
+		// a tap's `patchLiveDirtyRegions()` already synced the cache version —
+		// the touch handler clearing `:active` on touchend (any live-DOM CSS
+		// with an `:active`/`:hover`/`:focus` rule re-invalidates the hit
+		// element), a media-event listener, a timer/async callback — re-bumps
+		// `liveTreeVersion` with nobody having patched it. That used to force a
+		// full chunked rebuild here (the audio player's "0fps on Play"). For a
+		// pure-mutation repaint (NOT a viewport change, which genuinely needs a
+		// full re-layout) over an already-warm cache, try patching the dirty
+		// regions in place first; only fall through to the full rebuild when
+		// the patch punts (returns false). Same function, same
+		// safe-by-construction guarantees as the tap path — only the call site
+		// is new.
+		if (dirty && !viewportChanged && liveCacheOffscreen && lastPaintedRoot === root) {
+			const patched = patchLiveDirtyRegions();
+			// The patch swaps the layout-measure ctx to the cache ctx and does
+			// not restore it; put the screen ctx back before we continue.
+			setLayoutMeasureCtx(ctx);
+			if (patched) dirty = false;
+		}
 		if (dirty) {
-			// Start a fresh chunked build.
+			_partialDbg('=== FULL REBUILD: version=' + version + ' lastBody=' + lastBodyVersion
+				+ (viewportChanged ? ' VIEWPORT-CHANGED ' + viewport.width + 'x' + viewport.height : '')
+				+ ' pendingDirty=[' + drainLiveDirty().map(_tagOf).join(', ') + ']');
+			// Start a fresh chunked build. A full rebuild repaints every
+			// element, so any pending per-element dirty marks are now moot —
+			// drop them so a subsequent tap's patchLiveDirtyRegions doesn't
+			// try to patch elements this rebuild already covered (the
+			// drainLiveDirty above already emptied the set for the log).
+			clearLiveDirty();
 			//
 			// Phase 1.5.1 (2026-05-25): no global cascade cache clear —
 			// per-element invalidations from the LiveStyle Proxy +
@@ -327,7 +608,14 @@ export function paintLiveOverlay(
 				const cb = findAbsoluteContainingBlock(abs, root);
 				const cbBox = getLayoutBox(cb);
 				if (!cbBox) continue;
-				layoutAbsoluteRoot(abs, cbBox.contentX, cbBox.contentY, cbBox.contentW, cbBox.contentH);
+				// The containing block for an absolutely-positioned element is
+				// the ancestor's PADDING box, not its content box. Borders are
+				// layout-ignored here, so the padding box == the element's
+				// border box (x/y/w/h). Using contentX/contentW offset the
+				// child by the ancestor's padding — e.g. the library track's
+				// `.num` badge (track has `padding-left: 54px`) landed inside
+				// the text instead of in the 54px gutter.
+				layoutAbsoluteRoot(abs, cbBox.x, cbBox.y, cbBox.w, cbBox.h);
 			}
 			// Use the body's FULL layout height (which includes its own
 			// padding) rather than just `intrinsicContentH`. Children
@@ -338,14 +626,27 @@ export function paintLiveOverlay(
 			// page fall off the cache + past the reported scroll bound —
 			// you couldn't scroll far enough to see them, and even if you
 			// could, the cache canvas was too short to hold them.
-			lastLiveContentBottom = bodyBox.h;
+			// ...but grow to the children's painted extent when content
+			// OVERFLOWS the body box. A body with an explicit `height`
+			// (e.g. the audio player's `height:100vh` grid) reports
+			// `bodyBox.h` = that fixed height even when its children run
+			// past it, so using `h` alone clipped the bottom of the
+			// library/controls and capped the scroll bound short. Children
+			// paint from `contentY` down to `contentY + intrinsicContentH`,
+			// so that sum is the real painted bottom. `Math.max` keeps the
+			// padding-correct `bodyBox.h` for pages whose content fits
+			// (identical to before) and only ever extends — never clips.
+			lastLiveContentBottom = Math.max(
+				bodyBox.h,
+				bodyBox.contentY + bodyBox.intrinsicContentH,
+			);
 
 			// (Re)allocate the cache OffscreenCanvas. Cleared once at
 			// build start; chunked ops paint into it over multiple
 			// frame yields.
 			const cacheH = Math.max(
 				viewport.height,
-				Math.min(bodyBox.h, LIVE_CACHE_MAX_H),
+				Math.min(lastLiveContentBottom, LIVE_CACHE_MAX_H),
 			);
 			if (!liveCacheOffscreen
 				|| liveCacheW !== viewport.width
@@ -390,7 +691,8 @@ export function paintLiveOverlay(
 			// a heavy `<p>` with 30+ atoms breaks across multiple chunks
 			// instead of painting in one ~90 ms blob.
 			buildOps = [];
-			collectPaintOps(root, buildOps, /* skipBgOfRoot */ true);
+			scrollOverlayEls = [];
+			collectPaintOps(root, buildOps, /* skipBgOfRoot */ true, scrollOverlayEls);
 			buildOpIndex = 0;
 			cacheBuilding = true;
 			buildVersion = version;
@@ -420,10 +722,27 @@ export function paintLiveOverlay(
 				const start = performance.now();
 				while (buildOpIndex < buildOps.length) {
 					const op = buildOps[buildOpIndex];
-					if (op.kind === 'bg' && op.cs && op.box) {
-						paintBoxedElement(cacheCtx, op.el, op.cs, op.box);
-					} else if (op.kind === 'atom' && op.atom) {
-						paintOneInlineAtom(cacheCtx, op.atom);
+					// A single element's paint must NEVER abort the whole-page
+					// build: an uncaught throw here left `buildOpIndex` parked
+					// on the failing op, so every subsequent frame re-threw on
+					// the same op and never advanced — blanking everything
+					// after it (e.g. an SVG-icon button throwing dropped the
+					// rest of the controls AND the entire library that paints
+					// later in tree order). Catch, log which element failed
+					// (console.debug — never the render-mode-flipping
+					// error/log/warn/info), and skip it.
+					try {
+						if (op.kind === 'bg' && op.cs && op.box) {
+							paintBoxedElement(cacheCtx, op.el, op.cs, op.box);
+						} else if (op.kind === 'atom' && op.atom) {
+							paintOneInlineAtom(cacheCtx, op.atom);
+						}
+					} catch (err) {
+						const el = op.kind === 'atom' ? op.atom?.el : op.el;
+						const desc = el
+							? `<${(el.tagName || '?').toLowerCase()}${el.getAttribute?.('class') ? ' class="' + el.getAttribute('class') + '"' : ''}${el.getAttribute?.('id') ? ' id="' + el.getAttribute('id') + '"' : ''}>`
+							: op.kind;
+						console.debug('[live-overlay] paint op threw, skipping', desc, err);
 					}
 					buildOpIndex++;
 					if (performance.now() - start > budget) break;
@@ -457,6 +776,64 @@ export function paintLiveOverlay(
 					);
 				} finally { ctx.restore(); }
 			}
+		}
+
+		// Paint scrollable containers ON TOP of the cache blit. Each was
+		// excluded from the static cache; instead its children live in a
+		// dedicated offscreen (rendered once per version/size change) and we
+		// blit the visible slice here. Per-frame cost is one drawImage + the
+		// scrollbar, so steady-state animation and swiping both stay cheap.
+		// Same body-local → screen mapping as the cache blit: translate by
+		// (viewport origin − page scrollY), then draw at the element's box.
+		for (const sEl of scrollOverlayEls) {
+			const sBox = getLayoutBox(sEl);
+			if (!sBox) continue;
+			const cw = Math.max(1, Math.round(sBox.contentW));
+			const ih = Math.max(1, Math.round(sBox.intrinsicContentH));
+			const ch = Math.round(sBox.contentH);
+			const version = getLiveTreeVersion();
+			let sc = scrollContentCaches.get(sEl);
+			if (!sc || sc.w !== cw || sc.h !== ih) {
+				sc = { canvas: new OffscreenCanvas(cw, ih), version: -1, w: cw, h: ih };
+				scrollContentCaches.set(sEl, sc);
+			}
+			if (sc.version !== version) {
+				// Re-render the children into the offscreen, translated so the
+				// content-box origin maps to (0,0). measureText must run against
+				// THIS ctx while painting (restored right after).
+				const sctx = sc.canvas.getContext('2d');
+				if (sctx) {
+					sctx.clearRect(0, 0, cw, ih);
+					sctx.save();
+					try {
+						setLayoutMeasureCtx(sctx);
+						sctx.translate(-sBox.contentX, -sBox.contentY);
+						for (const c of sEl.children) paintSubtreeLaid(sctx, c);
+					} finally {
+						sctx.restore();
+						setLayoutMeasureCtx(ctx);
+					}
+				}
+				sc.version = version;
+			}
+			const maxScroll = Math.max(0, ih - ch);
+			const st = Math.min(Math.max(0, sEl.scrollTop | 0), maxScroll);
+			const visibleH = Math.min(ch, ih - st);
+			ctx.save();
+			try {
+				ctx.beginPath();
+				ctx.rect(viewport.x, viewport.y, viewport.width, viewport.height);
+				ctx.clip();
+				ctx.translate(viewport.x, viewport.y - scrollY);
+				if (visibleH > 0) {
+					ctx.drawImage(
+						sc.canvas as unknown as CanvasImageSource,
+						0, st, cw, visibleH,
+						sBox.contentX, sBox.contentY, cw, visibleH,
+					);
+				}
+				paintLiveScrollbarV(ctx, sBox, st);
+			} finally { ctx.restore(); }
 		}
 
 		// Schedule next chunk via setTimeout(0) → requestFullRepaint.
@@ -687,18 +1064,28 @@ export function findTapIntent(
 	viewportX: number = 0, viewportY: number = 0, scrollY: number = 0,
 ): { kind: 'navigate'; href: string }
 | { kind: 'button-action'; action: string }
+| { kind: 'dbltap-action'; action: string; el: LiveElement }
 | { kind: 'summary'; summary: LiveElement }
 | { kind: 'video-control'; control: VideoControlHit; video: LiveElement }
 | { kind: 'video-frame-tap'; video: LiveElement }
 | null {
 	for (let n: LiveElement | null = target; n; n = n.parent) {
+		// `data-action` on ANY element (button, or e.g. a search `<input>`)
+		// routes to a button-action intent. Checked before the tag
+		// branches so an interactive control opts into a shell action
+		// even when it's also a form widget.
+		const dataAction = n.getAttribute('data-action');
+		if (dataAction) return { kind: 'button-action', action: dataAction };
+		// `data-dbltap-action` opts an element into a shell action that
+		// fires only on a DOUBLE tap (single taps fall through). Used by
+		// the audio player's visualizer canvas to enter fullscreen-canvas
+		// without a visible button. controller-shortcuts applies the
+		// single-vs-double discrimination via {@link handleDoubleTapAction}.
+		const dblAction = n.getAttribute('data-dbltap-action');
+		if (dblAction) return { kind: 'dbltap-action', action: dblAction, el: n };
 		if (n.tagName === 'A') {
 			const href = n.getAttribute('href');
 			if (href) return { kind: 'navigate', href };
-		}
-		if (n.tagName === 'BUTTON') {
-			const action = n.getAttribute('data-action');
-			if (action) return { kind: 'button-action', action };
 		}
 		if (n.tagName === 'SUMMARY') {
 			return { kind: 'summary', summary: n };
@@ -737,6 +1124,9 @@ function paintSubtreeLaid(
 ): void {
 	const cs = getComputedLiveStyle(el);
 	if (cs.display === 'none') return;
+	// `opacity: 0` → invisible (matches collectPaintOps); skip the subtree.
+	const opacity = cs.opacity ?? el.style.opacity ?? 1;
+	if (opacity <= 0) return;
 	const box = getLayoutBox(el);
 	if (!box) {
 		// Table sectioning elements (THEAD / TBODY / TFOOT / TR) don't get
@@ -793,7 +1183,27 @@ function paintSubtreeRest(
 	// content has already been packed into line-box atoms.
 	const inline = getInlineLayout(el);
 	if (inline) {
-		paintInlineAtoms(ctx, inline);
+		// Clip the element's own inline text to its content box when
+		// overflow is hidden/clip/scroll. Without this, a text-only
+		// element that hides overflow doesn't actually clip its text:
+		// e.g. the `.sr-only` accessibility-label idiom (`width:1px;
+		// height:1px; overflow:hidden`) leaked its "Seek" / "Volume"
+		// labels into the layout, and `overflow:hidden; text-overflow:
+		// ellipsis` rows didn't truncate. (Element-child overflow is
+		// clipped separately below.)
+		const ox = cs.overflowX ?? 'visible';
+		const oy = cs.overflowY ?? 'visible';
+		if (ox !== 'visible' || oy !== 'visible') {
+			ctx.save();
+			try {
+				ctx.beginPath();
+				ctx.rect(box.contentX, box.contentY, box.contentW, box.contentH);
+				ctx.clip();
+				paintInlineAtoms(ctx, inline);
+			} finally { ctx.restore(); }
+		} else {
+			paintInlineAtoms(ctx, inline);
+		}
 		return;
 	}
 	if (el.children.length === 0) return;
@@ -816,9 +1226,50 @@ function paintSubtreeRest(
 			}
 			for (const c of el.children) paintSubtreeLaid(ctx, c);
 		} finally { ctx.restore(); }
+		// Overlay a scrollbar (outside the clip + scroll translate) so the
+		// user can see there's more content below and roughly where they
+		// are. Only drawn when the box actually overflows — which doubles
+		// as proof the element was laid out as scrollable. The engine does
+		// not otherwise render the page's `scrollbar-*` CSS.
+		if (scrolls) paintLiveScrollbarV(ctx, box, el.scrollTop);
 		return;
 	}
 	for (const c of el.children) paintSubtreeLaid(ctx, c);
+}
+
+/** Draw a vertical scrollbar on the right inner edge of a scrollable
+ * element's content box. Thumb size + position track the visible
+ * fraction and `scrollTop`. Always shown while the element overflows
+ * (no auto-hide) so there's a clear "more below" affordance. */
+function paintLiveScrollbarV(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	box: LayoutBox,
+	scrollTop: number,
+): void {
+	const maxScroll = Math.max(0, box.intrinsicContentH - box.contentH);
+	if (maxScroll <= 0 || box.contentH <= 0) return;
+	const trackW = 6;
+	const inset = 3;
+	const trackX = box.contentX + box.contentW - trackW - inset;
+	const trackY = box.contentY + inset;
+	const trackH = box.contentH - inset * 2;
+	if (trackH <= 8) return;
+	const r = trackW / 2;
+	const visibleFrac = Math.min(1, box.contentH / box.intrinsicContentH);
+	const thumbH = Math.max(24, Math.round(trackH * visibleFrac));
+	const st = Math.min(Math.max(0, scrollTop), maxScroll);
+	const thumbY = trackY + Math.round((trackH - thumbH) * (st / maxScroll));
+	ctx.save();
+	try {
+		pathLiveRoundedRect(ctx, trackX, trackY, trackW, trackH, r);
+		ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+		ctx.fill();
+		pathLiveRoundedRect(ctx, trackX, thumbY, trackW, thumbH, r);
+		ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
+		ctx.fill();
+	} finally {
+		ctx.restore();
+	}
 }
 
 /** Paint one element using its layout box. Backgrounds + canvas
@@ -870,14 +1321,44 @@ function paintBoxedElement(
 		}
 		return;
 	}
-	// M2.4 form widget dispatch.
-	if (paintFormWidget(ctx, el, cs, box)) return;
+	// M2.4 form widget dispatch. When a form control carries a rich CSS
+	// background (a parsed gradient) or a box-shadow, paint the generic
+	// box decoration first — gradient/solid fill, rounded corners,
+	// shadows, border — then let the form painter draw ONLY its
+	// foreground (label / value / glyphs) on top. The form painters
+	// otherwise fill the box with `ctx.fillStyle = cs.background`, which
+	// silently no-ops for a gradient string and leaves e.g. a gradient
+	// submit button invisible.
+	const isFormTag = tag === 'INPUT' || tag === 'BUTTON'
+		|| tag === 'SELECT' || tag === 'TEXTAREA';
+	if (isFormTag) {
+		const richBg = !!cs.backgroundLayers || !!cs.boxShadow;
+		if (richBg && box.w > 0 && box.h > 0) {
+			paintOuterBoxShadows(ctx, cs, box, radius);
+			paintBackground(ctx, cs, box, radius);
+			paintInsetBoxShadows(ctx, cs, box, radius);
+			paintBorders(ctx, cs, box, radius);
+		}
+		if (paintFormWidget(ctx, el, cs, box, richBg)) return;
+	}
 	if (box.w > 0 && box.h > 0) {
 		paintOuterBoxShadows(ctx, cs, box, radius);
 		paintBackground(ctx, cs, box, radius);
 		paintInsetBoxShadows(ctx, cs, box, radius);
 	}
 	paintBorders(ctx, cs, box, radius);
+	// `::before` / `::after` BOX backgrounds (decorative overlays like the
+	// visualizer grid) — painted above the host background, below the
+	// host's own content + children. Text-only pseudos are no-ops here and
+	// remain handled by the pseudo-text painter. Both drawn at this spot;
+	// ::after's true above-children z-order isn't modeled (matches the
+	// existing pseudo-text limitation), which is fine for box overlays.
+	if (cs.beforeStyle || cs.afterStyle) {
+		if (box.w > 0 && box.h > 0) {
+			if (cs.beforeStyle) paintPseudoBox(ctx, cs.beforeStyle, box, radius);
+			if (cs.afterStyle) paintPseudoBox(ctx, cs.afterStyle, box, radius);
+		}
+	}
 	// DOM-showcase paint cases (HR / METER / PROGRESS / SUMMARY chevron).
 	// BR / DETAILS produce no own pixels — BR is whitespace, DETAILS is
 	// a layout container whose children paint individually.
@@ -989,8 +1470,16 @@ function paintOneInlineAtom(
 		ctx.textBaseline = 'middle';
 		ctx.textAlign = 'left';
 		if (italic) ctx.transform(1, 0, -0.2, 1, drawY * 0.2, 0);
-		ctx.fillText(atom.text, atom.x, drawY);
-		if (bold) ctx.fillText(atom.text, atom.x + 1, drawY);
+		// Glyphs the Switch font lacks (e.g. the ‹ › angle-quote chevrons
+		// used as prev/next arrows) render as a notdef dot via fillText.
+		// Draw them as vector shapes instead, centered in the atom box.
+		const drawn = (atom.text === '‹' || atom.text === '›')
+			? paintIconGlyph(ctx, atom.text, atom.x + Math.max(0, (atom.w - fontSize * 0.42) / 2), drawY, fontSize)
+			: 0;
+		if (drawn === 0) {
+			ctx.fillText(atom.text, atom.x, drawY);
+			if (bold) ctx.fillText(atom.text, atom.x + 1, drawY);
+		}
 		const td = cs.textDecoration;
 		if (td && td !== 'none' && !atom.text.match(/^\s*$/)) {
 			let lineY: number;
@@ -1018,9 +1507,17 @@ function collectPaintOps(
 	el: LiveElement,
 	out: PaintOp[],
 	skipBgOfRoot: boolean,
+	scrollOut?: LiveElement[],
 ): void {
 	const cs = getComputedLiveStyle(el);
 	if (cs.display === 'none') return;
+	// `opacity: 0` is invisible per spec — emit no ops for it or its
+	// subtree. This is how the audio player's `.toast` stays hidden until
+	// `showToast()` adds `.show` (opacity:1); without it the empty toast
+	// pill painted permanently. (Partial 0<opacity<1 isn't group-composited
+	// in the flat-op build; only the fully-transparent case is handled.)
+	const opacity = cs.opacity ?? el.style.opacity ?? 1;
+	if (opacity <= 0) return;
 	if (el.style.position === 'fixed' && !skipBgOfRoot) return;
 	const box = getLayoutBox(el);
 	if (!box) {
@@ -1037,6 +1534,16 @@ function collectPaintOps(
 	if (!skipBgOfRoot) {
 		out.push({ kind: 'bg', el, cs, box });
 	}
+	// Scrollable container (overflow: auto/scroll): its OWN background stays
+	// in the static cache (it doesn't scroll), but its children are excluded
+	// — they're rendered into a per-container offscreen and blitted (scrolled
+	// + clipped) each frame by the overlay painter. The flat-op cache builder
+	// can't express clip/scroll, and re-painting the subtree live every frame
+	// is too slow, so the dedicated scroll cache is the cheap middle ground.
+	if (!skipBgOfRoot && isScrollOverlayEl(cs)) {
+		if (scrollOut) scrollOut.push(el);
+		return;
+	}
 	const inline = getInlineLayout(el);
 	if (inline) {
 		for (const atom of inline.atoms) {
@@ -1046,8 +1553,51 @@ function collectPaintOps(
 		return; // inline layout replaces child walk
 	}
 	for (const c of el.children) {
-		collectPaintOps(c, out, false);
+		collectPaintOps(c, out, false, scrollOut);
 	}
+}
+
+/** An element that scrolls its overflow vertically/horizontally
+ * (`overflow: auto | scroll`). Such elements are painted as per-frame
+ * overlays rather than baked into the static body cache, so the cache's
+ * flat op list never has to express clipping / scroll translation. */
+function isScrollOverlayEl(cs: ComputedLiveStyle): boolean {
+	const oy = cs.overflowY ?? 'visible';
+	const ox = cs.overflowX ?? 'visible';
+	return oy === 'auto' || oy === 'scroll' || ox === 'auto' || ox === 'scroll';
+}
+
+/** Scroll the nearest scrollable ancestor of `el` so `el` is fully visible
+ * (vertical only). Backs `LiveElement.scrollIntoView()`. Uses raw layout
+ * boxes (which are scroll-independent — `scrollTop` is applied at paint),
+ * so the math is just "where does this element sit within the unscrolled
+ * content." Setting `scrollTop` triggers a cheap re-blit (no re-layout). */
+export function scrollElementIntoView(el: LiveElement): void {
+	let host: LiveElement | null = el.parent;
+	let hostBox: LayoutBox | undefined;
+	while (host) {
+		const lb = getLayoutBox(host);
+		if (lb && isScrollOverlayEl(getComputedLiveStyle(host))
+			&& lb.intrinsicContentH > lb.contentH) {
+			hostBox = lb;
+			break;
+		}
+		host = host.parent;
+	}
+	if (!host || !hostBox) return;
+	const elBox = getLayoutBox(el);
+	if (!elBox) return;
+	const margin = 8;
+	const topInContent = elBox.y - hostBox.contentY;
+	const maxScroll = Math.max(0, hostBox.intrinsicContentH - hostBox.contentH);
+	let st = host.scrollTop;
+	if (topInContent - margin < st) {
+		st = topInContent - margin;
+	} else if (topInContent + elBox.h + margin > st + hostBox.contentH) {
+		st = topInContent + elBox.h + margin - hostBox.contentH;
+	}
+	st = Math.max(0, Math.min(maxScroll, Math.round(st)));
+	if (st !== host.scrollTop) host.scrollTop = st;
 }
 
 /** Format a positive integer 1..n as an upper-case roman numeral (1→'I',
@@ -1153,8 +1703,9 @@ function paintListMarker(
 	} finally { ctx.restore(); }
 }
 
-/** `<img>` paints the loaded Image at the layout box, or a placeholder
- * (dashed border + `alt` text) while the image is loading / missing.
+/** `<img>` paints the loaded Image at the layout box. While the image is
+ * still loading it renders NOTHING — the layout box just reserves the
+ * space; only a failed/broken load shows the `alt`-text placeholder.
  * The aspect ratio is honored by drawImage's stretch — the page is
  * expected to set width via CSS to control the displayed size. */
 function paintImg(
@@ -1180,7 +1731,12 @@ function paintImg(
 			return;
 		} catch (_) { /* fall through to placeholder */ }
 	}
-	// Placeholder: gray box + alt text centered.
+	// While the image is still loading, render NOTHING — the layout box
+	// already reserves the space, so we just leave it (the element's own
+	// background, if any, was painted by paintBoxedElement). Only a
+	// genuinely failed/broken image falls through to the alt placeholder.
+	if (!el.hasImageError()) return;
+	// Broken image: gray box + alt text centered.
 	ctx.fillStyle = cs.background || '#1d2c43';
 	ctx.fillRect(box.x, box.y, box.w, box.h);
 	ctx.strokeStyle = '#5a6a7e';
@@ -1498,6 +2054,40 @@ function paintIconGlyph(
 			ctx.lineWidth = prev;
 			return s;
 		}
+		case '‹': {
+			// Left chevron stroke (single left-angle quote). The Switch
+			// font has no glyph for these, so they'd paint as a notdef
+			// dot — draw the "<" shape instead.
+			const w = fontSize * 0.42, h = fontSize * 0.62;
+			const prev = ctx.lineWidth;
+			ctx.lineWidth = Math.max(1.5, fontSize * 0.11);
+			ctx.strokeStyle = ctx.fillStyle as string;
+			ctx.lineCap = 'round';
+			ctx.lineJoin = 'round';
+			ctx.beginPath();
+			ctx.moveTo(x + w, y - h / 2);
+			ctx.lineTo(x, y);
+			ctx.lineTo(x + w, y + h / 2);
+			ctx.stroke();
+			ctx.lineWidth = prev;
+			return w;
+		}
+		case '›': {
+			// Right chevron stroke (single right-angle quote). Mirror of ‹.
+			const w = fontSize * 0.42, h = fontSize * 0.62;
+			const prev = ctx.lineWidth;
+			ctx.lineWidth = Math.max(1.5, fontSize * 0.11);
+			ctx.strokeStyle = ctx.fillStyle as string;
+			ctx.lineCap = 'round';
+			ctx.lineJoin = 'round';
+			ctx.beginPath();
+			ctx.moveTo(x, y - h / 2);
+			ctx.lineTo(x + w, y);
+			ctx.lineTo(x, y + h / 2);
+			ctx.stroke();
+			ctx.lineWidth = prev;
+			return w;
+		}
 	}
 	return 0;
 }
@@ -1693,8 +2283,10 @@ function paintBackground(
 				ctx.rect(box.x, box.y, box.w, box.h);
 				ctx.clip();
 			}
+			const size = cs.backgroundSize;
 			for (const layer of layers) {
-				paintBackgroundLayer(ctx, layer, box.x, box.y, box.w, box.h);
+				if (size) paintTiledLayer(ctx, layer, box.x, box.y, box.w, box.h, size.w, size.h);
+				else paintBackgroundLayer(ctx, layer, box.x, box.y, box.w, box.h);
 			}
 		} finally { ctx.restore(); }
 		return;
@@ -1734,7 +2326,7 @@ function paintBackgroundLayer(
 		const dx = (s * len) / 2;
 		const dy = (-c * len) / 2;
 		const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-		applyStops(grad, layer.stops);
+		applyStops(grad, layer.stops, len);
 		ctx.fillStyle = grad;
 		ctx.fillRect(x, y, w, h);
 		return;
@@ -1760,7 +2352,7 @@ function paintBackgroundLayer(
 	}
 	if (layer.shape === 'circle' || rxMax === 0 || ryMax === 0) {
 		const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rMax);
-		applyStops(grad, layer.stops);
+		applyStops(grad, layer.stops, rMax);
 		ctx.fillStyle = grad;
 		ctx.fillRect(x, y, w, h);
 		return;
@@ -1774,15 +2366,157 @@ function paintBackgroundLayer(
 		ctx.scale(rxMax / ryMax, 1);
 		ctx.translate(-cx, -cy);
 		const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, ryMax);
-		applyStops(grad, layer.stops);
+		applyStops(grad, layer.stops, ryMax);
 		ctx.fillStyle = grad;
 		ctx.fillRect(x - rxMax, y - ryMax, w + rxMax * 2, h + ryMax * 2);
 	} finally { ctx.restore(); }
 }
 
-function applyStops(grad: CanvasGradient, stops: { color: string; pos?: number }[]): void {
+/** Paint one background layer TILED across the box in `tw`×`th` cells
+ * (CSS `background-size`). Each tile re-runs `paintBackgroundLayer` sized
+ * to the tile, so a gradient's stops (incl. px stops resolved against the
+ * tile extent) repeat per cell — that's how `linear-gradient(c 1px,
+ * transparent 1px)` + `background-size: 42px 42px` becomes a 42px grid.
+ * The caller is expected to have clipped to the box, so partial edge
+ * tiles are trimmed. Falls back to a single fill for degenerate sizes or
+ * a pathological tile count. */
+function paintTiledLayer(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	layer: BackgroundLayer,
+	x: number, y: number, w: number, h: number,
+	tw: number, th: number,
+): void {
+	if (tw <= 0 || th <= 0) { paintBackgroundLayer(ctx, layer, x, y, w, h); return; }
+	const cols = Math.ceil(w / tw);
+	const rows = Math.ceil(h / th);
+	if (cols * rows > 8000) { paintBackgroundLayer(ctx, layer, x, y, w, h); return; }
+	for (let r = 0; r < rows; r++) {
+		for (let c = 0; c < cols; c++) {
+			paintBackgroundLayer(ctx, layer, x + c * tw, y + r * th, tw, th);
+		}
+	}
+}
+
+/** Paint a `::before` / `::after` pseudo-element that draws a decorative
+ * background BOX (not text) — e.g. the visualizer grid overlay. The box
+ * is derived from the host's border box plus the pseudo's inset /
+ * offsets / explicit width-height (absolute-positioning model; `inset: 0`
+ * fills the host). Honors background-size tiling, opacity, and an
+ * optional mask-image alpha fade. No-op for text-only pseudos (no
+ * background) — those are still drawn by the pseudo-text painter. */
+function paintPseudoBox(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	pseudo: PseudoStyle | undefined,
+	hostBox: LayoutBox,
+	hostRadius: number,
+): void {
+	if (!pseudo) return;
+	if (!pseudo.backgroundLayers && !pseudo.background) return;
+	// Only absolutely-positioned pseudos get a painted background box (the
+	// decorative-overlay case, sized via the abs model below). A static /
+	// in-flow text pseudo with a background would need content sizing we
+	// don't model, so leave those to the pseudo-text painter unchanged.
+	if (pseudo.position !== 'absolute') return;
+	const cbX = hostBox.x, cbY = hostBox.y, cbW = hostBox.w, cbH = hostBox.h;
+	const L = pseudo.left, R = pseudo.right, T = pseudo.top, B = pseudo.bottom;
+	const explicitW = resolveLength(pseudo.width, cbW);
+	const explicitH = resolveLength(pseudo.height, cbH);
+	let pw = cbW, ph = cbH, px = cbX, py = cbY;
+	if (explicitW !== undefined) pw = explicitW;
+	else if (L !== undefined && R !== undefined) pw = Math.max(0, cbW - L - R);
+	if (explicitH !== undefined) ph = explicitH;
+	else if (T !== undefined && B !== undefined) ph = Math.max(0, cbH - T - B);
+	if (L !== undefined) px = cbX + L;
+	else if (R !== undefined) px = cbX + cbW - pw - R;
+	if (T !== undefined) py = cbY + T;
+	else if (B !== undefined) py = cbY + cbH - ph - B;
+	if (pw <= 0 || ph <= 0) return;
+	ctx.save();
+	try {
+		const alpha = pseudo.opacity ?? 1;
+		if (alpha < 1) ctx.globalAlpha *= alpha;
+		// The pseudo is a child of the host box — clip to the host's
+		// rounded rect so it respects border-radius + overflow:hidden.
+		if (hostRadius > 0) {
+			pathLiveRoundedRect(ctx, cbX, cbY, cbW, cbH, hostRadius);
+			ctx.clip();
+		}
+		if (pseudo.maskImage) paintPseudoMaskedBg(ctx, pseudo, px, py, pw, ph);
+		else paintPseudoBgLayers(ctx, pseudo, px, py, pw, ph);
+	} finally { ctx.restore(); }
+}
+
+/** Paint a pseudo's background layers (with optional `background-size`
+ * tiling) into the given rect, clipped to it. */
+function paintPseudoBgLayers(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	pseudo: PseudoStyle,
+	x: number, y: number, w: number, h: number,
+): void {
+	ctx.save();
+	try {
+		ctx.beginPath();
+		ctx.rect(x, y, w, h);
+		ctx.clip();
+		const layers = pseudo.backgroundLayers;
+		if (layers && layers.length > 0) {
+			const size = pseudo.backgroundSize;
+			for (const layer of layers) {
+				if (size) paintTiledLayer(ctx, layer, x, y, w, h, size.w, size.h);
+				else paintBackgroundLayer(ctx, layer, x, y, w, h);
+			}
+		} else if (pseudo.background) {
+			ctx.fillStyle = pseudo.background;
+			ctx.fillRect(x, y, w, h);
+		}
+	} finally { ctx.restore(); }
+}
+
+/** Paint a pseudo's background into an offscreen, then knock out its
+ * alpha with the `mask-image` gradient (destination-in) before
+ * compositing onto the cache — yields a radial/linear fade over the
+ * background. Falls back to an unmasked paint if OffscreenCanvas or the
+ * destination-in composite op isn't available (detected by read-back). */
+function paintPseudoMaskedBg(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	pseudo: PseudoStyle,
+	x: number, y: number, w: number, h: number,
+): void {
+	const iw = Math.max(1, Math.ceil(w));
+	const ih = Math.max(1, Math.ceil(h));
+	try {
+		const off = new OffscreenCanvas(iw, ih);
+		const octx = off.getContext('2d');
+		if (!octx) { paintPseudoBgLayers(ctx, pseudo, x, y, w, h); return; }
+		paintPseudoBgLayers(octx, pseudo, 0, 0, w, h);
+		octx.globalCompositeOperation = 'destination-in';
+		if (octx.globalCompositeOperation === 'destination-in' && pseudo.maskImage) {
+			paintBackgroundLayer(octx, pseudo.maskImage, 0, 0, w, h);
+		}
+		octx.globalCompositeOperation = 'source-over';
+		ctx.drawImage(off as unknown as CanvasImageSource, x, y);
+	} catch (_) {
+		// OffscreenCanvas / composite path unavailable — fall back to the
+		// unmasked grid (still a reasonable result) rather than throwing
+		// out of the element's paint op.
+		try { paintPseudoBgLayers(ctx, pseudo, x, y, w, h); } catch (_e) { /* swallow */ }
+	}
+}
+
+function applyStops(
+	grad: CanvasGradient,
+	stops: { color: string; pos?: number; posPx?: number }[],
+	extentPx: number = 0,
+): void {
 	for (const stop of stops) {
-		const p = stop.pos ?? 0;
+		// Pixel-positioned stops (`color 1px`) resolve against the gradient
+		// line length so they track `background-size` tiling — a 1px stop in
+		// a 42px tile lands at 1/42, drawing a crisp 1px line per tile.
+		let p = stop.pos;
+		if (p === undefined && stop.posPx !== undefined && extentPx > 0) {
+			p = stop.posPx / extentPx;
+		}
+		p = p ?? 0;
 		const clamped = p < 0 ? 0 : p > 1 ? 1 : p;
 		try {
 			grad.addColorStop(clamped, normalizeGradientColor(stop.color));

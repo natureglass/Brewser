@@ -14,7 +14,7 @@ export interface ChromeIcons {
 	left: Image | null;
 	right: Image | null;
 	home: Image | null;
-	library: Image | null;
+	settings: Image | null;
 	bookmarkTrue: Image | null;
 	bookmarkFalse: Image | null;
 }
@@ -23,21 +23,21 @@ export interface ChromeIconPaths {
 	left: string;
 	right: string;
 	home: string;
-	library: string;
+	settings: string;
 	bookmarkTrue: string;
 	bookmarkFalse: string;
 }
 
 export async function loadChromeIcons(paths: ChromeIconPaths): Promise<ChromeIcons> {
-	const [left, right, home, library, bookmarkTrue, bookmarkFalse] = await Promise.all([
+	const [left, right, home, settings, bookmarkTrue, bookmarkFalse] = await Promise.all([
 		loadImage(paths.left),
 		loadImage(paths.right),
 		loadImage(paths.home),
-		loadImage(paths.library),
+		loadImage(paths.settings),
 		loadImage(paths.bookmarkTrue),
 		loadImage(paths.bookmarkFalse),
 	]);
-	return { left, right, home, library, bookmarkTrue, bookmarkFalse };
+	return { left, right, home, settings, bookmarkTrue, bookmarkFalse };
 }
 
 /** Load an image whose template path may be empty. An empty / missing

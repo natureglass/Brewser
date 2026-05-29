@@ -17,9 +17,13 @@ export interface AddressBarState {
 	/** Whether the current URL is in the bookmarks store. Controls the
 	 * star button's colour: gold when saved, dim grey when not. */
 	bookmarked?: boolean;
+	/** Whether the current URL can be bookmarked at all (http/https).
+	 * Local `browser://` pages aren't bookmarkable, so the star button
+	 * is hidden and the URL reclaims its space. Defaults to true. */
+	bookmarkable?: boolean;
 	/** Result of the boot-time HTTP/HTTPS probe (excluding the
 	 * romfs-only probe). Drives the status circle to the left of the
-	 * Library button: green when an HTTP(S) attempt succeeded, red
+	 * Settings button: green when an HTTP(S) attempt succeeded, red
 	 * otherwise. `undefined` while the probe is still running — the
 	 * indicator is hidden in that case. */
 	internetReachable?: boolean;
@@ -105,22 +109,28 @@ export class BrowserUI {
 
 		// Star button sits immediately before the URL — visually part
 		// of the URL bar since its action targets `currentURL`. Two
-		// distinct icons so the toggle state is unambiguous.
-		const bookmarked = state.bookmarked ?? false;
-		const starIcon = bookmarked ? (this.icons?.bookmarkTrue ?? null) : (this.icons?.bookmarkFalse ?? null);
-		drawStarButton(ctx, CHROME_LAYOUT.starX, CHROME_LAYOUT.starWidth, chromeHeight, starIcon, bookmarked, tb);
+		// distinct icons so the toggle state is unambiguous. Hidden on
+		// non-bookmarkable pages (local `browser://`): the URL then
+		// starts at the star's slot instead, reclaiming the space.
+		const bookmarkable = state.bookmarkable ?? true;
+		if (bookmarkable) {
+			const bookmarked = state.bookmarked ?? false;
+			const starIcon = bookmarked ? (this.icons?.bookmarkTrue ?? null) : (this.icons?.bookmarkFalse ?? null);
+			drawStarButton(ctx, CHROME_LAYOUT.starX, CHROME_LAYOUT.starWidth, chromeHeight, starIcon, bookmarked, tb);
+		}
+		const urlX = bookmarkable ? CHROME_LAYOUT.urlX : CHROME_LAYOUT.starX;
 
-		// Library button (right edge).
-		drawIconOrLabel(ctx, CHROME_LAYOUT.libraryX, CHROME_LAYOUT.libraryWidth, chromeHeight, this.icons?.library ?? null, 'Library', true, tb);
-		// Divider just to the LEFT of the Library button.
+		// Settings button (right edge).
+		drawIconOrLabel(ctx, CHROME_LAYOUT.settingsX, CHROME_LAYOUT.settingsWidth, chromeHeight, this.icons?.settings ?? null, 'Settings', true, tb);
+		// Divider just to the LEFT of the Settings button.
 		ctx.fillStyle = tb.divider;
-		ctx.fillRect(CHROME_LAYOUT.libraryX - 5, 8, 1, chromeHeight - 18);
+		ctx.fillRect(CHROME_LAYOUT.settingsX - 5, 8, 1, chromeHeight - 18);
 
-		// Network status circle, sitting just left of the Library button.
+		// Network status circle, sitting just left of the Settings button.
 		// Green = HTTP(S) probe succeeded, red = failed, hidden while
 		// the probe result hasn't been stashed yet.
 		const indicatorRadius = 6;
-		const indicatorCenterX = CHROME_LAYOUT.libraryX - 22;
+		const indicatorCenterX = CHROME_LAYOUT.settingsX - 22;
 		const indicatorRightEdge = indicatorCenterX + indicatorRadius;
 		const reachable = state.internetReachable;
 		if (reachable !== undefined) {
@@ -133,13 +143,13 @@ export class BrowserUI {
 		ctx.textBaseline = 'middle';
 
 		// Right-aligned hint, sitting LEFT of the network indicator so
-		// hint + circle + Library all stay visible. Measured first so
+		// hint + circle + Settings all stay visible. Measured first so
 		// the URL knows how much room it has. Skip the draw entirely
 		// when the template provides no hint string so the URL bar can
 		// claim the full strip.
 		const urlRightLimit = reachable !== undefined
 			? (indicatorRightEdge - 2 * indicatorRadius - 12)
-			: CHROME_LAYOUT.libraryX - 14;
+			: CHROME_LAYOUT.settingsX - 14;
 		if (hintText) {
 			ctx.font = '14px system-ui';
 			const hintWidth = ctx.measureText(hintText).width;
@@ -151,10 +161,10 @@ export class BrowserUI {
 		// URL, truncated with an ellipsis if it would collide with the hint.
 		ctx.font = '20px system-ui';
 		ctx.fillStyle = tb.urlText;
-		const maxUrlWidth = urlRightLimit - CHROME_LAYOUT.urlX - 20;
+		const maxUrlWidth = urlRightLimit - urlX - 20;
 		ctx.fillText(
 			truncateToWidth(ctx, state.currentURL, maxUrlWidth),
-			CHROME_LAYOUT.urlX,
+			urlX,
 			chromeHeight / 2,
 		);
 
@@ -188,7 +198,7 @@ function drawIconOrGlyph(
 }
 
 /** Draw a label-style button: icon if loaded, text label fallback
- * otherwise. Used for Home / Library — always active. */
+ * otherwise. Used for Home / Settings — always active. */
 function drawIconOrLabel(
 	ctx: CanvasRenderingContext2D,
 	x: number,

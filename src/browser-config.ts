@@ -38,7 +38,7 @@ export const CHROME_HEIGHT = 56;
 
 /**
  * Chrome strip layout: back / forward / home buttons on the left, URL
- * in the middle, Library button anchored to the right edge. Pixel
+ * in the middle, Settings button anchored to the right edge. Pixel
  * coordinates match the chrome strip's top-left at `(0, 0)` and the
  * default canvas width (`DEFAULT_CANVAS_WIDTH`). Buttons fill the full
  * chrome height vertically; touch dispatch in
@@ -46,11 +46,11 @@ export const CHROME_HEIGHT = 56;
  */
 const CHROME_RIGHT_PADDING = 24;
 // Match the other nav buttons' slot (back / forward / home are 56 px)
-// so the library icon sits with the same `ICON_INSET` breathing room
+// so the settings icon sits with the same `ICON_INSET` breathing room
 // rather than swimming in a wide ~32-px pad on each side. The icon
 // itself is unchanged — its rendered size is `min(width, chromeHeight)
 // - 2 * ICON_INSET = 32 px`, capped by chromeHeight, not slot width.
-const LIBRARY_BUTTON_WIDTH = 56;
+const SETTINGS_BUTTON_WIDTH = 56;
 export const CHROME_LAYOUT = {
 	backX: 0,
 	backWidth: 56,
@@ -66,11 +66,11 @@ export const CHROME_LAYOUT = {
 	starWidth: 48,
 	/** Where the URL text starts (after a small visual separator). */
 	urlX: 240,
-	/** Library button — anchored to the right edge of the chrome
-	 * strip. Opens `browser://library/` with the page's bookmarks +
-	 * navigation history. */
-	libraryX: DEFAULT_CANVAS_WIDTH - CHROME_RIGHT_PADDING - LIBRARY_BUTTON_WIDTH,
-	libraryWidth: LIBRARY_BUTTON_WIDTH,
+	/** Settings button — anchored to the right edge of the chrome strip.
+	 * Opens `browser://settings/` (settings.html); icon is
+	 * `template.icons.settings`. */
+	settingsX: DEFAULT_CANVAS_WIDTH - CHROME_RIGHT_PADDING - SETTINGS_BUTTON_WIDTH,
+	settingsWidth: SETTINGS_BUTTON_WIDTH,
 } as const;
 
 /** On-canvas soft-keyboard layout. All measurements in CSS pixels. */

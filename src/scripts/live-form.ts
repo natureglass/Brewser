@@ -27,7 +27,7 @@ import { resolveCanvasFont } from './inline-css.js';
 import { getComputedLiveStyle, type ComputedLiveStyle } from './live-css.js';
 import { bumpLiveTreeVersion, getLiveRoot, type LiveElement } from './live-dom.js';
 import { getLayoutBox, type LayoutBox } from './live-layout.js';
-import { patchLiveCacheRegion, syncLiveCacheVersion } from './live-overlay.js';
+import { patchLiveCacheRegion, patchLiveDirtyRegions, syncLiveCacheVersion } from './live-overlay.js';
 import { requestFullRepaint, setKeyboardOpen } from './live-paint-control.js';
 
 // =========================================================================
@@ -99,6 +99,10 @@ export function paintFormWidget(
 	el: LiveElement,
 	cs: ComputedLiveStyle,
 	box: LayoutBox,
+	/** When true, the caller already painted the box background +
+	 * border + shadow (rich CSS bg path), so the widget should draw
+	 * only its foreground (label / value text). */
+	skipBg = false,
 ): boolean {
 	const tag = el.tagName;
 	if (tag === 'INPUT') {
@@ -109,13 +113,13 @@ export function paintFormWidget(
 			case 'range':    paintRange(ctx, el, cs, box); return true;
 			case 'color':    paintColorSwatch(ctx, el, cs, box); return true;
 			case 'button':
-			case 'submit':   paintButton(ctx, el, cs, box); return true;
-			default:         paintTextField(ctx, el, cs, box); return true;
+			case 'submit':   paintButton(ctx, el, cs, box, skipBg); return true;
+			default:         paintTextField(ctx, el, cs, box, skipBg); return true;
 		}
 	}
-	if (tag === 'BUTTON') { paintButton(ctx, el, cs, box); return true; }
+	if (tag === 'BUTTON') { paintButton(ctx, el, cs, box, skipBg); return true; }
 	if (tag === 'SELECT') { paintSelect(ctx, el, cs, box); return true; }
-	if (tag === 'TEXTAREA') { paintTextField(ctx, el, cs, box); return true; }
+	if (tag === 'TEXTAREA') { paintTextField(ctx, el, cs, box, skipBg); return true; }
 	return false;
 }
 
@@ -203,7 +207,12 @@ function paintRange(
 	const min = parseFloat(el.getAttribute('min') ?? '0') || 0;
 	const max = parseFloat(el.getAttribute('max') ?? '100') || 100;
 	const valueStr = getInputValue(el);
-	const value = parseFloat(valueStr) || ((min + max) / 2);
+	// parseFloat first; only fall back to the midpoint when the value is
+	// genuinely absent/non-numeric. A plain `|| midpoint` treated a real
+	// value of 0 as falsy and snapped the thumb to the centre (the audio
+	// player's seek bar showed mid-track at 0:00).
+	const parsedValue = parseFloat(valueStr);
+	const value = Number.isFinite(parsedValue) ? parsedValue : ((min + max) / 2);
 	const range = max - min || 1;
 	const frac = Math.max(0, Math.min(1, (value - min) / range));
 	const trackBg = cs.background || '#2c3e50';
@@ -247,16 +256,61 @@ function paintColorSwatch(
 	ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
 }
 
+/** Resolve `border-radius` to a px radius clamped to half the shorter
+ * side (mirrors live-overlay's resolver; kept local to avoid an import
+ * cycle between live-form and live-overlay). */
+function formBorderRadius(cs: ComputedLiveStyle, w: number, h: number): number {
+	const v = cs.borderRadius;
+	if (!v || w <= 0 || h <= 0) return 0;
+	const maxR = Math.min(w, h) / 2;
+	if ('px' in v) return Math.max(0, Math.min(v.px, maxR));
+	return Math.max(0, Math.min(v.percent * Math.min(w, h), maxR));
+}
+
+/** Trace a rounded-rect path and fill it with the current fillStyle. */
+function fillRoundedRectPath(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	x: number, y: number, w: number, h: number, r: number,
+): void {
+	const cr = Math.min(r, w / 2, h / 2);
+	ctx.beginPath();
+	ctx.moveTo(x + cr, y);
+	ctx.lineTo(x + w - cr, y);
+	ctx.quadraticCurveTo(x + w, y, x + w, y + cr);
+	ctx.lineTo(x + w, y + h - cr);
+	ctx.quadraticCurveTo(x + w, y + h, x + w - cr, y + h);
+	ctx.lineTo(x + cr, y + h);
+	ctx.quadraticCurveTo(x, y + h, x, y + h - cr);
+	ctx.lineTo(x, y + cr);
+	ctx.quadraticCurveTo(x, y, x + cr, y);
+	ctx.closePath();
+	ctx.fill();
+}
+
 function paintButton(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	el: LiveElement,
 	cs: ComputedLiveStyle,
 	box: LayoutBox,
+	skipBg = false,
 ): void {
-	const bg = cs.background || '#1d2c43';
 	const color = cs.color || '#e0e8f4';
-	ctx.fillStyle = bg;
-	ctx.fillRect(box.x, box.y, box.w, box.h);
+	if (!skipBg) {
+		// Solid-bg path. Rich CSS backgrounds (gradients) are painted by
+		// the caller before dispatch; here `cs.background` is a plain
+		// colour (or the default). Using it as fillStyle directly would
+		// silently no-op for a gradient string — hence the skipBg gate.
+		ctx.fillStyle = cs.background || '#1d2c43';
+		// Honor `border-radius` on solid-bg buttons (icon buttons use
+		// rounded corners). A plain fillRect ignored it, leaving square
+		// chips; round the fill when a radius is set.
+		const r = formBorderRadius(cs, box.w, box.h);
+		if (r > 0) {
+			fillRoundedRectPath(ctx, box.x, box.y, box.w, box.h, r);
+		} else {
+			ctx.fillRect(box.x, box.y, box.w, box.h);
+		}
+	}
 	// Label: <button>'s textContent or <input>'s value attribute.
 	const label = el.tagName === 'BUTTON'
 		? (el.textContent || '')
@@ -278,30 +332,54 @@ function paintTextField(
 	el: LiveElement,
 	cs: ComputedLiveStyle,
 	box: LayoutBox,
+	skipBg = false,
 ): void {
-	const bg = cs.background || '#424242';
 	const color = cs.color || '#ebebeb';
-	ctx.fillStyle = bg;
-	ctx.fillRect(box.x, box.y, box.w, box.h);
-	// Subtle border so the field reads as input-like vs. plain bg.
-	ctx.strokeStyle = '#5a6a7e';
-	ctx.lineWidth = 1;
-	ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+	if (!skipBg) {
+		ctx.fillStyle = cs.background || '#424242';
+		ctx.fillRect(box.x, box.y, box.w, box.h);
+		// Subtle border so the field reads as input-like vs. plain bg —
+		// but only when the page didn't ask for `border: none`.
+		const noBorder = (cs.borderTopWidth ?? 0) === 0
+			&& (cs.borderLeftWidth ?? 0) === 0
+			&& cs.borderTopColor === undefined;
+		if (!noBorder) {
+			ctx.strokeStyle = '#5a6a7e';
+			ctx.lineWidth = 1;
+			ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+		}
+	}
 	const value = getInputValue(el);
-	if (value) {
+	// Fall back to the `placeholder` attribute (muted) when empty, so an
+	// empty search field shows its prompt instead of nothing.
+	const placeholder = el.getAttribute('placeholder') || '';
+	const text = value || placeholder;
+	if (text) {
 		ctx.save();
 		try {
 			ctx.font = resolveCanvasFont({ fontSize: cs.fontSize, fontFamily: cs.fontFamily });
-			ctx.fillStyle = color;
+			ctx.fillStyle = value ? color : (cs.color ? withAlpha(cs.color, 0.6) : '#9bb1d6');
 			ctx.textBaseline = 'middle';
 			ctx.textAlign = 'left';
 			// Clip to box; pad 3px inside.
 			ctx.beginPath();
 			ctx.rect(box.x + 2, box.y + 1, box.w - 4, box.h - 2);
 			ctx.clip();
-			ctx.fillText(value, box.x + 4, box.y + box.h / 2);
+			ctx.fillText(text, box.x + 6, box.y + box.h / 2);
 		} finally { ctx.restore(); }
 	}
+}
+
+/** Best-effort muted variant of a colour for placeholder text. Falls
+ * back to the input colour itself if we can't parse it. */
+function withAlpha(color: string, alpha: number): string {
+	const hex = /^#([0-9a-f]{6})$/i.exec(color.trim());
+	if (hex) {
+		const n = parseInt(hex[1], 16);
+		const r = (n >> 16) & 0xff, g = (n >> 8) & 0xff, b = n & 0xff;
+		return `rgba(${r},${g},${b},${alpha})`;
+	}
+	return '#9bb1d6';
 }
 
 function paintSelect(
@@ -379,7 +457,7 @@ function paintSelect(
  * notices and refreshes the screen even when the page has no rAF loop
  * driving paints. Without this, the live-overlay cache rebuilds happen
  * on the NEXT scroll instead of immediately — taps "feel dead." */
-export async function handleFormTap(el: LiveElement, tapX?: number): Promise<boolean> {
+export async function handleFormTap(el: LiveElement, tapX?: number, clickAlreadyFired = false): Promise<boolean> {
 	if (el.hasAttribute('disabled')) return true;
 	requestFullRepaint();
 	const tag = el.tagName;
@@ -393,7 +471,9 @@ export async function handleFormTap(el: LiveElement, tapX?: number): Promise<boo
 		if (forId) target = findById(getLiveRoot(), forId);
 		if (!target) target = findFirstFormWidget(el);
 		if (target && target !== el) {
-			return await handleFormTap(target, tapX);
+			// Forwarded from the label tap: the touch dispatcher fired `click`
+			// on the LABEL, not on this target, so let the target fire its own.
+			return await handleFormTap(target, tapX, false);
 		}
 		return true;
 	}
@@ -504,10 +584,17 @@ export async function handleFormTap(el: LiveElement, tapX?: number): Promise<boo
 		return true;
 	}
 	if (tag === 'BUTTON') {
-		fireEvent(el, 'click');
-		// Patch in case the click handler mutated the button's class /
-		// style. Cheap — single-element repaint.
-		patchAndSync(el);
+		// The touch dispatcher (controller-shortcuts) already dispatched
+		// `click` on this element before calling us (see the SUMMARY note
+		// below), so re-firing here would run the page's handler TWICE — for
+		// a play/pause toggle that meant Stop immediately re-Played ("audio
+		// keeps playing"). Only fire when we WEREN'T preceded by that
+		// dispatch (e.g. a label-for forward).
+		if (!clickAlreadyFired) fireEvent(el, 'click');
+		// Targeted repaint of exactly what the click handler mutated (color
+		// toggle, status, active-row highlight, …) so a tap doesn't rebuild
+		// the whole page cache.
+		patchLiveDirtyRegions();
 		return true;
 	}
 	if (tag === 'SUMMARY') {

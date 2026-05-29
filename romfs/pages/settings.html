@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<title>Library — switch-web-browser</title>
+<title>Settings — switch-web-browser</title>
 <style>
   body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
   h1 { color: #ffd35e; }
@@ -9,12 +9,19 @@
   a { color: #9bb1d6; text-decoration: none; }
   .lead { color: #9bb1d6; }
   .empty { color: #6a7c95; font-style: italic; }
-  ul.library-list { list-style-type: none; }
-  ul.library-list li {
+  ul.settings-list { list-style-type: none; }
+  ul.settings-list li {
     background-color: #14202d;
     padding: 8px 14px;
     margin-top: 4px;
     border-left: 3px solid #1f2c4d;
+  }
+  ul.settings-list .url { color: #6a7c95; }
+  ul.settings-list .desc {
+    display: block;
+    color: #6a7c95;
+    font-size: 15px;
+    margin-top: 2px;
   }
   /* Template rows are full-width buttons. The currently-active row
      carries the `.active` class and (in the loader's output) lacks a
@@ -34,7 +41,7 @@
 </style>
 </head>
 <body>
-<h1>Library</h1>
+<h1>Settings</h1>
 <p class="lead">Tap a template to switch designs, or tap a bookmark /
 history row to open it.</p>
 

@@ -20,7 +20,7 @@
 // open directly — sdmc:/, romfs:/, absolute / relative paths to disk.
 // Network URLs (https://, browser://) are deferred to slice 2c+.
 
-import { type LiveElement } from './live-dom.js';
+import { resolveLiveResourceUrl, type LiveElement } from './live-dom.js';
 
 // =========================================================================
 // Native bridge — Switch.VideoDecoder is registered by the nxjs runtime
@@ -47,6 +47,10 @@ interface VideoDecoderHandle {
 	readonly usedAudio: boolean;
 	readonly usedVideo: boolean;
 	readonly muted: boolean;
+	readonly volume: number;
+	/** Accurate audio playback position in seconds (audrv played-sample
+	 * clock). Tracks audio-only playback where there are no video PTS. */
+	readonly audioTime: number;
 	readonly audioError: string | null;
 	readonly error: string | null;
 	close(): void;
@@ -54,6 +58,16 @@ interface VideoDecoderHandle {
 	pause(): void;
 	seek(seconds: number): void;
 	setMuted(muted: boolean): void;
+	setVolume(volume: number): void;
+	/** Audio-reactive per-band RMS levels at the play head (low→high),
+	 * ~0..1 unsmoothed. Empty before audio starts / no-audio sources. */
+	getAudioLevels(): number[];
+	/** Fill `out` with the frequency spectrum at the play head (low→high,
+	 * ~0..1). Returns true when data was written. */
+	getFrequencyData(out: Float32Array): boolean;
+	/** Fill `out` with the time-domain waveform at the play head (-1..1).
+	 * Returns true when data was written. */
+	getWaveform(out: Float32Array): boolean;
 	nextFrame(): VideoFrameData | null;
 }
 
@@ -196,6 +210,12 @@ interface VideoState {
 	// videoPlay also clears it (and unmutes) so a user-initiated play
 	// removes any leftover preview-mute state.
 	needsPosterPause: boolean;
+	// Desired audio gain (0..1) + mute, set from JS (HTMLMediaElement
+	// volume/muted) and REMEMBERED here so they survive decoder re-opens
+	// (track change, ended-restart, seek-reopen). Applied to each freshly
+	// opened decoder via setVolume/setMuted.
+	volume: number;
+	muted: boolean;
 }
 
 const videoStateMap = new WeakMap<LiveElement, VideoState>();
@@ -223,6 +243,8 @@ function ensureState(el: LiveElement): VideoState {
 			hwFallbackAttempted: false,
 			playRequestedAt: null,
 			needsPosterPause: false,
+			volume: 1,
+			muted: false,
 		};
 		videoStateMap.set(el, st);
 	}
@@ -245,10 +267,12 @@ function resolveSourceForDecoder(el: LiveElement): string | null {
 		if (s) candidates.push(s);
 	}
 	for (const c of candidates) {
-		// Native paths fopen can resolve.
-		if (c.startsWith('sdmc:/') || c.startsWith('romfs:/') ||
-		    c.startsWith('/') || c.startsWith('./') || c.startsWith('../')) {
-			return c;
+		// Resolve page-relative srcs (`./song.mp3`, `../media/x.mp3`,
+		// `browser://...`) the same way `<img>` does, then accept the native
+		// paths the FFmpeg + libnx fopen can open.
+		const r = resolveLiveResourceUrl(c);
+		if (r.startsWith('sdmc:/') || r.startsWith('romfs:/') || r.startsWith('/')) {
+			return r;
 		}
 	}
 	return null;
@@ -811,7 +835,78 @@ export function videoIsEnded(el: LiveElement): boolean {
 
 export function videoCurrentTime(el: LiveElement): number {
 	const st = videoStateMap.get(el);
-	return st ? st.currentPts : 0;
+	if (!st) return 0;
+	// Audio-only sources have no video-frame PTS to advance `currentPts`,
+	// so read the native audio playback clock (audrv played samples) — that
+	// is what lets the seek bar track audio playback. Video sources keep
+	// using the frame PTS that drives the displayed frame.
+	if (st.decoder) {
+		try {
+			if (st.decoder.usedAudio && !st.decoder.usedVideo) {
+				const t = st.decoder.audioTime;
+				if (Number.isFinite(t) && t >= 0) return t;
+			}
+		} catch { /* fall through to currentPts */ }
+	}
+	return st.currentPts;
+}
+
+/** Audio-reactive per-band levels at the play head (low→high, ~0..1).
+ * Returns `[]` when no decoder / no audio / before playback anchors. Backs
+ * `HTMLMediaElement`-style `getAudioLevels()` for the music visualizer. */
+export function videoGetAudioLevels(el: LiveElement): number[] {
+	const st = videoStateMap.get(el);
+	if (!st || !st.decoder) return [];
+	try {
+		const levels = st.decoder.getAudioLevels();
+		return Array.isArray(levels) ? levels : [];
+	} catch { return []; }
+}
+
+/** Fill `out` with the frequency spectrum at the play head (low→high,
+ * ~0..1). Returns false (and leaves `out` untouched) when no decoder / no
+ * audio / before playback anchors. Backs `getFrequencyData()` for the
+ * music visualizer. */
+export function videoGetFrequencyData(el: LiveElement, out: Float32Array): boolean {
+	const st = videoStateMap.get(el);
+	if (!st || !st.decoder) return false;
+	try { return st.decoder.getFrequencyData(out) === true; } catch { return false; }
+}
+
+/** Fill `out` with the time-domain waveform at the play head (-1..1).
+ * Returns false when no decoder / no audio / before playback anchors. */
+export function videoGetWaveform(el: LiveElement, out: Float32Array): boolean {
+	const st = videoStateMap.get(el);
+	if (!st || !st.decoder) return false;
+	try { return st.decoder.getWaveform(out) === true; } catch { return false; }
+}
+
+/** Remembered audio gain (0..1) for this element — survives decoder
+ * re-opens. */
+export function videoGetVolume(el: LiveElement): number {
+	const st = videoStateMap.get(el);
+	return st ? st.volume : 1;
+}
+
+export function videoSetVolume(el: LiveElement, v: number): void {
+	const st = ensureState(el);
+	st.volume = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1;
+	if (st.decoder) {
+		try { st.decoder.setVolume(st.volume); } catch { /* ignore */ }
+	}
+}
+
+export function videoIsMuted(el: LiveElement): boolean {
+	const st = videoStateMap.get(el);
+	return st ? st.muted : false;
+}
+
+export function videoSetMuted(el: LiveElement, m: boolean): void {
+	const st = ensureState(el);
+	st.muted = !!m;
+	if (st.decoder) {
+		try { st.decoder.setMuted(st.muted); } catch { /* ignore */ }
+	}
 }
 
 export function videoDuration(el: LiveElement): number {
@@ -877,6 +972,11 @@ export function videoPlay(el: LiveElement): void {
 	}
 	const dec = st.decoder as VideoDecoderHandle | null;
 	if (dec) {
+		// Apply the remembered audio state before starting, so volume/mute
+		// set before playback — or carried over from a previous track /
+		// re-open — take effect on this (possibly fresh) decoder.
+		try { dec.setVolume(st.volume); } catch { /* ignore */ }
+		try { dec.setMuted(st.muted); } catch { /* ignore */ }
 		try { dec.play(); } catch { /* ignore */ }
 		// Arm the stall watchdog only if we haven't received any frame
 		// yet. Once hasFirstFrame is true we know the decoder is alive,
@@ -916,6 +1016,23 @@ export function videoStop(el: LiveElement): void {
 		st.decoder.pause();
 	} catch { /* ignore */ }
 	st.currentPts = 0;
+	st.playRequestedAt = null;
+}
+
+/** Reset a media element's decoder + playback cursor so the NEXT
+ * `play()` opens a FRESH decoder for the element's CURRENT `src`. Backs
+ * `HTMLMediaElement.load()` — needed when a page swaps the source (e.g.
+ * an audio player advancing to the next track): without this, `videoPlay`
+ * sees the existing decoder and just resumes the OLD source. Keeps the
+ * per-element state object; only drops the decoder + cursor. */
+export function videoResetSource(el: LiveElement): void {
+	const st = videoStateMap.get(el);
+	if (!st) return;
+	closeDecoder(el, st);
+	st.url = null;
+	st.currentPts = 0;
+	st.loadError = null;
+	st.hasFirstFrame = false;
 	st.playRequestedAt = null;
 }
 

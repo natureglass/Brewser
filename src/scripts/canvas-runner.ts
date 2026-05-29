@@ -78,6 +78,12 @@ interface CanvasShim {
 	// Three.js's init from throwing "undefined is not a function".
 	addEventListener(type: string, listener: unknown, options?: unknown): void;
 	removeEventListener(type: string, listener: unknown, options?: unknown): void;
+	/** Pages that size a canvas to its CSS box read
+	 * `canvas.getBoundingClientRect()` (e.g. an audio visualizer's
+	 * `resizeCanvas`). Returns the wired live element's layout box once
+	 * layout has run; falls back to the offscreen's pixel dims before
+	 * then. */
+	getBoundingClientRect(): { x: number; y: number; width: number; height: number; top: number; left: number; right: number; bottom: number };
 }
 
 /** Thin shim returned by `document.getElementById(...)` for inline
@@ -927,6 +933,31 @@ function createCanvasEntry(el: HtmlElement): CanvasEntry {
 		set height(v: number) { offscreen.height = v; },
 		addEventListener(_type, _listener, _options) { /* no-op */ },
 		removeEventListener(_type, _listener, _options) { /* no-op */ },
+		getBoundingClientRect() {
+			// Find the live canvas element this offscreen is wired into and
+			// return its layout box. Wiring + layout both happen AFTER page
+			// scripts run, so an init-time call (before layout) falls back
+			// to the offscreen's pixel dims — a render-loop call (after
+			// layout) gets the real, stable CSS box.
+			const liveEl = findLiveElement(
+				getLiveRoot(),
+				(el) => el.tagName === 'CANVAS'
+					&& (el as unknown as { getOffscreen?: () => unknown }).getOffscreen?.() === offscreen,
+			);
+			if (liveEl) {
+				const r = liveEl.getBoundingClientRect() as { width: number; height: number; x?: number; y?: number; top?: number; left?: number; right?: number; bottom?: number };
+				if (r && r.width > 0 && r.height > 0) {
+					return {
+						x: r.x ?? r.left ?? 0, y: r.y ?? r.top ?? 0,
+						top: r.top ?? 0, left: r.left ?? 0,
+						right: r.right ?? r.width, bottom: r.bottom ?? r.height,
+						width: r.width, height: r.height,
+					};
+				}
+			}
+			const w = offscreen.width, h = offscreen.height;
+			return { x: 0, y: 0, top: 0, left: 0, right: w, bottom: h, width: w, height: h };
+		},
 		getContext(kind, _options) {
 			if (kind === '2d') return offscreen.getContext('2d');
 			if (kind === 'webgl' || kind === 'experimental-webgl') {
@@ -982,6 +1013,46 @@ function createCanvasEntry(el: HtmlElement): CanvasEntry {
 	return entry;
 }
 
+/** Depth-first, document-order search of a live subtree for the first
+ * element matching `pred`. */
+function findLiveElement(root: LiveElement, pred: (el: LiveElement) => boolean): LiveElement | null {
+	if (pred(root)) return root;
+	for (const child of root.children) {
+		const hit = findLiveElement(child, pred);
+		if (hit) return hit;
+	}
+	return null;
+}
+
+/** Collect every element in a live subtree matching `pred`, in document order. */
+function findAllLiveElements(root: LiveElement, pred: (el: LiveElement) => boolean, out: LiveElement[]): void {
+	if (pred(root)) out.push(root);
+	for (const child of root.children) findAllLiveElements(child, pred, out);
+}
+
+/** Build a match predicate for a SIMPLE selector — `#id`, `.class`, or a
+ * bare `tag`. Compound / descendant selectors return null (unsupported).
+ * Used so `document.querySelector` / `getElementById` resolve ordinary
+ * page elements out of the live DOM tree, not just the canvas/script
+ * shims the runner tracks. */
+function liveSelectorPredicate(selector: string): ((el: LiveElement) => boolean) | null {
+	const sel = selector.trim();
+	if (!sel) return null;
+	if (sel.charAt(0) === '#') {
+		const id = sel.slice(1);
+		return (el) => el.getAttribute('id') === id;
+	}
+	if (sel.charAt(0) === '.') {
+		const cls = sel.slice(1);
+		return (el) => (el.getAttribute('class') || '').split(/\s+/).indexOf(cls) >= 0;
+	}
+	if (/^[a-z][a-z0-9-]*$/i.test(sel)) {
+		const want = sel.toUpperCase();
+		return (el) => el.tagName === want;
+	}
+	return null;
+}
+
 function buildDocumentShim(
 	byId: Map<string, CanvasEntry>,
 	ordered: CanvasEntry[],
@@ -1021,8 +1092,17 @@ function buildDocumentShim(
 		// window — addons probe it as a fallback when `window` is
 		// undefined.
 		defaultView: getLiveWindow(),
-		getElementById(id: string): CanvasShim | ScriptShim | null {
-			return byId.get(id)?.shim ?? scriptShimsById.get(id) ?? null;
+		getElementById(id: string): CanvasShim | ScriptShim | LiveElement | null {
+			// Canvas / script shims the runner tracks win first (scripts
+			// expect the canvas shim for a `<canvas>` id). Otherwise resolve
+			// the element out of the live DOM tree — without this fallback
+			// `getElementById` / `querySelector('#id')` returned null for
+			// every ordinary element (an audio player's `#audio`, buttons,
+			// sliders, …), so the page's listener wiring threw
+			// "addEventListener of null" and aborted the whole script.
+			const shimHit = byId.get(id)?.shim ?? scriptShimsById.get(id);
+			if (shimHit) return shimHit;
+			return findLiveElement(body, (el) => el.getAttribute('id') === id);
 		},
 		querySelector(selector: string): CanvasShim | ScriptShim | LiveElement | null {
 			if (selector === 'canvas') return ordered[0]?.shim ?? null;
@@ -1040,6 +1120,9 @@ function buildDocumentShim(
 				}
 				return null;
 			}
+			// Simple `.class` / `tag` selectors resolve from the live tree.
+			const pred = liveSelectorPredicate(selector);
+			if (pred) return findLiveElement(body, pred);
 			return null;
 		},
 		querySelectorAll(selector: string): Array<CanvasShim | ScriptShim | LiveElement> {
@@ -1047,6 +1130,12 @@ function buildDocumentShim(
 			if (selector.startsWith('#')) {
 				const match = this.getElementById(selector.slice(1));
 				return match ? [match] : [];
+			}
+			const pred = liveSelectorPredicate(selector);
+			if (pred) {
+				const out: LiveElement[] = [];
+				findAllLiveElements(body, pred, out);
+				return out;
 			}
 			return [];
 		},
@@ -1109,12 +1198,37 @@ function buildDocumentShim(
 
 function buildConsoleShim() {
 	const route = (...args: unknown[]) => console.debug('[page]', ...args);
+	const noop = () => { /* no-op */ };
+	// All routed to console.debug (never the host console.error/log/warn/
+	// info, which flip nx.js into text-render mode and freeze the canvas —
+	// see feedback_console_error_switches_render_mode.md). `assert` was
+	// previously MISSING: a page calling `console.assert(...)` (common in
+	// self-test blocks) threw "console.assert is not a function", aborting
+	// the whole script — e.g. the SwitchSurf audio player's `init()` ran
+	// `runSelfTests()` before `buildLibrary()`, so its playlist never
+	// rendered. `assert` logs only on a failed condition and never throws.
 	return {
 		log: route,
 		info: route,
 		warn: route,
 		error: route,
 		debug: route,
+		assert: (condition: unknown, ...args: unknown[]) => {
+			if (!condition) console.debug('[page assert]', ...args);
+		},
+		group: route,
+		groupCollapsed: route,
+		groupEnd: noop,
+		table: route,
+		dir: route,
+		dirxml: route,
+		trace: route,
+		count: noop,
+		countReset: noop,
+		time: noop,
+		timeEnd: noop,
+		timeLog: noop,
+		clear: noop,
 	};
 }
 

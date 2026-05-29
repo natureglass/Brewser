@@ -40,7 +40,7 @@ export interface BrowserTemplate {
 		back: string;
 		forward: string;
 		home: string;
-		library: string;
+		settings: string;
 		bookmarkTrue: string;
 		bookmarkFalse: string;
 	};
@@ -100,7 +100,7 @@ export const DEFAULT_TEMPLATE: BrowserTemplate = {
 		back: 'assets/left.png',
 		forward: 'assets/right.png',
 		home: 'assets/home.png',
-		library: 'assets/library.png',
+		settings: 'assets/settings.png',
 		bookmarkTrue: 'assets/bookmark_true.png',
 		bookmarkFalse: 'assets/bookmark_false.png',
 	},
@@ -154,11 +154,33 @@ export interface BrowserConfig {
 	 * builds always hit the fallback; real Switch hw is expected to
 	 * stay on the hw path. */
 	videoNVTEGRA: boolean;
+	/** Title of the active search engine (matched against an entry's
+	 * `title` in `search_engines.json`). Drives the welcome page's
+	 * search-bar logo + where the query is sent. */
+	searchEngine: string;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
 	template: 'Templates/default.json',
 	videoNVTEGRA: true,
+	searchEngine: 'DuckDuckGo',
+};
+
+/** One entry in `search_engines.json`. `query` is the search-URL
+ * prefix the encoded query string is appended to (e.g.
+ * `https://www.google.com/search?q=`). `url` is the engine homepage. */
+export interface SearchEngine {
+	title: string;
+	logo: string;
+	url: string;
+	query: string;
+}
+
+const DEFAULT_SEARCH_ENGINE: SearchEngine = {
+	title: 'DuckDuckGo',
+	logo: '../pages/assets/duckduckgo_logo.png',
+	url: 'https://duckduckgo.com/',
+	query: 'https://duckduckgo.com/?q=',
 };
 
 const decoder = new TextDecoder();
@@ -179,11 +201,84 @@ export function loadConfig(profileRoot: string): BrowserConfig {
 		return {
 			template: typeof parsed?.template === 'string' ? parsed.template : DEFAULT_CONFIG.template,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
+			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 		};
 	} catch (error) {
 		console.debug(`[switch-web-browser] config.json parse failed: ${error}`);
 		return DEFAULT_CONFIG;
 	}
+}
+
+/** One entry in `apps.json`. `logo` + `url` are paths relative to the
+ * profile root's `pages/` dir (e.g. `../pages/apps/foo/logo.png`),
+ * authored the same way the welcome page's relative asset paths are.
+ * `logo` is used verbatim as an `<img src>`; `url` is rewritten to an
+ * absolute `browser://` URL for the card link (see `renderAppCards`). */
+export interface AppEntry {
+	title: string;
+	description: string;
+	logo: string;
+	url: string;
+}
+
+/** Read + validate `<profile>/apps.json` — the catalog the Apps page
+ * lists as cards. Returns the entries in source order; missing,
+ * malformed, or non-array files yield an empty list (the page then
+ * shows its empty-state). Each entry must carry all four string
+ * fields; partial entries are dropped. */
+export function loadApps(profileRoot: string): AppEntry[] {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${profileRoot}apps.json`);
+	} catch (_) {
+		return [];
+	}
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((e): e is AppEntry =>
+			!!e && typeof e.title === 'string' && typeof e.description === 'string'
+			&& typeof e.logo === 'string' && typeof e.url === 'string',
+		);
+	} catch (error) {
+		console.debug(`[switch-web-browser] apps.json parse failed: ${error}`);
+		return [];
+	}
+}
+
+/** Read + validate `<profile>/search_engines.json`. Returns the
+ * built-in DuckDuckGo entry as a single-element list if the file is
+ * missing / malformed, so search always has a usable engine. */
+export function loadSearchEngines(profileRoot: string): SearchEngine[] {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${profileRoot}search_engines.json`);
+	} catch (_) {
+		return [DEFAULT_SEARCH_ENGINE];
+	}
+	if (!raw) return [DEFAULT_SEARCH_ENGINE];
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		if (!Array.isArray(parsed)) return [DEFAULT_SEARCH_ENGINE];
+		const engines = parsed.filter((e): e is SearchEngine =>
+			!!e && typeof e.title === 'string' && typeof e.logo === 'string'
+			&& typeof e.url === 'string' && typeof e.query === 'string',
+		);
+		return engines.length > 0 ? engines : [DEFAULT_SEARCH_ENGINE];
+	} catch (error) {
+		console.debug(`[switch-web-browser] search_engines.json parse failed: ${error}`);
+		return [DEFAULT_SEARCH_ENGINE];
+	}
+}
+
+/** Resolve the active search engine: the entry whose `title` matches
+ * `config.json`'s `searchEngine`, else the first listed engine, else
+ * the built-in default. */
+export function resolveSearchEngine(profileRoot: string): SearchEngine {
+	const engines = loadSearchEngines(profileRoot);
+	const selected = loadConfig(profileRoot).searchEngine;
+	return engines.find((e) => e.title === selected) ?? engines[0] ?? DEFAULT_SEARCH_ENGINE;
 }
 
 /** Read `<profile>/templates.json` and return the validated entries

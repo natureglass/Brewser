@@ -6,7 +6,7 @@ const BOOKMARKS_URL = 'browser://bookmarks/';
 /**
  * Serves the current `BookmarksStore` as JSON at `browser://bookmarks/`.
  *
- * Consumed by the library page bundle to populate its "Bookmarks"
+ * Consumed by the settings page bundle to populate its "Bookmarks"
  * section. Registered ahead of `BrowserResourceLoader` so the
  * static-page loader doesn't intercept the request first.
  */

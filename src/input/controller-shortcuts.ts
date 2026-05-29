@@ -12,7 +12,7 @@ import {
 import { getComputedLiveStyle, setPseudoActive } from '../scripts/live-css.js';
 import { handleFormTap, isFormWidget } from '../scripts/live-form.js';
 import { getLayoutBox } from '../scripts/live-layout.js';
-import { findTapIntent } from '../scripts/live-overlay.js';
+import { findTapIntent, patchLiveDirtyRegions } from '../scripts/live-overlay.js';
 import { hitTestVideoControls, videoIsPaused } from '../scripts/live-video.js';
 
 const nativeSetTimeout = setTimeout.bind(globalThis);
@@ -116,7 +116,7 @@ export type ControllerInput =
 	| { kind: 'back' }
 	| { kind: 'forward' }
 	| { kind: 'home' }
-	| { kind: 'library' }
+	| { kind: 'settings' }
 	| { kind: 'star' }
 	| { kind: 'reload' }
 	| { kind: 'navigate'; url: string }
@@ -179,6 +179,15 @@ let chromeY1 = 56;
 export function setChromeRegion(y0: number, y1: number): void {
 	chromeY0 = y0;
 	chromeY1 = y1;
+}
+
+/** Whether the star (bookmark) button is currently shown + tappable.
+ * The shell sets this false on non-bookmarkable pages (local
+ * `browser://`); a tap in the star's x-slot then falls through to the
+ * address-bar branch, matching the UI where the URL reclaims that slot. */
+let starEnabled = true;
+export function setStarEnabled(enabled: boolean): void {
+	starEnabled = enabled;
 }
 
 /**
@@ -251,6 +260,49 @@ function handleVideoFrameTap(el: LiveElement): void {
 	pendingFrameTap = { el: tapEl, timeoutId: tid, lastTapAt: now };
 }
 
+// Generic double-tap → shell action for elements carrying
+// `data-dbltap-action`. Unlike the video frame tap there's no single-tap
+// action, so we just compare timestamps: a second tap on the SAME element
+// with the SAME action inside the window fires the action; a lone tap is a
+// no-op. Used by the audio player's visualizer canvas to enter
+// fullscreen-canvas on a double-tap (exit is handled by the
+// fullscreen-canvas touchstart gate + the B button).
+const DBLTAP_ACTION_MS = 320;
+let pendingActionTap: { el: LiveElement; action: string; lastTapAt: number } | null = null;
+function handleDoubleTapAction(el: LiveElement, action: string): void {
+	const now = performance.now();
+	if (pendingActionTap &&
+	    pendingActionTap.el === el &&
+	    pendingActionTap.action === action &&
+	    (now - pendingActionTap.lastTapAt) < DBLTAP_ACTION_MS) {
+		pendingActionTap = null;
+		pushInput({ kind: 'button-action', action });
+		return;
+	}
+	pendingActionTap = { el, action, lastTapAt: now };
+}
+
+// Double-tap-to-exit while already in fullscreen-canvas mode. Tracked by
+// screen coordinates (not the live hit-test) so the gesture works anywhere
+// on screen even though the source canvas's layout box is only card-sized
+// in fullscreen. A lone tap returns false and falls through to the normal
+// hit-test so fixed overlays (e.g. lil-gui panels) still receive single
+// taps — same contract as the video-fullscreen double-tap.
+const FS_CANVAS_DBLTAP_MS = 320;
+const FS_CANVAS_DBLTAP_DIST = 90;
+let lastFsCanvasTap: { x: number; y: number; at: number } | null = null;
+function fullscreenCanvasDoubleTap(x: number, y: number): boolean {
+	const now = performance.now();
+	if (lastFsCanvasTap &&
+	    (now - lastFsCanvasTap.at) < FS_CANVAS_DBLTAP_MS &&
+	    Math.hypot(x - lastFsCanvasTap.x, y - lastFsCanvasTap.y) < FS_CANVAS_DBLTAP_DIST) {
+		lastFsCanvasTap = null;
+		return true;
+	}
+	lastFsCanvasTap = { x, y, at: now };
+	return false;
+}
+
 let touchListenerInstalled = false;
 
 /**
@@ -290,7 +342,7 @@ export function setLiveViewport(v: LiveViewport, scrollY: number = 0): void {
 
 /**
  * Install a single canvas touchstart listener that handles both the
- * chrome-strip taps (back / forward / home / star / library / URL bar)
+ * chrome-strip taps (back / forward / home / star / settings / URL bar)
  * and content-area link taps. The chrome's screen y-range is supplied
  * by `setChromeRegion`, so the same listener works whether the toolbar
  * sits at the top or the bottom of the screen.
@@ -384,6 +436,17 @@ export function installCanvasTouch(): void {
 		// the chrome, so the right UX is to ignore taps until the load
 		// completes.
 		if (isNavigating) return;
+		// In fullscreen-canvas, a double-tap anywhere exits (mirrors the
+		// video-fullscreen exit gesture + the B button). A single tap
+		// falls through to the normal hit-test so fixed overlays still
+		// get it. Entering fullscreen-canvas is the page's job via a
+		// `data-dbltap-action` element (see handleDoubleTapAction).
+		if (browserMode === 'fullscreen-canvas') {
+			if (fullscreenCanvasDoubleTap(x, y)) {
+				pushInput({ kind: 'lr-combo' });
+				return;
+			}
+		}
 		// In video-fullscreen the page is hidden behind the focused
 		// video, so we can't fall through to the normal hit-test (a
 		// tap might land on an invisible <a href> at the same coords).
@@ -513,17 +576,21 @@ export function installCanvasTouch(): void {
 			const forwardEnd = CHROME_LAYOUT.forwardX + CHROME_LAYOUT.forwardWidth;
 			const homeEnd = CHROME_LAYOUT.homeX + CHROME_LAYOUT.homeWidth;
 			const starEnd = CHROME_LAYOUT.starX + CHROME_LAYOUT.starWidth;
-			const libraryEnd = CHROME_LAYOUT.libraryX + CHROME_LAYOUT.libraryWidth;
+			const settingsEnd = CHROME_LAYOUT.settingsX + CHROME_LAYOUT.settingsWidth;
 			if (x >= CHROME_LAYOUT.backX && x < backEnd) {
 				pushInput({ kind: 'back' });
 			} else if (x >= CHROME_LAYOUT.forwardX && x < forwardEnd) {
 				pushInput({ kind: 'forward' });
 			} else if (x >= CHROME_LAYOUT.homeX && x < homeEnd) {
 				pushInput({ kind: 'home' });
-			} else if (x >= CHROME_LAYOUT.starX && x < starEnd) {
+			} else if (starEnabled && x >= CHROME_LAYOUT.starX && x < starEnd) {
+				// Star tap only when the button is shown (bookmarkable
+				// http/https page). On local browser:// pages the star is
+				// hidden and the URL occupies its slot, so the tap falls
+				// through to the address-bar branch below.
 				pushInput({ kind: 'star' });
-			} else if (x >= CHROME_LAYOUT.libraryX && x < libraryEnd) {
-				pushInput({ kind: 'library' });
+			} else if (x >= CHROME_LAYOUT.settingsX && x < settingsEnd) {
+				pushInput({ kind: 'settings' });
 			} else {
 				pushInput({ kind: 'address-bar' });
 			}
@@ -649,11 +716,6 @@ export function installCanvasTouch(): void {
 		if (!wasDrag) {
 			const target = liveDragSession.element;
 			target.dispatchEvent({ type: 'click', ...baseEvent });
-			if (isFormWidget(target)) {
-				// Pass the tap's screen-x so range sliders can compute
-				// the new value from the position; other widgets ignore it.
-				void handleFormTap(target, x);
-			}
 			// Walk up the live tree from the tapped element looking for
 			// navigation / button / summary intents. This is how
 			// <a href> / <button data-action> / <summary> taps reach
@@ -662,6 +724,31 @@ export function installCanvasTouch(): void {
 				target, x, y,
 				liveViewport.x, liveViewport.y, liveScrollY,
 			);
+			// Form widgets normally open the keyboard / cycle on tap. But
+			// a widget that opts into a shell action via `data-action`
+			// (e.g. the search `<input data-action="search">`) should
+			// fire that action instead of the default widget behaviour —
+			// otherwise both the keyboard AND the action would trigger.
+			const widgetHasAction = intent?.kind === 'button-action';
+			if (isFormWidget(target) && !widgetHasAction) {
+				// Pass the tap's screen-x so range sliders can compute
+				// the new value from the position; other widgets ignore it.
+				_touchDiag('  → route: handleFormTap <' + target.tagName + '>');
+				// `true`: we already dispatched `click` on `target` above, so
+				// handleFormTap must NOT re-fire it (avoids double-firing a
+				// <button>'s handler — which made Stop instantly re-Play).
+				void handleFormTap(target, x, true);
+			} else if (!widgetHasAction) {
+				_touchDiag('  → route: generic-click patchLiveDirtyRegions <' + target.tagName + '>');
+				// Generic click target (e.g. a <button> tapped on its <svg>/
+				// <span> child, so `target` isn't the form widget itself — the
+				// click bubbled to the button's handler above). Repaint just
+				// the regions the handler mutated instead of rebuilding the
+				// whole page cache; patchLiveDirtyRegions falls back to the
+				// full rebuild (and still schedules the repaint) when it can't
+				// safely patch.
+				patchLiveDirtyRegions();
+			}
 			_touchDiag('  → touchend on <' + target.tagName + '> intent=' +
 				(intent ? intent.kind : 'none'));
 			if (intent) {
@@ -671,6 +758,9 @@ export function installCanvasTouch(): void {
 				} else if (intent.kind === 'button-action') {
 					_touchDiag('    → pushInput(button-action ' + intent.action + ')');
 					pushInput({ kind: 'button-action', action: intent.action });
+				} else if (intent.kind === 'dbltap-action') {
+					_touchDiag('    → handleDoubleTapAction ' + intent.action);
+					handleDoubleTapAction(intent.el, intent.action);
 				} else if (intent.kind === 'summary') {
 					_touchDiag('    → pushInput(summary-toggle)');
 					pushInput({ kind: 'summary-toggle', summary: intent.summary });

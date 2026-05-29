@@ -41,20 +41,86 @@ function coerceLength(v: CssLength | string | undefined): CssLength | undefined 
 import {
 	getComputedLiveStyle, invalidateLiveStyle, registerStyleSheet, resetLiveCss, unregisterStyleSheet,
 } from './live-css.js';
+// Runtime-only import (used inside the innerHTML setter). html-to-live
+// imports LiveElement back from this module — the cycle is safe because
+// neither side touches the other's exports at module-eval time.
+import { parseFragmentInto } from './html-to-live.js';
 import {
 	getInputChecked, getInputValue, setInputChecked, setInputValue,
 } from './live-form.js';
 import {
 	videoCurrentTime, videoDuration, videoErrorMessage, videoIsEnded,
-	videoIsPaused, videoPause, videoPlay, videoSeek,
+	videoIsPaused, videoPause, videoPlay, videoResetSource, videoSeek,
+	videoGetVolume, videoSetVolume, videoIsMuted, videoSetMuted,
+	videoGetAudioLevels, videoGetFrequencyData, videoGetWaveform,
 } from './live-video.js';
 import { getInlineLayout, getLayoutBox } from './live-layout.js';
 import {
-	isLiveCacheBuilding, patchLiveCacheRegion, syncLiveCacheVersion,
+	isLiveCacheBuilding, patchLiveCacheRegion, scrollElementIntoView,
+	syncLiveCacheVersion,
 } from './live-overlay.js';
-import { requestFullRepaint } from './live-paint-control.js';
+import { markLiveDirty, requestFullRepaint } from './live-paint-control.js';
+import { getComputedLiveStyle } from './live-css.js';
 
 const LIVE_ELEMENT_BRAND = Symbol('LiveElement');
+
+// =========================================================================
+// `<img>` src resolution
+// =========================================================================
+// nx.js's `Image` fetch resolves a relative URL against the runtime base
+// (`romfs:/`), NOT the page — so a page-authored relative path read the
+// BUNDLED romfs copy instead of the editable profile copy (and required a
+// full .nro rebuild + redeploy to update). `browser://` URLs can't be
+// fetched by Image at all (its fetch's protocol registry has no browser
+// loader). The shell sets the active profile root here so `<img>` srcs that
+// use the profile-pages convention (`../pages/<rest>`, `browser://<rest>`)
+// resolve to the absolute `<profile>/pages/<rest>` SD-card path, loading the
+// same file the rest of the browser serves — editable via a profile sync.
+let liveProfileRoot = '';
+let livePageBase = '';
+export function setLiveProfileRoot(root: string): void { liveProfileRoot = root; }
+/** SD-card directory of the page currently loaded (e.g.
+ * `sdmc:/switch/webprofiles/default/pages/apps/mediaplayer/`). Set by
+ * the shell per navigation; used to resolve PAGE-relative `<img>` srcs
+ * (`./assets/x.png`) so `index.html` acts as the base, like a real browser. */
+export function setLivePageBase(dir: string): void { livePageBase = dir; }
+
+/** Resolve a relative path against an absolute `scheme:/a/b/` base,
+ * honoring `.` / `..` segments. */
+function resolveAgainstBase(baseDir: string, rel: string): string {
+	const m = /^([a-z][a-z0-9+.-]*:\/)(.*)$/i.exec(baseDir);
+	if (!m) return baseDir + rel;
+	const parts = m[2].split('/').filter(Boolean);
+	for (const seg of rel.split('/')) {
+		if (seg === '' || seg === '.') continue;
+		if (seg === '..') { parts.pop(); continue; }
+		parts.push(seg);
+	}
+	return m[1] + parts.join('/');
+}
+
+/** Resolve a live-DOM resource URL (`<img>` src, `<audio>`/`<video>` src)
+ * to a fetchable absolute URL using the page-relative architecture. Shared
+ * so every resource reference resolves the same way. */
+export function resolveLiveResourceUrl(src: string): string {
+	const s = src.trim();
+	if (!s) return s;
+	// Already a fetchable absolute scheme → use as-is.
+	if (/^(?:sdmc|romfs|file|data|blob|https?):/i.test(s)) return s;
+	// `browser://<rest>` is an absolute browser URL → map to the profile
+	// pages path (Image can't fetch the `browser:` scheme).
+	if (/^browser:\/\//i.test(s)) {
+		if (!liveProfileRoot) return s;
+		const rel = s.replace(/^browser:\/\//i, '').replace(/^pages\//, '');
+		return `${liveProfileRoot}pages/${rel}`;
+	}
+	// Everything else is PAGE-relative — resolved against the page's own
+	// directory (`index.html` as the base), like a real browser. This is
+	// uniform across all pages; `./assets/x.png`, `assets/x.png` and
+	// `../sibling/x.png` all resolve relative to the current page.
+	if (livePageBase) return resolveAgainstBase(livePageBase, s);
+	return s;
+}
 
 // =========================================================================
 // Live tree version counter (Phase 1.5, 2026-05-25)
@@ -185,6 +251,10 @@ export class LiveElement {
 	 * or on failure). Set asynchronously from `loadImage()` on first
 	 * `src` attribute assignment. Painter reads via `getLoadedImage()`. */
 	private loadedImage: HTMLImageElement | null = null;
+	/** True once an `<img>` src fails to load. The painter shows the
+	 * `alt` placeholder ONLY in this state; a still-loading image renders
+	 * nothing (just reserves its box). Reset on each new `loadImage`. */
+	private imageLoadFailed = false;
 	/** Per-element width/height, used both as canvas-pixel dims (when
 	 * tag is `canvas`) and as fallback paint-size for fixed div
 	 * backgrounds. Defaults match HTMLCanvasElement (300×150). */
@@ -299,12 +369,26 @@ export class LiveElement {
 		invalidateLiveStyle(this);
 	}
 
-	/** `innerHTML` — for our purposes the same as `textContent` (no HTML
-	 * parsing). lil-gui only assigns short label strings ("Controls",
-	 * "✓", "Linear", etc.) so the divergence is invisible to it. Real
-	 * markup assignment would set `textContent` to the raw string. */
+	/** `innerHTML`. A plain string (no `<`) takes the fast path and
+	 * behaves like `textContent` — preserves lil-gui's short-label
+	 * assignments ("Controls", "✓", "Linear") and keeps the
+	 * `textContent` getter accurate. A string containing markup is parsed
+	 * into child LiveElements via the shared HtmlElement→Live converter,
+	 * so page scripts that build structured DOM (e.g. an audio player's
+	 * playlist rows) render with real nested elements + cascade matching,
+	 * not the raw tag text. */
 	get innerHTML(): string { return this._text; }
-	set innerHTML(v: string) { this.textContent = v; }
+	set innerHTML(v: string) {
+		const s = v == null ? '' : String(v);
+		if (s.indexOf('<') < 0) { this.textContent = s; return; }
+		// Clear existing content (children + _text), then graft the parsed
+		// fragment. `textContent = ''` also fires the STYLE-sheet
+		// unregister + invalidateLiveStyle paths.
+		this.textContent = '';
+		parseFragmentInto(this, s);
+		invalidateLiveStyle(this);
+		bumpLiveTreeVersion();
+	}
 
 	/** M2.4 form-element accessors. `.value` works for INPUT / SELECT /
 	 * TEXTAREA; `.checked` for INPUT[type=checkbox]. Storage is a
@@ -326,6 +410,19 @@ export class LiveElement {
 			this.removeAttribute('checked');
 		}
 	}
+	// HTMLInputElement reflected attributes. Per the HTML spec `input.min`
+	// / `.max` / `.step` are string properties that reflect the matching
+	// attribute. Pages rely on them — e.g. an audio player computing a
+	// seek position as `Number(seek.value) / Number(seek.max)`. Without
+	// these getters `seek.max` was `undefined` → `Number(undefined)` =
+	// `NaN` → the computed seek target was `NaN`, which `set currentTime`
+	// coerces to 0, so every seek jumped to the start.
+	get min(): string { return this.getAttribute('min') ?? ''; }
+	set min(v: string) { this.setAttribute('min', v == null ? '' : String(v)); }
+	get max(): string { return this.getAttribute('max') ?? ''; }
+	set max(v: string) { this.setAttribute('max', v == null ? '' : String(v)); }
+	get step(): string { return this.getAttribute('step') ?? ''; }
+	set step(v: string) { this.setAttribute('step', v == null ? '' : String(v)); }
 
 	/** Slice 2a HTMLMediaElement-shaped accessors for <video>. State and
 	 * decoder live in live-video.ts's WeakMap. Reading these on non-VIDEO
@@ -338,8 +435,35 @@ export class LiveElement {
 	get paused(): boolean { return videoIsPaused(this); }
 	get ended(): boolean { return videoIsEnded(this); }
 	get error(): string | null { return videoErrorMessage(this); }
+	// HTMLMediaElement.volume / .muted — wired to the decoder's audrv gain
+	// (videoSetVolume → audrvVoiceSetVolume) + mute. The desired value is
+	// remembered in live-video state so it survives decoder re-opens.
+	get volume(): number { return videoGetVolume(this); }
+	set volume(v: number) { videoSetVolume(this, +v); }
+	get muted(): boolean { return videoIsMuted(this); }
+	set muted(v: boolean) { videoSetMuted(this, !!v); }
 	play(): void { videoPlay(this); }
 	pause(): void { videoPause(this); }
+	/** `HTMLMediaElement.src` reflects the `src` attribute (per spec), so
+	 * `audio.src = '...'` reaches `resolveSourceForDecoder` (which reads
+	 * the attribute). A plain JS-property set would NOT, leaving the
+	 * decoder with no source. */
+	get src(): string { return this.getAttribute('src') ?? ''; }
+	set src(v: string) { this.setAttribute('src', v == null ? '' : String(v)); }
+	/** `HTMLMediaElement.load()` — reset the media pipeline so the next
+	 * `play()` opens a decoder for the CURRENT `src`. Used when switching
+	 * sources (e.g. an audio player's next/prev track). */
+	load(): void { videoResetSource(this); }
+	/** Non-standard: audio-reactive per-band levels (low→high, ~0..1) at the
+	 * play head, for music visualizers. Empty array when not playing / no
+	 * audio. Stands in for the absent Web Audio AnalyserNode. */
+	getAudioLevels(): number[] { return videoGetAudioLevels(this); }
+	/** Non-standard: fill `out` with the play-head frequency spectrum
+	 * (low→high, ~0..1). Returns true when written. ~getByteFrequencyData. */
+	getFrequencyData(out: Float32Array): boolean { return videoGetFrequencyData(this, out); }
+	/** Non-standard: fill `out` with the play-head time-domain waveform
+	 * (-1..1). Returns true when written. ~getByteTimeDomainData. */
+	getWaveform(out: Float32Array): boolean { return videoGetWaveform(this, out); }
 
 	/** M2.5 scroll accessors. `scrollTop` reads/writes the current
 	 * vertical scroll offset (clamped to [0, scrollHeight-clientHeight]
@@ -348,7 +472,14 @@ export class LiveElement {
 	private _scrollTop = 0;
 	get scrollTop(): number { return this._scrollTop; }
 	set scrollTop(v: number) {
-		this._scrollTop = Math.max(0, v | 0);
+		const nv = Math.max(0, v | 0);
+		if (nv === this._scrollTop) return;
+		this._scrollTop = nv;
+		// Scrollable containers are painted as per-frame overlays (NOT baked
+		// into the body cache), so a scroll only needs a repaint — NOT a cache
+		// rebuild / re-layout (which would be the multi-second freeze on heavy
+		// pages). Don't bump the tree version; just request a repaint.
+		requestFullRepaint();
 	}
 	get scrollHeight(): number {
 		const lb = getLayoutBox(this);
@@ -365,6 +496,13 @@ export class LiveElement {
 	get clientWidth(): number {
 		const lb = getLayoutBox(this);
 		return lb ? lb.contentW : 0;
+	}
+
+	/** Scroll the nearest scrollable ancestor so this element is visible.
+	 * Page scripts use it to keep a selected list row on screen. Vertical
+	 * only; the optional arg is accepted for DOM-API shape and ignored. */
+	scrollIntoView(_arg?: unknown): void {
+		scrollElementIntoView(this);
 	}
 
 	get width(): number { return this._width; }
@@ -429,6 +567,7 @@ export class LiveElement {
 	 * tree version bumps in `onload` to trigger a fresh paint. */
 	private loadImage(src: string): void {
 		this.loadedImage = null;
+		this.imageLoadFailed = false;
 		try {
 			const img: HTMLImageElement = new (globalThis as unknown as {
 				Image: new () => HTMLImageElement;
@@ -446,27 +585,49 @@ export class LiveElement {
 				// When the cache is still building (initial paint not
 				// complete), don't patch — the chunked builder will
 				// paint the now-loaded image when it reaches this element.
-				const explicitSize = typeof this.style.width === 'number'
-					&& typeof this.style.height === 'number';
-				if (isLiveCacheBuilding()) {
-					requestFullRepaint();
-				} else if (explicitSize) {
+				// Does this image have a DEFINITE box (width AND height set
+				// via inline style, CSS, or HTML attrs)? If so, the decode
+				// only fills pixels in a fixed box — layout can't change — so
+				// we patch just this element's region into the cache instead
+				// of forcing a full re-layout/rebuild. Crucially this also
+				// holds mid-build: the chunked builder may have already
+				// painted a placeholder for this op (top-of-page logos run
+				// early) and won't revisit it, and a bare requestFullRepaint
+				// wouldn't replace it — but a region patch does. Avoiding the
+				// version bump here is what stops a page with logos (e.g. the
+				// welcome page) from rendering twice: an image decoding mid-
+				// build used to abort + restart the whole build.
+				const cs = getComputedLiveStyle(this);
+				const hasW = this.style.width !== undefined || cs.width !== undefined
+					|| this.getAttribute('width') !== null;
+				const hasH = this.style.height !== undefined || cs.height !== undefined
+					|| this.getAttribute('height') !== null;
+				if (hasW && hasH) {
 					patchLiveCacheRegion(this);
-					syncLiveCacheVersion();
+					// Don't advance the cache version while a build is in
+					// flight (it owns the version handshake); the in-progress
+					// build keeps running and our patch lands in the same
+					// offscreen. Only the steady-state path syncs.
+					if (!isLiveCacheBuilding()) syncLiveCacheVersion();
 					requestFullRepaint();
 				} else {
-					// Natural-size image — layout depends on the image's
-					// dimensions, so a full re-layout/rebuild is needed.
+					// Auto-dimension image — layout depends on the decoded
+					// size, so a full re-layout/rebuild is genuinely needed.
 					bumpLiveTreeVersion();
 					requestFullRepaint();
 				}
 			};
 			img.onerror = () => {
-				// Leave loadedImage null; painter falls back to alt-text
-				// or a placeholder box. No version bump — we're already
-				// showing the right (placeholder) thing.
+				// Genuinely broken image: flag it so the painter switches
+				// from "render nothing (still loading)" to the alt-text
+				// placeholder, and repaint that region so it shows. Box is
+				// already reserved by layout, so a region patch suffices.
+				this.imageLoadFailed = true;
+				patchLiveCacheRegion(this);
+				if (!isLiveCacheBuilding()) syncLiveCacheVersion();
+				requestFullRepaint();
 			};
-			img.src = src;
+			img.src = resolveLiveResourceUrl(src);
 		} catch (_) { /* swallow — bad URL or runtime gap */ }
 	}
 
@@ -474,6 +635,8 @@ export class LiveElement {
 	 * IMG, the src hasn't been set, or the load is still pending /
 	 * failed. */
 	getLoadedImage(): HTMLImageElement | null { return this.loadedImage; }
+	/** True only when the image's load failed (not while it's loading). */
+	hasImageError(): boolean { return this.imageLoadFailed; }
 	getAttribute(name: string): string | null {
 		const lower = name.toLowerCase();
 		if (lower === 'class') return this.classList.value || null;
@@ -511,6 +674,7 @@ export class LiveElement {
 		child.parent = this;
 		this.children.push(child);
 		propagateAttached(child, this.attached);
+		markLiveDirty(this);
 		bumpLiveTreeVersion();
 		return child;
 	}
@@ -521,6 +685,7 @@ export class LiveElement {
 			child.parent = null;
 			propagateAttached(child, false);
 			if (child.tagName === 'STYLE') unregisterStyleSheet(child);
+			markLiveDirty(this);
 			bumpLiveTreeVersion();
 		}
 		return child;
@@ -538,6 +703,7 @@ export class LiveElement {
 		child.parent = this;
 		this.children.splice(idx, 0, child);
 		propagateAttached(child, this.attached);
+		markLiveDirty(this);
 		bumpLiveTreeVersion();
 		return child;
 	}
@@ -551,6 +717,7 @@ export class LiveElement {
 		newChild.parent = this;
 		this.children.splice(idx, 1, newChild);
 		propagateAttached(newChild, this.attached);
+		markLiveDirty(this);
 		bumpLiveTreeVersion();
 		return oldChild;
 	}

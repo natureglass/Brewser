@@ -1,0 +1,50 @@
+[
+  {
+    "url": "https://itch.io/",
+    "title": "itch.io",
+    "description": "Explore indie games, prototypes, and creative web builds.",
+    "addedAt": 1778919520150
+  },
+  {
+    "url": "https://poki.com/",
+    "title": "poki.com",
+    "description": "Play free online games directly in the browser.",
+    "addedAt": 1778919520160
+  },
+  {
+    "url": "https://www.chess.com/",
+    "title": "chess.com",
+    "description": "Play chess, solve puzzles, and follow matches.",
+    "addedAt": 1778919520170
+  },
+  {
+    "url": "https://www.crazygames.com/",
+    "title": "crazygames.com",
+    "description": "Find casual, arcade, action, and multiplayer games.",
+    "addedAt": 1778919520180
+  },
+  {
+    "url": "https://sudoku.com/",
+    "title": "sudoku.com",
+    "description": "Play daily Sudoku puzzles and challenge your logic.",
+    "addedAt": 1778919520190
+  },
+  {
+    "url": "https://play.unity.com/",
+    "title": "unity.com",
+    "description": "Unity Play is a platform where you can play and make games in your browser.",
+    "addedAt": 1778919520250
+  },
+  {
+    "url": "https://www.youtube.com/",
+    "title": "youtube.com",
+    "description": "Watch videos, music, tutorials, and entertainment.",
+    "addedAt": 1778919520260
+  },
+  {
+    "url": "https://www.google.com/",
+    "title": "google.com",
+    "description": "Search the web and access Google services.",
+    "addedAt": 1778919520270
+  }
+]

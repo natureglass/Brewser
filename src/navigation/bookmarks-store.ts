@@ -9,6 +9,9 @@ export interface Bookmark {
 	url: string;
 	title: string;
 	addedAt: number;
+	/** Optional one-line description shown under the title in the
+	 * settings list. Hand-authored bookmarks may include it. */
+	description?: string;
 }
 
 const decoder = new TextDecoder();
@@ -71,17 +74,32 @@ export class BookmarksStore {
 			const parsed = JSON.parse(text);
 			if (!Array.isArray(parsed)) return;
 			for (const entry of parsed) {
-				if (
-					entry &&
-					typeof entry.url === 'string' &&
-					typeof entry.addedAt === 'number'
-				) {
-					this.bookmarks.push({
-						url: entry.url,
-						title: typeof entry.title === 'string' ? entry.title : entry.url,
-						addedAt: entry.addedAt,
-					});
-				}
+				// Only `url` is required. Everything else is coerced
+				// leniently so hand-edited bookmarks.json files load:
+				//   - `addedAt` accepts a number OR a numeric string
+				//     (`"1778919520150"`) — the strict `typeof === 'number'`
+				//     check used to silently drop every quoted entry.
+				//   - title / description accept either casing
+				//     (`title`/`Title`, `description`/`Description`).
+				if (!entry || typeof entry.url !== 'string') continue;
+				const rawAdded = entry.addedAt;
+				const addedAt =
+					typeof rawAdded === 'number' && Number.isFinite(rawAdded)
+						? rawAdded
+						: typeof rawAdded === 'string' && rawAdded.trim() !== '' && Number.isFinite(Number(rawAdded))
+							? Number(rawAdded)
+							: 0;
+				const title =
+					typeof entry.title === 'string' ? entry.title
+						: typeof entry.Title === 'string' ? entry.Title
+							: entry.url;
+				const description =
+					typeof entry.description === 'string' ? entry.description
+						: typeof entry.Description === 'string' ? entry.Description
+							: undefined;
+				const bookmark: Bookmark = { url: entry.url, title, addedAt };
+				if (description) bookmark.description = description;
+				this.bookmarks.push(bookmark);
 			}
 		} catch (error) {
 			// File missing on first run is normal; any other read failure

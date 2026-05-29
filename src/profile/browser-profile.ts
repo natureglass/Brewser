@@ -23,9 +23,15 @@ const BUILTIN_PAGES: readonly string[] = [
 	'welcome.html',
 	'about.html',
 	'error.html',
-	'library.html',
+	'settings.html',
+	'apps.html',
 	'web-experiments.html',
 	'threejs-demos.html',
+	// Apps catalog (listed on apps.html from apps.json). Each app is a
+	// self-contained page folder under `pages/apps/<name>/`.
+	'apps/mediaplayer/index.html',
+	'apps/mediaplayer/audioplayer_logo.png',
+	'apps/mediaplayer/config.json',
 	// DOM tests — canonical scripted reference page that exercises
 	// the Phase 2 live-DOM surface end-to-end (cascade positioning +
 	// var() + flex layout + form widgets + event bubbling + scrollable).
@@ -183,7 +189,7 @@ const BUILTIN_PAGES: readonly string[] = [
  * PNG in place to re-skin the toolbar. */
 const BUILTIN_ASSETS: readonly string[] = [
 	'home.png',
-	'library.png',
+	'settings.png',
 	'left.png',
 	'right.png',
 	'bookmark_true.png',
@@ -194,13 +200,15 @@ const BUILTIN_ASSETS: readonly string[] = [
 
 /** Design-config + template files seeded from `romfs:/` into the
  * profile root. `config.json` names the active template; `templates.json`
- * is the catalog the Library page lists; each `Templates/<name>.json`
+ * is the catalog the Settings page lists; each `Templates/<name>.json`
  * is one named theme. Users add their own by dropping a new JSON in
  * `Templates/`, listing it in `templates.json`, and pointing
  * `config.json`'s `template` field at it. */
 const BUILTIN_TEMPLATE_FILES: readonly string[] = [
 	'config.json',
 	'templates.json',
+	'search_engines.json',
+	'apps.json',
 	'Templates/default.json',
 	'Templates/light.json',
 	'Templates/bottom-bar.json',
@@ -246,6 +254,8 @@ export class BrowserProfile {
 		// writeFileSync below doesn't fail on missing parents.
 		try { Switch.mkdirSync(`${this.storageRoot}pages/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.storageRoot}pages/apps/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.storageRoot}pages/apps/mediaplayer/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/dom-tests/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/dom-tests/reference/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/dom-tests/reference/assets/`); } catch (_) { /* exists */ }

@@ -5,7 +5,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { loadConfig, loadTemplateRegistry } from '../profile/browser-template.js';
+import { type AppEntry, loadApps, loadConfig, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
 
 /**
  * Serves the browser's built-in pages.
@@ -36,13 +36,18 @@ import { loadConfig, loadTemplateRegistry } from '../profile/browser-template.js
  *   `<browser-templates>`           → entries from `templates.json`
  * Substitution is a plain text replace, so authors can place the tags
  * anywhere in the document, wrap them in containers, or restyle the
- * resulting `<ul class="library-list">` via the page's own CSS.
+ * resulting `<ul class="settings-list">` via the page's own CSS.
  */
 
 const decoder = new TextDecoder();
-const DIR_SEGMENT = /^[a-z][a-z0-9-]*$/i;
+// Directory + path segments allow letters, digits, hyphen, and
+// underscore (e.g. an app folder named `my_app`). The dot
+// stays restricted to the static-asset filename position (FILE_SEGMENT)
+// so a `..` can never appear as a directory segment and escape the
+// profile dir.
+const DIR_SEGMENT = /^[a-z][a-z0-9_-]*$/i;
 const FILE_SEGMENT = /^[a-z][a-z0-9._-]*$/i;
-const PATH_PATTERN = /^[a-z][a-z0-9-]*(?:\/[a-z][a-z0-9-]*)*$/i;
+const PATH_PATTERN = /^[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)*$/i;
 
 /** Recognised static-asset MIME types keyed by extension (lowercase). */
 const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
@@ -146,7 +151,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 		let out = html;
 		out = out.replace(
 			/<browser-bookmarks(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-bookmarks\s*>)?/gi,
-			(_match, attrs: string | undefined) => this.renderBookmarks(parseLimit(attrs)),
+			(_match, attrs: string | undefined) => this.renderBookmarks(parseLimit(attrs), parseFormat(attrs)),
 		);
 		out = out.replace(
 			/<browser-history(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-history\s*>)?/gi,
@@ -156,16 +161,58 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-templates(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-templates\s*>)?/gi,
 			() => this.renderTemplates(),
 		);
+		out = out.replace(
+			/<browser-search(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-search\s*>)?/gi,
+			() => this.renderSearch(),
+		);
+		out = out.replace(
+			/<browser-apps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-apps\s*>)?/gi,
+			() => this.renderApps(),
+		);
 		return out;
 	}
 
-	private renderBookmarks(limit: number | null): string {
+	/** Render the Apps page cards from `apps.json`. Each entry becomes a
+	 * `.app-card` link (logo on top, then title + description) styled by
+	 * apps.html's own stylesheet — this only emits the structural
+	 * markup, mirroring `renderBookmarks`. Empty / missing catalog →
+	 * an empty-state `<p>`. */
+	private renderApps(): string {
+		const apps = loadApps(this.profileRoot);
+		if (apps.length === 0) {
+			return '<p class="empty">No apps installed yet. Add entries to <code>apps.json</code>.</p>';
+		}
+		return renderAppCards(apps);
+	}
+
+	/** Render the welcome-page search bar for the active engine (per
+	 * `config.json` → `search_engines.json`): the engine logo + a search
+	 * input + a Search button. Both the input and the button carry
+	 * `data-action="search"` so a tap opens the keyboard and routes the
+	 * query to the engine (the shell's `search` button-action). */
+	private renderSearch(): string {
+		const engine = resolveSearchEngine(this.profileRoot);
+		// `logo` is a ready-to-use relative path (e.g.
+		// `../pages/assets/google_logo.png`) — used verbatim as the img src.
+		const logo = htmlEscape(engine.logo);
+		const alt = htmlEscape(`${engine.title} logo`);
+		return (
+			'<form class="search-form" role="search">'
+			+ `<img class="search-logo" src="${logo}" alt="${alt}">`
+			+ '<input class="search-input" type="search" name="q" placeholder="Search the internet"'
+			+ ' aria-label="Search the internet" data-action="search" autocomplete="off">'
+			+ '<button class="search-button" type="submit" data-action="search">Search</button>'
+			+ '</form>'
+		);
+	}
+
+	private renderBookmarks(limit: number | null, format: 'list' | 'cards' = 'list'): string {
 		let list = this.bookmarksStore.list();
 		if (limit !== null) list = list.slice(0, limit);
 		if (list.length === 0) {
 			return '<p class="empty">No bookmarks saved yet. Tap ★ in the toolbar to add one.</p>';
 		}
-		return renderList(list);
+		return format === 'cards' ? renderBookmarkCards(list) : renderList(list);
 	}
 
 	private renderHistory(limit: number): string {
@@ -267,14 +314,72 @@ function parseLimit(attrs: string | undefined): number | null {
 	return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function renderList(entries: ReadonlyArray<{ url: string; title?: string }>): string {
+/** `format="cards"` renders the welcome-page `.quick-card` design;
+ * anything else (default) renders the settings `<ul>` list. */
+function parseFormat(attrs: string | undefined): 'list' | 'cards' {
+	if (!attrs) return 'list';
+	const m = /\bformat\s*=\s*"([^"]*)"/i.exec(attrs) ?? /\bformat\s*=\s*'([^']*)'/i.exec(attrs);
+	return m && m[1].toLowerCase() === 'cards' ? 'cards' : 'list';
+}
+
+/** Render bookmarks as welcome-page cards: an `<a class="quick-card">`
+ * with the title in `<strong>` and the description in `<span>`. The
+ * `.quick-card` styling + the `::after` arrow live in welcome.html's
+ * stylesheet, so this only emits the structural markup. */
+function renderBookmarkCards(
+	entries: ReadonlyArray<{ url: string; title?: string; description?: string }>,
+): string {
+	return entries.map((e) => {
+		const title = htmlEscape(e.title && e.title !== e.url ? e.title : e.url);
+		const desc = e.description ? `<span>${htmlEscape(e.description)}</span>` : '';
+		return `<a class="quick-card" href="${htmlEscape(e.url)}"><strong>${title}</strong>${desc}</a>`;
+	}).join('');
+}
+
+/** Render app entries as `.app-card` links: a logo `<img>` on top,
+ * then the title in `<strong>` and the description in `<span>` — the
+ * `.app-card` styling + `::after` arrow live in apps.html's stylesheet,
+ * so this only emits structural markup (mirrors `renderBookmarkCards`).
+ * The `logo` path is used verbatim as the img src (resolved like the
+ * welcome page's relative asset paths); `url` is rewritten to an
+ * absolute `browser://` link the resource loader can serve. */
+function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
+	return entries.map((e) => {
+		const href = htmlEscape(appUrlToBrowserHref(e.url));
+		const logo = htmlEscape(e.logo);
+		const alt = htmlEscape(`${e.title} logo`);
+		const title = htmlEscape(e.title);
+		const desc = e.description ? `<span>${htmlEscape(e.description)}</span>` : '';
+		return `<a class="app-card" href="${href}"><img class="app-logo" src="${logo}" alt="${alt}"><strong>${title}</strong>${desc}</a>`;
+	}).join('');
+}
+
+/** Turn an `apps.json` `url` into a navigable href. Entries are
+ * authored relative to the profile's `pages/` dir (`../pages/<rest>`),
+ * matching how the welcome page references its assets. Navigation goes
+ * through `globalThis.fetch`, which has no base-URL resolution and only
+ * `browser://` loaders registered (local fetch is disabled), so a bare
+ * relative path would 404 to the error page. Strip the leading
+ * `../`/`./` and the `pages/` prefix and re-express the remainder as a
+ * `browser://` URL, which `BrowserResourceLoader` maps back to
+ * `<profile>/pages/<rest>`. Already-absolute URLs pass through. */
+function appUrlToBrowserHref(url: string): string {
+	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+	const rel = url.replace(/^(?:\.\.?\/)+/, '').replace(/^pages\//, '');
+	return `browser://${rel}`;
+}
+
+function renderList(entries: ReadonlyArray<{ url: string; title?: string; description?: string }>): string {
 	const items = entries.map((e) => {
 		const label = e.title && e.title !== e.url
 			? `${htmlEscape(e.title)} · <span class="url">${htmlEscape(e.url)}</span>`
 			: htmlEscape(e.url);
-		return `<li><a href="${htmlEscape(e.url)}">${label}</a></li>`;
+		const desc = e.description
+			? `<span class="desc">${htmlEscape(e.description)}</span>`
+			: '';
+		return `<li><a href="${htmlEscape(e.url)}">${label}${desc}</a></li>`;
 	}).join('');
-	return `<ul class="library-list">${items}</ul>`;
+	return `<ul class="settings-list">${items}</ul>`;
 }
 
 function htmlEscape(s: string): string {

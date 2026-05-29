@@ -4,7 +4,7 @@
 // page. Also returns the parsed→live map the shell uses to wire
 // runner-managed `<canvas>` offscreens into the live tree.
 
-import type { HtmlElement, HtmlNode } from '../html/html-parser.js';
+import { type HtmlElement, type HtmlNode, parseHtml } from '../html/html-parser.js';
 import { getLiveRoot, LiveElement } from './live-dom.js';
 
 /** Tags dropped during conversion. <script> is also dropped — page-
@@ -58,6 +58,22 @@ export function populateLiveRoot(parsed: HtmlElement): Map<HtmlElement, LiveElem
 		}
 	}
 	return byParsed;
+}
+
+/** Parse an HTML fragment string and append the resulting LiveElements
+ * as children of `target`. Backs the `element.innerHTML = '<markup>'`
+ * setter so page scripts can build structured DOM (e.g. an audio
+ * player's playlist rows: `<span class="num">01</span><strong>Title
+ * </strong><span>subtitle</span>`). The caller clears `target`'s
+ * existing children first. Reuses the same HtmlElement→LiveElement
+ * converter the initial page load uses, so cascade matching, text
+ * flow, and nested elements behave identically. */
+export function parseFragmentInto(target: LiveElement, html: string): void {
+	const root = parseHtml(html);
+	const byParsed = new Map<HtmlElement, LiveElement>();
+	for (const child of root.children) {
+		appendConverted(target, child, byParsed);
+	}
 }
 
 /** Walk the parsed tree (skipping `<body>` since its descendants are

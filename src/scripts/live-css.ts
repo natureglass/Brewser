@@ -42,6 +42,7 @@
 import { generate, parse, walk, type CssNode, type Rule, type Selector } from 'css-tree';
 import { bumpLiveTreeVersion, type LiveElement } from './live-dom.js';
 import { parseLength, type CssLength } from './inline-css.js';
+import { markLiveDirty } from './live-paint-control.js';
 
 // =========================================================================
 // Type definitions
@@ -108,6 +109,10 @@ interface ParsedRule {
 export interface GradientStop {
 	color: string;
 	pos?: number;
+	/** Pixel-positioned stop (`color 1px`). Resolved against the gradient
+	 * line length at paint time (so it tracks `background-size` tiling).
+	 * Mutually exclusive with `pos`. */
+	posPx?: number;
 }
 
 /** `linear-gradient(<angle>, stops...)`. Angle stored in radians using
@@ -162,6 +167,19 @@ export interface PseudoStyle {
 	fontWeight?: 'normal' | 'bold' | number;
 	fontStyle?: 'normal' | 'italic' | 'oblique';
 	lineHeight?: number;
+	// Box-painting fields (a pseudo with `content: ""` that draws a
+	// decorative background box rather than text — e.g. a tiled grid
+	// overlay). The painter draws these for ::before (below host content)
+	// and ::after.
+	background?: string;
+	backgroundLayers?: BackgroundLayer[];
+	backgroundSize?: { w: number; h: number };
+	opacity?: number;
+	width?: CssLength;
+	height?: CssLength;
+	/** `mask-image: <gradient>` — an alpha mask applied to the pseudo's
+	 * painted background (e.g. a radial fade). */
+	maskImage?: BackgroundLayer;
 }
 
 /** Final cascade result handed to the painter. Mirrors InlineStyle plus
@@ -175,6 +193,11 @@ export interface ComputedLiveStyle {
 	 * are stored bottom-first (paint order) — CSS lists first-on-top, we
 	 * reverse at parse time so the painter can just iterate forward. */
 	backgroundLayers?: BackgroundLayer[];
+	/** Parsed `background-size` when it's a fixed px tile (`42px 42px` /
+	 * `42px`). Drives gradient TILING in the painter — each layer repeats
+	 * across the box in tiles of this size. `cover`/`contain`/`auto` /
+	 * percentage sizes leave this undefined (painter fills the box once). */
+	backgroundSize?: { w: number; h: number };
 	fontFamily?: string;
 	fontSize?: number;
 	fontWeight?: 'normal' | 'bold' | number;
@@ -188,11 +211,23 @@ export interface ComputedLiveStyle {
 		| 'lower-roman' | 'upper-roman';
 	cursor?: string;
 	opacity?: number;
-	display?: 'block' | 'inline' | 'inline-block' | 'flex' | 'grid' | 'table' | 'none';
+	display?: 'block' | 'inline' | 'inline-block' | 'flex' | 'inline-flex' | 'grid' | 'table' | 'none';
 	/** Raw `grid-template-columns:` value (parsed at layout time). The
 	 * layout module supports `repeat(auto-fit, minmax(<len>, 1fr))`,
-	 * `repeat(<N>, <track>)`, and explicit space-separated track lists. */
+	 * `repeat(<N>, <track>)`, and explicit space-separated track lists
+	 * (each track a `<len>` / `%` / `<n>fr` / `auto` / `minmax(a, b)`). */
 	gridTemplateColumns?: string;
+	/** Raw `grid-template-rows:` value (parsed at layout time, same track
+	 * grammar as columns but resolved against the container's content
+	 * HEIGHT). Presence switches the grid into explicit 2D mode, where
+	 * children honour `gridColumn` / `gridRow` placement; absence keeps
+	 * the row-major auto-flow + content-sized rows behaviour. */
+	gridTemplateRows?: string;
+	/** Raw `grid-column:` / `grid-row:` placement, e.g. `"1"`, `"2"`,
+	 * `"1 / 3"`, `"span 2"`. Parsed at layout time into a start line +
+	 * span over the explicit track grid. */
+	gridColumn?: string;
+	gridRow?: string;
 	width?: CssLength;
 	height?: CssLength;
 	// M2.6: positioning props through the cascade so class-based rules
@@ -203,6 +238,19 @@ export interface ComputedLiveStyle {
 	left?: number;
 	right?: number;
 	bottom?: number;
+	// Percentage offsets (kept separate from the px `top`/`left`/... so the
+	// existing px read-sites stay plain numbers). Resolved against the
+	// containing block in the absolute-layout pass — e.g. `left: 50%` for a
+	// centered overlay. % on fixed/relative isn't wired (rare).
+	topPct?: number;
+	leftPct?: number;
+	rightPct?: number;
+	bottomPct?: number;
+	/** Parsed `transform` translate (only translateX/Y/translate). Baked
+	 * into the box position in the absolute-layout pass; `%` resolves
+	 * against the element's OWN box (so `translateX(-50%)` + `left:50%`
+	 * centers). Other transform functions (scale/rotate) are ignored. */
+	transform?: { tx?: CssLength; ty?: CssLength };
 	zIndex?: number;
 	// M2.3 layout.
 	paddingTop?: number;
@@ -219,6 +267,10 @@ export interface ComputedLiveStyle {
 	flexShrink?: number;
 	flexBasis?: number;
 	alignItems?: 'stretch' | 'flex-start' | 'flex-end' | 'center';
+	/** `justify-items` (grid inline-axis alignment). Used to center a
+	 * text-only grid box's content (the `place-items: center` badge idiom).
+	 * Stored separately from `text-align` so it can override it. */
+	justifyItems?: 'start' | 'end' | 'center' | 'stretch';
 	justifyContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around';
 	boxSizing?: 'content-box' | 'border-box';
 	minWidth?: CssLength;
@@ -369,6 +421,7 @@ export function invalidateLiveStyle(el?: LiveElement | null): void {
 		return;
 	}
 	walkInvalidate(el);
+	markLiveDirty(el);
 	bumpLiveTreeVersion();
 }
 
@@ -812,6 +865,10 @@ function applyDeclToComputed(
 			else computed.backgroundLayers = undefined;
 			return;
 		}
+		case 'background-size': {
+			computed.backgroundSize = parseBackgroundSize(value);
+			return;
+		}
 		case 'font-family': computed.fontFamily = stripQuoted(value); return;
 		case 'font-size': {
 			// em on font-size resolves against the PARENT's font-size, not
@@ -890,11 +947,23 @@ function applyDeclToComputed(
 		case 'display': {
 			const v = value.trim().toLowerCase();
 			if (v === 'block' || v === 'inline' || v === 'inline-block'
-				|| v === 'flex' || v === 'grid' || v === 'none') computed.display = v;
+				|| v === 'flex' || v === 'inline-flex' || v === 'grid' || v === 'none') computed.display = v;
 			return;
 		}
 		case 'grid-template-columns': {
 			computed.gridTemplateColumns = value.trim();
+			return;
+		}
+		case 'grid-template-rows': {
+			computed.gridTemplateRows = value.trim();
+			return;
+		}
+		case 'grid-column': {
+			computed.gridColumn = value.trim();
+			return;
+		}
+		case 'grid-row': {
+			computed.gridRow = value.trim();
 			return;
 		}
 		case 'width': {
@@ -943,7 +1012,26 @@ function applyDeclToComputed(
 			const v = value.trim().toLowerCase();
 			if (v === 'stretch' || v === 'flex-start' || v === 'flex-end' || v === 'center') {
 				computed.alignItems = v;
-			}
+			} else if (v === 'start') computed.alignItems = 'flex-start';
+			else if (v === 'end') computed.alignItems = 'flex-end';
+			return;
+		}
+		case 'justify-items': {
+			computed.justifyItems = parseJustifyItems(value);
+			return;
+		}
+		case 'place-items': {
+			// Shorthand: `<align-items> [<justify-items>]`. One value sets
+			// both axes. Powers the `place-items: center` badge idiom (center
+			// a text-only grid box's content both ways).
+			const toks = value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+			const a = toks[0];
+			const j = toks[1] ?? toks[0];
+			if (a === 'center') computed.alignItems = 'center';
+			else if (a === 'start' || a === 'flex-start') computed.alignItems = 'flex-start';
+			else if (a === 'end' || a === 'flex-end') computed.alignItems = 'flex-end';
+			else if (a === 'stretch') computed.alignItems = 'stretch';
+			computed.justifyItems = parseJustifyItems(j);
 			return;
 		}
 		case 'justify-content': {
@@ -977,10 +1065,16 @@ function applyDeclToComputed(
 			}
 			return;
 		}
-		case 'top':    return assignNum(computed, 'top', value);
-		case 'left':   return assignNum(computed, 'left', value);
-		case 'right':  return assignNum(computed, 'right', value);
-		case 'bottom': return assignNum(computed, 'bottom', value);
+		case 'top':    return assignPosEdge(computed, 'top', value);
+		case 'left':   return assignPosEdge(computed, 'left', value);
+		case 'right':  return assignPosEdge(computed, 'right', value);
+		case 'bottom': return assignPosEdge(computed, 'bottom', value);
+		case 'inset':  return assignInset(computed, value);
+		case 'transform': {
+			const tf = parseTransformTranslate(value);
+			if (tf) computed.transform = tf;
+			return;
+		}
 		case 'z-index': {
 			const n = parsePxOrNum(value);
 			if (n !== undefined) computed.zIndex = Math.trunc(n);
@@ -1073,6 +1167,28 @@ function applyDeclToPseudoStyle(
 		case 'right': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.right = n; return; }
 		case 'bottom': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.bottom = n; return; }
 		case 'left': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.left = n; return; }
+		case 'inset': return assignInsetPseudo(slot, value);
+		case 'background':
+		case 'background-color': {
+			slot.background = value;
+			const layers = parseBackgroundLayers(value);
+			if (layers) slot.backgroundLayers = layers;
+			return;
+		}
+		case 'background-size': { slot.backgroundSize = parseBackgroundSize(value); return; }
+		case 'opacity': {
+			const n = parseFloat(value);
+			if (Number.isFinite(n)) slot.opacity = Math.max(0, Math.min(1, n));
+			return;
+		}
+		case 'width': { const len = parseLength(value); if (len !== undefined) slot.width = len; return; }
+		case 'height': { const len = parseLength(value); if (len !== undefined) slot.height = len; return; }
+		case 'mask-image':
+		case '-webkit-mask-image': {
+			const m = parseMaskImage(value);
+			if (m) slot.maskImage = m;
+			return;
+		}
 		case 'color': slot.color = value; return;
 		case 'font-size': {
 			const n = parsePxOrNum(value, { emBase });
@@ -1179,7 +1295,13 @@ function assignBoxComputed(
 	if (tokens.length === 0) return;
 	const nums: number[] = [];
 	for (const t of tokens) {
-		const n = parsePxOrNum(t);
+		// `auto` (margin centering) resolves to 0 in this engine — we
+		// don't implement auto-margin centering, and the elements that
+		// use it (`margin: 0 auto …`) are full-width blocks where it's a
+		// no-op anyway. Treating it as 0 (instead of bailing on the whole
+		// shorthand) means the OTHER components — notably the bottom
+		// margin in `margin: 0 auto 58px` — still apply.
+		const n = t.toLowerCase() === 'auto' ? 0 : parsePxOrNum(t);
 		if (n === undefined) return;
 		nums.push(n);
 	}
@@ -1195,6 +1317,143 @@ function assignBoxComputed(
 	(computed as Record<string, unknown>)[cap.toLowerCase() === 'padding' ? 'paddingRight' : 'marginRight'] = r;
 	(computed as Record<string, unknown>)[cap.toLowerCase() === 'padding' ? 'paddingBottom' : 'marginBottom'] = b;
 	(computed as Record<string, unknown>)[cap.toLowerCase() === 'padding' ? 'paddingLeft' : 'marginLeft'] = l;
+}
+
+/** Parse the four `inset` shorthand values (TRBL, same expansion as
+ * padding/margin) into top/right/bottom/left. `auto` leaves that edge
+ * unset (we don't implement auto offset resolution). Used for both
+ * normal elements and pseudo-elements (`inset: 0` to fill the host). */
+function expandInsetTokens(value: string): (number | undefined)[] | undefined {
+	const tokens = value.trim().split(/\s+/).filter(Boolean);
+	if (tokens.length === 0) return undefined;
+	const nums: (number | undefined)[] = [];
+	for (const t of tokens) {
+		if (t.toLowerCase() === 'auto') { nums.push(undefined); continue; }
+		const n = parsePxOrNum(t);
+		if (n === undefined) return undefined;
+		nums.push(n);
+	}
+	let top: number | undefined, right: number | undefined,
+		bottom: number | undefined, left: number | undefined;
+	switch (nums.length) {
+		case 1: top = right = bottom = left = nums[0]; break;
+		case 2: top = bottom = nums[0]; right = left = nums[1]; break;
+		case 3: top = nums[0]; right = left = nums[1]; bottom = nums[2]; break;
+		default: top = nums[0]; right = nums[1]; bottom = nums[2]; left = nums[3]; break;
+	}
+	return [top, right, bottom, left];
+}
+
+/** Assign a positional edge (`top`/`left`/`right`/`bottom`). A `%` value
+ * goes to the parallel `*Pct` field (resolved against the containing block
+ * in the absolute-layout pass); anything else stays a px number in the
+ * primary field. Setting one form clears the other so a re-cascade can't
+ * leave both. */
+function assignPosEdge(
+	computed: ComputedLiveStyle,
+	edge: 'top' | 'left' | 'right' | 'bottom',
+	value: string,
+): void {
+	const t = value.trim();
+	const pct = /^(-?\d+(?:\.\d+)?)%$/.exec(t);
+	const pctKey = (edge + 'Pct') as 'topPct' | 'leftPct' | 'rightPct' | 'bottomPct';
+	if (pct) {
+		computed[pctKey] = parseFloat(pct[1]);
+		computed[edge] = undefined;
+		return;
+	}
+	const n = parsePxOrNum(value);
+	if (n !== undefined) {
+		computed[edge] = n;
+		computed[pctKey] = undefined;
+	}
+}
+
+/** Parse the translate part of a `transform` value (`translateX(..)`,
+ * `translateY(..)`, `translate(x[, y])`). Lengths may be px or `%` (kept
+ * as CssLength for own-box resolution at layout time). Returns undefined
+ * when no translate is present (scale/rotate/etc. are ignored). */
+function parseTransformTranslate(value: string): { tx?: CssLength; ty?: CssLength } | undefined {
+	let tx: CssLength | undefined;
+	let ty: CssLength | undefined;
+	const re = /(translate[XY]?)\s*\(([^)]*)\)/gi;
+	let m: RegExpExecArray | null;
+	let saw = false;
+	while ((m = re.exec(value)) !== null) {
+		const fn = m[1].toLowerCase();
+		const args = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+		if (fn === 'translatex') { const v = parseLength(args[0] ?? ''); if (v !== undefined) { tx = v; saw = true; } }
+		else if (fn === 'translatey') { const v = parseLength(args[0] ?? ''); if (v !== undefined) { ty = v; saw = true; } }
+		else { // translate(x[, y])
+			const vx = parseLength(args[0] ?? '');
+			if (vx !== undefined) { tx = vx; saw = true; }
+			if (args.length > 1) { const vy = parseLength(args[1]); if (vy !== undefined) { ty = vy; saw = true; } }
+		}
+	}
+	return saw ? { tx, ty } : undefined;
+}
+
+/** Normalize a `justify-items` / `place-items` inline-axis token. `flex-*`
+ * spellings map to start/end; unrecognized → undefined. */
+function parseJustifyItems(value: string): 'start' | 'end' | 'center' | 'stretch' | undefined {
+	const v = value.trim().toLowerCase();
+	if (v === 'center' || v === 'stretch' || v === 'start' || v === 'end') return v;
+	if (v === 'flex-start' || v === 'left') return 'start';
+	if (v === 'flex-end' || v === 'right') return 'end';
+	return undefined;
+}
+
+function assignInset(computed: ComputedLiveStyle, value: string): void {
+	const edges = expandInsetTokens(value);
+	if (!edges) return;
+	const [top, right, bottom, left] = edges;
+	if (top !== undefined) computed.top = top;
+	if (right !== undefined) computed.right = right;
+	if (bottom !== undefined) computed.bottom = bottom;
+	if (left !== undefined) computed.left = left;
+}
+
+function assignInsetPseudo(slot: PseudoStyle, value: string): void {
+	const edges = expandInsetTokens(value);
+	if (!edges) return;
+	const [top, right, bottom, left] = edges;
+	if (top !== undefined) slot.top = top;
+	if (right !== undefined) slot.right = right;
+	if (bottom !== undefined) slot.bottom = bottom;
+	if (left !== undefined) slot.left = left;
+}
+
+/** Parse `background-size` only for the fixed-px-tile case (`42px 42px`
+ * or `42px`), which drives gradient TILING in the painter. One value
+ * sets both axes; `auto` for the second axis mirrors the first. Returns
+ * undefined for `cover` / `contain` / `auto` / `%` sizes (the painter
+ * then fills the box once, as before). */
+function parseBackgroundSize(value: string): { w: number; h: number } | undefined {
+	const t = value.trim().toLowerCase();
+	if (!t || t === 'cover' || t === 'contain' || t === 'auto') return undefined;
+	const tokens = t.split(/\s+/).filter(Boolean);
+	const px = (s: string): number | undefined => {
+		const m = /^(\d+(?:\.\d+)?)px$/.exec(s);
+		return m ? parseFloat(m[1]) : undefined;
+	};
+	const w = px(tokens[0]);
+	if (w === undefined || w <= 0) return undefined;
+	const second = tokens[1];
+	const h = second === undefined || second === 'auto' ? w : px(second);
+	if (h === undefined || h <= 0) return undefined;
+	return { w, h };
+}
+
+/** Parse `mask-image` / `-webkit-mask-image` when it's a single gradient
+ * (the only mask form we render — used as an alpha fade over a pseudo's
+ * background). Returns undefined for `none` / url() / unsupported forms. */
+function parseMaskImage(value: string): BackgroundLayer | undefined {
+	const t = value.trim();
+	const lin = /^linear-gradient\((.+)\)$/i.exec(t);
+	if (lin) return parseLinearGradient(lin[1]);
+	const rad = /^radial-gradient\((.+)\)$/i.exec(t);
+	if (rad) return parseRadialGradient(rad[1]);
+	return undefined;
 }
 
 function assignFlexShorthand(computed: ComputedLiveStyle, value: string): void {
@@ -1441,24 +1700,34 @@ function parseGradientStop(s: string): GradientStop | undefined {
 		if (pct) {
 			return { color: t.slice(0, lastSpaceAtZero).trim(), pos: parseFloat(pct[1]) / 100 };
 		}
-		// Treat raw pixel/em as a literal value the painter resolves
-		// against the gradient extent at paint time. For now, we only
-		// support % positions — fall through and treat as a colour-only
-		// stop if the tail isn't a percent.
+		// Pixel-positioned stop (`color 1px`). Kept as a raw px value and
+		// resolved against the gradient line length at paint time — this is
+		// what makes a `background-size`-tiled grid (`color 1px, transparent
+		// 1px` per 42px tile) render as crisp 1px lines rather than a smooth
+		// fade across the whole box.
+		const pxStop = /^(-?\d+(?:\.\d+)?)px$/.exec(tail);
+		if (pxStop) {
+			return { color: t.slice(0, lastSpaceAtZero).trim(), posPx: parseFloat(pxStop[1]) };
+		}
 	}
 	return { color: t, pos: undefined };
 }
 
 /** Distribute any unset `.pos` values across `stops` per CSS gradient
  * spec: first defaults to 0, last to 1, interior runs of unset values
- * are evenly spaced between their bracketing set values. */
+ * are evenly spaced between their bracketing set values. A px-positioned
+ * stop (`posPx`) counts as already-positioned — its fraction is resolved
+ * at paint time against the gradient line length, so it's left untouched
+ * here (and never has a `pos` default forced onto it). */
 function fillGradientStopPositions(stops: GradientStop[]): void {
 	if (stops.length === 0) return;
-	if (stops[0].pos === undefined) stops[0].pos = 0;
-	if (stops[stops.length - 1].pos === undefined) stops[stops.length - 1].pos = 1;
+	const positioned = (s: GradientStop): boolean => s.pos !== undefined || s.posPx !== undefined;
+	if (!positioned(stops[0])) stops[0].pos = 0;
+	if (!positioned(stops[stops.length - 1])) stops[stops.length - 1].pos = 1;
 	// Monotonic clamp: a positioned stop never goes earlier than the
 	// previous positioned one (CSS specifies that backwards-positioned
-	// stops are clamped forward, smoothing the gradient).
+	// stops are clamped forward, smoothing the gradient). Only fraction
+	// stops participate; px stops resolve later so we can't compare here.
 	let lastPos = stops[0].pos ?? 0;
 	for (const stop of stops) {
 		if (stop.pos !== undefined) {
@@ -1466,12 +1735,12 @@ function fillGradientStopPositions(stops: GradientStop[]): void {
 			else lastPos = stop.pos;
 		}
 	}
-	// Distribute unset interior runs.
+	// Distribute unset interior runs (stops with neither pos nor posPx).
 	let i = 0;
 	while (i < stops.length) {
-		if (stops[i].pos !== undefined) { i++; continue; }
+		if (positioned(stops[i])) { i++; continue; }
 		let j = i;
-		while (j < stops.length && stops[j].pos === undefined) j++;
+		while (j < stops.length && !positioned(stops[j])) j++;
 		const startPos = stops[i - 1].pos ?? 0;
 		const endPos = stops[j]?.pos ?? 1;
 		const span = (endPos - startPos) / (j - i + 1);
@@ -1737,20 +2006,64 @@ function safeGenerate(node: CssNode): string {
 	try { return generate(node); } catch (_) { return ''; }
 }
 
+/** Viewport size used to evaluate dimensional media features
+ * (`max-width` / `min-width` / `max-height` / `min-height`). Defaults
+ * to the Switch's 1280×720 content area; the shell can override via
+ * `setMediaViewport` if it ever lays content out at a different size.
+ * Read at stylesheet-parse time (the viewport is fixed per page load),
+ * so a change only takes effect on the next `registerStyleSheet`. */
+let mediaVpW = 1280;
+let mediaVpH = 720;
+export function setMediaViewport(w: number, h: number): void {
+	mediaVpW = w;
+	mediaVpH = h;
+}
+
 /** Match a media-query string against our Switch profile.
  *   - `(pointer:coarse)` => true (Switch is touch)
  *   - `(hover:hover)`   => false (no real hover; lil-gui gates its
  *                         hover-only rules behind this)
+ *   - `(max-width:Npx)` / `(min-width:Npx)` / `*-height` => compared
+ *      against the 1280×720 content viewport. Previously these fell to
+ *      the permissive `return true`, so a desktop-style stylesheet with
+ *      `@media (max-width: 620px)` overrides applied them ALL at once on
+ *      the 1280px screen (last one wins) — collapsing multi-column grids
+ *      to one column, stacking flex bars, etc.
  *   - `screen` / no query => true
  *   - anything else => true (permissive — better to apply than skip)
  */
 function matchMediaQuery(q: string): boolean {
-	const t = q.toLowerCase().replace(/\s+/g, '');
+	const raw = q.toLowerCase();
+	const t = raw.replace(/\s+/g, '');
 	if (!t || t === 'all' || t === 'screen') return true;
 	if (t.indexOf('(hover:hover)') >= 0) return false;
 	if (t.indexOf('(hover:none)') >= 0) return true;
 	if (t.indexOf('(pointer:coarse)') >= 0) return true;
 	if (t.indexOf('(pointer:fine)') >= 0) return false;
+
+	// Dimensional features. A media-query list is comma-separated (OR);
+	// each branch is `and`-joined terms (AND). Evaluate every recognized
+	// `(max|min)-(width|height): Npx` term; unrecognized terms in a
+	// branch are ignored (treated as satisfied). If the page used any
+	// dimensional feature but no branch matched, the rule is inactive.
+	const dimRe = /\((max|min)-(width|height)\s*:\s*(\d+(?:\.\d+)?)px\)/g;
+	if (dimRe.test(raw)) {
+		for (const branch of raw.split(',')) {
+			let branchOk = true;
+			let sawTerm = false;
+			const re = /\((max|min)-(width|height)\s*:\s*(\d+(?:\.\d+)?)px\)/g;
+			let m: RegExpExecArray | null;
+			while ((m = re.exec(branch)) !== null) {
+				sawTerm = true;
+				const limit = parseFloat(m[3]);
+				const actual = m[2] === 'width' ? mediaVpW : mediaVpH;
+				const ok = m[1] === 'max' ? actual <= limit : actual >= limit;
+				if (!ok) { branchOk = false; break; }
+			}
+			if (sawTerm && branchOk) return true;
+		}
+		return false;
+	}
 	return true;
 }
 

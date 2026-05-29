@@ -17,7 +17,7 @@
     "back": "assets/left.png",
     "forward": "assets/right.png",
     "home": "assets/home.png",
-    "library": "assets/library.png",
+    "settings": "assets/settings.png",
     "bookmarkTrue": "assets/bookmark_true.png",
     "bookmarkFalse": "assets/bookmark_false.png"
   },

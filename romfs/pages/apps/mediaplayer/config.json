@@ -1,0 +1,19 @@
+{
+    "audioFilesPath": "/music/",
+    "visualizer": {
+        "gain": 30.0,
+        "waveGain": 1.4,
+        "flipY": false,
+        "bgAlpha": 0.0,
+        "vividness": 0.5,
+        "waveform": 256,
+        "bars": 20,
+        "orbit": 210,
+        "radialBars": 64,
+        "mirrorWave": 210,
+        "spectrumLine": 120,
+        "pulseRings": 90,
+        "particles": 360,
+        "nebula": 140
+    }
+}

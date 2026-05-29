@@ -33,7 +33,9 @@ import {
 	tickAnimationFrames,
 	type PageScriptContext,
 } from './scripts/canvas-runner.js';
-import { getLiveRoot, resetLiveRoot, type LiveElement } from './scripts/live-dom.js';
+import { getLiveRoot, getLiveTreeVersion, resetLiveRoot, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
+import { getComputedLiveStyle } from './scripts/live-css.js';
+import { setCssViewport } from './scripts/inline-css.js';
 import { setKeyboardOpener } from './scripts/live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
@@ -52,8 +54,9 @@ import {
 	videoToggleMute,
 } from './scripts/live-video.js';
 import {
-	getLiveContentBottom, isLiveCacheReady, overlayLiveAnimatedCanvases,
-	paintLiveOverlay, resetLiveOverlayCache,
+	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
+	overlayLiveAnimatedCanvases, paintLiveOverlay, patchLiveDirtyRegions,
+	resetLiveOverlayCache,
 } from './scripts/live-overlay.js';
 import {
 	consumeFullRepaintRequest, isKeyboardOpen, requestFullRepaint,
@@ -71,6 +74,7 @@ import {
 	setChromeRegion,
 	setLiveViewport,
 	setNavigating,
+	setStarEnabled,
 	waitForControllerInput,
 	type BrowserMode,
 } from './input/controller-shortcuts.js';
@@ -81,7 +85,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from './network/network-probe.js';
 import { BrowserPermissionPolicy } from './permissions/browser-permission-policy.js';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_TEMPLATE, loadConfig, loadTemplate, type BrowserTemplate } from './profile/browser-template.js';
+import { DEFAULT_TEMPLATE, loadConfig, loadTemplate, resolveSearchEngine, type BrowserTemplate } from './profile/browser-template.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -120,6 +124,11 @@ export class BrowserShell {
 	 * fullscreen-canvas mode, so we can put it back on exit. `null` when
 	 * not currently fullscreening any canvas. */
 	private fullscreenCanvasOriginalSize: { width: number; height: number } | null = null;
+	/** `true` when the current fullscreen-canvas was entered in "live"
+	 * mode (canvas carries `data-fullscreen-live`): we did NOT rerun the
+	 * page scripts, so the page kept all its state and its own RAF loop
+	 * adapts to the new size. Exit must likewise skip the rerun. */
+	private fullscreenCanvasLive = false;
 	/** The focused `<video>` element while `mode === 'video-fullscreen'`,
 	 * `null` otherwise. Drives `overlayLiveAnimatedCanvases`'s
 	 * fullscreen-video paint branch. */
@@ -145,6 +154,12 @@ export class BrowserShell {
 	 * it has, the persistent pixels under the video are stale and the
 	 * slow path must run instead. */
 	private lastRepaintedScrollY: number = Number.NaN;
+	/** Live tree version the idle-tick path last repainted. Page-script
+	 * timer mutations (setTimeout/setInterval) bump the tree version but
+	 * fire no rAF / video frame / tap, so without comparing against this
+	 * they'd never reach the screen — e.g. the audio player's 4 Hz
+	 * updateTimeline advancing the seek bar + time during passive playback. */
+	private lastTickTreeVersion: number = -1;
 
 	constructor() {
 		this.policy = new BrowserPermissionPolicy();
@@ -169,6 +184,9 @@ export class BrowserShell {
 				// canvas while no canvas exists to paint.
 				this.currentScrollY = 0;
 				this.fullscreenCanvasOriginalSize = null;
+				this.fullscreenCanvasLive = false;
+				(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
+					.__swbFullscreenCanvasSize = null;
 				this.navigation.setCurrentTitle(null);
 				this.setMode('normal');
 				this.currentPageUrl = '';
@@ -231,6 +249,11 @@ export class BrowserShell {
 		// keyboard the URL bar uses. Returns the typed string on Submit
 		// or `null` on Cancel.
 		setKeyboardOpener((initial) => this.keyboard.open(initial));
+		// Let live-DOM `<img>` resolve profile-pages-relative srcs
+		// (`../pages/<rest>`) to the absolute SD-card profile path, so page
+		// images load the editable profile copy instead of nx.js's romfs
+		// base (which needs a .nro rebuild + redeploy to update).
+		setLiveProfileRoot(this.profile.storageRoot);
 	}
 
 	async run(): Promise<void> {
@@ -245,7 +268,7 @@ export class BrowserShell {
 		// scrolling so the clamp + repaint path is shared.
 		setTouchScrollHandler((delta) => this.handleScroll(delta));
 
-		this.paintBootSplash();
+		await this.paintBootSplash();
 		// Copy missing built-in pages, toolbar icons, and template.json
 		// from romfs into the profile dir. Cheap on every launch
 		// (existence check + skip for files that already exist) so the
@@ -388,11 +411,42 @@ export class BrowserShell {
 						if (info.scrolledThisTick) {
 							return false; // build-continuation deferred to next idle tick
 						}
+						// Idle tick. Drive an in-progress live-DOM content build
+						// straight from here instead of trusting the chunked
+						// builder's own setTimeout→requestFullRepaint
+						// continuation: on a fully STATIC page (no rAF/video
+						// activity) that continuation didn't reliably fire, so
+						// the build stalled after its first ~12 ms chunk and the
+						// page rendered only partially (e.g. the audio player's
+						// library + lower controls never painted). Re-painting
+						// every active tick while `isLiveCacheBuilding()` is true
+						// advances the chunked build to completion regardless of
+						// rAF — and `repaintContent` is a no-op-cheap cache blit
+						// once the build finishes and the flag clears.
 						const repaintRequested = consumeFullRepaintRequest();
-						if (repaintRequested) {
+						if (repaintRequested || isLiveCacheBuilding()) {
 							this.repaintContent();
 							if (this.mode === 'normal' && (reachableChanged || modeChanged)) this.renderChrome();
+							this.lastTickTreeVersion = getLiveTreeVersion();
 							return true;
+						}
+						// Page-script timer mutations (setTimeout/setInterval)
+						// bump the live tree version but fire no rAF, video
+						// frame, or tap — e.g. the audio player's 4 Hz
+						// updateTimeline advancing the seek bar + time label
+						// during passive playback. The branches above wouldn't
+						// catch them, so detect the version change here and run
+						// the same partial repaint the tap path uses (it patches
+						// just the changed regions, or punts to a full rebuild).
+						const treeVersionNow = getLiveTreeVersion();
+						if (treeVersionNow !== this.lastTickTreeVersion) {
+							this.lastTickTreeVersion = treeVersionNow;
+							const patched = patchLiveDirtyRegions();
+							if (consumeFullRepaintRequest() || patched) {
+								this.repaintContent();
+								if (this.mode === 'normal' && (reachableChanged || modeChanged)) this.renderChrome();
+								return true;
+							}
 						}
 						// Idle tick: nothing else fired, but if the
 						// operation mode just changed we still want to
@@ -416,9 +470,10 @@ export class BrowserShell {
 						await this.promptAndNavigate();
 						break;
 					case 'back':
-						// In video-fullscreen, B exits back to the page
-						// rather than navigating history.
-						if (this.mode === 'video-fullscreen') {
+						// In a fullscreen mode (video or canvas), B exits
+						// back to the page rather than navigating history —
+						// same affordance as the L+R combo.
+						if (this.mode === 'video-fullscreen' || this.mode === 'fullscreen-canvas') {
 							await this.exitFullscreen();
 						} else {
 							await this.runNavigation(() => this.navigation.goBack());
@@ -430,8 +485,8 @@ export class BrowserShell {
 					case 'home':
 						await this.navigateTo(DEFAULT_HOME_URL);
 						break;
-					case 'library':
-						await this.navigateTo('browser://library/');
+					case 'settings':
+						await this.navigateTo('browser://settings/');
 						break;
 					case 'star':
 						this.toggleBookmark();
@@ -439,11 +494,16 @@ export class BrowserShell {
 					case 'reload':
 						await this.runNavigation(() => this.navigation.reload());
 						break;
-					case 'navigate':
-						_shellInputDiag('navigateTo about to be called for ' + input.url);
-						await this.navigateTo(input.url);
-						_shellInputDiag('navigateTo returned for ' + input.url);
+					case 'navigate': {
+						// Link (`<a href>`) taps: resolve a relative href against
+						// the current page's URL, same page-relative architecture
+						// as `<img>` srcs. Absolute URLs pass through unchanged.
+						const navUrl = this.resolveNavUrl(input.url);
+						_shellInputDiag('navigateTo about to be called for ' + navUrl);
+						await this.navigateTo(navUrl);
+						_shellInputDiag('navigateTo returned for ' + navUrl);
 						break;
+					}
 					case 'button-action':
 						await this.dispatchButtonAction(input.action);
 						break;
@@ -496,6 +556,32 @@ export class BrowserShell {
 		}
 	}
 
+	/** Resolve a link `href` against the current page's URL, mirroring how
+	 * `<img>` srcs resolve page-relative — but producing a `browser://` URL
+	 * (navigation goes through the resource loaders, which serve
+	 * `browser://`). Absolute URLs (any scheme) pass through; a root-relative
+	 * `/foo` re-roots at the browser origin; everything else resolves against
+	 * the current page's directory with `.`/`..` handling. */
+	private resolveNavUrl(url: string): string {
+		const u = url.trim();
+		if (!u) return u;
+		if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;          // has scheme → absolute
+		const base = this.currentPageUrl;
+		if (!/^browser:\/\//i.test(base)) return u;            // no browser base → leave as-is
+		if (u.startsWith('#')) return base.split('#')[0] + u;  // same-page fragment
+		if (u.startsWith('/')) return `browser://${u.replace(/^\/+/, '')}`; // root-relative
+		const basePath = base.replace(/^browser:\/\//i, '').split('?')[0].split('#')[0];
+		const slash = basePath.lastIndexOf('/');
+		const parts = (slash >= 0 ? basePath.slice(0, slash) : '').split('/').filter(Boolean);
+		const [path, tail] = [u.split(/[?#]/)[0], u.slice(u.split(/[?#]/)[0].length)];
+		for (const seg of path.split('/')) {
+			if (seg === '' || seg === '.') continue;
+			if (seg === '..') { parts.pop(); continue; }
+			parts.push(seg);
+		}
+		return `browser://${parts.join('/')}${tail}`;
+	}
+
 	private async navigateTo(url: string): Promise<void> {
 		setNavigating(true);
 		try {
@@ -511,11 +597,17 @@ export class BrowserShell {
 		const reachable = readInternetReachable();
 		const mode = readOperationMode();
 		const modeLabel = mode === 0 ? 'HANDHELD' : mode === 1 ? 'DOCKED' : '';
+		// Only real web pages (http/https) can be bookmarked — local
+		// `browser://` pages hide the star. Keep the touch handler's
+		// star-slot gate in sync so its tap falls through to the URL bar.
+		const bookmarkable = isBookmarkable(url);
+		setStarEnabled(bookmarkable);
 		this.ui.renderAddressBar({
 			currentURL: url,
 			canGoBack: this.navigation.controller.canGoBack,
 			canGoForward: this.navigation.controller.canGoForward,
-			bookmarked: url ? this.bookmarksStore.has(url) : false,
+			bookmarked: bookmarkable && url ? this.bookmarksStore.has(url) : false,
+			bookmarkable,
 			internetReachable: reachable,
 		}, modeLabel);
 		// Capture so onTick's chrome-skip gate notices external state
@@ -533,7 +625,9 @@ export class BrowserShell {
 	 */
 	private toggleBookmark(): void {
 		const url = this.navigation.currentURL;
-		if (!url) return;
+		// Only http/https pages are bookmarkable; local browser:// pages
+		// have no star (defensive — the tap handler already gates this).
+		if (!url || !isBookmarkable(url)) return;
 		const title = this.navigation.currentTitle || url;
 		this.bookmarksStore.toggle({ url, title, addedAt: Date.now() });
 		this.renderChrome();
@@ -606,6 +700,39 @@ export class BrowserShell {
 		return Math.max(0, contentBottom - visibleHeight - this.paintScrollAdjust());
 	}
 
+	/** SD-card directory of a `browser://` page, used as the base for
+	 * page-relative `<img>` srcs (`./assets/x.png`), like a browser uses the
+	 * document URL. Mirrors `BrowserResourceLoader.classifyUrl`'s HTML
+	 * resolution so the base matches the file that actually loaded:
+	 *   - explicit file (`.../index.html`) → its parent dir.
+	 *   - directory form (`browser://welcome/`) → the loader tries
+	 *     `<path>.html` first (→ base is the PARENT, e.g. welcome.html lives
+	 *     in `pages/`), then `<path>/index.html` (→ base is `<path>/`).
+	 * Non-`browser://` URLs return '' (no page base). */
+	private computeLivePageBase(url: string): string {
+		if (!/^browser:\/\//i.test(url)) return '';
+		const root = this.profile.storageRoot;
+		const stripped = url.replace(/^browser:\/\//i, '')
+			.split('?')[0].split('#')[0].replace(/^\/+/, '').replace(/\/+$/, '');
+		if (!stripped) return `${root}pages/`;
+		const slash = stripped.lastIndexOf('/');
+		const lastSeg = stripped.slice(slash + 1);
+		const parentDir = slash >= 0 ? stripped.slice(0, slash + 1) : '';
+		// Explicit file → base is its parent directory.
+		if (!url.endsWith('/') && lastSeg.includes('.')) {
+			return `${root}pages/${parentDir}`;
+		}
+		// Directory form: prefer the `<path>.html` candidate (loaded from the
+		// PARENT dir) when that file exists, else `<path>/index.html`.
+		const htmlCandidate = `${root}pages/${stripped}.html`;
+		let htmlExists = false;
+		try {
+			const sw = (globalThis as { Switch?: { readFileSync?: (p: string) => unknown } }).Switch;
+			if (sw && typeof sw.readFileSync === 'function') htmlExists = !!sw.readFileSync(htmlCandidate);
+		} catch (_) { htmlExists = false; }
+		return htmlExists ? `${root}pages/${parentDir}` : `${root}pages/${stripped}/`;
+	}
+
 	/**
 	 * onHtmlResponse implementation. Resets the live root + cascade,
 	 * populates it from the parsed tree, runs page scripts with
@@ -617,7 +744,7 @@ export class BrowserShell {
 	 * Why the `resetLiveOverlayCache()` call: `resetLiveRoot()` resets
 	 * `liveTreeVersion` to 0. If the new page's populate produces the
 	 * same number of bumps as the prior page's last paint (e.g. two
-	 * loads of the Library page wrapping the same templates),
+	 * loads of the Settings page wrapping the same templates),
 	 * `paintLiveOverlay`'s dirty check would say "cache valid" and skip
 	 * the rebuild — but the cache's WeakMap is keyed by old (now-
 	 * discarded) LiveElement instances, so the new tree has no layout
@@ -628,6 +755,21 @@ export class BrowserShell {
 		_shellInputDiag('handleHtmlResponseLive url=' + url);
 		resetLiveOverlayCache();
 		resetLiveRoot();
+		// Page-relative `<img>` base: the SD-card directory of THIS page, so
+		// `./assets/x.png` resolves like a browser would (index.html as base).
+		setLivePageBase(this.computeLivePageBase(url));
+		// Resolve `vw`/`vh` units against the CONTENT area (the canvas minus
+		// the toolbar chrome), not the full screen. Set BEFORE scripts run +
+		// the first computed-style resolution so a page's `height: 100vh`
+		// fills exactly the visible content area instead of overflowing it by
+		// the toolbar height (which forced a scroll on the SwitchSurf player's
+		// `100vh` grid). resetLiveRoot above cleared the cascade cache, so the
+		// new basis is what every `vh`/`vw` resolves against.
+		{
+			const screen = nxScreen();
+			const chromeH = this.template.toolbar.height;
+			setCssViewport(screen.width, Math.max(1, screen.height - chromeH));
+		}
 		const byParsed = populateLiveRoot(tree);
 		scanForAutoplayVideos(getLiveRoot());
 		_shellInputDiag('  → populated ' + byParsed.size + ' parsed→live mappings');
@@ -652,6 +794,7 @@ export class BrowserShell {
 		}
 
 		this.fullscreenCanvasOriginalSize = null;
+		this.fullscreenCanvasLive = false;
 		this.currentPageUrl = url;
 		this.currentScrollY = 0;
 
@@ -664,9 +807,21 @@ export class BrowserShell {
 		const liveRoot = getLiveRoot();
 		const sidePad = this.template.page.sidePadding ?? 0;
 		const topPad = this.template.page.topPadding ?? 0;
-		if (liveRoot.style.paddingLeft === undefined) liveRoot.style.paddingLeft = sidePad;
-		if (liveRoot.style.paddingRight === undefined) liveRoot.style.paddingRight = sidePad;
-		if (liveRoot.style.paddingTop === undefined) liveRoot.style.paddingTop = topPad;
+		// Skip the template chrome inset for full-bleed pages — a body that
+		// hides overflow is a fixed-viewport app laying itself out to the
+		// screen edges (e.g. a `width:100vw; height:100vh` grid). Injecting
+		// side padding there double-insets the left AND pushes the 100vw
+		// child past the right edge (the SwitchSurf player's big left gap +
+		// clipped library). Such pages own their insets via their own
+		// padding. Scrolling content pages (overflow visible/auto) still get
+		// the inset so text/tables don't hug the screen edges.
+		const rootCs = getComputedLiveStyle(liveRoot);
+		const fullBleed = rootCs.overflowX === 'hidden' || rootCs.overflowY === 'hidden';
+		if (!fullBleed) {
+			if (liveRoot.style.paddingLeft === undefined) liveRoot.style.paddingLeft = sidePad;
+			if (liveRoot.style.paddingRight === undefined) liveRoot.style.paddingRight = sidePad;
+			if (liveRoot.style.paddingTop === undefined) liveRoot.style.paddingTop = topPad;
+		}
 
 		this.repaintAll();
 	}
@@ -884,7 +1039,7 @@ export class BrowserShell {
 	 * action families are recognised:
 	 *   - bare strings (`fullscreen-page`, `fullscreen-canvas`)
 	 *     trigger the shell's mode toggles.
-	 *   - `select-template:<path>` (from the Library page's
+	 *   - `select-template:<path>` (from the Settings page's
 	 *     `<browser-templates>` expansion) rewrites `config.json`'s
 	 *     `template` field and reloads.
 	 * Unknown actions are silently dropped so a malformed
@@ -902,6 +1057,9 @@ export class BrowserShell {
 			case 'fullscreen-canvas':
 				await this.toggleFullscreenCanvas();
 				break;
+			case 'search':
+				await this.promptAndSearch();
+				break;
 			default:
 				// Unknown action — no-op.
 				break;
@@ -909,11 +1067,32 @@ export class BrowserShell {
 	}
 
 	/**
-	 * Library-page template switcher. Writes the new template path
+	 * Search-bar handler: opens the on-screen keyboard for a query, then
+	 * navigates to the active search engine's results URL (engine chosen
+	 * via `config.json` → `search_engines.json`). Empty / cancelled
+	 * input just repaints the current page.
+	 */
+	private async promptAndSearch(): Promise<void> {
+		const engine = resolveSearchEngine(this.profile.storageRoot);
+		const current = this.navigation.currentURL ?? '';
+		const typed = await this.keyboard.open('');
+		if (typed === null || typed.trim() === '') {
+			// Cancel / empty — clear the keyboard pixels. Mirrors
+			// promptAndNavigate: defer if a tap already queued the next
+			// input, else reload the current page.
+			if (peekPendingInput()) return;
+			await this.navigateTo(current || DEFAULT_HOME_URL);
+			return;
+		}
+		await this.navigateTo(engine.query + encodeURIComponent(typed.trim()));
+	}
+
+	/**
+	 * Settings-page template switcher. Writes the new template path
 	 * into `<profile>/config.json`, re-loads the template + icons,
 	 * pushes the new design into the UI / keyboard / chrome region,
 	 * then reloads the current page so the chrome AND content paint
-	 * with the new colours, and the Library page's
+	 * with the new colours, and the Settings page's
 	 * `<browser-templates>` expansion picks up the new active row.
 	 */
 	private async selectTemplate(path: string): Promise<void> {
@@ -1090,6 +1269,25 @@ export class BrowserShell {
 			width: Number.isFinite(attrW) && attrW > 0 ? attrW : 300,
 			height: Number.isFinite(attrH) && attrH > 0 ? attrH : 150,
 		};
+		// Publish the fullscreen target size so a "live" page can size its
+		// render to the screen (the fullscreen present copies the bridge
+		// region [0,0,W,H] straight to the screen).
+		(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } })
+			.__swbFullscreenCanvasSize = { width: canvas.width, height: canvas.height };
+		// Flip mode (and the page-visible `__swbBrowserMode` global) BEFORE
+		// any rerun so the page sees fullscreen-canvas at init time.
+		this.fullscreenCanvasLive = 'data-fullscreen-live' in target.attrs;
+		this.setMode('fullscreen-canvas');
+		// "Live" canvas (e.g. the audio visualizer): it runs its own
+		// resize-adaptive render loop and holds page state — playback,
+		// selected visualizer, button UI — that a rerun would wipe. Just
+		// flip mode + repaint; the page's still-running loop reads the
+		// two globals above and re-sizes itself. No clearAnimationFrames
+		// (keep its loop alive), no rerun (keep its DOM + audio intact).
+		if (this.fullscreenCanvasLive) {
+			this.repaintAll();
+			return;
+		}
 		// Drop any `requestAnimationFrame` callbacks the previous script
 		// run queued — they reference the old `renderer` / closure state
 		// and would race the rerun's fresh setup. Without this the
@@ -1103,13 +1301,24 @@ export class BrowserShell {
 		// we paint.
 		const resizes = new Map([[target, { width: canvas.width, height: canvas.height }]]);
 		await this.scriptCtx.rerun(resizes);
-		this.setMode('fullscreen-canvas');
 		this.repaintAll();
 	}
 
 	private async exitFullscreen(): Promise<void> {
-		if (this.mode === 'fullscreen-canvas') await this.restoreCanvasSize();
+		const wasFullscreenCanvas = this.mode === 'fullscreen-canvas';
+		const wasLive = this.fullscreenCanvasLive;
+		this.fullscreenCanvasLive = false;
+		(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
+			.__swbFullscreenCanvasSize = null;
+		// Flip mode (and the global) BEFORE restoreCanvasSize's rerun so
+		// the re-executed page scripts see 'normal' and revert to their
+		// layout-box sizing.
 		this.setMode('normal');
+		// A live fullscreen never resized the backing store via rerun, so
+		// there's nothing to restore — the page's own loop reverts to its
+		// layout-box size once the mode global flips. Only the rerun path
+		// needs restoreCanvasSize.
+		if (wasFullscreenCanvas && !wasLive) await this.restoreCanvasSize();
 		this.clampScroll();
 		this.repaintAll();
 	}
@@ -1129,6 +1338,12 @@ export class BrowserShell {
 	private setMode(mode: BrowserMode): void {
 		this.mode = mode;
 		setBrowserMode(mode);
+		// Expose the mode to page scripts (they share the runtime global)
+		// so a responsive inline canvas can tell when it's been promoted
+		// to fullscreen-canvas and render at the shell-resized backing
+		// store instead of its normal-flow layout box. Read by the audio
+		// player's visualizer.
+		(globalThis as { __swbBrowserMode?: string }).__swbBrowserMode = mode;
 		// Leaving video-fullscreen clears the focused element so the
 		// overlay walker stops painting it full-canvas.
 		if (mode !== 'video-fullscreen') this.fullscreenVideo = null;
@@ -1169,7 +1384,7 @@ export class BrowserShell {
 			left: resolve(i.back),
 			right: resolve(i.forward),
 			home: resolve(i.home),
-			library: resolve(i.library),
+			settings: resolve(i.settings),
 			bookmarkTrue: resolve(i.bookmarkTrue),
 			bookmarkFalse: resolve(i.bookmarkFalse),
 		};
@@ -1189,29 +1404,38 @@ export class BrowserShell {
 		}
 	}
 
-	private paintBootSplash(): void {
+	/** First thing drawn at boot: the brand background + centered logo,
+	 * so the 1–2 s of profile seeding + first-page build reads as a splash
+	 * instead of a black screen. The Switch holds this presented frame
+	 * through the (blocking) init that follows; the welcome page's first
+	 * paint replaces it. `await`ed in `run()` so the logo's async decode
+	 * completes before that blocking work begins. Logo loads from romfs
+	 * (mounted at boot, before asset seeding); it must be RGBA — the PNG
+	 * decoder renders RGB as invisible (see SwitchSurf_logo.png). */
+	private async paintBootSplash(): Promise<void> {
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
-		ctx.fillStyle = '#0b1220';
+		ctx.fillStyle = '#00010a';
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		ctx.fillStyle = '#ffd35e';
-		ctx.font = 'bold 36px system-ui';
-		ctx.textBaseline = 'middle';
-		ctx.textAlign = 'center';
-		ctx.fillText('SwitchSurf', canvas.width / 2, canvas.height / 2);
-		// Diagnostic line: what does `Switch.appletType()` return in
-		// this launch? Different launchers / homebrew loaders report
-		// different values, so surface the actual number alongside its
-		// label.
-		const appletType = readAppletType();
-		ctx.fillStyle = '#9bb1d6';
-		ctx.font = '15px system-ui';
-		ctx.fillText(
-			`launch mode — Switch.appletType() = ${appletType} (${describeAppletType(appletType)})`,
-			canvas.width / 2,
-			canvas.height / 2 + 56,
-		);
-		ctx.textAlign = 'start';
+		const logo = await loadOptionalImage('romfs:/assets/SwitchSurf_logo.png');
+		const li = logo as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
+		const lw = li ? (li.naturalWidth || li.width || 0) : 0;
+		const lh = li ? (li.naturalHeight || li.height || 0) : 0;
+		if (logo && lw > 0 && lh > 0) {
+			const maxDim = 256;
+			const scale = Math.min(1, maxDim / Math.max(lw, lh));
+			const w = Math.round(lw * scale);
+			const h = Math.round(lh * scale);
+			ctx.drawImage(logo, Math.round((canvas.width - w) / 2), Math.round((canvas.height - h) / 2), w, h);
+		} else {
+			// Fallback wordmark if the logo can't be decoded.
+			ctx.fillStyle = '#ffd35e';
+			ctx.font = 'bold 36px system-ui';
+			ctx.textBaseline = 'middle';
+			ctx.textAlign = 'center';
+			ctx.fillText('SwitchSurf', canvas.width / 2, canvas.height / 2);
+			ctx.textAlign = 'start';
+		}
 	}
 
 	/**
@@ -1389,6 +1613,13 @@ function readOperationMode(): number {
 	} catch (_) {
 		return -1;
 	}
+}
+
+/** Only real web pages are bookmarkable. Local `browser://` pages (and
+ * any non-http(s) scheme like `romfs:` / `sdmc:`) hide the star button
+ * and ignore the bookmark action. */
+function isBookmarkable(url: string | null | undefined): boolean {
+	return !!url && /^https?:\/\//i.test(url);
 }
 
 /** Read the boot probe and report whether an HTTP(S) attempt actually

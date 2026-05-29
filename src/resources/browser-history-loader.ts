@@ -6,7 +6,7 @@ const HISTORY_URL = 'browser://history/';
 /**
  * Serves the current `HistoryStore` as JSON at `browser://history/`.
  *
- * Library page's `<browser-history>` tag reads the store directly,
+ * Settings page's `<browser-history>` tag reads the store directly,
  * but this loader stays around as a clean JSON API surface for any
  * future page that wants the data via `fetch('browser://history/')`.
  * Registered ahead of `BrowserResourceLoader` so the static-page loader

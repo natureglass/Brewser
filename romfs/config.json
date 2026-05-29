@@ -1,4 +1,5 @@
 {
   "template": "Templates/default.json",
+  "searchEngine": "DuckDuckGo",
   "videoNVTEGRA": true
 }

@@ -14,8 +14,12 @@
  * parent's content-box height. Resolution happens at layout time —
  * the value reaches the layout pass in this shape so the layout can
  * thread the parent's known size in and convert. */
-export type CssLength = number | CssPercent;
+export type CssLength = number | CssPercent | CssMinMax;
 export interface CssPercent { percent: number }
+/** `min(a, b, …)` / `max(a, b, …)` — resolved at layout time once the
+ * `%` basis is known. Args are themselves CssLengths (px / % / nested
+ * min-max). */
+export interface CssMinMax { fn: 'min' | 'max'; args: CssLength[] }
 
 /** True iff `v` is a `{ percent: N }` length. */
 export function isPercent(v: unknown): v is CssPercent {
@@ -28,6 +32,15 @@ export function isPercent(v: unknown): v is CssPercent {
 export function resolveLength(v: CssLength | undefined, basis: number): number | undefined {
 	if (v === undefined) return undefined;
 	if (typeof v === 'number') return v;
+	if ('fn' in v) {
+		const nums: number[] = [];
+		for (const a of v.args) {
+			const r = resolveLength(a, basis);
+			if (r !== undefined) nums.push(r);
+		}
+		if (nums.length === 0) return undefined;
+		return v.fn === 'min' ? Math.min(...nums) : Math.max(...nums);
+	}
 	return v.percent * 0.01 * basis;
 }
 
@@ -40,7 +53,7 @@ export interface InlineStyle {
 	bottom?: number;
 	width?: CssLength;
 	height?: CssLength;
-	display?: 'block' | 'inline' | 'inline-block' | 'flex' | 'table' | 'none';
+	display?: 'block' | 'inline' | 'inline-block' | 'flex' | 'inline-flex' | 'grid' | 'table' | 'none';
 	opacity?: number;
 	zIndex?: number;
 	cursor?: string;
@@ -273,7 +286,8 @@ export function applyDecl(style: InlineStyle, propRaw: string, valueRaw: string)
 			}
 			case 'display': {
 				if (value === 'block' || value === 'inline' ||
-				    value === 'inline-block' || value === 'flex' || value === 'none') {
+				    value === 'inline-block' || value === 'flex' ||
+				    value === 'inline-flex' || value === 'grid' || value === 'none') {
 					style.display = value;
 				}
 				return;
@@ -584,15 +598,71 @@ export function serializeStyle(style: InlineStyle): string {
 	return parts.join(';');
 }
 
+/** Viewport size for `vh` / `vw` units. Defaults to the Switch's
+ * 1280×720 content area; the shell can override via `setCssViewport`. */
+let cssVpW = 1280;
+let cssVpH = 720;
+export function setCssViewport(w: number, h: number): void {
+	cssVpW = w;
+	cssVpH = h;
+}
+
 function parsePxOrNum(s: string): number | undefined {
-	const t = s.endsWith('px') ? s.slice(0, -2).trim() : s;
-	const n = parseFloat(t);
+	const t = s.trim();
+	// Viewport units. `vh`/`vw` resolve against the content viewport.
+	// (Without this, `parseFloat('100vh')` silently returned 100 and the
+	// value was treated as 100px.)
+	const vh = /^(-?\d+(?:\.\d+)?)vh$/.exec(t);
+	if (vh) return parseFloat(vh[1]) * 0.01 * cssVpH;
+	const vw = /^(-?\d+(?:\.\d+)?)vw$/.exec(t);
+	if (vw) return parseFloat(vw[1]) * 0.01 * cssVpW;
+	const px = t.endsWith('px') ? t.slice(0, -2).trim() : t;
+	const n = parseFloat(px);
 	return Number.isFinite(n) ? n : undefined;
 }
 
-/** Parse a length value: `Npx`, unitless `N` → number; `N%` → percent. */
+/** Split a CSS function's argument list at TOP-LEVEL commas (so a
+ * nested `min(…, …)` inside a `max(…)` isn't split apart). */
+function splitTopLevelArgs(s: string): string[] {
+	const out: string[] = [];
+	let depth = 0, start = 0;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		if (ch === '(') depth++;
+		else if (ch === ')') depth--;
+		else if (ch === ',' && depth === 0) { out.push(s.slice(start, i)); start = i + 1; }
+	}
+	out.push(s.slice(start));
+	return out;
+}
+
+/** Parse a length value: `Npx`, unitless `N` → number; `N%` → percent;
+ * `Nvh`/`Nvw` → px against the viewport; `min(...)`/`max(...)`/`clamp(...)`
+ * → a CssMinMax resolved at layout time. */
 export function parseLength(s: string): CssLength | undefined {
 	const t = s.trim();
+	// `clamp(min, preferred, max)` ≡ `max(min, min(preferred, max))`.
+	// Expressed via the existing min/max CssMinMax nodes so resolveLength
+	// handles it at layout time once the `%` / `vw` bases are known.
+	const clampFn = /^clamp\(([\s\S]+)\)$/i.exec(t);
+	if (clampFn) {
+		const parts = splitTopLevelArgs(clampFn[1]).map((p) => parseLength(p.trim()));
+		if (parts.length === 3 && parts.every((p) => p !== undefined)) {
+			const [min, preferred, max] = parts as CssLength[];
+			return { fn: 'max', args: [min, { fn: 'min', args: [preferred, max] }] };
+		}
+		return undefined;
+	}
+	const fn = /^(min|max)\(([\s\S]+)\)$/i.exec(t);
+	if (fn) {
+		const args: CssLength[] = [];
+		for (const part of splitTopLevelArgs(fn[2])) {
+			const a = parseLength(part.trim());
+			if (a !== undefined) args.push(a);
+		}
+		if (args.length === 0) return undefined;
+		return { fn: fn[1].toLowerCase() as 'min' | 'max', args };
+	}
 	if (t.endsWith('%')) {
 		const n = parseFloat(t.slice(0, -1).trim());
 		return Number.isFinite(n) ? { percent: n } : undefined;
@@ -601,7 +671,9 @@ export function parseLength(s: string): CssLength | undefined {
 }
 
 function serializeLen(v: CssLength): string {
-	return typeof v === 'number' ? v + 'px' : v.percent + '%';
+	if (typeof v === 'number') return v + 'px';
+	if ('fn' in v) return v.fn + '(' + v.args.map(serializeLen).join(', ') + ')';
+	return v.percent + '%';
 }
 
 function clamp01(n: number): number {
