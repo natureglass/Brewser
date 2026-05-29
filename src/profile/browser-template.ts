@@ -158,12 +158,28 @@ export interface BrowserConfig {
 	 * `title` in `search_engines.json`). Drives the welcome page's
 	 * search-bar logo + where the query is sent. */
 	searchEngine: string;
+	/** Per-frame time budget (ms) for the progressive page render — the
+	 * live-DOM cache build paints ops until this many ms elapse, then yields
+	 * so scroll input + animation frames keep firing, resuming next frame.
+	 * Higher = pages snap in with fewer visible build steps but choppier
+	 * scroll/animation during that initial paint; lower = smoother but more
+	 * drawn-out fill-in. Clamped to [1, 1000]; default 12. Pushed into
+	 * live-overlay via `setLiveBuildChunkMs`. */
+	renderChunkMs: number;
+	/** Per-frame paint budget (ms) used while the user is SCROLLING a page
+	 * whose cache is still building — deliberately smaller than
+	 * `renderChunkMs` so each scroll tick stays cheap and scrolling stays
+	 * near 60 FPS while content fills in. Clamped to [1, 1000]; default 4.
+	 * Pushed into live-overlay via `setLiveScrollChunkMs`. */
+	scrollChunkMs: number;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
 	template: 'Templates/default.json',
 	videoNVTEGRA: true,
 	searchEngine: 'DuckDuckGo',
+	renderChunkMs: 12,
+	scrollChunkMs: 4,
 };
 
 /** One entry in `search_engines.json`. `query` is the search-URL
@@ -202,6 +218,12 @@ export function loadConfig(profileRoot: string): BrowserConfig {
 			template: typeof parsed?.template === 'string' ? parsed.template : DEFAULT_CONFIG.template,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
+			renderChunkMs: typeof parsed?.renderChunkMs === 'number' && Number.isFinite(parsed.renderChunkMs)
+				? Math.max(1, Math.min(1000, parsed.renderChunkMs))
+				: DEFAULT_CONFIG.renderChunkMs,
+			scrollChunkMs: typeof parsed?.scrollChunkMs === 'number' && Number.isFinite(parsed.scrollChunkMs)
+				? Math.max(1, Math.min(1000, parsed.scrollChunkMs))
+				: DEFAULT_CONFIG.scrollChunkMs,
 		};
 	} catch (error) {
 		console.debug(`[switch-web-browser] config.json parse failed: ${error}`);

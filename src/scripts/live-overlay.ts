@@ -215,6 +215,11 @@ function _tagOf(el: LiveElement): string {
 export function patchLiveDirtyRegions(): boolean {
 	const dirty = drainLiveDirty();
 	if (dirty.length === 0) return false;
+	// Bump the content version of any scrollable whose subtree was mutated,
+	// BEFORE we patch the static cache below — the scroll overlay loop reads
+	// these versions to decide which per-container offscreens to re-render.
+	// Drains here cover both the paint-loop patch and the live-form tap path.
+	noteScrollDirty(dirty);
 	_partialDbg('--- tap: drained ' + dirty.length + ' dirty: [' + dirty.map(_tagOf).join(', ') + ']');
 	// Mutations happened, so a repaint is needed no matter what — whether we
 	// patch below or punt to the full rebuild. Schedule it once here so every
@@ -387,12 +392,31 @@ let lastBodyViewportH = -1;
 // list of per-element bg ops + per-atom ops so the budget check fires
 // between any two atoms — giving uniform ~16 ms chunks regardless of
 // element size.
-const BUILD_CHUNK_MS = 12;
+//
+// Overridable from `config.json`'s `renderChunkMs` (the shell calls
+// `setLiveBuildChunkMs` at startup): higher = pages snap in with fewer
+// visible build steps but choppier scroll/animation during that initial
+// paint; lower = smoother but more drawn-out fill-in. 12 is the default.
+let buildChunkMs = 12;
+/** Set the idle/continuation build budget (ms per chunk). Wired to
+ * `config.json`'s `renderChunkMs`. Guarded so a non-positive / non-finite
+ * value can't stall or busy-loop the build (it would just keep the
+ * default). The caller (loadConfig) already clamps the upper bound. */
+export function setLiveBuildChunkMs(ms: number): void {
+	if (Number.isFinite(ms) && ms > 0) buildChunkMs = ms;
+}
 /** Smaller chunk budget for scroll-driven paintLiveOverlay calls. The
  * build still advances during scroll so content fills in below the
  * user's finger, but each scroll tick pays less paint cost — keeps
- * scroll near 60 FPS. */
-const SCROLL_CHUNK_MS = 4;
+ * scroll near 60 FPS. Overridable from `config.json`'s `scrollChunkMs`
+ * (the shell calls `setLiveScrollChunkMs` at startup). 4 is the default. */
+let scrollChunkMs = 4;
+/** Set the scroll-driven build budget (ms per chunk). Wired to
+ * `config.json`'s `scrollChunkMs`. Same guard/clamp story as
+ * `setLiveBuildChunkMs`. */
+export function setLiveScrollChunkMs(ms: number): void {
+	if (Number.isFinite(ms) && ms > 0) scrollChunkMs = ms;
+}
 let cacheBuilding = false;
 let buildVersion = -1;
 let buildContinuationScheduled = false;
@@ -423,12 +447,50 @@ let scrollOverlayEls: LiveElement[] = [];
 
 /** Per-scrollable-container content cache: the element's CHILDREN rendered
  * once into an offscreen of (contentW × intrinsicContentH), re-rendered
- * only when the tree version or size changes — NOT per frame. Scrolling
- * just re-blits a different source slice, so a swipe is a cheap drawImage
- * and steady-state animation pays nothing for the list. WeakMap so a
- * removed container's cache is collected. */
-interface ScrollContentCache { canvas: OffscreenCanvas; version: number; w: number; h: number; }
+ * only when the container's OWN content version or size changes — NOT per
+ * frame, and NOT on every global tree-version bump. Scrolling just re-blits
+ * a different source slice, so a swipe is a cheap drawImage and steady-state
+ * animation pays nothing for the list. WeakMap so a removed container's
+ * cache is collected. */
+interface ScrollContentCache { canvas: OffscreenCanvas; contentVersion: number; w: number; h: number; }
 const scrollContentCaches = new WeakMap<LiveElement, ScrollContentCache>();
+
+/** Per-scrollable "content version", bumped ONLY when a descendant (or the
+ * container itself) is mutated — see `noteScrollDirty`. This decouples a
+ * scrollable's re-render from the GLOBAL `getLiveTreeVersion()`: the media
+ * player's seek bar / time text update ~1×/sec (in the controls card, NOT
+ * the library), bumping the global version every second. Keying the scroll
+ * cache on that global version forced the heavy `.library-list` subtree to
+ * re-render every second even though the library never changed, costing
+ * playback FPS. A never-mutated scrollable stays at version 0; a fresh
+ * cache starts at -1 so it always renders once. */
+const scrollContentVersions = new WeakMap<LiveElement, number>();
+
+function currentScrollContentVersion(el: LiveElement): number {
+	return scrollContentVersions.get(el) ?? 0;
+}
+
+/** Given the elements drained from the dirty set this paint/tap, bump the
+ * content version of every scrollable container (from the last build's
+ * `scrollOverlayEls`) whose subtree actually contains one of them. Called
+ * from the two places mutations are consumed for a repaint —
+ * `patchLiveDirtyRegions` (paint-loop patch + live-form tap) and the
+ * full-rebuild drain — so a library mutation (buildLibrary's append/clear,
+ * the active-row class toggle, a row's textContent update) re-renders the
+ * list, while a seek/time bump outside the list does not. `contains` is
+ * true when `dirtyEl === sEl` too, so a mutation that marks the container
+ * itself (innerHTML clear / appendChild mark the parent) is caught. */
+function noteScrollDirty(dirtyEls: LiveElement[]): void {
+	if (dirtyEls.length === 0 || scrollOverlayEls.length === 0) return;
+	for (const sEl of scrollOverlayEls) {
+		for (const d of dirtyEls) {
+			if (sEl.contains(d)) {
+				scrollContentVersions.set(sEl, currentScrollContentVersion(sEl) + 1);
+				break;
+			}
+		}
+	}
+}
 /** The body root of the most recent flow paint. `patchLiveDirtyRegions`
  * (driven by tap handlers, which run outside the paint loop) needs a
  * handle to it to re-run layout. */
@@ -584,9 +646,16 @@ export function paintLiveOverlay(
 			if (patched) dirty = false;
 		}
 		if (dirty) {
+			// Capture the drained set so a full rebuild reached WITHOUT going
+			// through patchLiveDirtyRegions (a viewport-change rebuild) still
+			// refreshes any scrollable whose subtree changed. (Punt-driven
+			// rebuilds already drained + noted inside patchLiveDirtyRegions, so
+			// this is empty then.)
+			const drainedForRebuild = drainLiveDirty();
+			noteScrollDirty(drainedForRebuild);
 			_partialDbg('=== FULL REBUILD: version=' + version + ' lastBody=' + lastBodyVersion
 				+ (viewportChanged ? ' VIEWPORT-CHANGED ' + viewport.width + 'x' + viewport.height : '')
-				+ ' pendingDirty=[' + drainLiveDirty().map(_tagOf).join(', ') + ']');
+				+ ' pendingDirty=[' + drainedForRebuild.map(_tagOf).join(', ') + ']');
 			// Start a fresh chunked build. A full rebuild repaints every
 			// element, so any pending per-element dirty marks are now moot —
 			// drop them so a subsequent tap's patchLiveDirtyRegions doesn't
@@ -714,7 +783,7 @@ export function paintLiveOverlay(
 		// user paused — visible to the user as "page doesn't render until
 		// I stop scrolling."
 		const scrollChanged = !Number.isNaN(lastPaintedScrollY) && scrollY !== lastPaintedScrollY;
-		const budget = scrollChanged ? SCROLL_CHUNK_MS : BUILD_CHUNK_MS;
+		const budget = scrollChanged ? scrollChunkMs : buildChunkMs;
 		if (cacheBuilding && liveCacheOffscreen) {
 			const cacheCtx = liveCacheOffscreen.getContext('2d');
 			if (cacheCtx) {
@@ -791,13 +860,18 @@ export function paintLiveOverlay(
 			const cw = Math.max(1, Math.round(sBox.contentW));
 			const ih = Math.max(1, Math.round(sBox.intrinsicContentH));
 			const ch = Math.round(sBox.contentH);
-			const version = getLiveTreeVersion();
+			// Key on the container's OWN content version (bumped by
+			// noteScrollDirty only when its subtree mutates), NOT the global
+			// tree version — otherwise an unrelated bump (the player's per-
+			// second seek/time update) re-renders this whole subtree every
+			// second and tanks playback FPS.
+			const contentVersion = currentScrollContentVersion(sEl);
 			let sc = scrollContentCaches.get(sEl);
 			if (!sc || sc.w !== cw || sc.h !== ih) {
-				sc = { canvas: new OffscreenCanvas(cw, ih), version: -1, w: cw, h: ih };
+				sc = { canvas: new OffscreenCanvas(cw, ih), contentVersion: -1, w: cw, h: ih };
 				scrollContentCaches.set(sEl, sc);
 			}
-			if (sc.version !== version) {
+			if (sc.contentVersion !== contentVersion) {
 				// Re-render the children into the offscreen, translated so the
 				// content-box origin maps to (0,0). measureText must run against
 				// THIS ctx while painting (restored right after).
@@ -814,7 +888,7 @@ export function paintLiveOverlay(
 						setLayoutMeasureCtx(ctx);
 					}
 				}
-				sc.version = version;
+				sc.contentVersion = contentVersion;
 			}
 			const maxScroll = Math.max(0, ih - ch);
 			const st = Math.min(Math.max(0, sEl.scrollTop | 0), maxScroll);

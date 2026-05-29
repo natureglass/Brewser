@@ -1,5 +1,7 @@
 {
   "template": "Templates/default.json",
   "searchEngine": "DuckDuckGo",
-  "videoNVTEGRA": true
+  "videoNVTEGRA": true,
+  "renderChunkMs": 1000,
+  "scrollChunkMs": 4
 }

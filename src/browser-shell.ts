@@ -56,7 +56,7 @@ import {
 import {
 	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
 	overlayLiveAnimatedCanvases, paintLiveOverlay, patchLiveDirtyRegions,
-	resetLiveOverlayCache,
+	resetLiveOverlayCache, setLiveBuildChunkMs, setLiveScrollChunkMs,
 } from './scripts/live-overlay.js';
 import {
 	consumeFullRepaintRequest, isKeyboardOpen, requestFullRepaint,
@@ -282,6 +282,8 @@ export class BrowserShell {
 		// reads videoTryHwAccel via openDecoder).
 		const shellConfig = loadConfig(this.profile.storageRoot);
 		setVideoTryHwAccel(shellConfig.videoNVTEGRA);
+		setLiveBuildChunkMs(shellConfig.renderChunkMs);
+		setLiveScrollChunkMs(shellConfig.scrollChunkMs);
 		// Load the design template + push it into the UI, keyboard,
 		// and touch dispatcher so the very first chrome paint already
 		// reflects the user's customisations.
