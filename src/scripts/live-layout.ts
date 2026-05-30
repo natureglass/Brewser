@@ -46,7 +46,7 @@
 
 import { getComputedLiveStyle, type ComputedLiveStyle } from './live-css.js';
 import type { LiveElement } from './live-dom.js';
-import { resolveLength, type CssLength } from './inline-css.js';
+import { quoteFontFamily, resolveLength, type CssLength } from './inline-css.js';
 
 /** Per-element layout result. `(x, y, w, h)` is the border box (i.e.
  * the rect the painter draws the background into). `contentX/Y/W/H`
@@ -509,7 +509,7 @@ function layoutInline(
 		}
 		const fontSize = cs.fontSize ?? parentFontSize;
 		const fontFamily = cs.fontFamily || parentFontFamily;
-		const font = fontSize + 'px ' + fontFamily;
+		const font = fontSize + 'px ' + quoteFontFamily(fontFamily);
 		if (el.tagName === '#text') {
 			tokenizeText(el, el.data, font, fontSize);
 			return;
@@ -569,7 +569,7 @@ function layoutInline(
 	// limitation: we don't support trailing text after the last child
 	// unless the page uses createTextNode to express it).
 	if (parent.textContent && parent.tagName !== '#text') {
-		const font = parentFontSize + 'px ' + parentFontFamily;
+		const font = parentFontSize + 'px ' + quoteFontFamily(parentFontFamily);
 		tokenizeText(parent, parent.textContent, font, parentFontSize);
 	}
 
@@ -1024,16 +1024,41 @@ function layoutGrid(
 			row = [];
 			rowHeight = 0;
 		};
+		// Column-cursor walk so children with `grid-column: span N` claim N
+		// adjacent tracks (sensors dashboard, anything using a 12-col grid +
+		// per-card span). Cards without an explicit `grid-column` parse as
+		// null → span=1, identical to the pre-span 1-track-per-child behavior
+		// (welcome / apps cards untouched). The explicit 2D path
+		// (`layoutGridExplicit`, gated on grid-template-rows) is still where
+		// arbitrary `grid-row` + cell start lines go; this remains row-major
+		// auto-flow.
+		let colCursor = 0;
 		for (let i = 0; i < kids.length; i++) {
 			const child = kids[i];
 			const ccs = getComputedLiveStyle(child);
-			const slotIdx = i % colCount;
-			const slotW = tracks[slotIdx];
-			const x = colX[slotIdx];
+			const line = parseGridLine(ccs.gridColumn, colCount);
+			const span = line ? Math.min(Math.max(1, line.span), colCount) : 1;
+			// Wrap to the next row when this span would overflow the current
+			// one. Don't flush an already-empty row (would inject a phantom
+			// trailing gap and shift the first row down by `gap`).
+			if (colCursor > 0 && colCursor + span > colCount) {
+				flushRow();
+				colCursor = 0;
+			}
+			// Width = sum of the `span` track widths + the (span-1) interior
+			// gaps that the spanned cell visually covers.
+			let slotW = 0;
+			for (let s = 0; s < span; s++) slotW += tracks[colCursor + s];
+			slotW += (span - 1) * gap;
+			const x = colX[colCursor];
 			const h = layoutLeaf(child, ccs, x, y, slotW);
 			row.push(child);
 			if (h > rowHeight) rowHeight = h;
-			if (slotIdx === colCount - 1) flushRow();
+			colCursor += span;
+			if (colCursor >= colCount) {
+				flushRow();
+				colCursor = 0;
+			}
 		}
 		if (row.length > 0) {
 			// Partial last row — no trailing gap added.
@@ -1533,10 +1558,10 @@ function measureCellWidthsLive(cell: LiveElement): { min: number; max: number } 
 		for (const child of el.children) visit(child, font);
 	};
 	for (const child of cell.children) {
-		visit(child, fontSize + 'px ' + fontFamily);
+		visit(child, fontSize + 'px ' + quoteFontFamily(fontFamily));
 	}
 	if (cell.textContent && cell.children.length === 0) {
-		ctx.font = fontSize + 'px ' + fontFamily;
+		ctx.font = fontSize + 'px ' + quoteFontFamily(fontFamily);
 		const tokens = cell.textContent.split(/\s+/);
 		for (const t of tokens) {
 			if (!t) continue;
@@ -1972,7 +1997,7 @@ function intrinsicContentWidth(el: LiveElement, cs: ComputedLiveStyle): number {
 		} else if (el.textContent && measureCtx) {
 			measureCtx.save();
 			try {
-				measureCtx.font = (cs.fontSize ?? 14) + 'px ' + (cs.fontFamily || 'sans-serif');
+				measureCtx.font = (cs.fontSize ?? 14) + 'px ' + quoteFontFamily(cs.fontFamily || 'sans-serif');
 				inner = measureCtx.measureText(el.textContent).width;
 			} catch (_) { /* leave 0 */ }
 			finally { measureCtx.restore(); }
@@ -2116,7 +2141,7 @@ function intrinsicCross(el: LiveElement, cs: ComputedLiveStyle, isRow: boolean):
 	if (el.textContent && measureCtx) {
 		measureCtx.save();
 		try {
-			measureCtx.font = (cs.fontSize ?? 14) + 'px ' + (cs.fontFamily || 'sans-serif');
+			measureCtx.font = (cs.fontSize ?? 14) + 'px ' + quoteFontFamily(cs.fontFamily || 'sans-serif');
 			return measureCtx.measureText(el.textContent).width + (cs.paddingLeft ?? 0) + (cs.paddingRight ?? 0);
 		} catch (_) { /* fall through */ }
 		finally { measureCtx.restore(); }

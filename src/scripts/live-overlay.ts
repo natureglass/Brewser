@@ -40,7 +40,7 @@
 //     element's bbox if the element has explicit width/height; no
 //     wrapping (M2.3 layout pass).
 
-import { isBoldWeight, isItalicStyle, resolveCanvasFont, resolveLength } from './inline-css.js';
+import { isBoldWeight, isItalicStyle, quoteFontFamily, resolveCanvasFont, resolveLength } from './inline-css.js';
 import { getComputedLiveStyle, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
 import { getLiveTreeVersion, type LiveElement } from './live-dom.js';
 import { paintFormWidget } from './live-form.js';
@@ -291,8 +291,20 @@ export function patchLiveDirtyRegions(): boolean {
 			continue;
 		}
 		const rect = { x: oldB.x, y: oldB.y, w: oldB.w, h: oldB.h };
+		// Use the PARENT's content box as the available area, not the
+		// element's own cached box. layoutFixedRoot feeds availableWidth
+		// into resolveLength(cs.width, …) — feeding oldB.w made `width:N%`
+		// resolve against the element's previous pixel width instead of
+		// its containing block, multiplying by 0.N% on every re-layout.
+		// (The sensors-page battery fill decayed 107.8→105.6→103.5→… on
+		// each 2-second pollBattery setW write.) Parent's contentW/H is
+		// the actual containing block per CSS; falls back to oldB on a
+		// rootless / box-less parent (shouldn't happen in practice).
+		const parentBox = el.parent ? getLayoutBox(el.parent) : undefined;
+		const availW = parentBox?.contentW ?? oldB.w;
+		const availH = parentBox?.contentH ?? oldB.h;
 		try {
-			layoutFixedRoot(el, oldB.x, oldB.y, oldB.w, oldB.h);
+			layoutFixedRoot(el, oldB.x, oldB.y, availW, availH);
 		} catch (_) { /* keep the cached layout if a localized relayout throws */ }
 		rects.push(rect);
 		_partialDbg('  ' + _tagOf(el) + ' relaid ['
@@ -1769,7 +1781,7 @@ function paintListMarker(
 
 	ctx.save();
 	try {
-		ctx.font = fontSize + 'px ' + (cs.fontFamily || 'sans-serif');
+		ctx.font = fontSize + 'px ' + quoteFontFamily(cs.fontFamily || 'sans-serif');
 		ctx.fillStyle = color;
 		ctx.textBaseline = 'middle';
 		ctx.textAlign = 'right';
@@ -1820,7 +1832,7 @@ function paintImg(
 	ctx.save();
 	try {
 		ctx.fillStyle = cs.color || '#9bb1d6';
-		ctx.font = (cs.fontSize ?? 12) + 'px ' + (cs.fontFamily || 'sans-serif');
+		ctx.font = (cs.fontSize ?? 12) + 'px ' + quoteFontFamily(cs.fontFamily || 'sans-serif');
 		ctx.textBaseline = 'middle';
 		ctx.textAlign = 'center';
 		ctx.beginPath();

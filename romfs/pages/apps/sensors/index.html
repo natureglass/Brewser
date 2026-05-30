@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Switch Hardware Diagnostics Suite</title>
+<style>
+:root{
+  --neon-red:#ff3c41;
+  --neon-blue:#00c3e3;
+  --bg-0:#0a0e16;
+  --bg-1:#10151f;
+  --bg-2:#161d2b;
+  --panel:#141a26;
+  --line:rgba(255,255,255,.07);
+  --txt:#e8edf5;
+  --txt-dim:#8a93a6;
+  --good:#3ddc84;
+  --warn:#ffc83d;
+  --bad:#ff3c41;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden}
+body{
+  font-family:'Outfit',sans-serif;
+  background:
+    radial-gradient(900px 600px at 12% -5%, rgba(0,195,227,.14), transparent 60%),
+    radial-gradient(900px 600px at 88% 105%, rgba(255,60,65,.14), transparent 60%),
+    var(--bg-0);
+  color:var(--txt);
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 3px);
+  opacity:.5;
+}
+
+/* Fullscreen 3×2 dashboard grid — mediaplayer pattern. The wrap IS the
+ * grid container; cards drop into auto-flow cells filling the viewport,
+ * no body scroll. */
+.wrap{
+  position:relative;z-index:1;
+  width:100vw;height:100vh;
+  padding:14px;
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  grid-template-rows:1fr 1fr;
+  gap:14px;
+}
+.card{
+  min-width:0;min-height:0;
+  background:linear-gradient(180deg,var(--bg-2),var(--panel));
+  border:1px solid var(--line);
+  border-radius:18px;padding:18px;position:relative;overflow:hidden;
+}
+.card::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--neon-blue),var(--neon-red))}
+.card-title{font-family:'Chakra Petch';font-size:24px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.tag{margin-left:auto;font-size:12px;font-weight:600;letter-spacing:1px;padding:4px 11px;border-radius:30px;text-transform:uppercase}
+.tag.ok{background:rgba(61,220,132,.14);color:var(--good)}
+.tag.na{background:rgba(138,147,166,.14);color:var(--txt-dim)}
+.ic{width:34px;height:34px;display:inline-block;border-radius:9px;background:rgba(0,195,227,.12);color:var(--neon-blue);font-size:14px}
+
+/* generic rows */
+.row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:17px}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--txt-dim)}
+.row .v{font-family:'Chakra Petch';font-weight:600;min-width:250px;flex:0 1 auto;text-align:right}
+.v.good{color:var(--good)}.v.warn{color:var(--warn)}.v.blue{color:var(--neon-blue)}.v.dim{color:var(--txt-dim)}
+
+/* bars */
+.bar{height:10px;border-radius:6px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--neon-blue),var(--neon-red))}
+.barlabel{display:flex;justify-content:space-between;font-size:14px;color:var(--txt-dim);margin-top:12px}
+
+/* battery */
+.battviz{display:flex;align-items:center;gap:16px;margin:6px 0 12px}
+.batt{width:110px;height:52px;border:3px solid var(--txt);border-radius:9px;position:relative;padding:4px}
+.batt::after{content:"";position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:7px;height:22px;background:var(--txt);border-radius:0 3px 3px 0}
+.batt .fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--good),#7af0aa);width:72%}
+.batt .bolt{position:absolute;inset:0;color:#0a0e16;text-align:center;padding-top:15px}
+.bigpct{font-family:'Chakra Petch';font-size:42px;font-weight:700}
+
+/* gyro */
+.cube-scene{height:140px;display:grid;place-items:center;perspective:600px}
+.cube{width:90px;height:90px;position:relative;transform-style:preserve-3d;transform:rotateX(-20deg) rotateY(25deg);transition:transform .1s}
+.cube div{position:absolute;width:90px;height:90px;border:2px solid var(--neon-blue);background:rgba(0,195,227,.08);display:grid;place-items:center;font-family:'Chakra Petch';font-size:13px;color:var(--neon-blue)}
+.cf{transform:translateZ(45px)}.cb{transform:rotateY(180deg) translateZ(45px)}
+.cr{transform:rotateY(90deg) translateZ(45px)}.cl{transform:rotateY(-90deg) translateZ(45px)}
+.ct{transform:rotateX(90deg) translateZ(45px)}.cd{transform:rotateX(-90deg) translateZ(45px)}
+.axisrow{display:flex;gap:10px;margin-top:10px}
+.axis{flex:1;text-align:center;background:rgba(255,255,255,.04);border-radius:9px;padding:9px 0;font-family:'Chakra Petch';font-size:16px}
+.axis small{display:block;color:var(--txt-dim);font-size:11px;letter-spacing:1.5px;margin-bottom:2px}
+
+/* rumble */
+.rumble-btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.chip{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:30px;padding:10px 12px;font-size:14px;font-family:'Chakra Petch';cursor:pointer;color:var(--txt);outline:none;-webkit-appearance:none;appearance:none}
+.chip:hover{border-color:var(--neon-red);color:#fff}
+.chip.active{background:var(--neon-red);border-color:var(--neon-red);color:#fff}
+.wavewrap{height:54px;margin-top:14px;display:flex;align-items:center;gap:3px}
+.wavewrap span{flex:1;background:linear-gradient(180deg,var(--neon-blue),var(--neon-red));border-radius:3px;height:20%;transition:height .2s}
+
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+    <!-- BATTERY -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/battery.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Battery &amp; Charging</h3>
+      <div class="battviz">
+        <div class="batt"><div class="fill" id="batFill" style="width:0%"></div><div class="bolt"><img src="assets/zap.png" style="width:26px;height:26px;display:inline-block" alt=""></div></div>
+        <div><div class="bigpct" id="batPct">—</div><div style="color:var(--txt-dim);font-size:12px" id="batSub">on-demand</div></div>
+      </div>
+      <div class="row"><span class="k">State</span><span class="v good" id="batState">—</span></div>
+      <div class="row"><span class="k">Voltage</span><span class="v" id="batVoltage">—</span></div>
+      <div class="row"><span class="k">Temperature</span><span class="v" id="batTemp">—</span></div>
+      <div class="row"><span class="k">Charger</span><span class="v" id="batCharger">—</span></div>
+      <div class="row"><span class="k">Health (age)</span><span class="v good" id="batHealth">—</span></div>
+    </div>
+
+    <!-- GYRO / ACCEL -->
+    <div class="card" id="gyroCard" style="cursor:pointer">
+      <h3 class="card-title"><span class="ic"><img src="assets/compass.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Gyro &amp; Accelerometer <span class="tag ok" id="gyroTag">LIVE</span></h3>
+      <div class="cube-scene"><div class="cube" id="cube">
+        <div class="cf">FRONT</div><div class="cb">BACK</div>
+        <div class="cr">R</div><div class="cl">L</div>
+        <div class="ct">TOP</div><div class="cd">BOT</div>
+      </div></div>
+      <div class="axisrow">
+        <div class="axis"><small>PITCH</small><span id="gPitch">—</span></div>
+        <div class="axis"><small>ROLL</small><span id="gRoll">—</span></div>
+        <div class="axis"><small>YAW</small><span id="gYaw">—</span></div>
+      </div>
+      <div class="row" style="margin-top:8px"><span class="k">Accel (g)</span><span class="v" id="accelText">—</span></div>
+    </div>
+
+    <!-- HD RUMBLE -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/vibration_mode.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> HD Rumble <span class="tag ok">Linear Actuator</span></h3>
+      <div class="rumble-btns" id="rumbleBtns">
+        <button type="button" class="chip rumble-chip" data-r="light">Light</button>
+        <button type="button" class="chip rumble-chip" data-r="pulse">Pulse</button>
+        <button type="button" class="chip rumble-chip" data-r="wave">Ocean Wave</button>
+        <button type="button" class="chip rumble-chip" data-r="heavy">Heavy Burst</button>
+      </div>
+      <div class="wavewrap" id="rumbleWave">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="row"><span class="k">Intensity</span><span class="v blue" id="rumbleInt">0%</span></div>
+      <div class="row"><span class="k">Frequency</span><span class="v" id="rumbleFreq">—</span></div>
+    </div>
+
+    <!-- DOCK MODE -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/desktop_computer.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Operating Mode <span class="tag ok" id="modeTag">…</span></h3>
+      <div class="row"><span class="k">Current mode</span><span class="v blue" id="modeName">—</span></div>
+      <div class="row"><span class="k">Dock connection</span><span class="v" id="modeDock">—</span></div>
+      <div class="row"><span class="k">Video output</span><span class="v" id="modeVideo">—</span></div>
+      <div class="row"><span class="k">Output resolution</span><span class="v" id="modeRes">—</span></div>
+      <div class="row"><span class="k">Applet type</span><span class="v" id="modeApplet">—</span></div>
+    </div>
+
+    <!-- WIFI -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/signal_strength.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Wireless Status <span class="tag ok" id="wlTag">…</span></h3>
+      <div class="row"><span class="k">IP address</span><span class="v blue" id="wlIp">—</span></div>
+      <div class="row"><span class="k">Subnet mask</span><span class="v" id="wlSubnet">—</span></div>
+      <div class="row"><span class="k">Gateway</span><span class="v" id="wlGw">—</span></div>
+      <div class="row"><span class="k">Primary DNS</span><span class="v" id="wlDns">—</span></div>
+      <div class="row"><span class="k">Secondary DNS</span><span class="v dim" id="wlDns2">—</span></div>
+    </div>
+
+    <!-- SD CARD -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/floppy_disk.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> microSD Card <span class="tag ok" id="sdTag">…</span></h3>
+      <div class="barlabel"><span>Storage used</span><span id="sdUsedTotal">—</span></div>
+      <div class="bar"><i id="sdBar" style="width:0%"></i></div>
+      <div class="row" style="margin-top:8px"><span class="k">Free</span><span class="v good" id="sdFree">—</span></div>
+      <div class="row"><span class="k">Total</span><span class="v" id="sdTotal">—</span></div>
+      <div class="row"><span class="k">Used</span><span class="v" id="sdUsed">—</span></div>
+      <div class="row"><span class="k">Mount point</span><span class="v dim">sdmc:/</span></div>
+    </div>
+
+</div>
+
+<script>
+/* On-demand hardware sensor polling.
+ *
+ * No per-frame work unless explicitly toggled (Gyro card → live rAF; NFC card
+ * → 2 Hz interval). Refresh button + initial load do single-shot polls of all
+ * other sensors. Every call is logged with a relative timestamp to
+ * `sdmc:/swb_sensors.log` so the user can grab the file and share it back. */
+
+const LOG = 'sdmc:/swb_sensors.log';
+const T0 = Date.now();
+const enc = new TextEncoder();
+
+function log(msg) {
+  try {
+    Switch.appendFileSync(LOG, enc.encode('[+' + (Date.now() - T0) + 'ms] ' + msg + '\n').buffer);
+  } catch (_) { /* logging is optional */ }
+}
+
+function setT(id, v) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== String(v)) el.textContent = v;
+}
+const _lastW = {};
+function setW(id, pct) {
+  const v = Math.max(0, Math.min(100, pct));
+  if (_lastW[id] === v) return;
+  _lastW[id] = v;
+  const el = document.getElementById(id);
+  if (el) el.style.width = v + '%';
+}
+function setClass(id, cls) {
+  const el = document.getElementById(id);
+  if (el) el.className = cls;
+}
+
+/* ---- Battery (web API + native PSM extras) ---- */
+async function pollBattery() {
+  try {
+    const bm = await navigator.getBattery();
+    const pct = Math.round(bm.level * 100);
+    setT('batPct', pct + '%');
+    setT('batState', bm.charging ? 'Charging' : 'Discharging');
+    setW('batFill', pct);
+    log('battery web: level=' + bm.level + ' charging=' + bm.charging);
+  } catch (e) {
+    setT('batPct', 'n/a'); setT('batState', 'unavailable');
+    log('battery web err: ' + (e && e.message || e));
+  }
+  try {
+    const info = Switch.diagnostics.battery();
+    setT('batVoltage', (info.voltageMv / 1000).toFixed(2) + ' V');
+    setT('batTemp', info.temperatureC.toFixed(1) + ' °C');
+    setT('batHealth', Math.round(info.agePercent) + '%');
+    const chargerNames = ['None', 'PD', 'USB-C', 'Unknown'];
+    setT('batCharger', chargerNames[info.chargerType] || ('type ' + info.chargerType));
+    setT('batTag', info.charging ? 'CHARGING' : 'DISCHARGING');
+    log('battery native: ' + JSON.stringify(info));
+  } catch (e) {
+    setT('batVoltage', 'n/a'); setT('batTemp', 'n/a'); setT('batHealth', 'n/a'); setT('batCharger', 'n/a');
+    log('battery native err: ' + (e && e.message || e));
+  }
+}
+
+/* ---- Operating Mode + Applet ---- */
+function pollMode() {
+  try {
+    const m = Switch.operationMode();
+    const isHandheld = m === 0;
+    const labels = ['Handheld', 'Docked', 'Console'];
+    // Short uppercase tag — long words like "HANDHELD" overflow the title bar.
+    const tagLabels = ['HAND', 'DOCK', 'CON'];
+    setT('modeName', labels[m] || ('mode ' + m));
+    setT('modeDock', isHandheld ? 'Undocked' : 'Docked');
+    setT('modeVideo', isHandheld ? 'LCD' : 'HDMI');
+    setT('modeRes', isHandheld ? '1280×720' : '1920×1080');
+    setT('modeTag', tagLabels[m] || '—');
+    log('mode: ' + labels[m] + ' (' + m + ')');
+  } catch (e) {
+    setT('modeName', 'unavailable');
+    log('mode err: ' + (e && e.message || e));
+  }
+  try {
+    setT('modeApplet', String(Switch.appletType ? Switch.appletType() : '—'));
+  } catch (_) {}
+}
+
+/* ---- Wireless: nifm IP/subnet/gateway/DNS ---- The wlaninf RSSI + state
+ *      side was dropped because the service isn't accessible to homebrew on
+ *      real hardware (always returned `available:false`). The card now
+ *      reflects only what nifm exposes, which works reliably. */
+function pollWlan() {
+  try {
+    const ni = Switch.networkInfo();
+    const ip = ni.ip || '0.0.0.0';
+    setT('wlIp', ip);
+    setT('wlSubnet', ni.subnetMask || '—');
+    setT('wlGw', ni.gateway || '—');
+    setT('wlDns', ni.primaryDnsServer || '—');
+    setT('wlDns2', ni.secondaryDnsServer && ni.secondaryDnsServer !== '0.0.0.0' ? ni.secondaryDnsServer : '—');
+    setT('wlTag', ip !== '0.0.0.0' ? 'ONLINE' : 'OFFLINE');
+    log('wlan: ' + JSON.stringify(ni));
+  } catch (e) {
+    setT('wlIp', 'n/a'); setT('wlSubnet', 'n/a'); setT('wlGw', 'n/a');
+    setT('wlDns', 'n/a'); setT('wlDns2', 'n/a');
+    setT('wlTag', 'ERR');
+    log('wlan err: ' + (e && e.message || e));
+  }
+}
+
+/* ---- SD Card via Switch.FileSystem ---- */
+function fmtBytes(n) {
+  if (!Number.isFinite(n)) return 'n/a';
+  const gb = n / (1024 ** 3);
+  if (gb >= 1) return gb.toFixed(1) + ' GB';
+  const mb = n / (1024 ** 2);
+  return mb.toFixed(0) + ' MB';
+}
+function pollSd() {
+  try {
+    const fs = Switch.FileSystem.openSdmc();
+    const free = Number(fs.freeSpace());
+    const total = Number(fs.totalSpace());
+    const used = total - free;
+    const pct = total > 0 ? (used / total) * 100 : 0;
+    setT('sdFree', fmtBytes(free));
+    setT('sdTotal', fmtBytes(total));
+    setT('sdUsed', fmtBytes(used));
+    setT('sdUsedTotal', fmtBytes(used) + ' / ' + fmtBytes(total));
+    setW('sdBar', pct);
+    setT('sdTag', pct.toFixed(0) + '% USED');
+    log('sd: free=' + free + ' total=' + total);
+  } catch (e) {
+    setT('sdFree', 'n/a'); setT('sdTotal', 'n/a'); setT('sdUsed', 'n/a');
+    log('sd err: ' + (e && e.message || e));
+  }
+}
+
+/* ---- Six-axis (gyro + accel + fused angle) — opt-in via card tap ---- */
+let sixAxisRaf = null;
+function startSixAxis() {
+  if (sixAxisRaf) return;
+  try {
+    const ok = Switch.diagnostics.sixAxis.start();
+    if (!ok) {
+      setT('gPitch', 'no sensor'); setT('gRoll', 'no sensor'); setT('gYaw', 'no sensor');
+      setT('gyroTag', 'NO SENSOR');
+      log('sixAxis start: no sensor handles');
+      return;
+    }
+    setT('gyroTag', 'LIVE');
+    log('sixAxis started');
+    let frame = 0;
+    let nullReads = 0;
+    const tick = () => {
+      try {
+        const s = Switch.diagnostics.sixAxis.read();
+        if (s) {
+          setT('gPitch', s.angle.x.toFixed(1) + '°');
+          setT('gRoll', s.angle.z.toFixed(1) + '°');
+          setT('gYaw', s.angle.y.toFixed(1) + '°');
+          setT('accelText', 'X ' + s.acceleration.x.toFixed(2) + ' · Y ' + s.acceleration.y.toFixed(2) + ' · Z ' + s.acceleration.z.toFixed(2));
+          // Sample one full reading to the log every ~30 frames (~0.5s) so we
+          // can see live values without flooding. Includes raw gyro + accel +
+          // angle so we can spot whether Citron is feeding the IMU at all.
+          if (frame % 30 === 0) log('sixAxis sample f=' + frame + ': ' + JSON.stringify({
+            accel: s.acceleration, gyro: s.angularVelocity, angle: s.angle,
+            samplingNumber: String(s.samplingNumber), deltaTime: String(s.deltaTime),
+          }));
+        } else {
+          nullReads++;
+          // Surface "read returned null" once per second so we can tell
+          // whether the sensor handle is good but starved of samples
+          // (Citron) vs. a working sensor that's silent for one frame.
+          if (frame % 60 === 0) log('sixAxis null-reads in last 60 frames: ' + nullReads);
+          if (frame % 60 === 0) nullReads = 0;
+        }
+      } catch (e) { log('sixAxis read err: ' + (e && e.message || e)); }
+      frame++;
+      sixAxisRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) {
+    setT('gyroTag', 'ERR');
+    log('sixAxis start err: ' + (e && e.message || e));
+  }
+}
+function stopSixAxis() {
+  if (sixAxisRaf) {
+    cancelAnimationFrame(sixAxisRaf);
+    sixAxisRaf = null;
+    try { Switch.diagnostics.sixAxis.stop(); } catch (_) {}
+    setT('gyroTag', 'IDLE');
+    log('sixAxis stopped');
+  }
+}
+
+/* ---- HD Rumble (navigator.vibrate) ---- */
+const waveBars = [...document.querySelectorAll('#rumbleWave span')];
+const rInt = document.getElementById('rumbleInt');
+const rFreq = document.getElementById('rumbleFreq');
+let rumbleTimer;
+const patterns = {
+  light: { int: 25, freq: 320, vib: [30] },
+  pulse: { int: 55, freq: 200, vib: [60, 40, 60] },
+  wave:  { int: 70, freq: 160, vib: [40, 30, 80, 30, 120] },
+  heavy: { int: 100, freq: 120, vib: [200] },
+};
+const rumbleChips = document.querySelectorAll('.rumble-chip');
+log('rumble-chip handlers bound: ' + rumbleChips.length);
+rumbleChips.forEach(c => c.addEventListener('click', () => {
+  const tag = c.getAttribute('data-r');
+  log('rumble-chip clicked: ' + tag);
+  document.querySelectorAll('.rumble-chip').forEach(x => x.classList.remove('active'));
+  c.classList.add('active');
+  const p = patterns[tag];
+  rInt.textContent = p.int + '%';
+  rFreq.textContent = p.freq + ' Hz';
+  try {
+    const fired = navigator.vibrate ? navigator.vibrate(p.vib) : false;
+    log('vibrate ' + tag + ' fired=' + fired);
+  } catch (e) { log('vibrate err: ' + (e && e.message || e)); }
+  clearInterval(rumbleTimer);
+  let frames = 0;
+  rumbleTimer = setInterval(() => {
+    waveBars.forEach(b => b.style.height = (15 + Math.random() * p.int * 0.85) + '%');
+    if (++frames > 20) {
+      clearInterval(rumbleTimer);
+      waveBars.forEach(b => b.style.height = '20%');
+      c.classList.remove('active');
+      rInt.textContent = '0%';
+    }
+  }, 90);
+}));
+
+/* ---- Master refresh ---- */
+async function refreshAll(reason) {
+  const t0 = Date.now();
+  setT('sysStatus', 'POLLING…');
+  log('=== refreshAll start (' + (reason || 'manual') + ') ===');
+  const tBat = Date.now(); await pollBattery();
+  const tMode = Date.now(); pollMode();
+  const tWlan = Date.now(); pollWlan();
+  const tSd = Date.now(); pollSd();
+  const tEnd = Date.now();
+  setT('sysStatus', 'NOMINAL');
+  log('=== refreshAll done in ' + (tEnd - t0) + 'ms'
+    + ' [bat=' + (tMode - tBat) + 'ms'
+    + ' mode=' + (tWlan - tMode) + 'ms'
+    + ' wlan=' + (tSd - tWlan) + 'ms'
+    + ' sd=' + (tEnd - tSd) + 'ms] ===');
+}
+
+/* Lightweight auto-poll for fast-changing sensors (operation mode, battery).
+ * Wi-Fi + SD are slower / change less often and stay on the manual Refresh
+ * button. Keeps the dock/handheld pill + battery % current without per-frame
+ * work or affecting other pages. */
+let liveInterval = null;
+function startLivePoll() {
+  if (liveInterval) return;
+  log('live-poll start (mode+battery @ 2s)');
+  liveInterval = setInterval(() => {
+    log('--- live tick ---');
+    pollMode();
+    pollBattery();
+  }, 2000);
+}
+function stopLivePoll() {
+  if (liveInterval) {
+    clearInterval(liveInterval);
+    liveInterval = null;
+    log('live-poll stop');
+  }
+}
+
+/* Hooks: Gyro card tap toggles live six-axis sampling. */
+const gyroCard = document.getElementById('gyroCard');
+if (gyroCard) gyroCard.addEventListener('click', () => {
+  if (sixAxisRaf) stopSixAxis(); else startSixAxis();
+});
+
+/* Cleanup when navigating away — stop opt-in sampling + the live poll. */
+window.addEventListener('unload', () => {
+  stopLivePoll();
+  stopSixAxis();
+});
+
+/* Initial poll on load + start the live auto-poll for fast-changing sensors. */
+log('--- page loaded screen=' + screen.width + 'x' + screen.height + ' ---');
+refreshAll('load');
+startLivePoll();
+startSixAxis();
+</script>
+</body>
+</html>

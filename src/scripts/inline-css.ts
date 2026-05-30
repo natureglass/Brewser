@@ -532,8 +532,60 @@ function expandBoxShorthand(values: number[]): [number, number, number, number] 
  */
 export function resolveCanvasFont(style: InlineStyle): string {
 	const sz = (style.fontSize !== undefined && style.fontSize > 0) ? style.fontSize : 14;
-	const family = style.fontFamily || 'sans-serif';
-	return sz + 'px ' + family;
+	return sz + 'px ' + quoteFontFamily(style.fontFamily || 'sans-serif');
+}
+
+/** Normalize a font-family value into a form that HTML5 canvas's `font`
+ * setter will accept on nx.js.
+ *
+ * Two non-obvious behaviours this works around:
+ *
+ *  1. Multi-word family names MUST be quoted. `"30px Chakra Petch"` is
+ *     parsed by the canvas font parser as `size=30px`, `family=Chakra`,
+ *     `garbage=Petch` → the entire declaration is rejected and the canvas
+ *     falls back to its default `10px sans-serif`. CSS strips the source
+ *     quotes before this engine sees the family string, so we add them
+ *     back here.
+ *
+ *  2. nx.js canvas rejects the entire font declaration when the named
+ *     family isn't a registered FontFace — including the size. Real
+ *     browsers fall back family-only and keep the size; nx.js drops to
+ *     `10px sans-serif` wholesale. To make sure the SIZE still applies on
+ *     custom-font pages (e.g. CSS using `'Chakra Petch'`), we always
+ *     append a generic family (`sans-serif`) as a trailing fallback if the
+ *     family stack doesn't already end in one. That way the parser
+ *     accepts the declaration via the generic, and the engine still
+ *     reports the requested size. */
+const GENERIC_FAMILIES = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded']);
+
+export function quoteFontFamily(family: string): string {
+	const f = family.trim();
+	if (!f) return 'sans-serif';
+	// Split a comma-separated stack (`'Outfit', sans-serif` etc.). The CSS
+	// parser passes through the comma form when there are multiple families.
+	const parts = f.split(',').map((p) => p.trim()).filter(Boolean);
+	const out: string[] = [];
+	for (let raw of parts) {
+		// Strip any existing matched quotes around this part so we can
+		// re-emit with consistent double quotes.
+		if (raw.length >= 2 && ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")))) {
+			raw = raw.slice(1, -1);
+		}
+		if (!raw) continue;
+		// Generics stay unquoted (required by the canvas parser).
+		if (GENERIC_FAMILIES.has(raw.toLowerCase())) {
+			out.push(raw.toLowerCase());
+		} else if (/\s/.test(raw)) {
+			out.push('"' + raw + '"');
+		} else {
+			out.push(raw);
+		}
+	}
+	// Guarantee a generic fallback so unknown-family declarations still apply
+	// their size. See workaround #2 in the doc-comment above.
+	const lastLower = out[out.length - 1]?.toLowerCase() ?? '';
+	if (!GENERIC_FAMILIES.has(lastLower)) out.push('sans-serif');
+	return out.join(', ');
 }
 
 /** True iff the resolved weight is bold (numeric ≥600 or 'bold'). */

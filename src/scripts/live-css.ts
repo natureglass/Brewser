@@ -554,28 +554,36 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string): void {
 			computed.marginTop = 8;
 			computed.marginBottom = 8;
 			return;
+		// Heading UA defaults: ONLY margins + bold. Font-size dropped on
+		// purpose so author CSS (a `.card h2 { font-size:26px }` etc.) can
+		// control size directly without competing against a baked-in number
+		// — the previous defaults (32/24/19/16/14/12) were close to common
+		// author values, making small bumps look like they "did nothing"
+		// when actually a hardcoded UA size was winning. With no UA size,
+		// h1-h6 fall back to the inherited body font-size unless author
+		// CSS sets one, which matches what authors usually expect.
 		case 'H1':
-			computed.fontSize = 32; computed.fontWeight = 'bold';
+			computed.fontWeight = 'bold';
 			computed.marginTop = 16; computed.marginBottom = 12;
 			return;
 		case 'H2':
-			computed.fontSize = 24; computed.fontWeight = 'bold';
+			computed.fontWeight = 'bold';
 			computed.marginTop = 14; computed.marginBottom = 10;
 			return;
 		case 'H3':
-			computed.fontSize = 19; computed.fontWeight = 'bold';
+			computed.fontWeight = 'bold';
 			computed.marginTop = 12; computed.marginBottom = 8;
 			return;
 		case 'H4':
-			computed.fontSize = 16; computed.fontWeight = 'bold';
+			computed.fontWeight = 'bold';
 			computed.marginTop = 10; computed.marginBottom = 8;
 			return;
 		case 'H5':
-			computed.fontSize = 14; computed.fontWeight = 'bold';
+			computed.fontWeight = 'bold';
 			computed.marginTop = 10; computed.marginBottom = 6;
 			return;
 		case 'H6':
-			computed.fontSize = 12; computed.fontWeight = 'bold';
+			computed.fontWeight = 'bold';
 			computed.marginTop = 10; computed.marginBottom = 6;
 			return;
 		case 'P':
