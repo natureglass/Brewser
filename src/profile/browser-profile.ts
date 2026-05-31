@@ -189,6 +189,7 @@ const BUILTIN_PAGES: readonly string[] = [
  * PNG in place to re-skin the toolbar. */
 const BUILTIN_ASSETS: readonly string[] = [
 	'home.png',
+	'refresh.png',
 	'settings.png',
 	'left.png',
 	'right.png',

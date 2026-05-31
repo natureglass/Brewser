@@ -96,10 +96,11 @@ export class BrowserUI {
 			ctx.fillRect(0, 0, canvas.width, 2);
 		}
 
-		// Back / forward / home buttons on the left. Icons when loaded,
-		// text-glyph fallback otherwise.
+		// Back / forward / refresh / home buttons on the left. Icons when
+		// loaded, text-glyph fallback otherwise.
 		drawIconOrGlyph(ctx, CHROME_LAYOUT.backX, CHROME_LAYOUT.backWidth, chromeHeight, this.icons?.left ?? null, '‹', state.canGoBack, tb);
 		drawIconOrGlyph(ctx, CHROME_LAYOUT.forwardX, CHROME_LAYOUT.forwardWidth, chromeHeight, this.icons?.right ?? null, '›', state.canGoForward, tb);
+		drawIconOrLabel(ctx, CHROME_LAYOUT.refreshX, CHROME_LAYOUT.refreshWidth, chromeHeight, this.icons?.refresh ?? null, '⟳', true, tb);
 		drawIconOrLabel(ctx, CHROME_LAYOUT.homeX, CHROME_LAYOUT.homeWidth, chromeHeight, this.icons?.home ?? null, 'Home', true, tb);
 
 		// Divider between left-side nav buttons and the URL bar.

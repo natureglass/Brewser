@@ -56,16 +56,21 @@ export const CHROME_LAYOUT = {
 	backWidth: 56,
 	forwardX: 56,
 	forwardWidth: 56,
+	/** Refresh button — reloads the current page. Sits to the LEFT of
+	 * Home (between Forward and Home), so the natural left-to-right
+	 * order is Back · Forward · Refresh · Home · Star · URL. */
+	refreshX: 112,
+	refreshWidth: 56,
 	/** Home button — navigates to `DEFAULT_HOME_URL`. */
-	homeX: 112,
+	homeX: 168,
 	homeWidth: 56,
 	/** Star button — toggles the current URL in the bookmarks store.
 	 * Sits just left of the URL because its action is "operate on the
 	 * thing in the URL bar". */
-	starX: 180,
+	starX: 236,
 	starWidth: 48,
 	/** Where the URL text starts (after a small visual separator). */
-	urlX: 240,
+	urlX: 296,
 	/** Settings button — anchored to the right edge of the chrome strip.
 	 * Opens `browser://settings/` (settings.html); icon is
 	 * `template.icons.settings`. */

@@ -40,7 +40,7 @@
 //     element's bbox if the element has explicit width/height; no
 //     wrapping (M2.3 layout pass).
 
-import { isBoldWeight, isItalicStyle, quoteFontFamily, resolveCanvasFont, resolveLength } from './inline-css.js';
+import { isBoldWeight, isItalicStyle, isPercent, quoteFontFamily, resolveCanvasFont, resolveLength } from './inline-css.js';
 import { getComputedLiveStyle, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
 import { getLiveTreeVersion, type LiveElement } from './live-dom.js';
 import { paintFormWidget } from './live-form.js';
@@ -291,18 +291,23 @@ export function patchLiveDirtyRegions(): boolean {
 			continue;
 		}
 		const rect = { x: oldB.x, y: oldB.y, w: oldB.w, h: oldB.h };
-		// Use the PARENT's content box as the available area, not the
-		// element's own cached box. layoutFixedRoot feeds availableWidth
-		// into resolveLength(cs.width, …) — feeding oldB.w made `width:N%`
-		// resolve against the element's previous pixel width instead of
-		// its containing block, multiplying by 0.N% on every re-layout.
-		// (The sensors-page battery fill decayed 107.8→105.6→103.5→… on
-		// each 2-second pollBattery setW write.) Parent's contentW/H is
-		// the actual containing block per CSS; falls back to oldB on a
-		// rootless / box-less parent (shouldn't happen in practice).
+		// Default: pin availableW/H to oldB so an auto-width element
+		// (no explicit width, e.g. a flex child like a `.row .v` span)
+		// keeps its cached size — layoutFixedRoot's no-explicit-width
+		// fallback uses availableWidth as the element's own width, so
+		// passing the parent's contentW would inflate it to the full row.
+		// HOWEVER, when cs.width is a CssPercent, oldB.w as the
+		// containing-block basis multiplies the element by N% each call
+		// (98% → 96.04% → 94.12% …), which is the battery-fill decay.
+		// Switch only THAT axis to the parent's content size so the
+		// percent re-resolves against the actual containing block.
 		const parentBox = el.parent ? getLayoutBox(el.parent) : undefined;
-		const availW = parentBox?.contentW ?? oldB.w;
-		const availH = parentBox?.contentH ?? oldB.h;
+		const availW = (isPercent(cs.width) && parentBox)
+			? parentBox.contentW
+			: oldB.w;
+		const availH = (isPercent(cs.height) && parentBox)
+			? parentBox.contentH
+			: oldB.h;
 		try {
 			layoutFixedRoot(el, oldB.x, oldB.y, availW, availH);
 		} catch (_) { /* keep the cached layout if a localized relayout throws */ }
@@ -582,6 +587,13 @@ export interface PaintLiveOverlayOptions {
 	 * fullscreen-canvas mode where the WebGL canvas should fill the
 	 * screen instead of the page content. */
 	skipFlow?: boolean;
+	/** Bypass the `isKeyboardOpen()` early-return so the page can be
+	 * painted UNDERNEATH the on-canvas keyboard. The shell uses this in
+	 * its scroll-behind-keyboard path; it sets up a clip rect that ends
+	 * at the keyboard panel's top edge so the keyboard pixels aren't
+	 * touched. Off in every other path so rAF/video heartbeats can't
+	 * stomp the keyboard while it's modal. */
+	paintBehindKeyboard?: boolean;
 }
 
 export function paintLiveOverlay(
@@ -594,8 +606,11 @@ export function paintLiveOverlay(
 	// Stand down while the on-canvas keyboard owns the screen — the
 	// keyboard is modal and lives in a higher visual layer than the
 	// live overlay. Without this gate the rAF heartbeat would draw
-	// widgets / status canvases on top of the keyboard panel.
-	if (isKeyboardOpen()) return;
+	// widgets / status canvases on top of the keyboard panel. The
+	// shell's scroll-behind-keyboard path opts in via
+	// `paintBehindKeyboard` and supplies its own clip rect so we paint
+	// the page area above the panel without disturbing the panel pixels.
+	if (isKeyboardOpen() && !options.paintBehindKeyboard) return;
 	// Hand the measurement context to the layout pass so it can use
 	// measureText for intrinsic widths.
 	setLayoutMeasureCtx(ctx);

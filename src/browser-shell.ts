@@ -21,6 +21,7 @@ import {
 	DEFAULT_CANVAS_HEIGHT,
 	DEFAULT_CANVAS_WIDTH,
 	DEFAULT_HOME_URL,
+	KEYBOARD_LAYOUT,
 } from './browser-config.js';
 import { BrowserUI } from './browser-ui.js';
 import {
@@ -165,7 +166,15 @@ export class BrowserShell {
 		this.policy = new BrowserPermissionPolicy();
 		this.profile = new BrowserProfile();
 		this.profile.ensure();
-		this.historyStore = new HistoryStore({ path: this.profile.historyPath() });
+		// Read config.json upfront so the HistoryStore is constructed with
+		// the user's `maxHistory` cap (loadConfig falls back to DEFAULT_CONFIG
+		// on first run before seedTemplates has copied the romfs default in;
+		// either way maxHistory ends up at the same value).
+		const startupConfig = loadConfig(this.profile.storageRoot);
+		this.historyStore = new HistoryStore({
+			path: this.profile.historyPath(),
+			maxEntries: startupConfig.maxHistory,
+		});
 		this.bookmarksStore = new BookmarksStore({ path: this.profile.bookmarksPath() });
 		const delegate: WebViewDelegate = {
 			onPageStarted: () => {
@@ -226,8 +235,11 @@ export class BrowserShell {
 				// bypassed the policy could still attempt a real network call.
 				enableNetworkFetch: this.policy.networkEnabled,
 				permissionPolicy: this.policy,
-				// `BrowserHistoryLoader` must come first so it claims
-				// `browser://history/` before the static-page loader 404s it.
+				// JSON API loaders come first so they claim their `.json`
+				// URLs before the static-page loader's classifier would
+				// route them as static-asset 404s. `browser://history/`
+				// (no .json) falls through to the static-page loader,
+				// which serves `pages/history.html`.
 				resourceLoaders: [
 					new BrowserHistoryLoader(this.historyStore),
 					new BrowserBookmarksLoader(this.bookmarksStore),
@@ -247,8 +259,13 @@ export class BrowserShell {
 		// M2.4: expose the keyboard opener to the live-DOM form widgets
 		// so `<input type=text>` taps can spawn the same on-canvas
 		// keyboard the URL bar uses. Returns the typed string on Submit
-		// or `null` on Cancel.
-		setKeyboardOpener((initial) => this.keyboard.open(initial));
+		// or `null` on Cancel. The scroll callback is plumbed through so
+		// the page behind the keyboard can be scrolled while it's modal
+		// (right-stick Y, swipe above the panel) — same behavior as the
+		// URL bar / search paths.
+		setKeyboardOpener((initial) => this.keyboard.open(initial, {
+			onScroll: (delta) => this.handleScroll(delta),
+		}));
 		// Let live-DOM `<img>` resolve profile-pages-relative srcs
 		// (`../pages/<rest>`) to the absolute SD-card profile path, so page
 		// images load the editable profile copy instead of nx.js's romfs
@@ -639,14 +656,21 @@ export class BrowserShell {
 		const current = this.navigation.currentURL ?? '';
 		this.addressBar.setText(current);
 
-		const typed = await this.keyboard.open(current);
+		const typed = await this.keyboard.open(current, {
+			onScroll: (delta) => this.handleScroll(delta),
+		});
 		if (typed === null) {
 			// Cancel. If a touch already queued the next input (e.g. tap on a
 			// content link or chrome button dismissed the keyboard), let the
 			// main loop dispatch it — it will redraw on its own. Otherwise
-			// reload the current URL to clear the keyboard pixels.
+			// just flag a repaint: the live-overlay cache is still valid (the
+			// keyboard wrote directly to the screen canvas without mutating
+			// the live DOM), so the next idle tick blits it back over the
+			// keyboard pixels. Re-render the chrome strip too — with a bottom
+			// toolbar it sits inside the keyboard panel area and was hidden.
 			if (peekPendingInput()) return;
-			await this.navigateTo(current || DEFAULT_HOME_URL);
+			requestFullRepaint();
+			if (this.mode === 'normal') this.renderChrome();
 			return;
 		}
 
@@ -670,7 +694,15 @@ export class BrowserShell {
 		if (next === this.currentScrollY) return;
 		const t0 = performance.now();
 		this.currentScrollY = next;
-		this.repaintContent();
+		// On-canvas keyboard is up: paint only the page area above the
+		// keyboard panel via the clipped path so the keyboard's pixels
+		// stay intact. The normal repaintContent path early-returns on
+		// `isKeyboardOpen()` and would otherwise no-op the scroll.
+		if (isKeyboardOpen()) {
+			this.repaintContent({ behindKeyboard: true });
+		} else {
+			this.repaintContent();
+		}
 		// Record wall-clock + work-duration per scroll tick into a
 		// ring buffer the benchmark page reads to surface real-world
 		// scroll smoothness numbers.
@@ -873,7 +905,7 @@ export class BrowserShell {
 	 * not yet pinned. Cost: ~10 ms per frame; this is the ~21 FPS gap
 	 * on the Three.js cube demo. Reclaim is open work.
 	 */
-	private repaintContent(opts: { videoOnlyFast?: boolean } = {}): void {
+	private repaintContent(opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean } = {}): void {
 		// On-canvas keyboard is modal — its panel is drawn directly to
 		// the screen by `KeyboardOverlay.render` and owns the screen
 		// while open. The shell's content + overlay repaint paths would
@@ -883,9 +915,18 @@ export class BrowserShell {
 		// everything. When the keyboard closes, `setKeyboardOpen(false)`
 		// auto-flags `requestFullRepaint()` so the next call clears the
 		// keyboard pixels by re-painting the page underneath.
-		if (isKeyboardOpen()) return;
+		//
+		// `behindKeyboard` opts in to the scroll-behind-keyboard path:
+		// the page is re-blitted under a clip rect that ends at the
+		// keyboard panel's top edge so the panel pixels stay intact
+		// while content scrolls underneath. See the branch below.
+		if (isKeyboardOpen() && !opts.behindKeyboard) return;
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
+		if (opts.behindKeyboard) {
+			this.repaintBehindKeyboard(ctx, canvas.width, canvas.height);
+			return;
+		}
 		if (this.mode === 'fullscreen-canvas') {
 			this.repaintFullscreenCanvas(ctx, canvas.width, canvas.height);
 			return;
@@ -1037,10 +1078,69 @@ export class BrowserShell {
 	}
 
 	/**
+	 * Scroll-while-keyboard repaint. Paints the page area that sits
+	 * ABOVE the on-canvas keyboard panel — the keyboard panel pixels
+	 * stay put, the chrome strip stays put, and only the slice between
+	 * them is rewritten from the live-overlay cache. Called from
+	 * `handleScroll` when `isKeyboardOpen()` is true.
+	 *
+	 * Skips `overlayLiveAnimatedCanvases` entirely: animated canvases
+	 * and video frames don't tick while the keyboard is up (the shell's
+	 * onTick loop is suspended on the keyboard promise, so rAF/video
+	 * heartbeats don't fire), so there's no fresh content for them to
+	 * blit and `copyBridgeToScreen` may not honor the canvas clip.
+	 */
+	private repaintBehindKeyboard(
+		ctx: CanvasRenderingContext2D,
+		canvasWidth: number,
+		canvasHeight: number,
+	): void {
+		const chromeHeight = this.template.toolbar.height;
+		const isBottomToolbar = this.template.toolbar.position === 'bottom';
+		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
+		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
+		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
+		// Same viewport as the normal path — keeping width AND height
+		// identical to lastBodyViewport prevents paintLiveOverlay from
+		// classifying this as a "viewport-changed" rebuild (which would
+		// trash the warm cache). The clip below restricts which pixels
+		// actually get written.
+		const viewport = {
+			x: 0,
+			y: paintTopInset,
+			width: canvasWidth,
+			height: canvasHeight - paintTopInset - paintBottomInset,
+		};
+		const panelTop = KEYBOARD_LAYOUT.topY;
+		const clipBottom = Math.min(panelTop, viewport.y + viewport.height);
+		if (clipBottom <= viewport.y) return;
+		const t0 = performance.now();
+		ctx.save();
+		try {
+			ctx.beginPath();
+			ctx.rect(viewport.x, viewport.y, viewport.width, clipBottom - viewport.y);
+			ctx.clip();
+			// Re-fill the body background inside the clipped slice so a
+			// shorter page's bg color extends edge-to-edge above the panel.
+			ctx.fillStyle = this.template.page.background;
+			ctx.fillRect(viewport.x, viewport.y, viewport.width, clipBottom - viewport.y);
+			paintLiveOverlay(ctx, getLiveRoot(), viewport, effectiveScrollY, {
+				paintBehindKeyboard: true,
+			});
+		} finally {
+			ctx.restore();
+		}
+		setLiveViewport(viewport, effectiveScrollY);
+		this.lastCpuPresentMs = performance.now() - t0;
+		this.cpuPresentCallCount++;
+		this.lastRepaintedScrollY = effectiveScrollY;
+	}
+
+	/**
 	 * Handle a tap on an HTML `<button data-action="...">`. Two
 	 * action families are recognised:
-	 *   - bare strings (`fullscreen-page`, `fullscreen-canvas`)
-	 *     trigger the shell's mode toggles.
+	 *   - bare strings (`fullscreen-page`, `fullscreen-canvas`,
+	 *     `clear-history`) trigger shell-level handlers.
 	 *   - `select-template:<path>` (from the Settings page's
 	 *     `<browser-templates>` expansion) rewrites `config.json`'s
 	 *     `template` field and reloads.
@@ -1062,10 +1162,24 @@ export class BrowserShell {
 			case 'search':
 				await this.promptAndSearch();
 				break;
+			case 'clear-history':
+				await this.clearHistory();
+				break;
 			default:
 				// Unknown action — no-op.
 				break;
 		}
+	}
+
+	/**
+	 * History-page "Clear History" button handler. Empties the on-disk
+	 * `HistoryStore` (rewrites `history.jsonl` to empty) and reloads the
+	 * current page so the `<browser-history>` expansion re-runs against
+	 * the now-empty store — the list disappears in place.
+	 */
+	private async clearHistory(): Promise<void> {
+		this.historyStore.clear();
+		await this.runNavigation(() => this.navigation.reload());
 	}
 
 	/**
@@ -1076,14 +1190,18 @@ export class BrowserShell {
 	 */
 	private async promptAndSearch(): Promise<void> {
 		const engine = resolveSearchEngine(this.profile.storageRoot);
-		const current = this.navigation.currentURL ?? '';
-		const typed = await this.keyboard.open('');
+		const typed = await this.keyboard.open('', {
+			onScroll: (delta) => this.handleScroll(delta),
+		});
 		if (typed === null || typed.trim() === '') {
 			// Cancel / empty — clear the keyboard pixels. Mirrors
 			// promptAndNavigate: defer if a tap already queued the next
-			// input, else reload the current page.
+			// input, else flag a repaint so the next idle tick blits the
+			// live-overlay cache back over the keyboard pixels, and re-render
+			// chrome (hidden under the panel when the toolbar is at the bottom).
 			if (peekPendingInput()) return;
-			await this.navigateTo(current || DEFAULT_HOME_URL);
+			requestFullRepaint();
+			if (this.mode === 'normal') this.renderChrome();
 			return;
 		}
 		await this.navigateTo(engine.query + encodeURIComponent(typed.trim()));
@@ -1385,6 +1503,7 @@ export class BrowserShell {
 		return {
 			left: resolve(i.back),
 			right: resolve(i.forward),
+			refresh: resolve(i.refresh),
 			home: resolve(i.home),
 			settings: resolve(i.settings),
 			bookmarkTrue: resolve(i.bookmarkTrue),

@@ -2,6 +2,7 @@
   "template": "Templates/default.json",
   "searchEngine": "DuckDuckGo",
   "videoNVTEGRA": true,
-  "renderChunkMs": 1000,
-  "scrollChunkMs": 4
+  "renderChunkMs": 512,
+  "scrollChunkMs": 12,
+  "maxHistory": 30
 }

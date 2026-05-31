@@ -16,6 +16,7 @@
   "icons": {
     "back": "assets/left.png",
     "forward": "assets/right.png",
+    "refresh": "assets/refresh.png",
     "home": "assets/home.png",
     "settings": "assets/settings.png",
     "bookmarkTrue": "assets/bookmark_true.png",

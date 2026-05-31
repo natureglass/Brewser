@@ -28,7 +28,7 @@ import { getComputedLiveStyle, type ComputedLiveStyle } from './live-css.js';
 import { bumpLiveTreeVersion, getLiveRoot, type LiveElement } from './live-dom.js';
 import { getLayoutBox, type LayoutBox } from './live-layout.js';
 import { patchLiveCacheRegion, patchLiveDirtyRegions, syncLiveCacheVersion } from './live-overlay.js';
-import { requestFullRepaint, setKeyboardOpen } from './live-paint-control.js';
+import { requestFullRepaint } from './live-paint-control.js';
 
 // =========================================================================
 // Keyboard opener registration (called by the shell)
@@ -617,19 +617,15 @@ export async function handleFormTap(el: LiveElement, tapX?: number, clickAlready
 async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 	if (!keyboardOpener) return false;
 	const cur = getInputValue(el);
-	// Tell the live-overlay painter to stand down while the keyboard
-	// owns the screen — otherwise the rAF heartbeat paints widgets +
-	// status canvases on top of the keyboard panel. Cleared in the
-	// `finally` block so the live overlay resumes (and the shell
-	// triggers a full content repaint, wiping the keyboard pixels).
-	setKeyboardOpen(true);
+	// The keyboard itself manages the `isKeyboardOpen` flag now (set on
+	// entry, cleared on the resolve path) so the URL bar and `<input>`
+	// paths are gated uniformly. It also calls `requestFullRepaint()` on
+	// close so the next idle tick blits the page back over the panel.
 	let result: string | null;
 	try {
 		result = await keyboardOpener(cur);
 	} catch (_) {
 		result = null;
-	} finally {
-		setKeyboardOpen(false);
 	}
 	if (result === null) {
 		fireEvent(el, 'blur');
@@ -639,10 +635,11 @@ async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 	fireEvent(el, 'input');
 	fireEvent(el, 'change');
 	fireEvent(el, 'blur');
-	// Patch the text-field cell. The keyboard close already requested
-	// a full repaint via setKeyboardOpen(false), which clobbers the
-	// cache anyway — but patching first means the user sees the typed
-	// value the instant the keyboard closes, not after the rebuild.
+	// Patch the text-field cell so the user sees the typed value the
+	// instant the keyboard closes — `setInputValue` bumped the tree
+	// version, so without this patch the next paint would do a full
+	// rebuild. Sync the cache version after patching so the rebuild is
+	// skipped.
 	patchAndSync(el);
 	return true;
 }

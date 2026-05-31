@@ -13,6 +13,7 @@ import { getComputedLiveStyle, setPseudoActive } from '../scripts/live-css.js';
 import { handleFormTap, isFormWidget } from '../scripts/live-form.js';
 import { getLayoutBox } from '../scripts/live-layout.js';
 import { findTapIntent, patchLiveDirtyRegions } from '../scripts/live-overlay.js';
+import { isKeyboardOpen } from '../scripts/live-paint-control.js';
 import { hitTestVideoControls, videoIsPaused } from '../scripts/live-video.js';
 
 const nativeSetTimeout = setTimeout.bind(globalThis);
@@ -499,8 +500,20 @@ export function installCanvasTouch(): void {
 		// touchmove/touchend handlers installed below complete the
 		// chain. `click` is also fired for back-compat with Stats's
 		// tap-to-cycle (it listens for `click`, not `mousedown`).
+		//
+		// Gated off when the on-canvas keyboard is up: outside-panel
+		// taps are meant purely as cancel gestures and shouldn't also
+		// fire a `click` on whatever sits under the finger. The welcome
+		// page's bookmark cards extend down through the area visually
+		// occupied by the keyboard panel — without this gate a tap on
+		// the visible-sliver of a card (or seemingly empty space just
+		// above the panel) would queue a navigate to that bookmark.
+		// Chrome strip taps still fire via the static dispatch path
+		// below, which doesn't use the live-DOM hit-test.
 		try {
-			const liveHit = hitTestLive(getLiveRoot(), x, y, liveViewport);
+			const liveHit = isKeyboardOpen()
+				? null
+				: hitTestLive(getLiveRoot(), x, y, liveViewport);
 			if (liveHit) {
 				_touchDiag('  → live-DOM hit on <' + liveHit.tagName + '>');
 				// M2.5: open a scroll session if the hit is inside a
@@ -519,12 +532,17 @@ export function installCanvasTouch(): void {
 						maxScroll: Math.max(0, lb.intrinsicContentH - lb.contentH),
 						moved: false,
 					};
-				} else if (browserMode === 'normal' && !isFormWidget(liveHit)) {
+				} else if (browserMode === 'normal' && !isFormWidget(liveHit) && !isKeyboardOpen()) {
 					// No inner overflow:auto/scroll ancestor + the hit isn't
 					// a form widget (sliders own their own drag) → open a
 					// page-level scroll session. `touchmove` will translate
 					// finger dy into shell scrollY deltas via
 					// `touchScrollHandler`.
+					//
+					// Gated off when the on-canvas keyboard is up: the
+					// keyboard owns the page-scroll route in that mode (its
+					// own touchmove emits onScroll) so we don't get
+					// double-fired deltas.
 					pageScrollSession = { startY: y, lastY: y, moved: false };
 				}
 				const baseEvent = {
@@ -574,6 +592,7 @@ export function installCanvasTouch(): void {
 		if (y >= chromeY0 && y < chromeY1) {
 			const backEnd = CHROME_LAYOUT.backX + CHROME_LAYOUT.backWidth;
 			const forwardEnd = CHROME_LAYOUT.forwardX + CHROME_LAYOUT.forwardWidth;
+			const refreshEnd = CHROME_LAYOUT.refreshX + CHROME_LAYOUT.refreshWidth;
 			const homeEnd = CHROME_LAYOUT.homeX + CHROME_LAYOUT.homeWidth;
 			const starEnd = CHROME_LAYOUT.starX + CHROME_LAYOUT.starWidth;
 			const settingsEnd = CHROME_LAYOUT.settingsX + CHROME_LAYOUT.settingsWidth;
@@ -581,6 +600,10 @@ export function installCanvasTouch(): void {
 				pushInput({ kind: 'back' });
 			} else if (x >= CHROME_LAYOUT.forwardX && x < forwardEnd) {
 				pushInput({ kind: 'forward' });
+			} else if (x >= CHROME_LAYOUT.refreshX && x < refreshEnd) {
+				// Refresh slot — reuses the existing `reload` input kind that
+				// the Y button rising-edge handler also fires.
+				pushInput({ kind: 'reload' });
 			} else if (x >= CHROME_LAYOUT.homeX && x < homeEnd) {
 				pushInput({ kind: 'home' });
 			} else if (starEnabled && x >= CHROME_LAYOUT.starX && x < starEnd) {

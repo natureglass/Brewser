@@ -6,6 +6,18 @@ import {
 	KEYBOARD_LAYOUT,
 } from '../browser-config.js';
 import { DEFAULT_TEMPLATE, type BrowserTemplate } from '../profile/browser-template.js';
+import { setKeyboardOpen } from '../scripts/live-paint-control.js';
+
+/** Callbacks the shell passes to `KeyboardOverlay.open()` so the page
+ * behind the keyboard can be scrolled while it's up. Right-stick Y is
+ * sampled in the keyboard's own poll loop (the shell's main controller
+ * loop is suspended awaiting the keyboard's promise); touch swipes
+ * above the panel are forwarded by the panel's own touch session. */
+export interface KeyboardScrollCallbacks {
+	/** Positive delta = scroll content DOWN (matches handleScroll's
+	 * sign convention in browser-shell). */
+	onScroll?: (delta: number) => void;
+}
 
 interface Key {
 	/** Display label. */
@@ -191,13 +203,24 @@ export class KeyboardOverlay {
 		this.panelBackground = image;
 	}
 
-	async open(initial = ''): Promise<string | null> {
+	async open(
+		initial = '',
+		callbacks: KeyboardScrollCallbacks = {},
+	): Promise<string | null> {
 		const state: KeyboardState = {
 			value: initial,
 			cursor: initial.length,
 			focusRow: 0,
 			focusCol: 0,
 		};
+		// Flag the paint pipeline that the keyboard owns the screen — the
+		// live-overlay's `paintLiveOverlay` early-returns on this flag so
+		// rAF/video ticks don't clobber the keyboard pixels. Cleared in
+		// the resolve path below so the next idle tick repaints the page.
+		// Note: live-form's `<input>` tap path used to do this in its own
+		// try/finally; that responsibility now lives here so both the URL
+		// bar path and the `<input>` path are gated uniformly.
+		setKeyboardOpen(true);
 		this.render(state);
 
 		return new Promise<string | null>((resolve) => {
@@ -209,8 +232,12 @@ export class KeyboardOverlay {
 				(newState) => {
 					this.render(newState);
 				},
-				resolve,
+				(value) => {
+					setKeyboardOpen(false);
+					resolve(value);
+				},
 				this.layout.panelTop,
+				callbacks,
 			);
 			session.start();
 		});
@@ -343,9 +370,49 @@ function rising(prev: ButtonSnapshot, next: ButtonSnapshot, name: keyof ButtonSn
 	return next[name] && !prev[name];
 }
 
+/** Move-threshold (px) past which a touch above the keyboard panel is
+ * treated as a page-scroll swipe instead of a tap-to-cancel. Mirrors
+ * the SWIPE_MOVE_THRESHOLD in controller-shortcuts.ts so the gesture
+ * cutoff matches the rest of the browser. */
+const PAGE_SWIPE_MOVE_THRESHOLD = 6;
+
+/** Right-stick Y axis on the standard nx.js gamepad mapping (same
+ * constant as controller-shortcuts.ts; duplicated here so the keyboard
+ * doesn't reach into that module just for scroll). */
+const RIGHT_STICK_Y_AXIS = 3;
+const STICK_DEADZONE = 0.15;
+/** Max scroll px per pollLoop tick at full right-stick deflection.
+ * Pollloop runs at ~16ms = ~60 Hz, so full deflection = ~600 px/s,
+ * comparable to the shell's main-loop scroll cadence. */
+const MAX_SCROLL_PER_TICK = 10;
+
+function readStickScroll(pad: Gamepad | null): number {
+	const axis = pad?.axes[RIGHT_STICK_Y_AXIS] ?? 0;
+	const abs = Math.abs(axis);
+	if (abs < STICK_DEADZONE) return 0;
+	const normalized = (abs - STICK_DEADZONE) / (1 - STICK_DEADZONE);
+	return Math.sign(axis) * Math.round(normalized * normalized * MAX_SCROLL_PER_TICK);
+}
+
+/** Per-touch session for a swipe that started ABOVE the keyboard panel.
+ * Opened on touchstart-outside-panel; drives onScroll deltas on
+ * touchmove; resolved on touchend (cancel-keyboard if the gesture stayed
+ * a tap, just close the session if it grew into a swipe). */
+interface PageSwipeSession {
+	startY: number;
+	lastY: number;
+	moved: boolean;
+}
+
 class KeyboardSession {
 	private running = true;
-	private touchHandler?: (event: TouchEvent) => void;
+	private touchStartHandler?: (event: TouchEvent) => void;
+	private touchMoveHandler?: (event: TouchEvent) => void;
+	private touchEndHandler?: (event: TouchEvent) => void;
+	/** Swipe-tracking state for the current finger when it landed above
+	 * the panel. `null` means no outside-panel touch is in flight (the
+	 * touch either hit a key, or already lifted). */
+	private pageSwipe: PageSwipeSession | null = null;
 
 	constructor(
 		private readonly canvas: NxScreenCanvas,
@@ -355,6 +422,7 @@ class KeyboardSession {
 		private readonly notifyChange: (state: KeyboardState) => void,
 		private readonly resolve: (value: string | null) => void,
 		private readonly panelTop: number,
+		private readonly callbacks: KeyboardScrollCallbacks,
 	) {}
 
 	start(): void {
@@ -365,10 +433,19 @@ class KeyboardSession {
 	private finish(value: string | null): void {
 		if (!this.running) return;
 		this.running = false;
-		if (this.touchHandler) {
-			this.canvas.removeEventListener('touchstart', this.touchHandler);
-			this.touchHandler = undefined;
+		if (this.touchStartHandler) {
+			this.canvas.removeEventListener('touchstart', this.touchStartHandler);
+			this.touchStartHandler = undefined;
 		}
+		if (this.touchMoveHandler) {
+			this.canvas.removeEventListener('touchmove', this.touchMoveHandler);
+			this.touchMoveHandler = undefined;
+		}
+		if (this.touchEndHandler) {
+			this.canvas.removeEventListener('touchend', this.touchEndHandler);
+			this.touchEndHandler = undefined;
+		}
+		this.pageSwipe = null;
 		// Defer to the next macrotask so the navigation that consumes this
 		// value doesn't start *inside* the touch-event dispatch (Submit-by-tap)
 		// or the pollLoop's iteration (Submit-by-Plus). Without this, the
@@ -418,7 +495,7 @@ class KeyboardSession {
 	}
 
 	private installTouchHandler(): void {
-		this.touchHandler = (event: TouchEvent) => {
+		this.touchStartHandler = (event: TouchEvent) => {
 			const touch = event.touches[0] ?? event.changedTouches[0];
 			if (!touch) return;
 			for (let r = 0; r < this.rects.length; r++) {
@@ -437,21 +514,68 @@ class KeyboardSession {
 					}
 				}
 			}
-			// Tap outside the keyboard panel — treat as cancel so the page
-			// underneath becomes interactive again. The chrome strip / content
-			// link listener fires for the same touch event (registered first),
-			// so a link tap is already queued by the time we get here.
+			// Touch outside the keyboard panel. Open a swipe session: the
+			// touchend handler will cancel the keyboard if the gesture
+			// stayed a tap, but a swipe past PAGE_SWIPE_MOVE_THRESHOLD
+			// becomes a page scroll (driven by onScroll) and the cancel is
+			// suppressed. The main canvas's own touch handler also fires
+			// for this event (registered first) — its live-DOM hit-test
+			// is gated off while the keyboard is open so a tap on content
+			// won't queue a stray `click` (e.g. on the welcome page where
+			// bookmark cards extend behind the panel), but the chrome
+			// strip's static dispatch still runs so a tap on the back /
+			// forward / star buttons both cancels the keyboard AND fires
+			// the chrome action in one gesture.
 			if (touch.clientY < this.panelTop) {
-				this.finish(null);
+				this.pageSwipe = { startY: touch.clientY, lastY: touch.clientY, moved: false };
 			}
 		};
-		this.canvas.addEventListener('touchstart', this.touchHandler);
+		this.touchMoveHandler = (event: TouchEvent) => {
+			if (!this.pageSwipe) return;
+			const touch = event.touches[0] ?? event.changedTouches[0];
+			if (!touch) return;
+			const y = touch.clientY;
+			// Incremental delta since the last touchmove — pass to the shell
+			// as a scroll delta with the same sign convention as page-level
+			// swipes elsewhere: finger DOWN reveals content above → scrollY
+			// decreases → negative delta. The main canvas's pageScrollSession
+			// route is gated off while the keyboard is open, so this is the
+			// sole driver for swipe-to-scroll-page during keyboard input.
+			const incDy = y - this.pageSwipe.lastY;
+			this.pageSwipe.lastY = y;
+			if (Math.abs(y - this.pageSwipe.startY) > PAGE_SWIPE_MOVE_THRESHOLD) {
+				this.pageSwipe.moved = true;
+			}
+			if (incDy !== 0 && this.callbacks.onScroll) {
+				this.callbacks.onScroll(-incDy);
+			}
+		};
+		this.touchEndHandler = () => {
+			if (!this.pageSwipe) return;
+			const wasSwipe = this.pageSwipe.moved;
+			this.pageSwipe = null;
+			// Tap (no movement past the threshold) above the panel cancels
+			// the keyboard — same UX as before this change. The chrome /
+			// content link listeners already fired for this touch in the
+			// main canvas dispatcher; their queued input takes precedence
+			// over a plain cancel (peekPendingInput check in the shell).
+			if (!wasSwipe) this.finish(null);
+		};
+		this.canvas.addEventListener('touchstart', this.touchStartHandler);
+		this.canvas.addEventListener('touchmove', this.touchMoveHandler);
+		this.canvas.addEventListener('touchend', this.touchEndHandler);
 	}
 
 	private async pollLoop(): Promise<void> {
+		// 16 ms (~60 Hz) so right-stick page-scroll feels as smooth as the
+		// shell's main scroll loop. Key inputs still use rising-edge so a
+		// brief tap = exactly one step regardless of poll rate. Holding a
+		// D-pad direction no longer auto-repeats (it did at the previous
+		// 70 ms cadence with no rising-edge gate change), but the keyboard
+		// is small enough (5 rows × 10 cols) that tap-to-step is fine.
 		let prev = readButtons();
 		while (this.running) {
-			await delay(70);
+			await delay(16);
 			if (!this.running) return;
 			const next = readButtons();
 
@@ -475,6 +599,16 @@ class KeyboardSession {
 			if (rising(prev, next, 'plus')) {
 				this.finish(this.state.value);
 				return;
+			}
+
+			// Right-stick Y → page scroll behind the keyboard. The shell's
+			// main loop is suspended awaiting this keyboard's promise, so
+			// its onScroll path doesn't fire; we sample the axis here and
+			// forward to the callback. handleScroll() in the shell does the
+			// clip-to-panelTop repaint when isKeyboardOpen() is true.
+			if (this.callbacks.onScroll) {
+				const stickDelta = readStickScroll(activePad());
+				if (stickDelta !== 0) this.callbacks.onScroll(stickDelta);
 			}
 
 			prev = next;

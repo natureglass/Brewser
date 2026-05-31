@@ -44,27 +44,6 @@
     margin-bottom: 54px;
   }
 
-  .brand-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    color: #eaf2ff;
-    text-decoration: none;
-    font-weight: 800;
-  }
-
-  .brand-logo {
-    width: 58px;
-    height: 58px;
-    object-fit: contain;
-    filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.28));
-  }
-
-  .brand-name {
-    color: #ffd35e;
-    letter-spacing: 0.01em;
-  }
-
   .top-links {
     display: flex;
     justify-content: flex-end;
@@ -234,11 +213,6 @@
       padding: 20px;
     }
 
-    .brand-logo {
-      width: 50px;
-      height: 50px;
-    }
-
     .munch-link {
       min-width: 96px;
       padding-inline: 16px;
@@ -273,18 +247,10 @@
 <body>
 <div class="page-shell">
   <header class="top-bar">
-    <a class="brand-link" href="browser://home/" aria-label="SwitchSurf home">
-      <img
-        class="brand-logo"
-        src="../pages/assets/switchsurf_logo.png"
-        alt="SwitchSurf logo"
-      >
-      <span class="brand-name">SwitchSurf</span>
-    </a>
+    <a class="munch-link" href="browser://apps/">Apps</a>
 
     <nav class="top-links" aria-label="Browser navigation">
       <a class="munch-link" href="browser://history/">History</a>
-      <a class="munch-link" href="browser://apps/">Apps</a>
       <a class="munch-link" href="browser://web-experiments/">Dev</a>
     </nav>
   </header>

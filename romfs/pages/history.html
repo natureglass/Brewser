@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>History — SwitchSurf</title>
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top, rgba(122, 162, 255, 0.12), transparent 32%),
+      #0b1220;
+    color: #e0e8f4;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 18px;
+    padding: 28px;
+  }
+
+  h1 { color: #ffd35e; margin: 0 0 4px; line-height: 1.12; }
+  a { color: #9bb1d6; text-decoration: none; }
+  .lead { color: #9bb1d6; margin-top: 0; margin-bottom: 24px; }
+  .empty { color: #6a7c95; font-style: italic; }
+
+  .page-shell {
+    width: min(1280px, 100%);
+    margin: 0 auto;
+  }
+
+  /* Header row puts the page title on the left and the single
+     action button on the right. */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  /* Single destructive button — pill shape with red/orange accents so
+     it reads as "careful, this clears data". */
+  .clear-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 132px;
+    min-height: 46px;
+    padding: 11px 22px;
+    color: #ffb8b8;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    background:
+      radial-gradient(circle at top left, rgba(255, 60, 65, 0.22), transparent 36%),
+      linear-gradient(135deg, #2a151a, #1a1018 72%);
+    border: 1px solid rgba(255, 60, 65, 0.55);
+    border-radius: 999px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  /* History list — same shape the resource loader emits for
+     <browser-history>: a <ul class="settings-list"> of rows. Copied
+     from settings.html so the rendering matches. */
+  ul.settings-list { list-style-type: none; padding: 0; }
+  ul.settings-list li {
+    background-color: #14202d;
+    padding: 8px 14px;
+    margin-top: 4px;
+    border-left: 3px solid #1f2c4d;
+  }
+  ul.settings-list .url { color: #6a7c95; }
+  ul.settings-list .desc {
+    display: block;
+    color: #6a7c95;
+    font-size: 15px;
+    margin-top: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="page-shell">
+  <header class="top-bar">
+    <h1>History</h1>
+    <!-- data-action="clear-history" is intercepted by the shell
+         (browser-shell.ts dispatchButtonAction) — clears the history
+         store and reloads the page so the list re-renders empty. -->
+    <button class="clear-btn" type="button" data-action="clear-history">Clear History</button>
+  </header>
+
+  <p class="lead">Recent visits, most recent first. Tap a row to open it
+  again.</p>
+
+  <!-- Replaced by the resource loader with a list of recent visits.
+       `limit="N"` caps how many rows render; the cap on what's
+       *persisted* is config.json's `maxHistory`. -->
+  <browser-history limit="100"></browser-history>
+</div>
+</body>
+</html>
