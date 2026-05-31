@@ -41,7 +41,7 @@
 
 import { generate, parse, walk, type CssNode, type Rule, type Selector } from 'css-tree';
 import { bumpLiveTreeVersion, type LiveElement } from './live-dom.js';
-import { parseLength, type CssLength } from './inline-css.js';
+import { parseLength, resolveFontSizeKeyword, type CssLength } from './inline-css.js';
 import { markLiveDirty } from './live-paint-control.js';
 
 // =========================================================================
@@ -139,7 +139,26 @@ export interface SolidBackgroundLayer {
 	color: string;
 }
 
-export type BackgroundLayer = LinearGradient | RadialGradient | SolidBackgroundLayer;
+/** `background: url(...)` — the URL is unresolved (may be `/path`,
+ * `./path`, protocol-relative `//host/path`, or absolute). The painter
+ * resolves it via `resolveLiveResourceUrl` and asks the image-layer
+ * cache for an `HTMLImageElement`; once loaded, the live tree version
+ * bumps so the next paint can drawImage it. */
+export interface ImageBackgroundLayer {
+	type: 'image';
+	url: string;
+	/** Loose-parsed CSS position/repeat/size keywords from the same layer
+	 * (`no-repeat`, `center`, etc.). Painter consults these for placement;
+	 * unrecognized tokens are dropped. */
+	repeat?: 'repeat' | 'no-repeat' | 'repeat-x' | 'repeat-y';
+	position?: 'center' | 'left' | 'right' | 'top' | 'bottom';
+	/** `cover` / `contain` / explicit `<w>` `<h>` (px). */
+	sizeMode?: 'cover' | 'contain' | 'auto';
+	sizeW?: number;
+	sizeH?: number;
+}
+
+export type BackgroundLayer = LinearGradient | RadialGradient | SolidBackgroundLayer | ImageBackgroundLayer;
 
 /** Parsed `box-shadow` longhand. CSS allows multiple shadows separated
  * by top-level commas; each is `[inset] <ox> <oy> [<blur>] [<spread>] <color>`. */
@@ -212,6 +231,12 @@ export interface ComputedLiveStyle {
 	cursor?: string;
 	opacity?: number;
 	display?: 'block' | 'inline' | 'inline-block' | 'flex' | 'inline-flex' | 'grid' | 'table' | 'none';
+	/** CSS `float`. Layout honours `left` / `right` in layoutBlock by
+	 * packing consecutive floated kids onto the same row until the row
+	 * fills, then flushing. `none` (the default) lets the kid stack
+	 * normally. Floats with no explicit width fall back to parent
+	 * allocation — i.e. equivalent to not being floated. */
+	float?: 'left' | 'right' | 'none';
 	/** Raw `grid-template-columns:` value (parsed at layout time). The
 	 * layout module supports `repeat(auto-fit, minmax(<len>, 1fr))`,
 	 * `repeat(<N>, <track>)`, and explicit space-separated track lists
@@ -295,6 +320,12 @@ export interface ComputedLiveStyle {
 	// M2.5 overflow.
 	overflowX?: 'visible' | 'hidden' | 'scroll' | 'auto';
 	overflowY?: 'visible' | 'hidden' | 'scroll' | 'auto';
+	/** CSS `white-space`. `nowrap` keeps an inline run on a single line
+	 * (used with `overflow:hidden` + `text-overflow:ellipsis` to truncate
+	 * long URLs / labels). Other values fall back to the default wrap
+	 * behaviour — `pre` / `pre-wrap` not implemented (text collapses
+	 * whitespace either way). */
+	whiteSpace?: 'normal' | 'nowrap' | 'pre' | 'pre-wrap';
 	/** `content` from `:before` rules. */
 	before?: string;
 	/** `content` from `:after` rules. */
@@ -652,7 +683,162 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string): void {
 			computed.fontStyle = 'italic';
 			computed.textAlign = 'center';
 			return;
+		// Form widgets — vertical UA margins so stacked widgets don't
+		// fuse together. Real Chrome/Firefox/Safari ship `margin: 0`
+		// on `<input>`/`<button>` and rely on inline-block line-height
+		// for visual breathing room, but our engine renders form
+		// widgets as block-level via layoutLeaf, so the gap has to be
+		// added explicitly. 3 + 3 = 6 px between adjacent widgets
+		// matches what tier3-style pages look like in a real browser.
+		// Author CSS still overrides via the normal cascade.
+		// `<input type=hidden>` zero-sizes itself in layoutLeaf so the
+		// margin doesn't push siblings around for hidden fields.
+		case 'INPUT':
+		case 'BUTTON':
+		case 'SELECT':
+		case 'TEXTAREA':
+			computed.marginTop = 3;
+			computed.marginBottom = 3;
+			return;
+		// Non-rendered elements. STYLE is the load-bearing one — body-
+		// level `<style>` blocks were rendering their CSS source as
+		// visible text (Google's `/search` "Update je browser" page
+		// surfaced this as a `.MAeEl{font-size:16px…}` strip at the
+		// top). SCRIPT/HEAD/TITLE/META/LINK/NOSCRIPT are mostly already
+		// filtered by `html-to-live.SKIP_TAGS`, but page scripts can
+		// create them dynamically (e.g. `document.createElement
+		// ('script')`), and matching the spec UA defaults here means
+		// such nodes never paint regardless of how they entered the
+		// tree.
+		case 'STYLE':
+		case 'SCRIPT':
+		case 'HEAD':
+		case 'TITLE':
+		case 'META':
+		case 'LINK':
+		case 'NOSCRIPT':
+			computed.display = 'none';
+			return;
 	}
+}
+
+/**
+ * Apply HTML presentational hint attributes to `computed`.
+ *
+ * Pre-CSS layouts (and Google's tier3 mobile page) lean heavily on
+ * `<img width=N>`, `<table width=N%>`, `<td width=N>`, `<input size=N>`
+ * etc. for sizing. Per HTML5 these are "presentational hints" that
+ * contribute to the cascade at user-agent specificity, so author CSS
+ * still wins — modelled by writing into `computed` between
+ * `applyUaDefaults` and the matched-rule pass.
+ *
+ * Only the hints actually surfaced by tier3 + common legacy markup are
+ * covered; obscure ones (`<font color>`, `<basefont>`, `<marquee>`,
+ * etc.) are intentionally omitted.
+ */
+function applyPresentationalHints(computed: ComputedLiveStyle, el: LiveElement): void {
+	const tag = el.tagName;
+
+	if (tag === 'IMG' || tag === 'CANVAS' || tag === 'VIDEO' || tag === 'OBJECT' || tag === 'EMBED') {
+		setLenAttr(computed, 'width', el.getAttribute('width'));
+		setLenAttr(computed, 'height', el.getAttribute('height'));
+		return;
+	}
+
+	if (tag === 'TABLE') {
+		setLenAttr(computed, 'width', el.getAttribute('width'));
+		setLenAttr(computed, 'height', el.getAttribute('height'));
+		return;
+	}
+
+	if (tag === 'TD' || tag === 'TH') {
+		setLenAttr(computed, 'width', el.getAttribute('width'));
+		setLenAttr(computed, 'height', el.getAttribute('height'));
+		// Cell horizontal alignment defaults: legacy `<td align=…>`
+		// hint. `justify` is dropped — `computed.textAlign` doesn't
+		// support it and the engine has no justify rasterisation path.
+		const align = (el.getAttribute('align') ?? '').toLowerCase();
+		if (align === 'left' || align === 'right' || align === 'center') {
+			computed.textAlign = align;
+		}
+		return;
+	}
+
+	if (tag === 'TR') {
+		setLenAttr(computed, 'height', el.getAttribute('height'));
+		return;
+	}
+
+	if (tag === 'HR') {
+		setLenAttr(computed, 'width', el.getAttribute('width'));
+		return;
+	}
+
+	if (tag === 'INPUT') {
+		const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+		if (type === 'image') {
+			setLenAttr(computed, 'width', el.getAttribute('width'));
+			setLenAttr(computed, 'height', el.getAttribute('height'));
+			return;
+		}
+		// Text-family inputs: HTML's `size` attribute is roughly "N
+		// characters wide." We don't have proper character-width metrics
+		// at cascade time, so approximate with the font size (or the 14px
+		// default) × ~0.55. Matches what real browsers do within ±20% and
+		// makes tier3's `<input size=35>` paint visibly.
+		if (
+			type === 'text' || type === 'search' || type === 'email' || type === 'url'
+			|| type === 'tel' || type === 'password' || type === '' || type === 'number'
+		) {
+			const sizeStr = el.getAttribute('size');
+			if (sizeStr) {
+				const n = parseInt(sizeStr, 10);
+				if (Number.isFinite(n) && n > 0) {
+					const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
+					// 4px each side of internal padding so the value text
+					// has breathing room inside the painted box.
+					computed.width = Math.round(n * fontPx * 0.55 + 8);
+				}
+			}
+		}
+		return;
+	}
+
+	if (tag === 'TEXTAREA') {
+		const colsStr = el.getAttribute('cols');
+		const rowsStr = el.getAttribute('rows');
+		if (colsStr) {
+			const n = parseInt(colsStr, 10);
+			if (Number.isFinite(n) && n > 0) {
+				const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
+				computed.width = Math.round(n * fontPx * 0.55 + 8);
+			}
+		}
+		if (rowsStr) {
+			const n = parseInt(rowsStr, 10);
+			if (Number.isFinite(n) && n > 0) {
+				const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
+				const lineH = typeof computed.lineHeight === 'number' ? computed.lineHeight : 1.2;
+				computed.height = Math.round(n * fontPx * lineH + 8);
+			}
+		}
+		return;
+	}
+}
+
+/** Parse an HTML width/height-style attribute value (`"150"`, `"100%"`,
+ * `"150px"`) and write it to `computed[key]` as a CssLength. Numeric
+ * values without a unit are pixels per HTML spec, which `parseLength`
+ * already handles via `parsePxOrNum`. */
+function setLenAttr(
+	computed: ComputedLiveStyle,
+	key: 'width' | 'height',
+	raw: string | null,
+): void {
+	if (!raw) return;
+	const v = parseLength(raw.trim());
+	if (v === undefined) return;
+	computed[key] = v;
 }
 
 // =========================================================================
@@ -681,6 +867,14 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 	//    use specificity 0 (matched-by-tag) — we model that by simply
 	//    layering defaults first and letting matched rules overwrite.
 	applyUaDefaults(computed, el.tagName);
+	// 0a. Apply HTML presentational hints (`<img width=…>`, `<table
+	//    width=…%>`, `<input size=…>`, …). Per HTML5 these contribute at
+	//    UA-stylesheet specificity (lower than any author rule), so we
+	//    layer them right after the UA defaults and before matched
+	//    author rules. Critical for external HTML like google.com's
+	//    tier3 page, which uses these attributes instead of inline
+	//    style for table/cell widths and input size.
+	applyPresentationalHints(computed, el);
 
 	// 1. Walk all rules across all sheets that match this element.
 	const matched: { rule: ParsedRule; pseudo: 'before' | 'after' | null }[] = [];
@@ -817,6 +1011,11 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 		if (computed.fontStyle === undefined && parentComputed.fontStyle !== undefined) computed.fontStyle = parentComputed.fontStyle;
 		if (computed.textAlign === undefined && parentComputed.textAlign !== undefined) computed.textAlign = parentComputed.textAlign;
 		if (computed.lineHeight === undefined && parentComputed.lineHeight !== undefined) computed.lineHeight = parentComputed.lineHeight;
+		// `white-space` is inheritable per CSS spec — a `nowrap` on a
+		// container scopes to all its descendants' text runs. DDG sets
+		// it on `.result__extras__url` and expects the inner `<a>`'s
+		// text to inherit; without inheritance the URL still wraps.
+		if (computed.whiteSpace === undefined && parentComputed.whiteSpace !== undefined) computed.whiteSpace = parentComputed.whiteSpace;
 		// text-decoration is spec'd as not-inherited, but per CSS 2.1 it
 		// propagates to descendants visually because the decoration is
 		// drawn over the descendant's text. We model this by inheriting
@@ -873,16 +1072,38 @@ function applyDeclToComputed(
 			else computed.backgroundLayers = undefined;
 			return;
 		}
+		case 'background-image': {
+			// Standalone `background-image:` — common pattern when sites set
+			// position/size separately via background-position/etc. and only
+			// the image url() goes here. parseBackgroundLayers handles the
+			// url() extraction.
+			const layers = parseBackgroundLayers(value);
+			if (layers) computed.backgroundLayers = layers;
+			return;
+		}
 		case 'background-size': {
 			computed.backgroundSize = parseBackgroundSize(value);
 			return;
 		}
 		case 'font-family': computed.fontFamily = stripQuoted(value); return;
 		case 'font-size': {
-			// em on font-size resolves against the PARENT's font-size, not
-			// the element's own (since we are defining the element's own).
-			const emBase = parentComputed?.fontSize ?? 16;
-			const n = parsePxOrNum(value, { emBase });
+			// CSS font-size accepts (in order of precedence here):
+			//   1. Absolute keywords (`small`, `x-small`, `medium`, …) — fixed
+			//      px values per the CSS 2.1 specification.
+			//   2. Relative keywords (`smaller`, `larger`) — resolve against
+			//      the parent's computed font-size with the spec's ~1.2x
+			//      ratio. Use the parent's value as the base (the element's
+			//      own font-size is what we're computing here).
+			//   3. Numeric lengths (`Npx`, `Nem`, …) — em resolves against
+			//      the parent's font-size, NOT the element's own (since we
+			//      are defining the element's own).
+			const v = value.trim().toLowerCase();
+			const kw = resolveFontSizeKeyword(v);
+			if (kw !== undefined) { computed.fontSize = kw; return; }
+			const parentSize = parentComputed?.fontSize ?? 16;
+			if (v === 'larger') { computed.fontSize = Math.round(parentSize * 1.2); return; }
+			if (v === 'smaller') { computed.fontSize = Math.round(parentSize / 1.2); return; }
+			const n = parsePxOrNum(value, { emBase: parentSize });
 			if (n !== undefined) computed.fontSize = n;
 			return;
 		}
@@ -941,8 +1162,26 @@ function applyDeclToComputed(
 			// em on non-font-size lengths resolves against the element's
 			// OWN font-size (or parent's if not yet set in this cascade
 			// pass).
-			const emBase = computed.fontSize ?? parentComputed?.fontSize ?? 16;
-			const n = parsePxOrNum(value, { emBase });
+			const fs = computed.fontSize ?? parentComputed?.fontSize ?? 16;
+			const trimmed = value.trim();
+			// CSS spec: a UNITLESS line-height is a multiplier of font-size,
+			// not raw px. `body { line-height: 1.6 }` with default 16px
+			// font-size = 25.6px line height. Pre-2026-05-31 we treated
+			// `1.6` as 1.6 px which collapsed all body text into nearly
+			// zero-line-height (DDG html-mode looked "squashed").
+			//
+			// Inheritance trade-off: per spec, descendants inherit the
+			// bare multiplier and re-resolve against their OWN font-size.
+			// We resolve at parse time and propagate the resulting px,
+			// so children with a different font-size get the parent's
+			// resolved value rather than re-multiplying. Close enough
+			// for most pages; full spec-compliance would require tracking
+			// "is multiplier" through inheritance + a post-cascade resolve.
+			if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+				computed.lineHeight = parseFloat(trimmed) * fs;
+				return;
+			}
+			const n = parsePxOrNum(value, { emBase: fs });
 			if (n !== undefined) computed.lineHeight = n;
 			return;
 		}
@@ -956,6 +1195,11 @@ function applyDeclToComputed(
 			const v = value.trim().toLowerCase();
 			if (v === 'block' || v === 'inline' || v === 'inline-block'
 				|| v === 'flex' || v === 'inline-flex' || v === 'grid' || v === 'none') computed.display = v;
+			return;
+		}
+		case 'float': {
+			const v = value.trim().toLowerCase();
+			if (v === 'left' || v === 'right' || v === 'none') computed.float = v;
 			return;
 		}
 		case 'grid-template-columns': {
@@ -1098,6 +1342,13 @@ function applyDeclToComputed(
 			if (v) computed.overflowY = v;
 			return;
 		}
+		case 'white-space': {
+			const v = value.trim().toLowerCase();
+			if (v === 'normal' || v === 'nowrap' || v === 'pre' || v === 'pre-wrap') {
+				computed.whiteSpace = v;
+			}
+			return;
+		}
 		// Border longhands.
 		case 'border-top-width':    return assignNum(computed, 'borderTopWidth', value);
 		case 'border-right-width':  return assignNum(computed, 'borderRightWidth', value);
@@ -1220,7 +1471,15 @@ function applyDeclToPseudoStyle(
 			return;
 		}
 		case 'line-height': {
-			const n = parsePxOrNum(value, { emBase: slot.fontSize ?? emBase });
+			const fs = slot.fontSize ?? emBase;
+			const trimmed = value.trim();
+			// Unitless line-height = multiplier × font-size (same trap as
+			// the regular cascade's case).
+			if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+				slot.lineHeight = parseFloat(trimmed) * fs;
+				return;
+			}
+			const n = parsePxOrNum(value, { emBase: fs });
 			if (n !== undefined) slot.lineHeight = n;
 			return;
 		}
@@ -1858,24 +2117,62 @@ function parseRadialGradient(inner: string): RadialGradient | undefined {
 export function parseBackgroundLayers(value: string): BackgroundLayer[] | undefined {
 	const parts = splitTopLevelCommas(value);
 	const layers: BackgroundLayer[] = [];
-	let sawGradient = false;
+	let sawRichLayer = false;
 	for (const part of parts) {
 		const t = part.trim();
 		const linM = /^linear-gradient\((.+)\)$/i.exec(t);
 		if (linM) {
 			const lg = parseLinearGradient(linM[1]);
-			if (lg) { layers.push(lg); sawGradient = true; continue; }
+			if (lg) { layers.push(lg); sawRichLayer = true; continue; }
 		}
 		const radM = /^radial-gradient\((.+)\)$/i.exec(t);
 		if (radM) {
 			const rg = parseRadialGradient(radM[1]);
-			if (rg) { layers.push(rg); sawGradient = true; continue; }
+			if (rg) { layers.push(rg); sawRichLayer = true; continue; }
+		}
+		// `url("...")` anywhere in this layer's tokens — pull it out and
+		// loosely parse the surrounding `no-repeat` / `center` / `contain`
+		// / `cover` / `<size>` keywords. Anything we don't recognize is
+		// dropped; missing keywords get sensible defaults at paint time.
+		const urlM = /url\(\s*(['"]?)([^'")]+)\1\s*\)/i.exec(t);
+		if (urlM) {
+			const url = urlM[2].trim();
+			const rest = t.replace(urlM[0], ' ').trim();
+			const img: ImageBackgroundLayer = { type: 'image', url };
+			// Repeat keywords.
+			if (/\bno-repeat\b/i.test(rest)) img.repeat = 'no-repeat';
+			else if (/\brepeat-x\b/i.test(rest)) img.repeat = 'repeat-x';
+			else if (/\brepeat-y\b/i.test(rest)) img.repeat = 'repeat-y';
+			else if (/\brepeat\b/i.test(rest)) img.repeat = 'repeat';
+			// Position keyword (single — we don't track per-axis yet).
+			if (/\bcenter\b/i.test(rest)) img.position = 'center';
+			else if (/\bleft\b/i.test(rest)) img.position = 'left';
+			else if (/\bright\b/i.test(rest)) img.position = 'right';
+			else if (/\btop\b/i.test(rest)) img.position = 'top';
+			else if (/\bbottom\b/i.test(rest)) img.position = 'bottom';
+			// Size keyword or explicit `<w> <h>` (px) — CSS allows them after
+			// `/`, e.g. `center / auto 36px`. Honour `auto N px` (auto width,
+			// fixed height) and `N px N px` (both fixed). `cover` / `contain`
+			// override.
+			if (/\bcover\b/i.test(rest)) img.sizeMode = 'cover';
+			else if (/\bcontain\b/i.test(rest)) img.sizeMode = 'contain';
+			else {
+				const sizeMatch = /\/\s*(auto|(\d+(?:\.\d+)?)px)\s+(auto|(\d+(?:\.\d+)?)px)/i.exec(rest);
+				if (sizeMatch) {
+					img.sizeMode = 'auto';
+					if (sizeMatch[2]) img.sizeW = parseFloat(sizeMatch[2]);
+					if (sizeMatch[4]) img.sizeH = parseFloat(sizeMatch[4]);
+				}
+			}
+			layers.push(img);
+			sawRichLayer = true;
+			continue;
 		}
 		// Solid color (or anything we don't understand — pass through
 		// as a colour and let the painter assign to fillStyle).
 		layers.push({ type: 'solid', color: t });
 	}
-	if (!sawGradient) return undefined;
+	if (!sawRichLayer) return undefined;
 	// CSS lists first-on-top; the painter wants bottom-first so it can
 	// iterate forward.
 	return layers.reverse();
@@ -2027,6 +2324,17 @@ export function setMediaViewport(w: number, h: number): void {
 	mediaVpH = h;
 }
 
+/** User-preferred colour scheme used to evaluate
+ * `@media (prefers-color-scheme: light | dark)`. Defaults to `light`,
+ * matching the wider web's expected default; the shell overrides from
+ * `config.json` at startup and on any runtime toggle. Read at
+ * stylesheet-parse time, so changes take effect on the next
+ * `registerStyleSheet`. */
+let mediaColorScheme: 'light' | 'dark' = 'light';
+export function setMediaColorScheme(scheme: 'light' | 'dark'): void {
+	mediaColorScheme = scheme;
+}
+
 /** Match a media-query string against our Switch profile.
  *   - `(pointer:coarse)` => true (Switch is touch)
  *   - `(hover:hover)`   => false (no real hover; lil-gui gates its
@@ -2048,6 +2356,14 @@ function matchMediaQuery(q: string): boolean {
 	if (t.indexOf('(hover:none)') >= 0) return true;
 	if (t.indexOf('(pointer:coarse)') >= 0) return true;
 	if (t.indexOf('(pointer:fine)') >= 0) return false;
+	// `prefers-color-scheme` opts the page into a theme variant. Compare
+	// against the user's config-driven preference (`light` default). A
+	// query without a token value (e.g. `(prefers-color-scheme)`) just
+	// tests for support — match true so author CSS that uses the bare
+	// feature still applies.
+	if (t.indexOf('(prefers-color-scheme:light)') >= 0) return mediaColorScheme === 'light';
+	if (t.indexOf('(prefers-color-scheme:dark)') >= 0) return mediaColorScheme === 'dark';
+	if (t.indexOf('(prefers-color-scheme:no-preference)') >= 0) return false;
 
 	// Dimensional features. A media-query list is comma-separated (OR);
 	// each branch is `and`-joined terms (AND). Evaluate every recognized

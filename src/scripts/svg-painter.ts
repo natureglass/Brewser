@@ -4,13 +4,21 @@
  * `<polygon>` / `<path>` / `<g>` children with Canvas2D primitives.
  *
  * Source-agnostic: the caller passes an adapter that knows how to read
- * a node's tag, attribute, and child list. Today the only caller is
- * the live-DOM path (`scripts/live-overlay.ts`); the adapter pattern
- * is preserved for future callers.
+ * a node's tag, attribute, and child list. Callers today:
+ *   - live-overlay.ts (inline <svg> in live-DOM pages)
+ *   - live-dom.ts (rasterising .svg URLs fetched as CSS background-image)
  *
- * Out of scope: `<text>`, `<image>`, `<use>`, `<defs>`, gradients,
- * patterns, masks, filters, animations, the elliptical-arc `A/a` path
- * command, and CSS-style transforms.
+ * 2026-05-31 additions:
+ *   - `<defs>` collection — any element with `id` is indexed so refs work.
+ *   - `<clipPath>` resolution via `clip-path="url(#id)"` — collected from
+ *     defs, applied as ctx.clip() around the host's paint subtree.
+ *   - `fill-rule="evenodd"` honored on `<path>`. (Default nonzero.)
+ *   - `style="fill:…;stroke:…"` attribute respected alongside the
+ *     attribute-form fill / stroke (style wins per CSS spec).
+ *
+ * Out of scope: `<text>`, `<image>`, `<use>`, gradients, patterns,
+ * masks, filters, animations, the elliptical-arc `A/a` path command, and
+ * CSS-style transforms beyond `transform="translate(x y)"`.
  */
 
 export interface SvgNodeAdapter<N> {
@@ -23,16 +31,38 @@ interface SvgInherited {
 	fill?: string;
 	stroke?: string;
 	strokeWidth?: number;
+	fillRule?: CanvasFillRule;
+	clipRule?: CanvasFillRule;
 }
+
+/** Tags that don't paint anything themselves — they only define ids
+ * other elements reference via `url(#id)`. Skipped during the main
+ * paint walk so their geometry doesn't render as filled shapes. */
+const DEF_TAGS = new Set([
+	'defs', 'clippath', 'mask', 'lineargradient', 'radialgradient',
+	'pattern', 'symbol', 'marker', 'filter', 'metadata', 'title', 'desc',
+]);
 
 export function paintSvgSubtree<N>(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	root: N,
 	adapter: SvgNodeAdapter<N>,
 ): void {
+	// Pre-pass: index every element with an `id`. This is what lets
+	// `clip-path="url(#foo)"` actually find `<clipPath id="foo">…</clipPath>`
+	// inside the tree (typically nested under <defs>). Indexed across the
+	// entire tree so refs work from anywhere — matches real SVG behavior.
+	const idMap = new Map<string, N>();
+	collectIds(root, adapter, idMap);
 	for (const child of adapter.children(root)) {
-		paintNode(ctx as CanvasRenderingContext2D, child, adapter, {});
+		paintNode(ctx as CanvasRenderingContext2D, child, adapter, {}, idMap);
 	}
+}
+
+function collectIds<N>(node: N, a: SvgNodeAdapter<N>, out: Map<string, N>): void {
+	const id = a.attr(node, 'id');
+	if (id) out.set(id, node);
+	for (const c of a.children(node)) collectIds(c, a, out);
 }
 
 function paintNode<N>(
@@ -40,12 +70,41 @@ function paintNode<N>(
 	node: N,
 	a: SvgNodeAdapter<N>,
 	inherited: SvgInherited,
+	ids: Map<string, N>,
 ): void {
 	const tag = a.tag(node).toLowerCase();
+	if (DEF_TAGS.has(tag)) return; // defs / clippath / mask / etc.
 	const merged = merge(node, a, inherited);
+	// Wrap this node's paint in a clip if it references one. Painted
+	// AROUND the body so descendants are clipped too. transform on the
+	// host element wraps both clip-establishment and body.
+	const clipRef = parseUrlRef(a.attr(node, 'clip-path'));
+	const transform = a.attr(node, 'transform');
+	const needSave = !!clipRef || !!transform;
+	if (needSave) ctx.save();
+	try {
+		if (transform) applyTransform(ctx, transform);
+		if (clipRef) {
+			const def = ids.get(clipRef);
+			if (def) applyClipPath(ctx, def, a, merged);
+		}
+		paintBody(ctx, node, tag, a, merged, ids);
+	} finally {
+		if (needSave) ctx.restore();
+	}
+}
+
+function paintBody<N>(
+	ctx: CanvasRenderingContext2D,
+	node: N,
+	tag: string,
+	a: SvgNodeAdapter<N>,
+	merged: SvgInherited,
+	ids: Map<string, N>,
+): void {
 	switch (tag) {
-		case 'g':
-			for (const c of a.children(node)) paintNode(ctx, c, a, merged);
+		case 'g': case 'svg':
+			for (const c of a.children(node)) paintNode(ctx, c, a, merged, ids);
 			return;
 		case 'rect': return paintRect(ctx, node, a, merged);
 		case 'circle': return paintCircle(ctx, node, a, merged);
@@ -57,12 +116,132 @@ function paintNode<N>(
 	}
 }
 
+/** Establish a clipping path from a `<clipPath>` def's child shapes.
+ * Each child draws its geometry into the current path; ctx.clip() then
+ * confines all subsequent drawing to that union. */
+function applyClipPath<N>(
+	ctx: CanvasRenderingContext2D,
+	def: N,
+	a: SvgNodeAdapter<N>,
+	inherited: SvgInherited,
+): void {
+	ctx.beginPath();
+	for (const child of a.children(def)) {
+		tracePathFor(ctx, child, a, inherited);
+	}
+	// clip-rule on the host or on the child shape decides fill rule for
+	// the clip; default nonzero matches SVG spec.
+	const clipRule = inherited.clipRule ?? 'nonzero';
+	ctx.clip(clipRule);
+}
+
+/** Add the geometry of one SVG shape node to the CURRENT path (no
+ * begin/fill/stroke). Used by clip-path establishment. */
+function tracePathFor<N>(
+	ctx: CanvasRenderingContext2D,
+	node: N,
+	a: SvgNodeAdapter<N>,
+	inherited: SvgInherited,
+): void {
+	const tag = a.tag(node).toLowerCase();
+	switch (tag) {
+		case 'g':
+			for (const c of a.children(node)) tracePathFor(ctx, c, a, inherited);
+			return;
+		case 'rect': {
+			const x = num(node, a, 'x');
+			const y = num(node, a, 'y');
+			const w = num(node, a, 'width');
+			const h = num(node, a, 'height');
+			if (w > 0 && h > 0) ctx.rect(x, y, w, h);
+			return;
+		}
+		case 'circle': {
+			const cx = num(node, a, 'cx');
+			const cy = num(node, a, 'cy');
+			const r = num(node, a, 'r');
+			if (r > 0) { ctx.moveTo(cx + r, cy); ctx.arc(cx, cy, r, 0, Math.PI * 2); }
+			return;
+		}
+		case 'ellipse': {
+			const cx = num(node, a, 'cx');
+			const cy = num(node, a, 'cy');
+			const rx = num(node, a, 'rx');
+			const ry = num(node, a, 'ry');
+			if (rx > 0 && ry > 0) { ctx.moveTo(cx + rx, cy); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); }
+			return;
+		}
+		case 'polygon': case 'polyline': {
+			const raw = a.attr(node, 'points');
+			if (!raw) return;
+			const nums = raw.trim().split(/[\s,]+/).map(parseFloat).filter((n) => Number.isFinite(n));
+			if (nums.length < 4) return;
+			ctx.moveTo(nums[0], nums[1]);
+			for (let i = 2; i + 1 < nums.length; i += 2) ctx.lineTo(nums[i], nums[i + 1]);
+			if (tag === 'polygon') ctx.closePath();
+			return;
+		}
+		case 'path': {
+			const d = a.attr(node, 'd');
+			if (d) executePath(ctx, d);
+			return;
+		}
+	}
+}
+
+/** Parse `url(#foo)` / `url("#foo")` → `foo`. Returns undefined for
+ * non-url-ref values (e.g. `none`, raw color, missing attr). */
+function parseUrlRef(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	const m = /^url\(\s*(['"]?)#([^'")]+)\1\s*\)$/i.exec(value.trim());
+	return m ? m[2] : undefined;
+}
+
+/** Minimal `transform` parser: handles `translate(x y)` / `translate(x,y)`
+ * / `translate(x)` (y=0). Ignores rotate/scale/skew/matrix — most icons
+ * use translate-only positioning, and unsupported transforms safely
+ * no-op rather than mangle the render. */
+function applyTransform(ctx: CanvasRenderingContext2D, transform: string): void {
+	const t = transform.trim();
+	const m = /^translate\(\s*(-?\d+(?:\.\d+)?)(?:[\s,]+(-?\d+(?:\.\d+)?))?\s*\)$/i.exec(t);
+	if (m) {
+		const tx = parseFloat(m[1]);
+		const ty = m[2] ? parseFloat(m[2]) : 0;
+		ctx.translate(tx, ty);
+	}
+}
+
 function merge<N>(node: N, a: SvgNodeAdapter<N>, inh: SvgInherited): SvgInherited {
-	const fill = a.attr(node, 'fill') ?? inh.fill;
-	const stroke = a.attr(node, 'stroke') ?? inh.stroke;
-	const swRaw = a.attr(node, 'stroke-width');
+	// `style="fill:…;stroke:…"` wins over attribute-form per CSS spec.
+	const style = parseStyleAttr(a.attr(node, 'style'));
+	const fill = style.fill ?? a.attr(node, 'fill') ?? inh.fill;
+	const stroke = style.stroke ?? a.attr(node, 'stroke') ?? inh.stroke;
+	const swRaw = style.strokeWidth ?? a.attr(node, 'stroke-width');
 	const strokeWidth = swRaw !== undefined ? parseFloat(swRaw) : inh.strokeWidth;
-	return { fill, stroke, strokeWidth };
+	const fillRule = (style.fillRule ?? a.attr(node, 'fill-rule') ?? inh.fillRule) as CanvasFillRule | undefined;
+	const clipRule = (style.clipRule ?? a.attr(node, 'clip-rule') ?? inh.clipRule) as CanvasFillRule | undefined;
+	return { fill, stroke, strokeWidth, fillRule, clipRule };
+}
+
+function parseStyleAttr(s: string | undefined): {
+	fill?: string; stroke?: string; strokeWidth?: string; fillRule?: string; clipRule?: string;
+} {
+	if (!s) return {};
+	const out: Record<string, string> = {};
+	for (const decl of s.split(';')) {
+		const i = decl.indexOf(':');
+		if (i < 0) continue;
+		const k = decl.slice(0, i).trim().toLowerCase();
+		const v = decl.slice(i + 1).trim();
+		if (k && v) out[k] = v;
+	}
+	return {
+		fill: out['fill'],
+		stroke: out['stroke'],
+		strokeWidth: out['stroke-width'],
+		fillRule: out['fill-rule'],
+		clipRule: out['clip-rule'],
+	};
 }
 
 function applyPaint(ctx: CanvasRenderingContext2D, m: SvgInherited): { didFill: boolean; didStroke: boolean } {
@@ -111,7 +290,7 @@ function paintRect<N>(ctx: CanvasRenderingContext2D, node: N, a: SvgNodeAdapter<
 	} else {
 		ctx.rect(x, y, w, h);
 	}
-	if (didFill) ctx.fill();
+	if (didFill) ctx.fill(m.fillRule ?? 'nonzero');
 	if (didStroke) ctx.stroke();
 }
 
@@ -123,7 +302,7 @@ function paintCircle<N>(ctx: CanvasRenderingContext2D, node: N, a: SvgNodeAdapte
 	const { didFill, didStroke } = applyPaint(ctx, m);
 	ctx.beginPath();
 	ctx.arc(cx, cy, r, 0, Math.PI * 2);
-	if (didFill) ctx.fill();
+	if (didFill) ctx.fill(m.fillRule ?? 'nonzero');
 	if (didStroke) ctx.stroke();
 }
 
@@ -136,7 +315,7 @@ function paintEllipse<N>(ctx: CanvasRenderingContext2D, node: N, a: SvgNodeAdapt
 	const { didFill, didStroke } = applyPaint(ctx, m);
 	ctx.beginPath();
 	ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-	if (didFill) ctx.fill();
+	if (didFill) ctx.fill(m.fillRule ?? 'nonzero');
 	if (didStroke) ctx.stroke();
 }
 
@@ -163,7 +342,7 @@ function paintPoly<N>(ctx: CanvasRenderingContext2D, node: N, a: SvgNodeAdapter<
 	ctx.moveTo(nums[0], nums[1]);
 	for (let i = 2; i + 1 < nums.length; i += 2) ctx.lineTo(nums[i], nums[i + 1]);
 	if (close) ctx.closePath();
-	if (didFill && close) ctx.fill();
+	if (didFill && close) ctx.fill(m.fillRule ?? 'nonzero');
 	if (didStroke) ctx.stroke();
 }
 
@@ -173,7 +352,7 @@ function paintPath<N>(ctx: CanvasRenderingContext2D, node: N, a: SvgNodeAdapter<
 	const { didFill, didStroke } = applyPaint(ctx, m);
 	ctx.beginPath();
 	executePath(ctx, d);
-	if (didFill) ctx.fill();
+	if (didFill) ctx.fill(m.fillRule ?? 'nonzero');
 	if (didStroke) ctx.stroke();
 }
 
@@ -213,7 +392,8 @@ function executePath(ctx: CanvasRenderingContext2D, d: string): void {
 			skipSep();
 		}
 		if (cmd === null) break;
-		const rel = cmd === cmd.toLowerCase() && cmd !== 'z';
+		const cmdStr: string = cmd;
+		const rel: boolean = cmdStr === cmdStr.toLowerCase() && cmdStr !== 'z';
 		switch (cmd) {
 			case 'M': case 'm': {
 				let x = readNum(), y = readNum();

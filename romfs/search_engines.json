@@ -6,7 +6,7 @@
     "query": "https://www.google.com/search?q="
   },
   {
-    "title": "Microsoft Bing",
+    "title": "Bing",
     "logo": "../pages/assets/bing_logo.png",
     "url": "https://www.bing.com/",
     "query": "https://www.bing.com/search?q="
@@ -20,7 +20,7 @@
   {
     "title": "DuckDuckGo",
     "logo": "../pages/assets/duckduckgo_logo.png",
-    "url": "https://duckduckgo.com/",
-    "query": "https://duckduckgo.com/?q="
+    "url": "https://html.duckduckgo.com/",
+    "query": "https://html.duckduckgo.com/html/?q="
   }
 ]

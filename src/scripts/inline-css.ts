@@ -245,6 +245,18 @@ export function applyDecl(style: InlineStyle, propRaw: string, valueRaw: string)
 			case 'max-height': style.maxHeight = len; return;
 		}
 	}
+	if (prop === 'font-size') {
+		// Absolute CSS keywords (`small`, `x-small`, …) come first so the
+		// numeric branch below isn't tried with a non-numeric input.
+		// Relative keywords (`smaller`, `larger`) require parent context
+		// and are deliberately not handled here — see
+		// `resolveFontSizeKeyword` doc.
+		const kw = resolveFontSizeKeyword(value);
+		if (kw !== undefined) { style.fontSize = kw; return; }
+		const n = parsePxOrNum(value);
+		if (n !== undefined) style.fontSize = n;
+		return;
+	}
 	if (NUM_PROPS.has(prop)) {
 		const n = parsePxOrNum(value);
 		if (n === undefined) return;
@@ -256,7 +268,21 @@ export function applyDecl(style: InlineStyle, propRaw: string, valueRaw: string)
 			case 'opacity': style.opacity = clamp01(n); return;
 			case 'z-index': style.zIndex = Math.trunc(n); return;
 			case 'font-size': style.fontSize = n; return;
-			case 'line-height': style.lineHeight = n; return;
+			case 'line-height': {
+				// Unitless line-height is a font-size MULTIPLIER per CSS
+				// spec (see [[reference-swb-white-space-nowrap]] sibling
+				// for the broader unit story). Resolve at parse time using
+				// the same-element inline font-size if set, else 16px.
+				// Inline-style line-height with units (px / em / rem)
+				// already came out of parsePxOrNum resolved to a number.
+				const trimmed = value.trim();
+				if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+					style.lineHeight = parseFloat(trimmed) * (style.fontSize ?? 16);
+				} else {
+					style.lineHeight = n;
+				}
+				return;
+			}
 			case 'padding-top': style.paddingTop = n; return;
 			case 'padding-right': style.paddingRight = n; return;
 			case 'padding-bottom': style.paddingBottom = n; return;
@@ -668,6 +694,19 @@ function parsePxOrNum(s: string): number | undefined {
 	if (vh) return parseFloat(vh[1]) * 0.01 * cssVpH;
 	const vw = /^(-?\d+(?:\.\d+)?)vw$/.exec(t);
 	if (vw) return parseFloat(vw[1]) * 0.01 * cssVpW;
+	// `em` / `rem` — both resolve against the CSS default 16px base here
+	// since this parser doesn't see the element's computed font-size. The
+	// live-css cascade has a richer parsePxOrNum that uses the actual
+	// parent font-size for *typographic* sites; this fallback covers
+	// length props (min-height/min-width/etc.) that get plumbed through
+	// inline-css's parseLength wrapper without that context. DDG's
+	// `.result__extras { min-height: 1.57em }` resolved to 1.57px under
+	// the pre-em parser, which collapsed the flex container so the next
+	// sibling (snippet) stacked on top of the URL row.
+	const em = /^(-?\d+(?:\.\d+)?)em$/.exec(t);
+	if (em) return parseFloat(em[1]) * 16;
+	const rem = /^(-?\d+(?:\.\d+)?)rem$/.exec(t);
+	if (rem) return parseFloat(rem[1]) * 16;
 	const px = t.endsWith('px') ? t.slice(0, -2).trim() : t;
 	const n = parseFloat(px);
 	return Number.isFinite(n) ? n : undefined;
@@ -686,6 +725,29 @@ function splitTopLevelArgs(s: string): string[] {
 	}
 	out.push(s.slice(start));
 	return out;
+}
+
+/** CSS `font-size` absolute keyword → px. Values follow the web-standard
+ * mapping that real browsers ship (medium = 16px is the spec default; the
+ * other keywords are the historical 9/10/13/18/24/32/48 ratios from CSS
+ * 2.1). Returns undefined for non-keyword input so the caller can fall
+ * through to `Npx` / unit parsing. `smaller` / `larger` are NOT handled
+ * here — they need the parent's computed font-size as context, which the
+ * inline-style parser doesn't have. The live-CSS cascade (live-css.ts)
+ * handles those separately at apply time. */
+export function resolveFontSizeKeyword(value: string): number | undefined {
+	const v = value.trim().toLowerCase();
+	switch (v) {
+		case 'xx-small': return 9;
+		case 'x-small': return 10;
+		case 'small': return 13;
+		case 'medium': return 16;
+		case 'large': return 18;
+		case 'x-large': return 24;
+		case 'xx-large': return 32;
+		case 'xxx-large': return 48;
+	}
+	return undefined;
 }
 
 /** Parse a length value: `Npx`, unitless `N` → number; `N%` → percent;

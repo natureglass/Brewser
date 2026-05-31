@@ -39,6 +39,7 @@ interface ShellButtonSnapshot {
 	r: boolean;
 	dpadUp: boolean;
 	dpadDown: boolean;
+	minus: boolean;
 }
 
 function snapshot(): ShellButtonSnapshot {
@@ -52,6 +53,7 @@ function snapshot(): ShellButtonSnapshot {
 		r: isPressed(pad, COMBO_BUTTONS.r),
 		dpadUp: isPressed(pad, COMBO_BUTTONS.dpadUp),
 		dpadDown: isPressed(pad, COMBO_BUTTONS.dpadDown),
+		minus: isPressed(pad, COMBO_BUTTONS.minus),
 	};
 }
 
@@ -120,6 +122,10 @@ export type ControllerInput =
 	| { kind: 'settings' }
 	| { kind: 'star' }
 	| { kind: 'reload' }
+	/** Rising edge of the Minus button on its own (not part of the
+	 * L+R+Minus exit combo). The shell captures the current screen and
+	 * writes it as a PNG to `<profile>/screenshots/`. */
+	| { kind: 'screenshot' }
 	| { kind: 'navigate'; url: string }
 	/** Tap on an HTML `<button data-action="...">` rendered by the page.
 	 * The shell interprets the action string (e.g. `fullscreen-page`,
@@ -956,6 +962,11 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 		if (rising(prev, next, 'b')) return { kind: 'back' };
 		if (rising(prev, next, 'x')) return { kind: 'forward' };
 		if (rising(prev, next, 'y')) return { kind: 'reload' };
+		// Minus alone (no L/R) → screenshot. The L+R+Minus exit combo is
+		// caught above and continues without falling through to the
+		// rising-edge checks, so a held Minus en route to the exit combo
+		// never reaches this branch.
+		if (rising(prev, next, 'minus')) return { kind: 'screenshot' };
 
 		let scrolledThisTick = false;
 		if (options.onScroll) {

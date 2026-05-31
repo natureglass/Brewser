@@ -103,6 +103,72 @@ function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement): void {
 	visit(node);
 }
 
+/** Walk the parsed tree's `<head>` for `<link rel="stylesheet" href=…>`,
+ * fetch each URL, and graft the result into the live cascade as a
+ * `display:none` `<style>` LiveElement (same path as inline styles).
+ * Async — runs after `populateLiveRoot` so the page renders immediately
+ * with whatever inline `<style>` and UA-default rules it has, then
+ * re-renders as each external sheet arrives. `pageUrl` is used to
+ * resolve protocol-relative + root-relative hrefs.
+ *
+ * Sheets with a `media="..."` attribute that includes neither `all`
+ * nor `screen` nor `handheld` are skipped (we treat the Switch as
+ * 'screen/handheld'). Missing `media` attr → applies (CSS spec default).
+ *
+ * No retries, no caching across navigations — `clearGifAnimations` /
+ * `resetLiveRoot` already wipe the old page's cascade so a re-load
+ * just re-fetches. Per-sheet failures are silent (logged via the img
+ * diag log for visibility). */
+export async function loadHeadLinkStylesheets(
+	parsed: HtmlElement,
+	pageUrl: string,
+): Promise<void> {
+	const links: { href: string; media: string | undefined }[] = [];
+	const visit = (n: HtmlElement) => {
+		if (n.tag === 'body') return;
+		if (n.tag === 'link') {
+			const rel = (n.attrs.rel || '').toLowerCase();
+			const href = n.attrs.href;
+			if (rel.split(/\s+/).includes('stylesheet') && href) {
+				links.push({ href, media: n.attrs.media });
+			}
+			return;
+		}
+		for (const child of n.children) {
+			if (child.type === 'element') visit(child);
+		}
+	};
+	visit(parsed);
+	if (links.length === 0) return;
+	const liveRoot = getLiveRoot();
+	// Fire all fetches in parallel — each registers its sheet as soon as
+	// it arrives, so the page progressively gains style.
+	await Promise.all(links.map(async ({ href, media }) => {
+		if (media) {
+			const m = media.toLowerCase();
+			const tokens = m.split(',').map((s) => s.trim());
+			const matches = tokens.some((t) => t === '' || t === 'all' || t === 'screen' || t === 'handheld');
+			if (!matches) return;
+		}
+		let absolute: string;
+		try { absolute = new URL(href, pageUrl).toString(); }
+		catch (_) { return; }
+		let cssText: string;
+		try {
+			const res = await fetch(absolute);
+			if (!res.ok) return;
+			cssText = await res.text();
+		} catch (_) {
+			return;
+		}
+		if (!cssText) return;
+		const styleEl = new LiveElement('style');
+		styleEl.style.display = 'none';
+		liveRoot.appendChild(styleEl);
+		styleEl.textContent = cssText; // triggers registerStyleSheet
+	}));
+}
+
 /** Locate the first `<body>` in the parsed tree. Most pages have one;
  * fragment-only sources don't. */
 function findBody(node: HtmlElement): HtmlElement | null {

@@ -4,5 +4,8 @@
   "videoNVTEGRA": true,
   "renderChunkMs": 512,
   "scrollChunkMs": 12,
-  "maxHistory": 30
+  "maxHistory": 30,
+  "theme": "light",
+  "autoRotate": true,
+  "clickSounds": true
 }

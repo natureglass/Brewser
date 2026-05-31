@@ -41,6 +41,79 @@ export function setKeyboardOpener(fn: KeyboardOpener | null): void {
 }
 
 // =========================================================================
+// Theme-aware widget defaults — used when the page hasn't set explicit
+// CSS background/color on a form widget. The shell pushes the active
+// scheme via `setLiveFormColorScheme` whenever it changes; live-form
+// reads the cached object instead of recomputing per paint.
+// =========================================================================
+
+interface FormWidgetTheme {
+	textFieldBg: string;
+	textFieldBorder: string;
+	textFieldText: string;
+	textFieldPlaceholder: string;
+	buttonBg: string;
+	buttonText: string;
+	checkboxBg: string;
+	checkboxBorder: string;
+	checkboxCheck: string;
+	selectBg: string;
+	selectBorder: string;
+	selectText: string;
+	selectChevron: string;
+}
+
+const LIGHT_THEME: FormWidgetTheme = {
+	textFieldBg: '#ffffff',
+	textFieldBorder: '#bdbdbd',
+	textFieldText: '#1a1a1a',
+	textFieldPlaceholder: '#888888',
+	buttonBg: '#f1f3f4',
+	buttonText: '#1a1a1a',
+	checkboxBg: '#ffffff',
+	checkboxBorder: '#888888',
+	checkboxCheck: '#1a73e8',
+	selectBg: '#ffffff',
+	selectBorder: '#bdbdbd',
+	selectText: '#1a1a1a',
+	selectChevron: '#5f6368',
+};
+
+const DARK_THEME: FormWidgetTheme = {
+	textFieldBg: '#424242',
+	textFieldBorder: '#5a6a7e',
+	textFieldText: '#ebebeb',
+	textFieldPlaceholder: '#9bb1d6',
+	buttonBg: '#1d2c43',
+	buttonText: '#e0e8f4',
+	checkboxBg: '#2c3e50',
+	checkboxBorder: '#5a6a7e',
+	checkboxCheck: '#ffffff',
+	selectBg: '#424242',
+	selectBorder: '#5a6a7e',
+	selectText: '#ebebeb',
+	selectChevron: '#ebebeb',
+};
+
+let liveFormTheme: FormWidgetTheme = LIGHT_THEME;
+export function setLiveFormColorScheme(scheme: 'light' | 'dark'): void {
+	liveFormTheme = scheme === 'dark' ? DARK_THEME : LIGHT_THEME;
+}
+
+/** Filter a parsed `cs.background` string so the CSS keywords
+ * `'none'` and `'transparent'` — both valid CSS but rejected by
+ * Canvas2D's fillStyle setter — don't sneak past `||` fallbacks into
+ * the painter. Returns `undefined` for those keywords (caller picks
+ * the theme default), the original string otherwise. Without this,
+ * setting `ctx.fillStyle = 'none'` silently leaves the prior stale
+ * fillStyle in place and the next `fillRect` paints with whatever
+ * colour the last element used. */
+function resolveWidgetBg(bg: string | undefined): string | undefined {
+	if (!bg || bg === 'none' || bg === 'transparent') return undefined;
+	return bg;
+}
+
+// =========================================================================
 // Per-element state — `.value` for inputs, `.checked` for checkboxes.
 // Stored in WeakMaps so widget state survives even though LiveElement
 // doesn't natively own these properties (we monkey-patch getters in
@@ -107,6 +180,13 @@ export function paintFormWidget(
 	const tag = el.tagName;
 	if (tag === 'INPUT') {
 		const type = inputType(el);
+		// Hidden inputs are layout-suppressed (layoutLeaf sets 0×0) AND
+		// the form-data-set algorithm still includes their `value` on
+		// submit, but they must not paint anything visible. Without
+		// this short-circuit the default branch below would route them
+		// to `paintTextField` and draw a stray field rectangle wherever
+		// the parent layout placed the (zero-size) box.
+		if (type === 'hidden') return true;
 		switch (type) {
 			case 'checkbox': paintCheckbox(ctx, el, cs, box); return true;
 			case 'radio':    paintRadio(ctx, el, cs, box); return true;
@@ -130,13 +210,13 @@ function paintCheckbox(
 	box: LayoutBox,
 ): void {
 	const checked = getInputChecked(el);
-	const bg = cs.background || '#2c3e50';
-	const color = cs.color || '#ffffff';
+	const bg = resolveWidgetBg(cs.background) ?? liveFormTheme.checkboxBg;
+	const color = cs.color || liveFormTheme.checkboxCheck;
 	ctx.fillStyle = bg;
 	ctx.fillRect(box.x, box.y, box.w, box.h);
 	// Subtle border so an empty checkbox is visually distinct from
 	// surrounding panel bg of the same colour.
-	ctx.strokeStyle = '#5a6a7e';
+	ctx.strokeStyle = liveFormTheme.checkboxBorder;
 	ctx.lineWidth = 1;
 	ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
 	if (checked) {
@@ -287,6 +367,26 @@ function fillRoundedRectPath(
 	ctx.fill();
 }
 
+/** Trace a rounded-rect path and stroke it with the current strokeStyle. */
+function strokeRoundedRectPath(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	x: number, y: number, w: number, h: number, r: number,
+): void {
+	const cr = Math.min(r, w / 2, h / 2);
+	ctx.beginPath();
+	ctx.moveTo(x + cr, y);
+	ctx.lineTo(x + w - cr, y);
+	ctx.quadraticCurveTo(x + w, y, x + w, y + cr);
+	ctx.lineTo(x + w, y + h - cr);
+	ctx.quadraticCurveTo(x + w, y + h, x + w - cr, y + h);
+	ctx.lineTo(x + cr, y + h);
+	ctx.quadraticCurveTo(x, y + h, x, y + h - cr);
+	ctx.lineTo(x, y + cr);
+	ctx.quadraticCurveTo(x, y, x + cr, y);
+	ctx.closePath();
+	ctx.stroke();
+}
+
 function paintButton(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	el: LiveElement,
@@ -294,13 +394,13 @@ function paintButton(
 	box: LayoutBox,
 	skipBg = false,
 ): void {
-	const color = cs.color || '#e0e8f4';
+	const color = cs.color || liveFormTheme.buttonText;
 	if (!skipBg) {
 		// Solid-bg path. Rich CSS backgrounds (gradients) are painted by
 		// the caller before dispatch; here `cs.background` is a plain
 		// colour (or the default). Using it as fillStyle directly would
 		// silently no-op for a gradient string — hence the skipBg gate.
-		ctx.fillStyle = cs.background || '#1d2c43';
+		ctx.fillStyle = resolveWidgetBg(cs.background) ?? liveFormTheme.buttonBg;
 		// Honor `border-radius` on solid-bg buttons (icon buttons use
 		// rounded corners). A plain fillRect ignored it, leaving square
 		// chips; round the fill when a radius is set.
@@ -334,19 +434,26 @@ function paintTextField(
 	box: LayoutBox,
 	skipBg = false,
 ): void {
-	const color = cs.color || '#ebebeb';
+	const color = cs.color || liveFormTheme.textFieldText;
 	if (!skipBg) {
-		ctx.fillStyle = cs.background || '#424242';
+		ctx.fillStyle = resolveWidgetBg(cs.background) ?? liveFormTheme.textFieldBg;
 		ctx.fillRect(box.x, box.y, box.w, box.h);
-		// Subtle border so the field reads as input-like vs. plain bg —
-		// but only when the page didn't ask for `border: none`.
-		const noBorder = (cs.borderTopWidth ?? 0) === 0
-			&& (cs.borderLeftWidth ?? 0) === 0
-			&& cs.borderTopColor === undefined;
-		if (!noBorder) {
-			ctx.strokeStyle = '#5a6a7e';
-			ctx.lineWidth = 1;
-			ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+		// Default: paint a 1 px border in the theme colour so the field
+		// is visible against a same-colour body bg (white field on
+		// white tier3 page). Author CSS can override the width and
+		// colour via the cascade — `border-width: 0` explicitly
+		// suppresses the border (the page wants a borderless field),
+		// any other value flows through `cs.borderTopWidth`/`Color`.
+		// Previously the gate was `(borderTopWidth ?? 0) === 0`, which
+		// conflated "page said nothing" with "page set 0" and dropped
+		// the default border for every page that didn't explicitly
+		// style its inputs.
+		const borderWidth = cs.borderTopWidth ?? 1;
+		if (borderWidth > 0) {
+			ctx.strokeStyle = cs.borderTopColor ?? liveFormTheme.textFieldBorder;
+			ctx.lineWidth = borderWidth;
+			const off = borderWidth / 2;
+			ctx.strokeRect(box.x + off, box.y + off, box.w - borderWidth, box.h - borderWidth);
 		}
 	}
 	const value = getInputValue(el);
@@ -358,7 +465,7 @@ function paintTextField(
 		ctx.save();
 		try {
 			ctx.font = resolveCanvasFont({ fontSize: cs.fontSize, fontFamily: cs.fontFamily });
-			ctx.fillStyle = value ? color : (cs.color ? withAlpha(cs.color, 0.6) : '#9bb1d6');
+			ctx.fillStyle = value ? color : (cs.color ? withAlpha(cs.color, 0.6) : liveFormTheme.textFieldPlaceholder);
 			ctx.textBaseline = 'middle';
 			ctx.textAlign = 'left';
 			// Clip to box; pad 3px inside.
@@ -382,19 +489,63 @@ function withAlpha(color: string, alpha: number): string {
 	return '#9bb1d6';
 }
 
+/** Read the user-visible text of an OPTION (or any leaf element).
+ * Falls back to walking #text children when the element's own `_text`
+ * field is empty — the case for OPTIONs parsed from real-world markup
+ * like `<option>All Regions</option>`. */
+function readOptionLabel(el: LiveElement): string {
+	if (el.textContent) return el.textContent;
+	let s = '';
+	for (const c of el.children) {
+		if (c.tagName === '#text') s += c.data;
+	}
+	return s;
+}
+
 function paintSelect(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	el: LiveElement,
 	cs: ComputedLiveStyle,
 	box: LayoutBox,
 ): void {
-	const bg = cs.background || '#424242';
-	const color = cs.color || '#ebebeb';
-	ctx.fillStyle = bg;
-	ctx.fillRect(box.x, box.y, box.w, box.h);
-	ctx.strokeStyle = '#5a6a7e';
-	ctx.lineWidth = 1;
-	ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+	// Respect explicit `background:none` / `border:none` from the page
+	// (DDG html-mode sets both on the underlying <select>; the wrapper
+	// .frm__select provides chevron + spacing). When the page makes
+	// these decisions intentionally, painting our theme chrome over
+	// them makes the widget look heavier than designed. Undefined =
+	// no rule → use theme defaults so a bare <select> on a page with
+	// no styling still reads as a tappable control.
+	const bgRaw = cs.background;
+	const bgExplicitlyNone = bgRaw === 'none' || bgRaw === 'transparent';
+	const bg = bgExplicitlyNone ? null : (resolveWidgetBg(bgRaw) ?? liveFormTheme.selectBg);
+	// `border:none` sets borderTopWidth to 0 (per applyBorderShorthand).
+	// Undefined = the page didn't touch the border → theme default.
+	const borderTouched = cs.borderTopWidth !== undefined;
+	const showBorder = !borderTouched || (cs.borderTopWidth ?? 0) > 0;
+	const color = cs.color || liveFormTheme.selectText;
+	const radius = formBorderRadius(cs, box.w, box.h);
+	if (bg) {
+		ctx.fillStyle = bg;
+		if (radius > 0) {
+			fillRoundedRectPath(ctx, box.x, box.y, box.w, box.h, radius);
+		} else {
+			ctx.fillRect(box.x, box.y, box.w, box.h);
+		}
+	}
+	if (showBorder) {
+		ctx.strokeStyle = cs.borderTopColor || liveFormTheme.selectBorder;
+		ctx.lineWidth = 1;
+		if (radius > 0) {
+			// Re-trace the path for stroke — fillRoundedRectPath consumes the
+			// path with fill(), so stroke() would re-stroke a stale path.
+			strokeRoundedRectPath(
+				ctx, box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1,
+				Math.max(0, radius - 0.5),
+			);
+		} else {
+			ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+		}
+	}
 	// Display the currently-selected option's text. The selected index
 	// is read from the SELECT's `value` attribute (M2.5 popup writes
 	// this on selection).
@@ -402,9 +553,16 @@ function paintSelect(
 	let labelText = '';
 	for (const child of el.children) {
 		if (child.tagName !== 'OPTION') continue;
-		const optValue = child.getAttribute('value') ?? child.textContent;
+		// `textContent` getter on LiveElement returns only the element's
+		// own `_text` field — for an OPTION parsed from markup like
+		// `<option>All Regions</option>`, the label is on a `#text`
+		// child, not the OPTION itself, so the getter returns '' and the
+		// label would be invisible. Walk the OPTION's children for the
+		// text payload directly.
+		const optLabel = readOptionLabel(child);
+		const optValue = child.getAttribute('value') ?? optLabel;
 		if (optValue === selectedValue || labelText === '') {
-			labelText = child.textContent;
+			labelText = optLabel;
 			if (optValue === selectedValue) break;
 		}
 	}
@@ -425,17 +583,25 @@ function paintSelect(
 	// Path-based drawing scales with box size and works reliably.
 	ctx.save();
 	try {
-		ctx.fillStyle = color;
+		// Chevron drawn as a thin "˅" stroke (two lines meeting at a
+		// point) instead of a filled triangle — matches the lighter look
+		// of native browser dropdowns. The capped-at-28-px shorter side
+		// keeps the chevron sensible if a future layout regression hands
+		// paintSelect a giant box.
+		ctx.strokeStyle = cs.color || liveFormTheme.selectChevron;
+		ctx.lineWidth = 1.5;
+		ctx.lineCap = 'round';
+		ctx.lineJoin = 'round';
 		const cx = box.x + box.w - 10;
 		const cy = box.y + box.h / 2;
-		const tw = Math.max(6, Math.min(box.w, box.h) * 0.35); // triangle width
-		const th = tw * 0.6;                                    // triangle height
+		const cap = Math.min(box.w, box.h, 28) * 0.3;
+		const tw = Math.max(4, cap);  // chevron arm half-width
+		const th = tw * 0.55;          // chevron drop
 		ctx.beginPath();
-		ctx.moveTo(cx - tw / 2, cy - th / 2);
-		ctx.lineTo(cx + tw / 2, cy - th / 2);
+		ctx.moveTo(cx - tw, cy - th / 2);
 		ctx.lineTo(cx, cy + th / 2);
-		ctx.closePath();
-		ctx.fill();
+		ctx.lineTo(cx + tw, cy - th / 2);
+		ctx.stroke();
 	} finally { ctx.restore(); }
 }
 
@@ -697,4 +863,106 @@ function fireEvent(el: LiveElement, type: string): void {
 	try {
 		el.dispatchEvent({ type, target: el, currentTarget: el });
 	} catch (_) { /* swallow */ }
+}
+
+// =========================================================================
+// Form submission — build the URL a `<form>` would navigate to when its
+// submit button is tapped. Used by live-overlay's `findTapIntent` so
+// `<input type=submit>` / `<button type=submit>` taps turn into a
+// `navigate` intent through the same path that `<a href>` taps use.
+// =========================================================================
+
+/** Walk up from `start` to the enclosing `<form>` (or `null` if none).
+ * Used to resolve a submit-button tap to its owning form. */
+export function findEnclosingForm(start: LiveElement): LiveElement | null {
+	for (let n: LiveElement | null = start; n; n = n.parent) {
+		if (n.tagName === 'FORM') return n;
+	}
+	return null;
+}
+
+/** Build the URL a `<form>` would navigate to when submitted by
+ * `submitter` (a submit button / submit input — null if the form was
+ * submitted by some other means, e.g. an Enter keypress on a text
+ * field). Returns `null` when the form has no `action` AND no enclosing
+ * page to default it against — in that case the caller should skip
+ * navigation.
+ *
+ * GET method: serialise every named, non-disabled, successful control
+ * into the action URL's query string per HTML's
+ * application/x-www-form-urlencoded algorithm. The action itself can be
+ * relative — the shell resolves it against the current page URL the
+ * same way it does for `<a href>`.
+ *
+ * POST method: we don't yet have a request-body navigation path, so we
+ * navigate to the action URL with no body. The result will be wrong
+ * for sites that expect form data in a POST, but it won't crash and it
+ * leaves the door open for a real POST-navigation slice later.
+ */
+export function buildFormSubmitUrl(
+	form: LiveElement,
+	submitter: LiveElement | null,
+): string | null {
+	const rawAction = (form.getAttribute('action') ?? '').trim();
+	const method = (form.getAttribute('method') ?? 'GET').toUpperCase();
+	const action = rawAction || '';
+
+	if (method !== 'GET') {
+		return action || null;
+	}
+
+	const params: string[] = [];
+	const visit = (el: LiveElement): void => {
+		const tag = el.tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+			appendControlValue(el, submitter, params);
+		}
+		for (const c of el.children) visit(c);
+	};
+	visit(form);
+
+	const qs = params.join('&');
+	if (!qs) return action || null;
+	if (!action) return '?' + qs;
+	const sep = action.includes('?') ? '&' : '?';
+	return action + sep + qs;
+}
+
+/** Append `name=value` pairs for one form control following HTML's
+ * "constructing the form data set" rules — restricted to the control
+ * types the engine actually paints. `submitter` lets us include the
+ * activated submit button's own (name, value) pair (other submit /
+ * reset / button inputs are skipped). */
+function appendControlValue(
+	el: LiveElement,
+	submitter: LiveElement | null,
+	out: string[],
+): void {
+	const name = el.getAttribute('name');
+	if (!name) return;
+	if (el.hasAttribute('disabled')) return;
+
+	const tag = el.tagName;
+	const type = tag === 'INPUT'
+		? (el.getAttribute('type') ?? 'text').toLowerCase()
+		: tag === 'TEXTAREA' ? 'textarea' : 'select';
+
+	if (type === 'submit' || type === 'image' || type === 'button' || type === 'reset') {
+		if (el !== submitter) return;
+		const v = el.getAttribute('value') ?? '';
+		out.push(encodeURIComponent(name) + '=' + encodeURIComponent(v));
+		return;
+	}
+	if (type === 'checkbox' || type === 'radio') {
+		if (!getInputChecked(el)) return;
+		const v = getInputValue(el) || 'on';
+		out.push(encodeURIComponent(name) + '=' + encodeURIComponent(v));
+		return;
+	}
+	if (type === 'file') {
+		// We don't support file uploads; omit the field per spec.
+		return;
+	}
+	const v = getInputValue(el);
+	out.push(encodeURIComponent(name) + '=' + encodeURIComponent(v));
 }

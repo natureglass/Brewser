@@ -1,4 +1,4 @@
-import { nxScreen, WebView, type WebViewDelegate } from '@switch-web/runtime';
+import { captureNativeFetch, nxScreen, WebView, type WebViewDelegate } from '@switch-web/runtime';
 
 // Shell-input diagnostic. Writes which `input.kind` the shell saw and
 // before/after the navigateTo dispatch — narrows whether a click ever
@@ -34,10 +34,10 @@ import {
 	tickAnimationFrames,
 	type PageScriptContext,
 } from './scripts/canvas-runner.js';
-import { getLiveRoot, getLiveTreeVersion, resetLiveRoot, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
-import { getComputedLiveStyle } from './scripts/live-css.js';
+import { clearGifAnimations, getLiveRoot, getLiveTreeVersion, resetLiveRoot, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
+import { getComputedLiveStyle, setMediaColorScheme } from './scripts/live-css.js';
 import { setCssViewport } from './scripts/inline-css.js';
-import { setKeyboardOpener } from './scripts/live-form.js';
+import { setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
@@ -63,7 +63,7 @@ import {
 	consumeFullRepaintRequest, isKeyboardOpen, requestFullRepaint,
 } from './scripts/live-paint-control.js';
 import { getLayoutBox } from './scripts/live-layout.js';
-import { populateLiveRoot } from './scripts/html-to-live.js';
+import { loadHeadLinkStylesheets, populateLiveRoot } from './scripts/html-to-live.js';
 import { extractTitle, parseHtml, type HtmlElement } from './html/html-parser.js';
 import { AddressBarInput } from './input/address-bar-input.js';
 import {
@@ -91,6 +91,7 @@ import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js'
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
 import { loadChromeIcons, loadOptionalImage } from './resources/chrome-icons.js';
+import { SwitchUaFetchLoader } from './resources/switch-ua-fetch-loader.js';
 
 /**
  * Top-level orchestrator for the browser shell.
@@ -161,6 +162,19 @@ export class BrowserShell {
 	 * they'd never reach the screen — e.g. the audio player's 4 Hz
 	 * updateTimeline advancing the seek bar + time during passive playback. */
 	private lastTickTreeVersion: number = -1;
+	/** User-preferred colour scheme (config.json `theme`). Drives the
+	 * `Sec-CH-Prefers-Color-Scheme` request header on external fetches,
+	 * the `@media (prefers-color-scheme:…)` cascade in live-css, and the
+	 * effective viewport background colour. Defaults to `light` (the
+	 * web's expected default); only `<body>` paint actually covers the
+	 * viewport, so internal pages that explicitly set their own bg are
+	 * unaffected — only external pages without an explicit `<body>` bg
+	 * are influenced. */
+	private colorScheme: 'light' | 'dark' = 'light';
+	/** Reference to the registered UA-injecting fetch loader, kept so
+	 * `setColorScheme` can update the outgoing Client-Hint header
+	 * without rebuilding the loader. Null when network is disabled. */
+	private uaFetchLoader: SwitchUaFetchLoader | null = null;
 
 	constructor() {
 		this.policy = new BrowserPermissionPolicy();
@@ -171,6 +185,14 @@ export class BrowserShell {
 		// on first run before seedTemplates has copied the romfs default in;
 		// either way maxHistory ends up at the same value).
 		const startupConfig = loadConfig(this.profile.storageRoot);
+		this.colorScheme = startupConfig.theme;
+		// Push the colour-scheme preference into the CSS cascade up front so
+		// the first stylesheet parse evaluates `@media (prefers-color-scheme:
+		// …)` against the right value. Also tells the form-widget painter
+		// which default palette to fall back to when a page doesn't set
+		// explicit `background`/`color` on its inputs / buttons.
+		setMediaColorScheme(this.colorScheme);
+		setLiveFormColorScheme(this.colorScheme);
 		this.historyStore = new HistoryStore({
 			path: this.profile.historyPath(),
 			maxEntries: startupConfig.maxHistory,
@@ -206,6 +228,12 @@ export class BrowserShell {
 				// the leaked callbacks accumulate forever).
 				clearAnimationFrames();
 				clearAllVideos();
+				// Stop any animated-GIF tickers from the prior page —
+				// they hold closures over now-detached LiveElements and
+				// would otherwise keep firing `setFrame` +
+				// patchLiveCacheRegion on stale boxes, clobbering the
+				// new page's cache.
+				clearGifAnimations();
 				// Wipe the shared screen GL bridge FBO so the next
 				// page's first paint (which may copyBridgeToScreen
 				// before any new rAF tick has fired) doesn't carry
@@ -240,7 +268,22 @@ export class BrowserShell {
 				// route them as static-asset 404s. `browser://history/`
 				// (no .json) falls through to the static-page loader,
 				// which serves `pages/history.html`.
+				//
+				// `SwitchUaFetchLoader` claims `http(s)://` before the
+				// runtime-appended `NativeFetchLoader` (see
+				// `web-view.ts`'s `buildLoaders`) so external requests
+				// go out with a Switch-browser UA — needed because
+				// google.com and many other sites serve a much smaller
+				// HTML variant to the Switch UA than to the default
+				// libcurl UA.
 				resourceLoaders: [
+					...(this.policy.networkEnabled
+						? [this.uaFetchLoader = new SwitchUaFetchLoader({
+							nativeFetch: captureNativeFetch(),
+							permissionPolicy: this.policy,
+							colorScheme: this.colorScheme,
+						})]
+						: []),
 					new BrowserHistoryLoader(this.historyStore),
 					new BrowserBookmarksLoader(this.bookmarksStore),
 					new BrowserResourceLoader({
@@ -513,6 +556,9 @@ export class BrowserShell {
 					case 'reload':
 						await this.runNavigation(() => this.navigation.reload());
 						break;
+					case 'screenshot':
+						this.captureScreenshot();
+						break;
 					case 'navigate': {
 						// Link (`<a href>`) taps: resolve a relative href against
 						// the current page's URL, same page-relative architecture
@@ -576,17 +622,26 @@ export class BrowserShell {
 	}
 
 	/** Resolve a link `href` against the current page's URL, mirroring how
-	 * `<img>` srcs resolve page-relative — but producing a `browser://` URL
-	 * (navigation goes through the resource loaders, which serve
-	 * `browser://`). Absolute URLs (any scheme) pass through; a root-relative
-	 * `/foo` re-roots at the browser origin; everything else resolves against
-	 * the current page's directory with `.`/`..` handling. */
+	 * `<img>` srcs resolve page-relative. Absolute URLs (any scheme) pass
+	 * through. `browser://` bases follow the engine's own segment-walking
+	 * rules to produce another `browser://` URL. `http(s)://` bases
+	 * (external pages like google.com) defer to the standard URL parser
+	 * so `/search` becomes `https://<host>/search` etc. — required for
+	 * tier3 form-submit navigation and for relative `<a href>` on
+	 * external pages. */
 	private resolveNavUrl(url: string): string {
 		const u = url.trim();
 		if (!u) return u;
 		if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;          // has scheme → absolute
 		const base = this.currentPageUrl;
-		if (!/^browser:\/\//i.test(base)) return u;            // no browser base → leave as-is
+		if (/^https?:\/\//i.test(base)) {
+			try {
+				return new URL(u, base).toString();
+			} catch (_) {
+				return u;
+			}
+		}
+		if (!/^browser:\/\//i.test(base)) return u;            // no recognised base → leave as-is
 		if (u.startsWith('#')) return base.split('#')[0] + u;  // same-page fragment
 		if (u.startsWith('/')) return `browser://${u.replace(/^\/+/, '')}`; // root-relative
 		const basePath = base.replace(/^browser:\/\//i, '').split('?')[0].split('#')[0];
@@ -744,6 +799,16 @@ export class BrowserShell {
 	 *     in `pages/`), then `<path>/index.html` (→ base is `<path>/`).
 	 * Non-`browser://` URLs return '' (no page base). */
 	private computeLivePageBase(url: string): string {
+		// External http(s) pages: return the full page URL so the
+		// live-DOM resource resolver can hand it straight to `new URL`
+		// for spec-correct relative resolution. Crucial for tier3-style
+		// pages like google.com whose logo is referenced as a root-
+		// relative `/images/branding/…gif` — without the page URL as
+		// base, the IMG src reaches the image pipeline as a path with
+		// no scheme/host and 404s. The browser:// path below keeps its
+		// own directory-style resolution because the runtime fetch
+		// can't see `browser:` and we need to map to a profile dir.
+		if (/^https?:\/\//i.test(url)) return url;
 		if (!/^browser:\/\//i.test(url)) return '';
 		const root = this.profile.storageRoot;
 		const stripped = url.replace(/^browser:\/\//i, '')
@@ -807,6 +872,21 @@ export class BrowserShell {
 		const byParsed = populateLiveRoot(tree);
 		scanForAutoplayVideos(getLiveRoot());
 		_shellInputDiag('  → populated ' + byParsed.size + ' parsed→live mappings');
+
+		// External `<link rel="stylesheet">` fetches run async — fire and
+		// forget. The page renders immediately with inline `<style>` + UA
+		// defaults; as each sheet arrives, `registerStyleSheet` bumps the
+		// live-tree version so the next paint picks up the new cascade.
+		// Without this, pages like DDG html-mode that put ALL their CSS
+		// in an external sheet rendered with our UA defaults only (green
+		// `<a>` text, no `.frm__select` width, no logo url() image, …).
+		// Only fired for http(s) pages — `browser://` pages always inline
+		// their `<style>` so the fetch step is wasted work there.
+		if (url.startsWith('http://') || url.startsWith('https://')) {
+			loadHeadLinkStylesheets(tree, url).then(() => {
+				requestFullRepaint();
+			}).catch(() => { /* per-sheet failures already logged */ });
+		}
 
 		const allowScripts = url.startsWith('browser://');
 		this.scriptCtx = await runPageScripts(tree, {
@@ -881,6 +961,103 @@ export class BrowserShell {
 	 */
 	private paintScrollAdjust(): number {
 		return this.mode === 'fullscreen-page' ? this.layoutTopInset() : 0;
+	}
+
+	/**
+	 * Colour to fill the content viewport with before the live-DOM body
+	 * paints over it. For `theme: light` (the web's expected default)
+	 * we use white so external pages without an explicit `<body>`
+	 * background look like they do in every other browser. For
+	 * `theme: dark` we fall back to the template's `page.background`
+	 * so the user's dark-themed chrome and content stay visually
+	 * continuous. The body's own background, when set, always paints
+	 * on top — so internal pages that explicitly set their own bg
+	 * (welcome, settings, …) are unaffected either way.
+	 */
+	private effectivePageBackground(): string {
+		if (this.colorScheme === 'light') return '#ffffff';
+		return this.template.page.background;
+	}
+
+	/**
+	 * Capture whatever is currently on the screen canvas and write it
+	 * to `<profile>/screenshots/screenshot_<timestamp>.png`. Triggered
+	 * by the Minus button rising-edge on the active joy-con (handled
+	 * via the `screenshot` shell-input kind from controller-shortcuts).
+	 *
+	 * Implementation notes:
+	 *   - `screen.toBlob` is async (the encode runs on a worker), so
+	 *     this method returns immediately and the file write happens
+	 *     once the PNG blob is ready. No UI feedback for now — the file
+	 *     either lands on disk or doesn't.
+	 *   - The screenshots dir is created lazily; subsequent shots reuse
+	 *     it without re-touching the filesystem for the mkdir.
+	 *   - The timestamp uses `YYYY-MM-DDThh-mm-ss-mmmZ` (dots + colons
+	 *     replaced with dashes) so the filename is FAT32-safe and
+	 *     sortable lexicographically.
+	 */
+	private captureScreenshot(): void {
+		const canvas = nxScreen();
+		const dir = `${this.profile.storageRoot}screenshots/`;
+		try { Switch.mkdirSync(dir); } catch (_) { /* already exists */ }
+		const ts = new Date().toISOString().replace(/[:.]/g, '-');
+		const path = `${dir}screenshot_${ts}.png`;
+		canvas.toBlob((blob: Blob | null) => {
+			if (!blob) {
+				console.debug('[switch-web-browser] screenshot: toBlob returned null');
+				return;
+			}
+			// Flash AFTER toBlob's internal canvas read so the saved PNG
+			// does NOT include the flash. Visual confirmation that the
+			// shot landed; cleared by a single subsequent cache-blit.
+			this.flashScreenshotFeedback();
+			blob.arrayBuffer().then((buf: ArrayBuffer) => {
+				try {
+					Switch.writeFileSync(path, buf);
+					console.debug('[switch-web-browser] screenshot saved: ' + path);
+				} catch (e) {
+					console.debug('[switch-web-browser] screenshot write failed: '
+						+ (e instanceof Error ? e.message : String(e)));
+				}
+			});
+		});
+	}
+
+	/**
+	 * Brief white-flash overlay on the screen canvas to confirm a
+	 * successful screenshot. Drawn DIRECTLY on the framebuffer (one
+	 * `fillRect`), then cleared by a single `requestFullRepaint` after
+	 * ~80 ms — the next loop tick blits the live-cache offscreen back
+	 * over the flashed pixels. Critically:
+	 *   - No `bumpLiveTreeVersion`, no `markLiveDirty`, no
+	 *     `patchLiveDirtyRegions` — the live tree / layout state is
+	 *     unchanged, so the next paint takes the cache-blit fast path
+	 *     (not the rebuild path).
+	 *   - No `OffscreenCanvas` allocation, no `getImageData`/`putImageData`
+	 *     round-trip. One fillRect into the screen ctx + one timer.
+	 */
+	private flashScreenshotFeedback(): void {
+		const canvas = nxScreen();
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return;
+		// Clip the flash to the page-content area so the toolbar isn't
+		// touched — mirrors the inset math the slow-path paint uses
+		// (browser-shell.ts ≈ L1103). Fullscreen modes have no chrome,
+		// so both insets become 0 and the flash covers everything,
+		// which is the right behaviour for video / fullscreen-canvas /
+		// fullscreen-page shots.
+		const chromeHeight = this.template.toolbar.height;
+		const isBottomToolbar = this.template.toolbar.position === 'bottom';
+		const topInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
+		const bottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
+		const flashH = canvas.height - topInset - bottomInset;
+		if (flashH <= 0) { setTimeout(() => requestFullRepaint(), 80); return; }
+		ctx.save();
+		try {
+			ctx.fillStyle = 'rgba(255,255,255,0.85)';
+			ctx.fillRect(0, topInset, canvas.width, flashH);
+		} finally { ctx.restore(); }
+		setTimeout(() => requestFullRepaint(), 80);
 	}
 
 	/**
@@ -989,7 +1166,7 @@ export class BrowserShell {
 			this.cpuPresentCallCount++;
 			return;
 		}
-		ctx.fillStyle = this.template.page.background;
+		ctx.fillStyle = this.effectivePageBackground();
 		ctx.fillRect(
 			0, paintTopInset,
 			canvas.width, canvas.height - paintTopInset - paintBottomInset,
@@ -1122,7 +1299,7 @@ export class BrowserShell {
 			ctx.clip();
 			// Re-fill the body background inside the clipped slice so a
 			// shorter page's bg color extends edge-to-edge above the panel.
-			ctx.fillStyle = this.template.page.background;
+			ctx.fillStyle = this.effectivePageBackground();
 			ctx.fillRect(viewport.x, viewport.y, viewport.width, clipBottom - viewport.y);
 			paintLiveOverlay(ctx, getLiveRoot(), viewport, effectiveScrollY, {
 				paintBehindKeyboard: true,
@@ -1486,7 +1663,7 @@ export class BrowserShell {
 		const ctx = canvas.getContext('2d');
 		// Wipe everything first so a previously-drawn chrome strip
 		// (or layout slice) doesn't bleed into the new mode.
-		ctx.fillStyle = this.template.page.background;
+		ctx.fillStyle = this.effectivePageBackground();
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 		this.repaintContent();
 		if (this.mode === 'normal') this.renderChrome();

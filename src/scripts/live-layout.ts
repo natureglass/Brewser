@@ -336,6 +336,33 @@ export function layoutAbsoluteRoot(
 	return box;
 }
 
+/** Detect "state-passing" text inputs that pages stash inside a
+ * standalone `<form>` purely so the browser POSTs a hidden value with
+ * the next nav. DDG html-mode has `<form><input type="text"
+ * name="state_hidden" id="state_hidden"/></form>` — no submit, no
+ * placeholder, no value, no other siblings — and real browsers hide
+ * it via UA-stylesheet rules that we don't apply. Without filtering
+ * here it renders as a blank text field above the real search bar.
+ *
+ * Conservative heuristic — only fires when EVERY signal matches:
+ *   - `<input type="text">` (or no `type` attr, which defaults to text)
+ *   - empty `value` AND no `placeholder` (nothing to display anyway)
+ *   - parent is a `<form>` with this input as its sole element child
+ *
+ * The "sole element child" guard prevents false positives on real
+ * search forms, which always have at least a submit button or another
+ * field alongside the text input. */
+function isLonelyStateInput(el: LiveElement): boolean {
+	if (el.tagName !== 'INPUT') return false;
+	const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+	if (type !== 'text') return false;
+	if (el.getAttribute('value')) return false;
+	if (el.getAttribute('placeholder')) return false;
+	const parent = el.parentElement;
+	if (!parent || parent.tagName !== 'FORM') return false;
+	return parent.children.length === 1;
+}
+
 /**
  * Lay out every child of `parent` inside the content rect `(originX,
  * originY, contentW, contentH)`. Dispatches on parent's `display`:
@@ -373,6 +400,7 @@ function layoutChildren(
 		// separate post-pass against its nearest positioned ancestor.
 		const pos = ccs.position ?? c.style.position;
 		if (pos === 'fixed' || pos === 'absolute') return false;
+		if (isLonelyStateInput(c)) return false;
 		return true;
 	});
 	const hasOwnText = parent.tagName !== '#text' && !!parent.textContent;
@@ -413,10 +441,22 @@ function layoutChildren(
 	// own row; consecutive inline runs would need anonymous-block wrapping
 	// (deferred). Most realistic markup is one or the other, so this is
 	// the common path that matters.
+	// `inline-block` participates in inline flow per CSS spec — siblings
+	// sit on the same line, line-wraps when the row fills. DDG result
+	// rows hit this: `<div class="result__extras__url">` is inline-block
+	// and contains a sibling `<span>` (also inline-block, wraps the
+	// favicon) + an `<a>` (inline) for the URL text. Treating inline-block
+	// as "not inline" routed the parent to layoutBlock which STACKED the
+	// favicon span ON TOP of the URL anchor (each took its own full-width
+	// row), making the URL appear under the icon. Including inline-block
+	// here lets layoutInline flow the span (whose `walkInline` recurses
+	// into its IMG kid as a replaced-inline atom) on the same line as the
+	// URL text — matches real browsers.
 	let allInline = true;
 	for (const c of kids) {
 		const ccs = getComputedLiveStyle(c);
-		if (ccs.display !== 'inline') { allInline = false; break; }
+		const d = ccs.display;
+		if (d !== 'inline' && d !== 'inline-block') { allInline = false; break; }
 	}
 	if (allInline) {
 		return layoutInline(parent, kids, cs, originX, originY, contentW, contentH);
@@ -579,7 +619,13 @@ function layoutInline(
 		walkInline(k, kcs);
 	}
 
-	// Pack atoms into lines.
+	// Pack atoms into lines. When white-space:nowrap, suppress wrapping
+	// — atoms keep accumulating on the current line even when the
+	// projected width exceeds contentW. Caller's overflow:hidden + the
+	// painter's clip then truncate visually (the CSS truncation idiom
+	// `white-space:nowrap; overflow:hidden; text-overflow:ellipsis`).
+	// `<br>` still forces a new line in nowrap mode per CSS spec.
+	const noWrap = parentCs.whiteSpace === 'nowrap';
 	interface Line { items: WorkAtom[]; w: number; h: number; }
 	const lines: Line[] = [];
 	let current: Line = { items: [], w: 0, h: 0 };
@@ -592,7 +638,7 @@ function layoutInline(
 		}
 		if (a.isWhitespace && current.items.length === 0) continue;
 		const projected = current.w + a.w;
-		if (current.items.length > 0 && projected > contentW && !a.isWhitespace) {
+		if (!noWrap && current.items.length > 0 && projected > contentW && !a.isWhitespace) {
 			while (current.items.length > 0 && current.items[current.items.length - 1].isWhitespace) {
 				const trimmed = current.items.pop()!;
 				current.w -= trimmed.w;
@@ -694,12 +740,78 @@ function layoutBlock(
 	const parentTextAlign = parentCs?.textAlign;
 	const centerReplaced = parentTextAlign === 'center';
 	const rightReplaced = parentTextAlign === 'right' || parentTextAlign === 'end';
+	// Float row state. `float:left` kids pack onto the current row from
+	// `floatRowLeftX` rightward; `float:right` packs from `floatRowRightX`
+	// leftward. `floatRowH` tracks the tallest float on the row so the
+	// next non-float (or row-overflowing float) clears past it. Flushing
+	// resets the cursors + advances `y` by `floatRowH`. This is a
+	// pragmatic subset of CSS float — no shape wrapping, no text flowing
+	// around a float — but it's enough for DDG's `.frm__select` row of
+	// `width:150px; float:left` widgets to sit side-by-side instead of
+	// stacking full-width.
+	let floatRowLeftX = originX;
+	let floatRowRightX = originX + contentW;
+	let floatRowH = 0;
+	const flushFloatRow = () => {
+		if (floatRowH > 0) {
+			y += floatRowH;
+			floatRowLeftX = originX;
+			floatRowRightX = originX + contentW;
+			floatRowH = 0;
+		}
+	};
 	for (const child of kids) {
 		const ccs = getComputedLiveStyle(child);
 		const mTop = ccs.marginTop ?? 0;
 		const mBottom = ccs.marginBottom ?? 0;
 		const mLeft = ccs.marginLeft ?? 0;
 		const mRight = ccs.marginRight ?? 0;
+		const float = ccs.float;
+		const isFloat = float === 'left' || float === 'right';
+		// `display:inline-block` siblings flow on the same line per CSS
+		// spec until the row fills. We piggy-back on the float-row
+		// mechanism — treat `inline-block` as `float:left`-equivalent
+		// for sizing+packing. Only kicks in when the child has an
+		// explicit width AND the parent has multiple inline-block-ish
+		// kids; without that there's no point packing one item on its
+		// own row. The width gate also keeps full-width inline-block
+		// blocks (no explicit width) on their own row as the stack flow
+		// would have done. DDG's `.frm__select` (inline-block + width:
+		// 145px, no float because the float:left rule is gated to
+		// .lt-ie8) used to stack vertically before this — each select
+		// occupied a full-width row in the form. Real browsers flow
+		// them side-by-side because inline-block.
+		const isInlineBlockPack = !isFloat && ccs.display === 'inline-block';
+		if (isFloat || isInlineBlockPack) {
+			const childExplicitWF = resolveLength(ccs.width, contentW);
+			// Floats / inline-blocks with no explicit width fall back to
+			// parent allocation, which would defeat side-by-side packing.
+			// Keep the existing block-stacking path for those.
+			if (childExplicitWF !== undefined) {
+				const childWF = clampSize(
+					childExplicitWF, ccs.minWidth, ccs.maxWidth, contentW,
+				);
+				const slotW = floatRowRightX - floatRowLeftX;
+				const needed = childWF + mLeft + mRight;
+				// If the box won't fit on the current row, flush + retry
+				// on a fresh row.
+				if (needed > slotW && floatRowH > 0) flushFloatRow();
+				const cxF = (isFloat && float === 'right')
+					? floatRowRightX - mRight - childWF
+					: floatRowLeftX + mLeft;
+				const childExplicitHF = resolveLength(ccs.height, contentH);
+				const childHF = layoutLeaf(child, ccs, cxF, y + mTop, childWF, childExplicitHF);
+				const consumedH = childHF + mTop + mBottom;
+				if (consumedH > floatRowH) floatRowH = consumedH;
+				if (isFloat && float === 'right') floatRowRightX -= childWF + mLeft + mRight;
+				else floatRowLeftX += childWF + mLeft + mRight;
+				prevMarginBottom = 0;
+				continue;
+			}
+		}
+		// Non-float (or width-less float falling through): any in-flight
+		// float row must flush so this child sits below the floats.
+		flushFloatRow();
 		// Additive margins (no collapse). Skip leading margin for first
 		// child if y == originY — matches lil-gui visual.
 		y += Math.max(prevMarginBottom, mTop);
@@ -713,18 +825,63 @@ function layoutBlock(
 		// parent. Matches the override layoutLeaf applies for these
 		// tags when no explicit CSS width is set.
 		const tag = child.tagName;
-		const isReplacedInline = tag === 'CANVAS' || tag === 'IMG';
+		// Form widgets (`<input>`, `<button>`, `<select>`, `<textarea>`)
+		// are treated as replaced-inline-like here so that:
+		//   (a) buttons size to their label + padding (not the parent's
+		//       full content width) — predicted below.
+		//   (b) text inputs with a `size` attr keep the width
+		//       applyPresentationalHints derived (already on `cs.width`).
+		//   (c) parents with `text-align:center` (e.g. tier3's `<body
+		//       style="text-align:center">` propagated through to the
+		//       form's divs) actually CENTER the widget, like every
+		//       other browser does — the existing `centerReplaced`
+		//       branch below uses this flag.
+		// Without this tier3's `<input size="35">` sat flush-left of
+		// its div while the submit (added to the set first) centered,
+		// so the column visibly went left-aligned ↔ centred mid-form.
+		const isButtonInput = tag === 'INPUT' && (() => {
+			const t = (child.getAttribute('type') ?? 'text').toLowerCase();
+			return t === 'submit' || t === 'button' || t === 'reset';
+		})();
+		const isReplacedInline = tag === 'CANVAS' || tag === 'IMG'
+			|| tag === 'INPUT' || tag === 'BUTTON'
+			|| tag === 'SELECT' || tag === 'TEXTAREA';
 		if (isReplacedInline && childExplicitW === undefined) {
 			if (tag === 'CANVAS') {
 				const ds = child.getDisplaySize();
 				if (ds.w > 0) childW = ds.w;
-			} else { // IMG
+			} else if (tag === 'IMG') {
 				const loaded = child.getLoadedImage();
 				const attrW = parseFloat(child.getAttribute('width') ?? '');
 				const naturalW = loaded?.naturalWidth ?? loaded?.width ?? 0;
 				if (Number.isFinite(attrW) && attrW > 0) childW = attrW;
 				else if (naturalW > 0) childW = naturalW;
+			} else if (tag === 'BUTTON' || isButtonInput) {
+				// Width = measured label width + horizontal padding.
+				// `value` attribute on INPUT, textContent on BUTTON.
+				// `measureCtx` is the module-level layout-measure
+				// context the shell installs each frame; bail out to
+				// the parent allocation if it's somehow not set yet.
+				if (measureCtx) {
+					const label = tag === 'BUTTON'
+						? (child.textContent || '')
+						: (child.getAttribute('value') || '');
+					const fontPx = typeof ccs.fontSize === 'number' ? ccs.fontSize : 14;
+					const fontFamily = ccs.fontFamily || 'sans-serif';
+					measureCtx.save();
+					try {
+						measureCtx.font = fontPx + 'px ' + quoteFontFamily(fontFamily);
+						const labelW = label ? measureCtx.measureText(label).width : 0;
+						// 12 px of horizontal padding each side; 32 px
+						// floor so a value-less submit still has a
+						// tappable target.
+						childW = Math.max(32, Math.round(labelW + 24));
+					} finally { measureCtx.restore(); }
+				}
 			}
+			// Other replaced-inline form widgets (text INPUT without a
+			// `size` attr, SELECT, TEXTAREA without `cols`) stay at the
+			// parent allocation — no good intrinsic-width signal here.
 		}
 		// Resolve explicit child height against parent contentH so
 		// percent-heights become a concrete hHint into layoutLeaf.
@@ -742,6 +899,10 @@ function layoutBlock(
 		y += childH;
 		prevMarginBottom = mBottom;
 	}
+	// Flush any trailing float row so the parent's content height
+	// includes the floats (otherwise floats past the last block sibling
+	// would visually overflow the parent's box).
+	flushFloatRow();
 	return y - originY;
 }
 
@@ -1729,6 +1890,70 @@ function layoutLeaf(
 			w = wAttr;
 		}
 	}
+	// Form widgets default to zero size when no CSS/attribute height is
+	// set — that's the standard `intrinsicVoidH = 0` fallback. Without
+	// these branches a tier3-style `<input size="35" type="text">`
+	// renders as a zero-height (invisible) box because `size` only
+	// touches width via `applyPresentationalHints`. Heights below are
+	// proportional to the inherited font size + a few pixels of
+	// "chrome" so the widget reads as a typical browser control on
+	// either theme. Explicit CSS height still wins via the normal
+	// `explicitH` branch further down.
+	if (tag === 'INPUT') {
+		const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+		const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
+		if (type === 'hidden') {
+			// Hidden inputs occupy no layout space (CSS spec: `display:
+			// none` UA default). Force both axes to zero so a hidden
+			// field doesn't push siblings around or leak a paint hit.
+			intrinsicVoidH = 0;
+			w = 0;
+		} else if (type === 'checkbox' || type === 'radio') {
+			intrinsicVoidH = Math.max(14, fontPx + 2);
+		} else if (type === 'range') {
+			intrinsicVoidH = Math.max(20, fontPx + 8);
+		} else if (type === 'submit' || type === 'button' || type === 'reset') {
+			intrinsicVoidH = Math.round(fontPx * 1.6 + 6);
+		} else if (type !== 'image') {
+			// text / search / email / url / tel / password / number /
+			// color / date / file / month / week / time
+			intrinsicVoidH = Math.round(fontPx * 1.4 + 6);
+		}
+	}
+	if (tag === 'BUTTON') {
+		const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
+		intrinsicVoidH = Math.round(fontPx * 1.6 + 6);
+	}
+	if (tag === 'SELECT') {
+		const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
+		intrinsicVoidH = Math.round(fontPx * 1.4 + 6);
+		// Closed-state dropdown: the painter (paintSelect) draws ONE row
+		// — the selected option's label + chevron — clipped to box.h.
+		// Skip layoutChildren and use intrinsicVoidH as the box height so
+		// the stacked OPTIONs don't inflate it (DDG's region picker has
+		// ~60 OPTIONs which previously made the SELECT ~700px tall and
+		// covered the result list; the chevron also scaled with box.h,
+		// producing the giant angled artifact). OPTION layout boxes are
+		// never read (tap collector + text painter both skip OPTION /
+		// OPTGROUP; paintSelect short-circuits descendant painting), so
+		// suppressing them is safe. `size > 1` (multi-row list-box) is
+		// deferred until a fixture needs it.
+		const sizeAttr = parseInt(el.getAttribute('size') ?? '1', 10);
+		if (!(sizeAttr > 1)) {
+			const h = clampSize(
+				explicitH ?? hHint ?? (pad.top + intrinsicVoidH + pad.bottom),
+				cs.minHeight, cs.maxHeight, heightBasis);
+			const contentH = Math.max(0, h - pad.top - pad.bottom);
+			storeBox(el, {
+				x, y, w, h,
+				contentX: x + pad.left, contentY: y + pad.top,
+				contentW: Math.max(0, w - pad.left - pad.right), contentH,
+				intrinsicContentH: intrinsicVoidH,
+				intrinsicContentW: Math.max(0, w - pad.left - pad.right),
+			});
+			return h;
+		}
+	}
 	// `<video>` sizing follows the IMG/SVG pattern — replaced element
 	// with attribute-driven defaults. HTML spec defaults are 300×150
 	// when no width/height is set anywhere (matching `<canvas>`).
@@ -2052,7 +2277,21 @@ function intrinsicContentHeight(el: LiveElement, cs: ComputedLiveStyle): number 
 			const isFlexRow = isFlex && (dir === 'row' || dir === 'row-reverse');
 			const isFlexCol = isFlex && (dir === 'column' || dir === 'column-reverse');
 			const gap = cs.gap ?? 0;
-			if (isFlexRow) {
+			// Inline-flow context: when every kid is inline / inline-block
+			// they flow on the same line per CSS spec (mirrors the
+			// allInline routing in layoutChildren). Cross-axis height is
+			// the TALLEST kid, not the SUM — without this an inline-block
+			// container (e.g. DDG's `.result__extras__url`) with a span +
+			// `<a>` inside reported sum-of-heights as its intrinsic, so a
+			// row that's really one-line-tall claimed multi-line height
+			// and pushed the snippet below by ~50px of phantom whitespace.
+			let allInlineKids = true;
+			for (const c of kids) {
+				const ccs = getComputedLiveStyle(c);
+				const d = ccs.display;
+				if (d !== 'inline' && d !== 'inline-block') { allInlineKids = false; break; }
+			}
+			if (isFlexRow || allInlineKids) {
 				// Cross axis is vertical → row height is the tallest child.
 				for (const c of kids) {
 					const ccs = getComputedLiveStyle(c);

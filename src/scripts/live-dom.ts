@@ -21,7 +21,9 @@
 // children stack at the parent's origin, no text in non-canvas
 // elements. Those land in 2.1+ atop the M2.0 surface.
 
+import { type HtmlElement, parseHtml } from '../html/html-parser.js';
 import { applyDecl, parseCssText, parseLength, serializeStyle, type CssLength, type InlineStyle } from './inline-css.js';
+import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
 
 /** Coerce a value written to `style.{width,height,...}` into a
  * `CssLength | undefined`. Accepts numbers (raw px), CssLength objects,
@@ -60,7 +62,6 @@ import {
 	syncLiveCacheVersion,
 } from './live-overlay.js';
 import { markLiveDirty, requestFullRepaint } from './live-paint-control.js';
-import { getComputedLiveStyle } from './live-css.js';
 
 const LIVE_ELEMENT_BRAND = Symbol('LiveElement');
 
@@ -79,6 +80,237 @@ const LIVE_ELEMENT_BRAND = Symbol('LiveElement');
 let liveProfileRoot = '';
 let livePageBase = '';
 export function setLiveProfileRoot(root: string): void { liveProfileRoot = root; }
+
+// =========================================================================
+// Animated-GIF ticker registry
+// =========================================================================
+
+/** nx.js's `Image` class gains three multi-frame accessors when a GIF
+ * is decoded (see image.ts in nxjs-source). Web `HTMLImageElement`
+ * doesn't model these, so we narrow via this typed view at the call
+ * site instead of polluting the global Image declaration. */
+interface GifAnimatedImage {
+	frameCount: number;
+	frameDelay(index: number): number;
+	setFrame(index: number): void;
+}
+
+/** Hard floor on per-frame delay. GIF spec allows 0 ("as fast as
+ * possible"), which would peg the timer at native frame rate and burn
+ * CPU painting the same image; real browsers clamp similarly. */
+const GIF_MIN_FRAME_DELAY_MS = 20;
+function clampGifDelay(ms: number): number {
+	if (!Number.isFinite(ms) || ms < GIF_MIN_FRAME_DELAY_MS) return GIF_MIN_FRAME_DELAY_MS;
+	return ms;
+}
+
+/** Every active GIF frame-ticker. The shell calls `clearGifAnimations`
+ * on page-change so previously-scheduled `setFrame` + repaint calls
+ * don't fire on detached elements (and clobber the new page's cache). */
+const activeGifAnimations = new Set<{ cancel: () => void }>();
+
+export function clearGifAnimations(): void {
+	for (const t of activeGifAnimations) t.cancel();
+	activeGifAnimations.clear();
+}
+
+// =========================================================================
+// CSS background-image cache. Keys are RAW (unresolved) URL strings as
+// they appear in the cascade. Each entry lazily kicks off a network /
+// disk load on first lookup; subsequent lookups return the cached
+// image source (HTMLImageElement for raster formats; OffscreenCanvas
+// for SVG which we rasterize ourselves since nx.js's image decoder
+// has no SVG support). On load success we bump `liveTreeVersion` so
+// the next paint draws the image instead of leaving the layer blank.
+// Cleared on page nav.
+// =========================================================================
+
+/** Image source for a CSS background — either a raster `HTMLImageElement`
+ * (nx.js's Image, decoded by the C-side decoder) or an OffscreenCanvas
+ * we rasterize ourselves for SVG. Both are valid `CanvasImageSource`
+ * args to `drawImage`. */
+export type BgImageSource = HTMLImageElement | OffscreenCanvas;
+
+interface BgImageEntry {
+	img: BgImageSource | null;
+	failed: boolean;
+}
+const bgImageCache = new Map<string, BgImageEntry>();
+
+/** Lookup-or-load a background-image URL. Returns the loaded image, or
+ * `null` while still loading / on permanent failure. Triggers a fresh
+ * load + tree-version bump on first call per URL. */
+export function getBackgroundImage(url: string): BgImageSource | null {
+	if (!url) return null;
+	const existing = bgImageCache.get(url);
+	if (existing) return existing.failed ? null : existing.img;
+	const entry: BgImageEntry = { img: null, failed: false };
+	bgImageCache.set(url, entry);
+	const resolved = resolveLiveResourceUrl(url);
+	_imgDiag('[' + new Date().toISOString() + '] BG-START url=' + url + ' resolved=' + resolved);
+	// SVG path: nx.js's Image decoder doesn't handle SVG, so fetch the
+	// XML as text, parse it, and rasterize via paintSvgSubtree into an
+	// OffscreenCanvas. The OffscreenCanvas is then returned in the same
+	// `BgImageSource` shape as a regular Image — the painter blits it
+	// with drawImage exactly the same way.
+	if (/\.svg(\?|#|$)/i.test(url)) {
+		void rasterizeSvgBackground(url, resolved, entry);
+		return null;
+	}
+	try {
+		const img: HTMLImageElement = new (globalThis as unknown as {
+			Image: new () => HTMLImageElement;
+		}).Image();
+		img.onload = () => {
+			_imgDiag('[' + new Date().toISOString() + '] BG-LOAD ok url=' + url
+				+ ' w=' + img.naturalWidth + ' h=' + img.naturalHeight);
+			entry.img = img;
+			bumpLiveTreeVersion();
+		};
+		img.onerror = () => {
+			_imgDiag('[' + new Date().toISOString() + '] BG-LOAD fail url=' + url);
+			entry.failed = true;
+		};
+		img.src = resolved;
+	} catch (err) {
+		entry.failed = true;
+		_imgDiag('[' + new Date().toISOString() + '] BG-LOAD threw url=' + url + ' err=' + String(err));
+	}
+	return null;
+}
+
+/** Fetch + rasterize an SVG URL into an OffscreenCanvas, store on
+ * `entry.img` when done. Uses html-parser's permissive HTML5 mode —
+ * good enough for the simple-shapes SVGs sites actually serve
+ * (favicons, logos, icon glyphs). Sizing comes from `viewBox` first,
+ * then `width`/`height` attrs, then a 24×24 fallback. Failures (404,
+ * unparseable, no shapes) are silent — entry.failed flips so we don't
+ * re-attempt. */
+async function rasterizeSvgBackground(url: string, resolved: string, entry: BgImageEntry): Promise<void> {
+	try {
+		const res = await fetch(resolved);
+		if (!res.ok) {
+			_imgDiag('[' + new Date().toISOString() + '] BG-LOAD fail (svg http ' + res.status + ') url=' + url);
+			entry.failed = true;
+			return;
+		}
+		const svgText = await res.text();
+		const tree = parseHtml(svgText);
+		// The parser wraps top-level elements under a synthetic root.
+		// Real SVG documents have <svg> at the top; if the parser
+		// HTML-wrapped them (under <html><body>), defensively unwrap.
+		const svgEl = findSvgRoot(tree);
+		if (!svgEl) {
+			_imgDiag('[' + new Date().toISOString() + '] BG-LOAD fail (svg no root) url=' + url);
+			entry.failed = true;
+			return;
+		}
+		const { width, height, vbX, vbY, vbW, vbH } = readSvgViewport(svgEl);
+		if (width <= 0 || height <= 0) {
+			entry.failed = true;
+			return;
+		}
+		// Rasterize at up to 2x the natural size so we have headroom when
+		// the background is scaled up (most CSS-sized SVGs end up larger
+		// than their viewBox). Capped to keep memory reasonable for big
+		// logos.
+		const scale = Math.min(2, Math.max(1, 64 / Math.max(width, height)));
+		const cw = Math.max(1, Math.round(width * scale));
+		const ch = Math.max(1, Math.round(height * scale));
+		const oc = new OffscreenCanvas(cw, ch);
+		const octx = oc.getContext('2d');
+		if (!octx) { entry.failed = true; return; }
+		// Map viewBox → canvas so SVG user-space coordinates land in
+		// [0, cw] × [0, ch] regardless of viewBox origin or aspect.
+		octx.scale(cw / vbW, ch / vbH);
+		octx.translate(-vbX, -vbY);
+		paintSvgSubtree(octx as OffscreenCanvasRenderingContext2D, svgEl, BG_SVG_ADAPTER);
+		_imgDiag('[' + new Date().toISOString() + '] BG-LOAD ok (svg) url=' + url
+			+ ' w=' + cw + ' h=' + ch);
+		entry.img = oc as unknown as BgImageSource;
+		bumpLiveTreeVersion();
+	} catch (err) {
+		_imgDiag('[' + new Date().toISOString() + '] BG-LOAD threw (svg) url=' + url + ' err=' + String(err));
+		entry.failed = true;
+	}
+}
+
+/** Locate the `<svg>` element inside an html-parser tree. */
+function findSvgRoot(node: HtmlElement): HtmlElement | null {
+	if (node.tag === 'svg') return node;
+	for (const child of node.children) {
+		if (child.type !== 'element') continue;
+		const found = findSvgRoot(child);
+		if (found) return found;
+	}
+	return null;
+}
+
+/** Resolve an `<svg>` element's intrinsic dimensions + viewBox. Width /
+ * height attrs override viewBox-derived sizing per SVG spec; if both
+ * are missing we fall back to the viewBox extent, then a 24×24 default
+ * so a malformed SVG still rasterizes to *something*. */
+function readSvgViewport(svgEl: HtmlElement): { width: number; height: number; vbX: number; vbY: number; vbW: number; vbH: number } {
+	const attrs = svgEl.attrs ?? {};
+	const wAttr = parseFloat(attrs['width'] ?? '');
+	const hAttr = parseFloat(attrs['height'] ?? '');
+	// html-parser lowercases attr names — viewBox → viewbox.
+	const vbRaw = attrs['viewbox'];
+	let vbX = 0, vbY = 0, vbW = 0, vbH = 0;
+	if (vbRaw) {
+		const parts = vbRaw.trim().split(/[\s,]+/).map(parseFloat);
+		if (parts.length === 4 && parts.every((p) => Number.isFinite(p))) {
+			vbX = parts[0]; vbY = parts[1]; vbW = parts[2]; vbH = parts[3];
+		}
+	}
+	const width = Number.isFinite(wAttr) && wAttr > 0 ? wAttr : (vbW > 0 ? vbW : 24);
+	const height = Number.isFinite(hAttr) && hAttr > 0 ? hAttr : (vbH > 0 ? vbH : 24);
+	if (vbW <= 0) vbW = width;
+	if (vbH <= 0) vbH = height;
+	return { width, height, vbX, vbY, vbW, vbH };
+}
+
+/** SVG-painter adapter over html-parser's HtmlElement shape — same
+ * fields as live-overlay's LIVE_SVG_ADAPTER but reading the parsed
+ * primitives directly so we don't construct LiveElements just to
+ * rasterize an icon. */
+const BG_SVG_ADAPTER: SvgNodeAdapter<HtmlElement> = {
+	tag(n) { return n.tag; },
+	attr(n, name) {
+		return n.attrs ? n.attrs[name.toLowerCase()] : undefined;
+	},
+	children(n) {
+		const kids = n.children ?? [];
+		return kids.filter((c): c is HtmlElement => c.type === 'element');
+	},
+};
+
+/** Wipe the background-image cache on page navigation so loads from
+ * the previous page don't leak into the new one. */
+export function clearBackgroundImageCache(): void {
+	bgImageCache.clear();
+}
+
+// =========================================================================
+// Image-load diagnostic — appends every `<img>` load attempt + result to
+// `sdmc:/swb_img_diag.log` so we can diagnose missing-image bugs on real
+// hardware (where stdout/stderr aren't easy to see). Capped so a broken
+// page can't fill the SD card. Set `IMG_DIAG` to `false` to silence.
+// =========================================================================
+
+const IMG_DIAG = true;
+const IMG_DIAG_PATH = 'sdmc:/swb_img_diag.log';
+const IMG_DIAG_CAP = 500;
+let _imgDiagCount = 0;
+function _imgDiag(msg: string): void {
+	if (!IMG_DIAG || _imgDiagCount >= IMG_DIAG_CAP) return;
+	_imgDiagCount++;
+	try {
+		const sw = (globalThis as { Switch?: { appendFileSync?: (p: string, d: string) => void } }).Switch;
+		sw?.appendFileSync?.(IMG_DIAG_PATH, msg + '\n');
+	} catch (_) { /* ignore */ }
+}
+
 /** SD-card directory of the page currently loaded (e.g.
  * `sdmc:/switch/webprofiles/default/pages/apps/mediaplayer/`). Set by
  * the shell per navigation; used to resolve PAGE-relative `<img>` srcs
@@ -118,7 +350,21 @@ export function resolveLiveResourceUrl(src: string): string {
 	// directory (`index.html` as the base), like a real browser. This is
 	// uniform across all pages; `./assets/x.png`, `assets/x.png` and
 	// `../sibling/x.png` all resolve relative to the current page.
-	if (livePageBase) return resolveAgainstBase(livePageBase, s);
+	if (livePageBase) {
+		// External http(s) pages: defer to the standard `URL` parser,
+		// which handles root-relative (`/x`), directory-relative
+		// (`./x`, `../x`), protocol-relative (`//host/x`), and
+		// absolute (`scheme://...`) hrefs against the page URL in one
+		// step. Required for tier3-style pages whose assets are root-
+		// relative — see `BrowserShell.computeLivePageBase`. Falls
+		// back to the original src on a malformed input so a bad
+		// attribute doesn't throw out of the load path.
+		if (/^https?:\/\//i.test(livePageBase)) {
+			try { return new URL(s, livePageBase).toString(); }
+			catch (_) { return s; }
+		}
+		return resolveAgainstBase(livePageBase, s);
+	}
 	return s;
 }
 
@@ -255,6 +501,11 @@ export class LiveElement {
 	 * `alt` placeholder ONLY in this state; a still-loading image renders
 	 * nothing (just reserves its box). Reset on each new `loadImage`. */
 	private imageLoadFailed = false;
+	/** Animated-GIF frame ticker. Null for static images and for
+	 * elements whose load hasn't completed (or whose decoded image has
+	 * `frameCount <= 1`). Cancelled by `loadImage` on re-load, and by
+	 * `clearGifAnimations()` from the shell on page navigation. */
+	private gifAnimation: { cancel: () => void } | null = null;
 	/** Per-element width/height, used both as canvas-pixel dims (when
 	 * tag is `canvas`) and as fallback paint-size for fixed div
 	 * backgrounds. Defaults match HTMLCanvasElement (300×150). */
@@ -568,12 +819,28 @@ export class LiveElement {
 	private loadImage(src: string): void {
 		this.loadedImage = null;
 		this.imageLoadFailed = false;
+		// Cancel any GIF ticker from a previous load (src changed,
+		// element reused). The next `onload` will start a fresh one if
+		// the new image is animated.
+		this.stopGifAnimation();
+		const resolved = resolveLiveResourceUrl(src);
+		_imgDiag('[' + new Date().toISOString() + '] START src=' + src + ' resolved=' + resolved);
 		try {
 			const img: HTMLImageElement = new (globalThis as unknown as {
 				Image: new () => HTMLImageElement;
 			}).Image();
 			img.onload = () => {
+				const anim = img as unknown as { frameCount?: number };
+				const fc = typeof anim.frameCount === 'number' ? anim.frameCount : 0;
+				_imgDiag('[' + new Date().toISOString() + '] LOAD ok src=' + src
+					+ ' w=' + img.naturalWidth + ' h=' + img.naturalHeight
+					+ ' frames=' + fc);
 				this.loadedImage = img;
+				// Animated GIF? Start the frame ticker. `frameCount` is a
+				// runtime-only nx.js extension on Image (see image.ts);
+				// `HTMLImageElement` doesn't know about it, hence the
+				// cast. Static images and single-frame GIFs no-op here.
+				this.startGifAnimationIfNeeded(img);
 				// Phase 2.5.2 (B): when the image has explicit dimensions
 				// (style.width AND style.height set as pixels), the load
 				// doesn't change layout — only the painted pixels in this
@@ -612,12 +879,39 @@ export class LiveElement {
 					requestFullRepaint();
 				} else {
 					// Auto-dimension image — layout depends on the decoded
-					// size, so a full re-layout/rebuild is genuinely needed.
+					// size, so the box needs to grow from the pre-load
+					// fallback (parent width × default intrinsic height) to
+					// the natural width/height. Bump the live tree version
+					// AND mark this element dirty so the next paint either
+					// reaches the full-rebuild fallback (when the dirty set
+					// drains empty for other reasons) or routes through
+					// `patchLiveDirtyRegions`, which re-lays-out this
+					// element with the now-known naturalWidth/Height and
+					// repaints both the old (small) and new (grown) regions.
+					// Without the mark, the patch path can sync the cache
+					// version without doing the layout update — leaving the
+					// IMG painted at the fallback box (the symptom on slower
+					// SDMC fetches: the animated-GIF ticker starts patching
+					// frames into a pre-load 1280×24 strip).
+					markLiveDirty(this);
 					bumpLiveTreeVersion();
 					requestFullRepaint();
 				}
 			};
-			img.onerror = () => {
+			img.onerror = (ev: unknown) => {
+				// Best-effort error message extraction (ErrorEvent.error
+				// from nx.js's Image; falls back to a generic tag when the
+				// event shape differs).
+				let why = 'unknown';
+				const e = ev as { error?: unknown; message?: string } | null | undefined;
+				if (e) {
+					if (typeof e.message === 'string') why = e.message;
+					else if (e.error instanceof Error) why = e.error.message;
+					else if (typeof e.error === 'string') why = e.error;
+					else if (e.error) why = String(e.error);
+				}
+				_imgDiag('[' + new Date().toISOString() + '] LOAD FAIL src=' + src
+					+ ' resolved=' + resolved + ' why=' + why);
 				// Genuinely broken image: flag it so the painter switches
 				// from "render nothing (still loading)" to the alt-text
 				// placeholder, and repaint that region so it shows. Box is
@@ -627,8 +921,12 @@ export class LiveElement {
 				if (!isLiveCacheBuilding()) syncLiveCacheVersion();
 				requestFullRepaint();
 			};
-			img.src = resolveLiveResourceUrl(src);
-		} catch (_) { /* swallow — bad URL or runtime gap */ }
+			img.src = resolved;
+		} catch (e) {
+			_imgDiag('[' + new Date().toISOString() + '] LOAD THROW src=' + src
+				+ ' err=' + (e instanceof Error ? e.message : String(e)));
+			/* swallow — bad URL or runtime gap */
+		}
 	}
 
 	/** Backing Image for `<img>` elements. Null when the element isn't
@@ -637,6 +935,64 @@ export class LiveElement {
 	getLoadedImage(): HTMLImageElement | null { return this.loadedImage; }
 	/** True only when the image's load failed (not while it's loading). */
 	hasImageError(): boolean { return this.imageLoadFailed; }
+
+	/** If `img` is an animated GIF (`frameCount > 1`), schedule a
+	 * chained-setTimeout loop that advances frames at each frame's
+	 * declared delay and patches just this element's region into the
+	 * live cache so the next paint blits the new frame without rebuilding
+	 * the whole tree. No-op for static images. */
+	private startGifAnimationIfNeeded(img: HTMLImageElement): void {
+		const anim = img as unknown as GifAnimatedImage;
+		const total = typeof anim.frameCount === 'number' ? anim.frameCount : 0;
+		if (total <= 1) return;
+		let idx = 0;
+		let cancelled = false;
+		let currentTid: ReturnType<typeof setTimeout> | null = null;
+		const advance = (): void => {
+			if (cancelled) return;
+			idx = (idx + 1) % total;
+			try { anim.setFrame(idx); } catch (_) { return; }
+			// Per-element region patch — paint the new frame into the
+			// element's slot in the offscreen cache.
+			//
+			// We deliberately do NOT call `syncLiveCacheVersion()` here.
+			// On the FIRST `onload` for an auto-dimensioned (no width/
+			// height attr) animated GIF, `loadImage`'s `else` branch
+			// bumps the live tree version so the engine re-lays-out the
+			// element with the now-known `naturalWidth/Height`. If we
+			// synced the cache version on the very first tick we'd mask
+			// that pending rebuild and freeze the layout box at the
+			// pre-load fallback (parent's content width × default
+			// intrinsic height) — drawImage would then stretch every
+			// frame onto a ~1280×24 strip. Skipping the sync keeps the
+			// rebuild scheduled; subsequent ticks fire after layout has
+			// settled, so the patch lands in the correct region with no
+			// further work needed.
+			patchLiveCacheRegion(this);
+			requestFullRepaint();
+			const delay = clampGifDelay(anim.frameDelay(idx));
+			currentTid = setTimeout(advance, delay);
+		};
+		const ticker = {
+			cancel: () => {
+				cancelled = true;
+				if (currentTid !== null) clearTimeout(currentTid);
+			},
+		};
+		this.gifAnimation = ticker;
+		activeGifAnimations.add(ticker);
+		currentTid = setTimeout(advance, clampGifDelay(anim.frameDelay(0)));
+	}
+
+	/** Stop this element's GIF ticker (if any) and drop it from the
+	 * global active set. */
+	private stopGifAnimation(): void {
+		if (this.gifAnimation) {
+			this.gifAnimation.cancel();
+			activeGifAnimations.delete(this.gifAnimation);
+			this.gifAnimation = null;
+		}
+	}
 	getAttribute(name: string): string | null {
 		const lower = name.toLowerCase();
 		if (lower === 'class') return this.classList.value || null;
@@ -1108,6 +1464,10 @@ export function resetLiveRoot(): void {
 	// starts fresh (without this, the first paint after navigation could
 	// hit a stale cache from the previous page).
 	resetLiveTreeVersion();
+	// CSS background-image cache — entries reference HTMLImageElements
+	// owned by the previous page session; flush so the new page's url()
+	// references trigger fresh loads against the new base URL.
+	clearBackgroundImageCache();
 }
 
 /**

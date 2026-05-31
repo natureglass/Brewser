@@ -178,6 +178,14 @@ export interface BrowserConfig {
 	 * the count past this, the oldest entry is dropped on the spot (see
 	 * `HistoryStore.record`). Clamped to [1, 10000]; default 30. */
 	maxHistory: number;
+	/** User-preferred colour scheme. Sent to external pages as the
+	 * `Sec-CH-Prefers-Color-Scheme` client hint so servers can serve a
+	 * matching theme up front; also drives the engine-side viewport
+	 * background colour (white for `light`, the template's
+	 * `page.background` for `dark`) and the `@media
+	 * (prefers-color-scheme:…)` cascade. Defaults to `light` to match
+	 * the wider web's expected default. */
+	theme: 'light' | 'dark';
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
@@ -187,6 +195,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	renderChunkMs: 12,
 	scrollChunkMs: 4,
 	maxHistory: 30,
+	theme: 'light',
 };
 
 /** One entry in `search_engines.json`. `query` is the search-URL
@@ -234,6 +243,9 @@ export function loadConfig(profileRoot: string): BrowserConfig {
 			maxHistory: typeof parsed?.maxHistory === 'number' && Number.isFinite(parsed.maxHistory)
 				? Math.max(1, Math.min(10000, Math.trunc(parsed.maxHistory)))
 				: DEFAULT_CONFIG.maxHistory,
+			theme: parsed?.theme === 'dark' || parsed?.theme === 'light'
+				? parsed.theme
+				: DEFAULT_CONFIG.theme,
 		};
 	} catch (error) {
 		console.debug(`[switch-web-browser] config.json parse failed: ${error}`);

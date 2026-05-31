@@ -42,8 +42,8 @@
 
 import { isBoldWeight, isItalicStyle, isPercent, quoteFontFamily, resolveCanvasFont, resolveLength } from './inline-css.js';
 import { getComputedLiveStyle, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
-import { getLiveTreeVersion, type LiveElement } from './live-dom.js';
-import { paintFormWidget } from './live-form.js';
+import { getBackgroundImage, getLiveTreeVersion, type LiveElement } from './live-dom.js';
+import { buildFormSubmitUrl, findEnclosingForm, paintFormWidget } from './live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	hitTestVideoControls, paintVideoControls, paintVideoFrameAt,
@@ -312,6 +312,17 @@ export function patchLiveDirtyRegions(): boolean {
 			layoutFixedRoot(el, oldB.x, oldB.y, availW, availH);
 		} catch (_) { /* keep the cached layout if a localized relayout throws */ }
 		rects.push(rect);
+		// If the re-layout grew (or moved) the box — for example an
+		// auto-dimensioned `<img>` whose `naturalWidth/Height` just became
+		// known — push the new box too so the painted region covers both
+		// the area being vacated and the area newly occupied. Without
+		// this the larger new region's extra pixels stay stale and the
+		// element appears clipped to its old size. Mirrors the abs-
+		// positioned branch above. `newB !== oldB` is a cheap ref-equal
+		// check on the cached layout entry; getLayoutBox returns the
+		// same reference until a relayout replaces it.
+		const newB = getLayoutBox(el);
+		if (newB && newB !== oldB) pushRect(newB);
 		_partialDbg('  ' + _tagOf(el) + ' relaid ['
 			+ Math.round(rect.x) + ',' + Math.round(rect.y) + ' '
 			+ Math.round(rect.w) + 'x' + Math.round(rect.h) + ']');
@@ -1187,6 +1198,24 @@ export function findTapIntent(
 		if (n.tagName === 'A') {
 			const href = n.getAttribute('href');
 			if (href) return { kind: 'navigate', href };
+		}
+		// `<input type=submit/image>` and `<button type=submit>` (or a
+		// `<button>` with no type — submit is the HTML5 default) inside a
+		// `<form action=...>` build a navigate intent the same shape an
+		// `<a href>` would, so the shell's existing URL-resolution +
+		// navigation path handles them with no extra plumbing. Gated on
+		// the form having an action — actionless forms are typically
+		// in-page state (UI groupings) and shouldn't navigate.
+		if (n.tagName === 'INPUT' || n.tagName === 'BUTTON') {
+			const defaultType = n.tagName === 'BUTTON' ? 'submit' : 'text';
+			const type = (n.getAttribute('type') ?? defaultType).toLowerCase();
+			if (type === 'submit' || type === 'image') {
+				const form = findEnclosingForm(n);
+				if (form && form.getAttribute('action')) {
+					const href = buildFormSubmitUrl(form, n);
+					if (href) return { kind: 'navigate', href };
+				}
+			}
 		}
 		if (n.tagName === 'SUMMARY') {
 			return { kind: 'summary', summary: n };
@@ -2386,6 +2415,22 @@ function paintBackground(
 			}
 			const size = cs.backgroundSize;
 			for (const layer of layers) {
+				// Image layers: `background-size` sets the IMAGE's draw
+				// dimensions, not the tile grid. paintTiledLayer would
+				// repeat a 36×36 logo across the whole header — wrong for
+				// `background-repeat:no-repeat` (DDG's logo case).
+				// Synthesise a sized image layer when cs supplies a size
+				// but the layer doesn't already carry one from the
+				// shorthand, then defer to paintBackgroundLayer's own
+				// size/repeat handling.
+				if (layer.type === 'image') {
+					const effLayer = (size && layer.sizeMode === undefined
+						&& layer.sizeW === undefined && layer.sizeH === undefined)
+						? { ...layer, sizeMode: 'auto' as const, sizeW: size.w, sizeH: size.h }
+						: layer;
+					paintBackgroundLayer(ctx, effLayer, box.x, box.y, box.w, box.h);
+					continue;
+				}
 				if (size) paintTiledLayer(ctx, layer, box.x, box.y, box.w, box.h, size.w, size.h);
 				else paintBackgroundLayer(ctx, layer, box.x, box.y, box.w, box.h);
 			}
@@ -2393,7 +2438,13 @@ function paintBackground(
 		return;
 	}
 	const bg = cs.background;
-	if (bg) {
+	// `'none'` / `'transparent'` are valid CSS but invalid Canvas2D
+	// fillStyle values — assigning them is a silent no-op that LEAVES
+	// THE PREVIOUS fillStyle in place. A subsequent fillRect then
+	// paints the box with whatever stale colour the prior element used
+	// (e.g. tier3's `<form style="background:none">` ended up filled
+	// with the toolbar navy). Treat both keywords as "no bg, no fill".
+	if (bg && bg !== 'none' && bg !== 'transparent') {
 		ctx.fillStyle = bg;
 		if (radius > 0) {
 			pathLiveRoundedRect(ctx, box.x, box.y, box.w, box.h, radius);
@@ -2412,6 +2463,57 @@ function paintBackgroundLayer(
 	if (layer.type === 'solid') {
 		ctx.fillStyle = layer.color;
 		ctx.fillRect(x, y, w, h);
+		return;
+	}
+	if (layer.type === 'image') {
+		const img = getBackgroundImage(layer.url);
+		if (!img) return; // not loaded (or failed) — leave layer transparent
+		// HTMLImageElement has naturalWidth/Height; OffscreenCanvas (used
+		// for SVG rasterizations) has only width/height. Type guard via
+		// `in` so the BgImageSource union resolves cleanly.
+		const natW = 'naturalWidth' in img ? img.naturalWidth : img.width;
+		const natH = 'naturalHeight' in img ? img.naturalHeight : img.height;
+		if (natW <= 0 || natH <= 0) return;
+		// Resolve draw size: explicit px → use directly; cover → fill +
+		// crop; contain → fit + letterbox; otherwise natural size (capped
+		// to the box on each axis).
+		let dw: number, dh: number;
+		if (layer.sizeMode === 'cover') {
+			const s = Math.max(w / natW, h / natH);
+			dw = natW * s; dh = natH * s;
+		} else if (layer.sizeMode === 'contain') {
+			const s = Math.min(w / natW, h / natH);
+			dw = natW * s; dh = natH * s;
+		} else if (layer.sizeMode === 'auto' || layer.sizeW || layer.sizeH) {
+			// `auto N`px (aspect-preserving against the fixed axis) — common
+			// CSS pattern for icons/logos that want a fixed height + auto
+			// width-from-aspect.
+			if (layer.sizeW && layer.sizeH) { dw = layer.sizeW; dh = layer.sizeH; }
+			else if (layer.sizeW) { dw = layer.sizeW; dh = natH * (layer.sizeW / natW); }
+			else if (layer.sizeH) { dh = layer.sizeH; dw = natW * (layer.sizeH / natH); }
+			else { dw = natW; dh = natH; }
+		} else {
+			dw = natW; dh = natH;
+		}
+		// repeat:repeat tiles across the box. Anything else (no-repeat /
+		// repeat-x / repeat-y) draws one tile (we don't axis-tile yet).
+		if (layer.repeat === 'repeat') {
+			for (let py = y; py < y + h; py += dh) {
+				for (let px = x; px < x + w; px += dw) {
+					ctx.drawImage(img, px, py, dw, dh);
+				}
+			}
+			return;
+		}
+		// Position: default `center` matches real-browser default for
+		// background-image when no `background-position` is set.
+		let dx = x + (w - dw) / 2;
+		let dy = y + (h - dh) / 2;
+		if (layer.position === 'left') dx = x;
+		else if (layer.position === 'right') dx = x + w - dw;
+		if (layer.position === 'top') dy = y;
+		else if (layer.position === 'bottom') dy = y + h - dh;
+		ctx.drawImage(img, dx, dy, dw, dh);
 		return;
 	}
 	if (layer.type === 'linear') {

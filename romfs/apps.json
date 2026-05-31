@@ -10,5 +10,11 @@
         "description": "An application to test the various sensors on your device.",
         "logo": "../pages/apps/sensors/assets/sensors_logo.png",
         "url": "../pages/apps/sensors/index.html"
+    },
+    {
+        "title":"YouTube",
+        "description": "Watch videos directly on your console.",
+        "logo": "../pages/apps/youtube/assets/youtube_logo.png",
+        "url": "../pages/apps/youtube/index.html"
     }
 ]
