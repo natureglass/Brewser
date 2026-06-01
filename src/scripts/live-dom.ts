@@ -46,7 +46,7 @@ import {
 // Runtime-only import (used inside the innerHTML setter). html-to-live
 // imports LiveElement back from this module — the cycle is safe because
 // neither side touches the other's exports at module-eval time.
-import { parseFragmentInto } from './html-to-live.js';
+import { loadIframeContents, parseFragmentInto } from './html-to-live.js';
 import {
 	getInputChecked, getInputValue, setInputChecked, setInputValue,
 } from './live-form.js';
@@ -148,15 +148,10 @@ export function getBackgroundImage(url: string): BgImageSource | null {
 	bgImageCache.set(url, entry);
 	const resolved = resolveLiveResourceUrl(url);
 	_imgDiag('[' + new Date().toISOString() + '] BG-START url=' + url + ' resolved=' + resolved);
-	// SVG path: nx.js's Image decoder doesn't handle SVG, so fetch the
-	// XML as text, parse it, and rasterize via paintSvgSubtree into an
-	// OffscreenCanvas. The OffscreenCanvas is then returned in the same
-	// `BgImageSource` shape as a regular Image — the painter blits it
-	// with drawImage exactly the same way.
-	if (/\.svg(\?|#|$)/i.test(url)) {
-		void rasterizeSvgBackground(url, resolved, entry);
-		return null;
-	}
+	// SVG is now handled by the native decoder (nanosvg in image.c) so
+	// .svg URLs flow through the same `new Image()` path as raster
+	// formats. `rasterizeSvgBackground` stays defined below as a
+	// defensive fallback path but is no longer wired in.
 	try {
 		const img: HTMLImageElement = new (globalThis as unknown as {
 			Image: new () => HTMLImageElement;
@@ -166,6 +161,13 @@ export function getBackgroundImage(url: string): BgImageSource | null {
 				+ ' w=' + img.naturalWidth + ' h=' + img.naturalHeight);
 			entry.img = img;
 			bumpLiveTreeVersion();
+			// `bumpLiveTreeVersion` alone only invalidates the cache —
+			// it doesn't wake the paint loop. On idle pages (DDG result
+			// list after layout settles) the loop was sleeping, so the
+			// duck logo only appeared after the user scrolled twice
+			// (first scroll = stale cache blit, second = full rebuild).
+			// Active repaint matches what `<img>` element loadImage does.
+			requestFullRepaint();
 		};
 		img.onerror = () => {
 			_imgDiag('[' + new Date().toISOString() + '] BG-LOAD fail url=' + url);
@@ -293,13 +295,14 @@ export function clearBackgroundImageCache(): void {
 
 // =========================================================================
 // Image-load diagnostic — appends every `<img>` load attempt + result to
-// `sdmc:/swb_img_diag.log` so we can diagnose missing-image bugs on real
-// hardware (where stdout/stderr aren't easy to see). Capped so a broken
-// page can't fill the SD card. Set `IMG_DIAG` to `false` to silence.
+// `sdmc:/switch/webprofiles/default/logs/swb_img_diag.log` so we can
+// diagnose missing-image bugs on real hardware (where stdout/stderr aren't
+// easy to see). Capped so a broken page can't fill the SD card. Set
+// `IMG_DIAG` to `false` to silence.
 // =========================================================================
 
 const IMG_DIAG = true;
-const IMG_DIAG_PATH = 'sdmc:/swb_img_diag.log';
+const IMG_DIAG_PATH = 'sdmc:/switch/webprofiles/default/logs/swb_img_diag.log';
 const IMG_DIAG_CAP = 500;
 let _imgDiagCount = 0;
 function _imgDiag(msg: string): void {
@@ -788,6 +791,13 @@ export class LiveElement {
 		// [[nxjs-image-bypasses-global-fetch]].
 		else if (lower === 'src' && this.tagName === 'IMG') {
 			this.loadImage(value);
+		}
+		// `<iframe src="...">` triggers a separate fetch+parse+graft.
+		// Tier 1B: content is fetched, parsed, and appended as iframe
+		// children. Scripts are skipped; styles get scoped to the
+		// iframe's subtree only (see html-to-live.ts loadIframeContents).
+		else if (lower === 'src' && this.tagName === 'IFRAME') {
+			loadIframeContents(this, value);
 		}
 		// Phase 3b (2026-05-26): `<canvas width="640" height="360">`
 		// — sync the parsed-attr value into `_width` / `_height` so

@@ -180,7 +180,7 @@ body::before{
  * No per-frame work unless explicitly toggled (Gyro card → live rAF; NFC card
  * → 2 Hz interval). Refresh button + initial load do single-shot polls of all
  * other sensors. Every call is logged with a relative timestamp to
- * `sdmc:/swb_sensors.log` so the user can grab the file and share it back. */
+ * `sdmc:/switch/webprofiles/default/logs/swb_sensors.log` so the user can grab the file and share it back. */
 
 // Any console call would route through nx.js's $.print and flip the canvas to
 // text-render mode mid-frame ([[console-error-switches-render-mode]]). Silence
@@ -189,7 +189,7 @@ body::before{
 console.warn = () => {}; console.log = () => {};
 console.error = () => {}; console.info = () => {};
 
-const LOG = 'sdmc:/swb_sensors.log';
+const LOG = 'sdmc:/switch/webprofiles/default/logs/swb_sensors.log';
 const T0 = Date.now();
 const enc = new TextEncoder();
 

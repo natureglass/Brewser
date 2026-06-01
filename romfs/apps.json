@@ -12,9 +12,17 @@
         "url": "../pages/apps/sensors/index.html"
     },
     {
+        "title":"Speed Test",
+        "description": "Test your internet speed directly on your console.",
+        "logo": "../pages/apps/speedtest/assets/speedtest_logo.png",
+        "url": "../pages/apps/speedtest/index.html"
+    },
+    {
         "title":"YouTube",
         "description": "Watch videos directly on your console.",
         "logo": "../pages/apps/youtube/assets/youtube_logo.png",
         "url": "../pages/apps/youtube/index.html"
     }
+
+    
 ]

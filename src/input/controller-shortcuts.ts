@@ -822,7 +822,7 @@ export function installCanvasTouch(): void {
 	});
 }
 
-const _TOUCH_DIAG_PATH = 'sdmc:/switch/webprofiles/default/khronos-logs/shell-nav-diag.log';
+const _TOUCH_DIAG_PATH = 'sdmc:/switch/webprofiles/default/logs/shell-nav-diag.log';
 const _touchDiagStart = Date.now();
 function _touchDiag(label: string): void {
 	try {

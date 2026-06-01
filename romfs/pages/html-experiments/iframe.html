@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Test fixture: iframe</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-family: system-ui; padding: 20px; }
+  h1 { color: #ffd35e; }
+  h2 { color: #7aa2ff; margin-top: 28px; font-size: 19px; }
+  p.lead { color: #9bb1d6; font-size: 15px; }
+  .caveat { color: #d77ee0; font-size: 13px; }
+  iframe { background: #f7f7f7; }
+</style>
+</head>
+<body>
+<h1>&lt;iframe&gt; — Tier 1B inline preview</h1>
+<p class="lead">Each iframe below fetches its <code>src</code>, parses the
+response HTML, and grafts the body as the iframe's subtree. Scripts inside
+the iframe are skipped. Internal <code>&lt;style&gt;</code> blocks are
+selector-scoped so they only match descendants of their iframe — embedded
+CSS won't leak into this parent page's cascade.</p>
+
+<h2>1. Same-origin local fixture</h2>
+<p class="lead">Loads another <code>browser://</code> fixture inside an
+iframe. Most reliable: no network, no CSS-scoping conflicts.</p>
+<iframe src="browser://html-experiments/align/" width="640" height="200"></iframe>
+
+<h2>2. Custom size</h2>
+<p class="lead">No <code>width</code> / <code>height</code> attrs — falls
+back to the HTML spec defaults (300&times;150) so you can see the frame
+without any sizing hints.</p>
+<iframe src="browser://html-experiments/two/"></iframe>
+
+<h2>3. Inline next to text</h2>
+<p class="lead">Iframes are replaced-inline (like <code>&lt;img&gt;</code>),
+so they can sit alongside text on the same line.
+Here's some lead-in text, then an iframe:
+<iframe src="browser://html-experiments/border/" width="400" height="120"></iframe>
+and the line continues after it (or wraps, depending on width).</p>
+
+<h2>4. External https page</h2>
+<p class="lead">Fetches a real external page over HTTPS. Caveat: many
+real pages depend on scripts or external CSS we don't run inside the
+iframe — content will look stripped-down. The page below is small and
+mostly markup.</p>
+<iframe src="https://example.com/" width="700" height="240"></iframe>
+
+<p class="caveat">Known Tier 1B limitations:
+<code>sandbox</code> / <code>allow</code> / CSP attributes are parsed
+but not enforced. Cross-origin is not isolated. Iframe scripts never
+run. CSS selectors targeting <code>html</code> / <code>body</code>
+inside the iframe won't match (the iframe has no inner body element).
+Tier 1C (separate JS context + sandbox enforcement) is a future task
+if a use case needs it.</p>
+
+<p><a href="browser://web-experiments/">&larr; back to Web Experiments</a></p>
+</body>
+</html>

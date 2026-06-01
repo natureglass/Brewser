@@ -1,11 +1,12 @@
 {
   "template": "Templates/default.json",
+  "theme": "light",
+  "toolbarHeight": 64,
   "searchEngine": "DuckDuckGo",
   "videoNVTEGRA": true,
   "renderChunkMs": 512,
   "scrollChunkMs": 12,
   "maxHistory": 30,
-  "theme": "light",
   "autoRotate": true,
   "clickSounds": true
 }

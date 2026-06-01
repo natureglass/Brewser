@@ -135,6 +135,23 @@ export function patchLiveCacheRegion(el: LiveElement): void {
 			const ops: PaintOp[] = [];
 			collectPaintOps(root, ops, /* skipBgOfRoot */ true);
 			for (const op of ops) {
+				// Clip ops ALWAYS execute regardless of dirty-rect intersection
+				// — skipping a clip-push would unbalance the save/restore stack
+				// and leak clipping into unrelated subtrees painted later in
+				// the op list.
+				if (op.kind === 'clip-push' && op.box) {
+					try {
+						cacheCtx.save();
+						cacheCtx.beginPath();
+						cacheCtx.rect(op.box.contentX, op.box.contentY, op.box.contentW, op.box.contentH);
+						cacheCtx.clip();
+					} catch (_) { /* ignore */ }
+					continue;
+				}
+				if (op.kind === 'clip-pop') {
+					try { cacheCtx.restore(); } catch (_) { /* ignore */ }
+					continue;
+				}
 				const b: DirtyRect | undefined = op.kind === 'atom' ? op.atom : op.box;
 				if (!b || !rectsIntersect(b, rect)) continue;
 				try {
@@ -362,6 +379,21 @@ export function patchLiveDirtyRegions(): boolean {
 		}
 		if (bodyBox) paintBoxedElement(cacheCtx, root, bodyCs, bodyBox);
 		for (const op of ops) {
+			// Clip ops ALWAYS execute regardless of dirty-rect intersection
+			// so save/restore stays balanced — same reason as the build loop.
+			if (op.kind === 'clip-push' && op.box) {
+				try {
+					cacheCtx.save();
+					cacheCtx.beginPath();
+					cacheCtx.rect(op.box.contentX, op.box.contentY, op.box.contentW, op.box.contentH);
+					cacheCtx.clip();
+				} catch (_) { /* ignore */ }
+				continue;
+			}
+			if (op.kind === 'clip-pop') {
+				try { cacheCtx.restore(); } catch (_) { /* ignore */ }
+				continue;
+			}
 			const b: DirtyRect | undefined = op.kind === 'atom' ? op.atom : op.box;
 			if (!b) continue;
 			let hit = false;
@@ -457,9 +489,14 @@ let lastPaintedScrollY = Number.NaN;
 /** One unit of paint work emitted by the pre-walk. Bg ops paint an
  * element's background + borders + non-inline text via the existing
  * `paintBoxedElement`. Atom ops paint a single inline text atom (or
- * IMG atom) inside an inline-formatting context. */
+ * IMG atom) inside an inline-formatting context. Clip-push/pop ops
+ * bracket children of an `overflow: hidden` container (e.g. `<iframe>`),
+ * pairing a `ctx.save() + ctx.rect(box) + ctx.clip()` with a later
+ * `ctx.restore()`. Partial-repaint paths must ALWAYS execute clip ops
+ * (skipping a clip-push would unbalance the save/restore stack and
+ * leak clipping into unrelated subtrees). */
 interface PaintOp {
-	kind: 'bg' | 'atom';
+	kind: 'bg' | 'atom' | 'clip-push' | 'clip-pop';
 	el: LiveElement;
 	cs?: ComputedLiveStyle;
 	box?: LayoutBox;
@@ -843,6 +880,13 @@ export function paintLiveOverlay(
 							paintBoxedElement(cacheCtx, op.el, op.cs, op.box);
 						} else if (op.kind === 'atom' && op.atom) {
 							paintOneInlineAtom(cacheCtx, op.atom);
+						} else if (op.kind === 'clip-push' && op.box) {
+							cacheCtx.save();
+							cacheCtx.beginPath();
+							cacheCtx.rect(op.box.contentX, op.box.contentY, op.box.contentW, op.box.contentH);
+							cacheCtx.clip();
+						} else if (op.kind === 'clip-pop') {
+							cacheCtx.restore();
 						}
 					} catch (err) {
 						const el = op.kind === 'atom' ? op.atom?.el : op.el;
@@ -1516,6 +1560,10 @@ function paintBoxedElement(
 		paintVideoPlaceholder(ctx, el, cs, box, radius);
 		return;
 	}
+	if (tag === 'IFRAME') {
+		paintIframe(ctx, el, box);
+		return;
+	}
 	if (tag === 'BR') return;
 	if (tag === 'LI') paintListMarker(ctx, el, cs, box);
 	// Phase 2.5: if this element has inline content packed into line
@@ -1682,6 +1730,25 @@ function collectPaintOps(
 		}
 		return; // inline layout replaces child walk
 	}
+	// `overflow: hidden` (not auto/scroll — those go via scrollOut above):
+	// bracket the children's ops with a clip-push / clip-pop pair so the
+	// static cache builder applies the same clipping the live painter
+	// (paintSubtreeRest) does. Headline case: `<iframe>` (UA default
+	// overflow: hidden) where the grafted child content can exceed the
+	// declared box height. Without these ops the children paint past the
+	// iframe box into adjacent flow content.
+	const oy = cs.overflowY ?? 'visible';
+	const ox = cs.overflowX ?? 'visible';
+	const needsClip = (oy === 'hidden' || oy === 'clip')
+		|| (ox === 'hidden' || ox === 'clip');
+	if (needsClip) {
+		out.push({ kind: 'clip-push', el, box });
+		for (const c of el.children) {
+			collectPaintOps(c, out, false, scrollOut);
+		}
+		out.push({ kind: 'clip-pop', el });
+		return;
+	}
 	for (const c of el.children) {
 		collectPaintOps(c, out, false, scrollOut);
 	}
@@ -1838,6 +1905,57 @@ function paintListMarker(
  * space; only a failed/broken load shows the `alt`-text placeholder.
  * The aspect ratio is honored by drawImage's stretch — the page is
  * expected to set width via CSS to control the displayed size. */
+/** Paint chrome for an `<iframe>` element. The iframe's grafted content
+ * (fetched + parsed from its `src` — see html-to-live.ts
+ * `loadIframeContents`) renders via the normal subtree-paint pass since
+ * each child is a real LiveElement. This function only draws the
+ * iframe's frame border and (when the subtree is still empty) a
+ * loading/error placeholder so the box isn't a confusing blank rect.
+ *
+ * Tier 1B caveats:
+ *   - iframe-internal `<script>` is never executed (shared JS context;
+ *     skipping is the safer default — see html-to-live.ts grafting).
+ *   - `sandbox` / `allow` / CSP attributes are ignored (parsed but
+ *     not enforced).
+ *   - Cross-origin restrictions (same-origin policy) are NOT enforced.
+ *     Any iframe sees its content as if same-origin. */
+function paintIframe(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	el: LiveElement,
+	box: LayoutBox,
+): void {
+	if (box.w <= 0 || box.h <= 0) return;
+	ctx.save();
+	try {
+		// 1px frame border. Standard browser default; gives the user a
+		// visual cue where the embed begins/ends even when content fails.
+		ctx.strokeStyle = '#444';
+		ctx.lineWidth = 1;
+		ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+		// Placeholder text shows while waiting for the fetch + parse,
+		// or permanently if the load failed. Suppressed once children
+		// exist (the grafted subtree paints over this on the next pass).
+		const hasContent = el.children.length > 0;
+		if (!hasContent) {
+			const src = el.getAttribute('src') ?? '(no src)';
+			const failed = (el as unknown as { _iframeLoadFailed?: boolean })._iframeLoadFailed === true;
+			ctx.fillStyle = '#f7f7f7';
+			ctx.fillRect(box.x + 1, box.y + 1, box.w - 2, box.h - 2);
+			ctx.fillStyle = failed ? '#9a3324' : '#666';
+			ctx.font = '14px system-ui';
+			ctx.textBaseline = 'middle';
+			ctx.textAlign = 'center';
+			const cx = box.x + box.w / 2;
+			const cy = box.y + box.h / 2;
+			ctx.fillText(failed ? 'Embed failed to load' : 'Loading embed…', cx, cy - 10);
+			ctx.font = '11px system-ui';
+			ctx.fillStyle = '#888';
+			const short = src.length > 80 ? src.slice(0, 77) + '…' : src;
+			ctx.fillText(short, cx, cy + 10);
+		}
+	} finally { ctx.restore(); }
+}
+
 function paintImg(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	el: LiveElement,
@@ -2621,7 +2739,15 @@ function paintPseudoBox(
 	// don't model, so leave those to the pseudo-text painter unchanged.
 	if (pseudo.position !== 'absolute') return;
 	const cbX = hostBox.x, cbY = hostBox.y, cbW = hostBox.w, cbH = hostBox.h;
-	const L = pseudo.left, R = pseudo.right, T = pseudo.top, B = pseudo.bottom;
+	// Edge values: px wins over percent on the same edge. Percent
+	// resolves against host width (left/right) or height (top/bottom).
+	// Without percent support, `top: 50%` on a chevron pseudo silently
+	// dropped to `top: 0` — landing on the host's top edge instead of
+	// its centre (DDG dropdown chevrons on the input row).
+	const L = pseudo.left ?? (pseudo.leftPct !== undefined ? (pseudo.leftPct / 100) * cbW : undefined);
+	const R = pseudo.right ?? (pseudo.rightPct !== undefined ? (pseudo.rightPct / 100) * cbW : undefined);
+	const T = pseudo.top ?? (pseudo.topPct !== undefined ? (pseudo.topPct / 100) * cbH : undefined);
+	const B = pseudo.bottom ?? (pseudo.bottomPct !== undefined ? (pseudo.bottomPct / 100) * cbH : undefined);
 	const explicitW = resolveLength(pseudo.width, cbW);
 	const explicitH = resolveLength(pseudo.height, cbH);
 	let pw = cbW, ph = cbH, px = cbX, py = cbY;
@@ -2978,11 +3104,18 @@ function paintPseudoText(
 		const bh = hostBox?.h ?? h;
 		let ax: number;
 		let align: CanvasTextAlign;
-		if (pseudo?.right !== undefined) {
-			ax = bx + bw - pseudo.right;
+		// Edge resolution: px wins, then percent (against bw/bh — the
+		// host box). Matches paintPseudoBox's pattern so pseudo TEXT
+		// positioned with e.g. `right: 50%` lands correctly too.
+		const pR = pseudo?.right ?? (pseudo?.rightPct !== undefined ? (pseudo.rightPct / 100) * bw : undefined);
+		const pL = pseudo?.left ?? (pseudo?.leftPct !== undefined ? (pseudo.leftPct / 100) * bw : undefined);
+		const pB = pseudo?.bottom ?? (pseudo?.bottomPct !== undefined ? (pseudo.bottomPct / 100) * bh : undefined);
+		const pT = pseudo?.top ?? (pseudo?.topPct !== undefined ? (pseudo.topPct / 100) * bh : undefined);
+		if (pR !== undefined) {
+			ax = bx + bw - pR;
 			align = 'right';
-		} else if (pseudo?.left !== undefined) {
-			ax = bx + pseudo.left;
+		} else if (pL !== undefined) {
+			ax = bx + pL;
 			align = 'left';
 		} else {
 			ax = bx + (defaultAlign === 'right' ? bw - 2 : 2);
@@ -2990,11 +3123,11 @@ function paintPseudoText(
 		}
 		let ay: number;
 		let baseline: CanvasTextBaseline;
-		if (pseudo?.bottom !== undefined) {
-			ay = by + bh - pseudo.bottom;
+		if (pB !== undefined) {
+			ay = by + bh - pB;
 			baseline = 'alphabetic';
-		} else if (pseudo?.top !== undefined) {
-			ay = by + pseudo.top;
+		} else if (pT !== undefined) {
+			ay = by + pT;
 			baseline = 'top';
 		} else {
 			ay = drawY;

@@ -180,6 +180,15 @@ export interface PseudoStyle {
 	right?: number;
 	bottom?: number;
 	left?: number;
+	/** Percent-form inset siblings of top/right/bottom/left. Stored
+	 * separately because they resolve against the host box (height for
+	 * top/bottom, width for left/right) at paint time, not parse time.
+	 * Painter prefers the px value when both are set. Common case is
+	 * dropdown / badge chevron pseudos using `top: 50%` to centre. */
+	topPct?: number;
+	rightPct?: number;
+	bottomPct?: number;
+	leftPct?: number;
 	color?: string;
 	fontSize?: number;
 	fontFamily?: string;
@@ -619,6 +628,21 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string): void {
 			return;
 		case 'P':
 			computed.marginTop = 8; computed.marginBottom = 8;
+			return;
+		// `<iframe>` — UA default is `overflow: auto` so embedded content
+		// that exceeds the iframe's declared box height is scrollable
+		// (with a visible scrollbar) instead of just being clipped. The
+		// existing inner-scroll architecture handles this via
+		// scrollOverlayEls + per-container offscreen cache + paintLive-
+		// ScrollbarV (see [[swb-live-dom-inner-scroll]]). The iframe
+		// element gets added to `scrollOut` by collectPaintOps;
+		// grafted children render into a per-container offscreen
+		// (sized contentW × intrinsicContentH) and the visible slice
+		// is blitted on top of the iframe's bg / border. Touch-swipe
+		// over the iframe scrolls via `findScrollableAncestor`.
+		case 'IFRAME':
+			computed.overflowX = 'auto';
+			computed.overflowY = 'auto';
 			return;
 		case 'BLOCKQUOTE':
 			computed.marginTop = 8; computed.marginBottom = 8;
@@ -1422,10 +1446,10 @@ function applyDeclToPseudoStyle(
 			if (v === 'static' || v === 'relative' || v === 'absolute') slot.position = v;
 			return;
 		}
-		case 'top': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.top = n; return; }
-		case 'right': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.right = n; return; }
-		case 'bottom': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.bottom = n; return; }
-		case 'left': { const n = parsePxOrNum(value, { emBase }); if (n !== undefined) slot.left = n; return; }
+		case 'top': { assignPseudoEdge(slot, 'top', value, emBase); return; }
+		case 'right': { assignPseudoEdge(slot, 'right', value, emBase); return; }
+		case 'bottom': { assignPseudoEdge(slot, 'bottom', value, emBase); return; }
+		case 'left': { assignPseudoEdge(slot, 'left', value, emBase); return; }
 		case 'inset': return assignInsetPseudo(slot, value);
 		case 'background':
 		case 'background-color': {
@@ -2236,6 +2260,37 @@ function parseOneShadow(s: string): BoxShadow | undefined {
 		spread: lengths[3] ?? 0,
 		color,
 	};
+}
+
+/** Assign top/right/bottom/left to a pseudo, splitting into px vs percent
+ * fields so the painter can resolve percent edges against the host box
+ * at paint time. Px wins when both are set on the same edge — matches
+ * a real browser's "last value wins, but absolute beats relative".
+ * Without this, `top: 50%` was silently dropped (parsePxOrNum returns
+ * undefined for percent) and chevron pseudos defaulted to `top: 0` —
+ * which on a dropdown like DDG's region picker put the chevron right
+ * on the input row's bottom edge. */
+function assignPseudoEdge(
+	slot: PseudoStyle,
+	edge: 'top' | 'right' | 'bottom' | 'left',
+	value: string,
+	emBase: number,
+): void {
+	const t = value.trim();
+	const pct = /^(-?\d+(?:\.\d+)?)%$/.exec(t);
+	if (pct) {
+		const n = parseFloat(pct[1]);
+		if (Number.isFinite(n)) {
+			(slot as Record<string, number>)[edge + 'Pct'] = n;
+			(slot as Record<string, number | undefined>)[edge] = undefined;
+		}
+		return;
+	}
+	const n = parsePxOrNum(t, { emBase });
+	if (n !== undefined) {
+		(slot as Record<string, number>)[edge] = n;
+		(slot as Record<string, number | undefined>)[edge + 'Pct'] = undefined;
+	}
 }
 
 function parsePxOrNum(value: string, ctx?: { emBase?: number; remBase?: number }): number | undefined {

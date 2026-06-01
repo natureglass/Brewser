@@ -845,7 +845,8 @@ function layoutBlock(
 		})();
 		const isReplacedInline = tag === 'CANVAS' || tag === 'IMG'
 			|| tag === 'INPUT' || tag === 'BUTTON'
-			|| tag === 'SELECT' || tag === 'TEXTAREA';
+			|| tag === 'SELECT' || tag === 'TEXTAREA'
+			|| tag === 'IFRAME';
 		if (isReplacedInline && childExplicitW === undefined) {
 			if (tag === 'CANVAS') {
 				const ds = child.getDisplaySize();
@@ -856,6 +857,12 @@ function layoutBlock(
 				const naturalW = loaded?.naturalWidth ?? loaded?.width ?? 0;
 				if (Number.isFinite(attrW) && attrW > 0) childW = attrW;
 				else if (naturalW > 0) childW = naturalW;
+			} else if (tag === 'IFRAME') {
+				// Iframe is replaced-inline per HTML spec — sized by
+				// `width`/`height` attrs (or CSS, handled above). HTML
+				// spec default is 300×150 when both are missing.
+				const attrW = parseFloat(child.getAttribute('width') ?? '');
+				childW = Number.isFinite(attrW) && attrW > 0 ? attrW : 300;
 			} else if (tag === 'BUTTON' || isButtonInput) {
 				// Width = measured label width + horizontal padding.
 				// `value` attribute on INPUT, textContent on BUTTON.
@@ -1789,7 +1796,7 @@ function layoutLeaf(
 	// `hHint` (which IS the parent's chosen height for this element).
 	// When hHint is also undefined we treat percent height as auto.
 	const heightBasis = hHint ?? 0;
-	const explicitH = resolveLength(cs.height, heightBasis)
+	let explicitH = resolveLength(cs.height, heightBasis)
 		?? resolveLength(el.style.height, heightBasis);
 	// Void-element default heights — these have no children + no text but
 	// must occupy vertical space. <br> is one font-line; <hr> + meter +
@@ -1856,6 +1863,30 @@ function layoutLeaf(
 		// just fixes the "no explicit width" default.
 		const explicitW = resolveLength(cs.width, w) ?? resolveLength(el.style.width, w);
 		if (explicitW === undefined && ds.w > 0) w = ds.w;
+	}
+	// `<iframe>` is replaced-inline per HTML spec — sized by `width`/
+	// `height` attrs (or CSS). Default 300×150 when neither is given.
+	// HTML `width`/`height` attrs on an iframe are equivalent to CSS
+	// width/height for sizing purposes — they CAP the box, not just
+	// floor it. Force `explicitH` from the attr when CSS doesn't set
+	// height, so child content overflow stays clipped (via UA-default
+	// `overflow: hidden` for iframe, see applyUaDefaults). Without this,
+	// an iframe with `height="200"` whose grafted content is taller
+	// would grow to fit (intrinsicVoidH is a floor in the third branch
+	// of the h selection below) — pushing the rest of the page down.
+	if (tag === 'IFRAME') {
+		const wAttr = parseFloat(el.getAttribute('width') ?? '');
+		const hAttr = parseFloat(el.getAttribute('height') ?? '');
+		const explicitW = resolveLength(cs.width, w) ?? resolveLength(el.style.width, w);
+		if (explicitH === undefined && Number.isFinite(hAttr) && hAttr > 0) {
+			explicitH = hAttr;
+		} else if (explicitH === undefined) {
+			explicitH = 150;
+		}
+		if (explicitW === undefined) {
+			if (Number.isFinite(wAttr) && wAttr > 0) w = wAttr;
+			else w = 300;
+		}
 	}
 	// `<svg>` sizing follows the same pattern as `<img>`:
 	//   - explicit CSS width/height win (resolveLength on cs.width)

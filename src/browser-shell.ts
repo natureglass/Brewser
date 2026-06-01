@@ -4,7 +4,7 @@ import { captureNativeFetch, nxScreen, WebView, type WebViewDelegate } from '@sw
 // before/after the navigateTo dispatch — narrows whether a click ever
 // reached navigateTo, vs. the touch listener never firing, vs. the
 // navigation hanging in load().
-const _SHELL_INPUT_DIAG_PATH = 'sdmc:/switch/webprofiles/default/khronos-logs/shell-nav-diag.log';
+const _SHELL_INPUT_DIAG_PATH = 'sdmc:/switch/webprofiles/default/logs/shell-nav-diag.log';
 const _shellInputDiagStart = Date.now();
 function _shellInputDiag(label: string): void {
 	try {
@@ -63,7 +63,7 @@ import {
 	consumeFullRepaintRequest, isKeyboardOpen, requestFullRepaint,
 } from './scripts/live-paint-control.js';
 import { getLayoutBox } from './scripts/live-layout.js';
-import { loadHeadLinkStylesheets, populateLiveRoot } from './scripts/html-to-live.js';
+import { isExternalCssLoading, loadHeadLinkStylesheetsWithFlag, populateLiveRoot } from './scripts/html-to-live.js';
 import { extractTitle, parseHtml, type HtmlElement } from './html/html-parser.js';
 import { AddressBarInput } from './input/address-bar-input.js';
 import {
@@ -883,7 +883,7 @@ export class BrowserShell {
 		// Only fired for http(s) pages — `browser://` pages always inline
 		// their `<style>` so the fetch step is wasted work there.
 		if (url.startsWith('http://') || url.startsWith('https://')) {
-			loadHeadLinkStylesheets(tree, url).then(() => {
+			loadHeadLinkStylesheetsWithFlag(tree, url).then(() => {
 				requestFullRepaint();
 			}).catch(() => { /* per-sheet failures already logged */ });
 		}
@@ -1180,10 +1180,43 @@ export class BrowserShell {
 				copyBridgeToScreen,
 			);
 		}
+		// External stylesheets fetched mid-flight: cover the broken pre-CSS
+		// layout with a translucent "Loading styles…" overlay until the
+		// last sheet registers (then `isExternalCssLoading()` flips false).
+		// DDG html-mode is the headline case — without this the page
+		// flashes its zero-height-logo layout for ~10s before snapping
+		// into the cascade-applied design.
+		if (isExternalCssLoading()) {
+			this.paintCssLoadingOverlay(ctx, viewport);
+		}
 		setLiveViewport(viewport, effectiveScrollY);
 		this.lastCpuPresentMs = performance.now() - t0;
 		this.cpuPresentCallCount++;
 		this.lastRepaintedScrollY = effectiveScrollY;
+	}
+
+	/** Translucent dimmer + "Loading styles…" text painted over the page
+	 * content area while external <link rel=stylesheet>s are still
+	 * fetching. Caller already drew the page underneath; this is a single
+	 * overlay layer so it's cheap. */
+	private paintCssLoadingOverlay(
+		ctx: CanvasRenderingContext2D,
+		viewport: { x: number; y: number; width: number; height: number },
+	): void {
+		ctx.save();
+		ctx.fillStyle = 'rgba(15, 20, 30, 0.78)';
+		ctx.fillRect(viewport.x, viewport.y, viewport.width, viewport.height);
+		ctx.fillStyle = '#e6edf7';
+		ctx.font = '24px system-ui';
+		ctx.textBaseline = 'middle';
+		ctx.textAlign = 'center';
+		const cx = viewport.x + viewport.width / 2;
+		const cy = viewport.y + viewport.height / 2;
+		ctx.fillText('Loading styles…', cx, cy);
+		ctx.font = '15px system-ui';
+		ctx.fillStyle = '#9bb1d6';
+		ctx.fillText('Fetching external stylesheets', cx, cy + 30);
+		ctx.restore();
 	}
 
 	private repaintFullscreenCanvas(

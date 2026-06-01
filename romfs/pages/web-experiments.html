@@ -45,6 +45,10 @@ the rendering pipeline.</p>
   <strong><a href="browser://html-experiments/benchmark/">benchmark</a></strong>
   <br><span class="desc">Scroll-tick + repaint timings for the live-DOM content pipeline. Scroll for ~5s then reload (<code>Y</code>) to render the captured stats.</span>
 </li>
+<li>
+  <strong><a href="browser://html-experiments/iframe/">iframe</a></strong>
+  <br><span class="desc">Tier 1B <code>&lt;iframe&gt;</code> inline preview &mdash; fetches the <code>src</code>, parses HTML, grafts the body as the iframe's subtree, scopes embedded CSS to the iframe's descendants. Scripts skipped; <code>sandbox</code>/<code>allow</code> parsed but not enforced.</span>
+</li>
 </ul>
 
 <h2>CSS</h2>

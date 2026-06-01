@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebGL1 Canvas Internet Speed Test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0c1222;
+      --panel: #121a2d;
+      --panel-2: #18223a;
+      --text: #edf3ff;
+      --muted: #9fb0cf;
+      --good: #54e3a6;
+      --warn: #ffd166;
+      --bad: #ff6b6b;
+      --accent: #65d6ff;
+      --border: rgba(255,255,255,.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .app {
+      width: min(1080px, 100%);
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.025));
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      overflow: hidden;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 640px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    header {
+      padding: 24px 26px 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 48px);
+      letter-spacing: -.04em;
+      line-height: 1;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 10px 0 0;
+      max-width: 62ch;
+      line-height: 1.45;
+    }
+
+    #glCanvas {
+      width: 100%;
+      height: 390px;
+      display: block;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 0 24px 24px;
+    }
+
+    button, input, select {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.07);
+      color: var(--text);
+      border-radius: 16px;
+      font: inherit;
+      min-height: 46px;
+      padding: 0 14px;
+      outline: none;
+    }
+
+    input:focus, select:focus { border-color: rgba(101, 214, 255, .65); }
+
+    button {
+      background: linear-gradient(135deg, #65d6ff, #54e3a6);
+      color: #07111c;
+      font-weight: 800;
+      border: 0;
+      cursor: pointer;
+      transition: transform .15s ease, filter .15s ease;
+    }
+
+    button:hover { filter: brightness(1.04); transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; opacity: .55; transform: none; filter: none; }
+
+    .side {
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .metric {
+      background: rgba(255,255,255,.055);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 16px;
+      min-height: 102px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .value {
+      margin-top: 8px;
+      font-size: 30px;
+      font-weight: 850;
+      letter-spacing: -.04em;
+    }
+
+    .unit {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 650;
+      margin-left: 4px;
+    }
+
+    .log {
+      background: rgba(0,0,0,.22);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 14px;
+      min-height: 180px;
+      max-height: 230px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: #d6e3ff;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .config {
+      display: grid;
+      gap: 10px;
+    }
+
+    .config-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    .config-row label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      width: fit-content;
+      margin-top: 14px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+
+    @media (max-width: 860px) {
+      body { padding: 14px; }
+      .app { grid-template-columns: 1fr; }
+      .hero { min-height: auto; }
+      #glCanvas { height: 330px; }
+      .controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="card hero">
+      <header>
+        <h1>WebGL1 Speed Test</h1>
+        <p class="subtitle">A simple canvas-rendered gauge with live diagnostics. The UI is drawn with WebGL1; browser networking is measured with streamed downloads and POST uploads.</p>
+        <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Ready</span></div>
+      </header>
+
+      <canvas id="glCanvas" aria-label="Current speed test gauge"></canvas>
+
+      <div class="controls">
+        <button id="startBtn">Start speed test</button>
+        <select id="testSize">
+          <option value="small">Small test</option>
+          <option value="normal" selected>Normal test</option>
+          <option value="large">Large test</option>
+        </select>
+      </div>
+    </section>
+
+    <aside class="card side">
+      <div class="metric-grid">
+        <div class="metric">
+          <div class="label">Current</div>
+          <div class="value"><span id="currentSpeed">0.0</span><span class="unit">Mbps</span></div>
+        </div>
+        <div class="metric">
+          <div class="label">Ping</div>
+          <div class="value"><span id="ping">—</span><span class="unit">ms</span></div>
+        </div>
+        <div class="metric">
+          <div class="label">Downstream</div>
+          <div class="value"><span id="downResult">—</span><span class="unit">Mbps</span></div>
+        </div>
+        <div class="metric">
+          <div class="label">Upstream</div>
+          <div class="value"><span id="upResult">—</span><span class="unit">Mbps</span></div>
+        </div>
+      </div>
+
+      <section class="config">
+        <div class="config-row">
+          <label for="downloadEndpoint">Download endpoint</label>
+          <input id="downloadEndpoint" value="https://speed.cloudflare.com/__down?bytes={bytes}" />
+        </div>
+        <div class="config-row">
+          <label for="uploadEndpoint">Upload endpoint</label>
+          <input id="uploadEndpoint" value="https://speed.cloudflare.com/__up" />
+        </div>
+      </section>
+
+      <div class="log" id="log">Diagnostics will appear here.</div>
+      <p class="note">Tip: for production, use your own nearby CORS-enabled endpoints. Download should return bytes; upload should accept POST bodies. Public endpoints can change or rate-limit.</p>
+    </aside>
+  </main>
+
+  <script>
+    const canvas = document.getElementById('glCanvas');
+    const startBtn = document.getElementById('startBtn');
+    const statusText = document.getElementById('statusText');
+    const statusDot = document.getElementById('statusDot');
+    const currentSpeedEl = document.getElementById('currentSpeed');
+    const downResultEl = document.getElementById('downResult');
+    const upResultEl = document.getElementById('upResult');
+    const pingEl = document.getElementById('ping');
+    const logEl = document.getElementById('log');
+    const testSizeEl = document.getElementById('testSize');
+    const downloadEndpointEl = document.getElementById('downloadEndpoint');
+    const uploadEndpointEl = document.getElementById('uploadEndpoint');
+
+    const state = {
+      phase: 'Ready',
+      speed: 0,
+      gaugeSpeed: 0,
+      downstream: null,
+      upstream: null,
+      maxGauge: 100,
+      running: false,
+      lastTime: performance.now()
+    };
+
+    function log(message) {
+      const stamp = new Date().toLocaleTimeString();
+      logEl.textContent += `\n[${stamp}] ${message}`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function resetLog() {
+      logEl.textContent = 'Diagnostics:';
+    }
+
+    function setStatus(text, color = 'warn') {
+      statusText.textContent = text;
+      const colors = {
+        good: '#54e3a6', warn: '#ffd166', bad: '#ff6b6b', accent: '#65d6ff'
+      };
+      statusDot.style.background = colors[color] || colors.warn;
+    }
+
+    function fmt(n) {
+      return Number.isFinite(n) ? n.toFixed(n < 10 ? 2 : 1) : '—';
+    }
+
+    function updateDom() {
+      currentSpeedEl.textContent = fmt(state.speed);
+      downResultEl.textContent = state.downstream == null ? '—' : fmt(state.downstream);
+      upResultEl.textContent = state.upstream == null ? '—' : fmt(state.upstream);
+    }
+
+    function bytesForSize(kind, direction) {
+      const table = {
+        small: { down: 8_000_000, up: 2_000_000 },
+        normal: { down: 28_000_000, up: 6_000_000 },
+        large: { down: 80_000_000, up: 16_000_000 }
+      };
+      return table[kind][direction];
+    }
+
+    async function measurePing(url) {
+      const endpoint = url.replace('{bytes}', '1');
+      const attempts = 3;
+      const samples = [];
+
+      for (let i = 0; i < attempts; i++) {
+        const started = performance.now();
+        await fetch(endpoint + `&ping=${Date.now()}-${i}`, { cache: 'no-store', mode: 'cors' });
+        samples.push(performance.now() - started);
+      }
+
+      return samples.reduce((a, b) => a + b, 0) / samples.length;
+    }
+
+    async function measureDownload({ bytes, endpointTemplate, onProgress }) {
+      const url = endpointTemplate.replace('{bytes}', String(bytes));
+      const started = performance.now();
+      const response = await fetch(url + `${url.includes('?') ? '&' : '?'}cacheBust=${crypto.randomUUID()}`, {
+        cache: 'no-store',
+        mode: 'cors'
+      });
+
+      if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}`);
+
+      let loaded = 0;
+
+      if (response.body && response.body.getReader) {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          loaded += value.byteLength;
+          const elapsed = (performance.now() - started) / 1000;
+          onProgress((loaded * 8) / elapsed / 1_000_000);
+        }
+      } else {
+        const buffer = await response.arrayBuffer();
+        loaded = buffer.byteLength;
+        const elapsed = (performance.now() - started) / 1000;
+        onProgress((loaded * 8) / elapsed / 1_000_000);
+      }
+
+      const elapsed = (performance.now() - started) / 1000;
+      return (loaded * 8) / elapsed / 1_000_000;
+    }
+
+    function fillRandomBytes(target) {
+      // Browsers limit crypto.getRandomValues() to 65,536 bytes per call.
+      // Fill large upload buffers in safe slices.
+      const maxCryptoBytes = 65_536;
+      for (let offset = 0; offset < target.byteLength; offset += maxCryptoBytes) {
+        const end = Math.min(offset + maxCryptoBytes, target.byteLength);
+        crypto.getRandomValues(target.subarray(offset, end));
+      }
+    }
+
+    async function measureUpload({ bytes, endpoint, onProgress }) {
+      const chunkSize = 256 * 1024;
+      const chunks = Math.ceil(bytes / chunkSize);
+      const parts = [];
+      const started = performance.now();
+
+      for (let i = 0; i < chunks; i++) {
+        const size = Math.min(chunkSize, bytes - i * chunkSize);
+        const data = new Uint8Array(size);
+        fillRandomBytes(data);
+        parts.push(data);
+        const elapsed = Math.max((performance.now() - started) / 1000, 0.001);
+        onProgress(((i + 1) * chunkSize * 8) / elapsed / 1_000_000);
+        await new Promise(requestAnimationFrame);
+      }
+
+      // Do not set Blob type here. A non-safelisted Content-Type such as
+      // application/octet-stream can trigger a CORS preflight, and many public
+      // upload test endpoints reject that OPTIONS request. Leaving the type
+      // empty lets the browser send a simpler POST.
+      const body = new Blob(parts);
+      const uploadStarted = performance.now();
+      const response = await fetch(endpoint + `${endpoint.includes('?') ? '&' : '?'}cacheBust=${crypto.randomUUID()}`, {
+        method: 'POST',
+        body,
+        cache: 'no-store',
+        mode: 'cors'
+      });
+
+      if (!response.ok) throw new Error(`Upload failed with HTTP ${response.status}`);
+
+      const elapsed = (performance.now() - uploadStarted) / 1000;
+      const mbps = (bytes * 8) / elapsed / 1_000_000;
+      onProgress(mbps);
+      return mbps;
+    }
+
+    async function runTest() {
+      if (state.running) return;
+      state.running = true;
+      state.speed = 0;
+      state.downstream = null;
+      state.upstream = null;
+      state.maxGauge = 100;
+      updateDom();
+      resetLog();
+      startBtn.disabled = true;
+      startBtn.textContent = 'Testing…';
+      setStatus('Starting diagnostics', 'accent');
+
+      const size = testSizeEl.value;
+      const downloadBytes = bytesForSize(size, 'down');
+      const uploadBytes = bytesForSize(size, 'up');
+      const downloadEndpoint = downloadEndpointEl.value.trim();
+      const uploadEndpoint = uploadEndpointEl.value.trim();
+
+      try {
+        log(`Selected profile: ${size}`);
+        log(`Download payload: ${(downloadBytes / 1_000_000).toFixed(1)} MB`);
+        log(`Upload payload: ${(uploadBytes / 1_000_000).toFixed(1)} MB`);
+
+        state.phase = 'Ping';
+        setStatus('Measuring ping', 'accent');
+        const ping = await measurePing(downloadEndpoint);
+        pingEl.textContent = Math.round(ping);
+        log(`Latency estimate: ${Math.round(ping)} ms`);
+
+        state.phase = 'Downstream';
+        setStatus('Testing downstream', 'accent');
+        const down = await measureDownload({
+          bytes: downloadBytes,
+          endpointTemplate: downloadEndpoint,
+          onProgress: mbps => {
+            state.speed = mbps;
+            state.maxGauge = Math.max(100, state.maxGauge, mbps * 1.25);
+            updateDom();
+          }
+        });
+        state.downstream = down;
+        state.speed = down;
+        log(`Downstream complete: ${fmt(down)} Mbps`);
+        updateDom();
+
+        await new Promise(resolve => setTimeout(resolve, 450));
+
+        state.phase = 'Upstream';
+        setStatus('Testing upstream', 'accent');
+        const up = await measureUpload({
+          bytes: uploadBytes,
+          endpoint: uploadEndpoint,
+          onProgress: mbps => {
+            state.speed = mbps;
+            state.maxGauge = Math.max(100, state.maxGauge, mbps * 1.25);
+            updateDom();
+          }
+        });
+        state.upstream = up;
+        state.speed = up;
+        log(`Upstream complete: ${fmt(up)} Mbps`);
+        updateDom();
+
+        state.phase = 'Complete';
+        setStatus('Complete', 'good');
+        log('Final results shown above. Run again for another sample.');
+      } catch (error) {
+        state.phase = 'Error';
+        setStatus('Test failed', 'bad');
+        log(`Error: ${error.message}`);
+        log('Check CORS, endpoint availability, ad blockers, VPNs, browser privacy settings, or try your own test server.');
+        if (String(error.message).includes('Failed to fetch')) {
+          log('Upload note: Failed to fetch usually means the browser blocked the request before a readable response was returned, often because of CORS/preflight rules.');
+        }
+      } finally {
+        state.running = false;
+        startBtn.disabled = false;
+        startBtn.textContent = 'Run again';
+        setTimeout(() => { if (!state.running && state.phase !== 'Error') state.speed = 0; }, 1200);
+      }
+    }
+
+    startBtn.addEventListener('click', runTest);
+    canvas.addEventListener('click', runTest);
+
+    // -----------------------------
+    // Minimal WebGL1 gauge renderer
+    // -----------------------------
+    const gl = canvas.getContext('webgl', { antialias: true, alpha: true });
+
+    if (!gl) {
+      setStatus('WebGL unavailable', 'bad');
+      log('This browser/device does not expose WebGL1.');
+      throw new Error('WebGL1 not supported');
+    }
+
+    const vert = `
+      attribute vec2 a_position;
+      attribute vec4 a_color;
+      uniform vec2 u_resolution;
+      varying vec4 v_color;
+      void main() {
+        vec2 zeroToOne = a_position / u_resolution;
+        vec2 clip = zeroToOne * 2.0 - 1.0;
+        gl_Position = vec4(clip * vec2(1.0, -1.0), 0.0, 1.0);
+        v_color = a_color;
+      }
+    `;
+
+    const frag = `
+      precision mediump float;
+      varying vec4 v_color;
+      void main() {
+        gl_FragColor = v_color;
+      }
+    `;
+
+    function shader(type, source) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, source);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, shader(gl.VERTEX_SHADER, vert));
+    gl.attachShader(program, shader(gl.FRAGMENT_SHADER, frag));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+
+    const positionLoc = gl.getAttribLocation(program, 'a_position');
+    const colorLoc = gl.getAttribLocation(program, 'a_color');
+    const resolutionLoc = gl.getUniformLocation(program, 'u_resolution');
+    const buffer = gl.createBuffer();
+
+    function pushTri(vertices, x1, y1, x2, y2, x3, y3, color) {
+      vertices.push(x1, y1, ...color, x2, y2, ...color, x3, y3, ...color);
+    }
+
+    function pushRingSegment(vertices, cx, cy, innerR, outerR, a0, a1, color, steps = 10) {
+      for (let i = 0; i < steps; i++) {
+        const t0 = a0 + (a1 - a0) * i / steps;
+        const t1 = a0 + (a1 - a0) * (i + 1) / steps;
+        const p0 = [cx + Math.cos(t0) * innerR, cy + Math.sin(t0) * innerR];
+        const p1 = [cx + Math.cos(t1) * innerR, cy + Math.sin(t1) * innerR];
+        const p2 = [cx + Math.cos(t0) * outerR, cy + Math.sin(t0) * outerR];
+        const p3 = [cx + Math.cos(t1) * outerR, cy + Math.sin(t1) * outerR];
+        pushTri(vertices, p0[0], p0[1], p2[0], p2[1], p1[0], p1[1], color);
+        pushTri(vertices, p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], color);
+      }
+    }
+
+    function pushCircle(vertices, cx, cy, r, color, steps = 48) {
+      for (let i = 0; i < steps; i++) {
+        const a0 = Math.PI * 2 * i / steps;
+        const a1 = Math.PI * 2 * (i + 1) / steps;
+        pushTri(vertices, cx, cy, cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, color);
+      }
+    }
+
+    function pushRect(vertices, x, y, w, h, color) {
+      pushTri(vertices, x, y, x + w, y, x, y + h, color);
+      pushTri(vertices, x + w, y, x + w, y + h, x, y + h, color);
+    }
+
+    function drawText(ctx, w, h) {
+      ctx.clearRect(0, 0, w, h);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#edf3ff';
+      ctx.font = '800 44px Inter, system-ui, sans-serif';
+      ctx.fillText(fmt(state.gaugeSpeed), w / 2, h * .54);
+      ctx.font = '700 17px Inter, system-ui, sans-serif';
+      ctx.fillStyle = '#9fb0cf';
+      ctx.fillText('Mbps', w / 2, h * .61);
+      ctx.font = '800 20px Inter, system-ui, sans-serif';
+      ctx.fillStyle = state.phase === 'Error' ? '#ff6b6b' : '#65d6ff';
+      ctx.fillText(state.phase, w / 2, h * .74);
+
+      const down = state.downstream == null ? '—' : fmt(state.downstream);
+      const up = state.upstream == null ? '—' : fmt(state.upstream);
+      ctx.font = '650 15px Inter, system-ui, sans-serif';
+      ctx.fillStyle = '#d6e3ff';
+      ctx.fillText(`Down ${down}  •  Up ${up}`, w / 2, h * .83);
+    }
+
+    const textCanvas = document.createElement('canvas');
+    const textCtx = textCanvas.getContext('2d');
+
+    function render(now) {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const cssW = canvas.clientWidth;
+      const cssH = canvas.clientHeight;
+      const w = Math.max(1, Math.floor(cssW * dpr));
+      const h = Math.max(1, Math.floor(cssH * dpr));
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        textCanvas.width = w;
+        textCanvas.height = h;
+      }
+
+      const delta = Math.min((now - state.lastTime) / 1000, .08);
+      state.lastTime = now;
+      state.gaugeSpeed += (state.speed - state.gaugeSpeed) * Math.min(1, delta * 8);
+
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(program);
+      gl.uniform2f(resolutionLoc, w, h);
+
+      const cx = w / 2;
+      const cy = h * .64;
+      const outer = Math.min(w * .36, h * .54);
+      const inner = outer * .74;
+      const start = Math.PI * .94;
+      const end = Math.PI * 2.06;
+      const total = end - start;
+      const pct = Math.max(0, Math.min(1, state.gaugeSpeed / Math.max(10, state.maxGauge)));
+      const needleAngle = start + total * pct;
+
+      const vertices = [];
+
+      pushCircle(vertices, cx, cy, outer * .83, [0.07, 0.12, 0.22, .5], 80);
+      pushRingSegment(vertices, cx, cy, inner, outer, start, end, [1, 1, 1, .10], 80);
+
+      const filledSteps = Math.max(1, Math.floor(90 * pct));
+      for (let i = 0; i < filledSteps; i++) {
+        const a0 = start + total * i / 90;
+        const a1 = start + total * (i + 1) / 90;
+        const t = i / 90;
+        const color = t < .45 ? [0.33, .89, .65, .9] : t < .78 ? [1, .82, .4, .92] : [1, .42, .42, .95];
+        pushRingSegment(vertices, cx, cy, inner, outer, a0, a1, color, 2);
+      }
+
+      for (let i = 0; i <= 10; i++) {
+        const a = start + total * i / 10;
+        const r1 = inner * .93;
+        const r2 = outer * 1.02;
+        const x1 = cx + Math.cos(a) * r1;
+        const y1 = cy + Math.sin(a) * r1;
+        const x2 = cx + Math.cos(a) * r2;
+        const y2 = cy + Math.sin(a) * r2;
+        const dx = Math.cos(a + Math.PI / 2) * 2.2 * dpr;
+        const dy = Math.sin(a + Math.PI / 2) * 2.2 * dpr;
+        pushTri(vertices, x1 - dx, y1 - dy, x1 + dx, y1 + dy, x2 - dx, y2 - dy, [1,1,1,.25]);
+        pushTri(vertices, x2 - dx, y2 - dy, x1 + dx, y1 + dy, x2 + dx, y2 + dy, [1,1,1,.25]);
+      }
+
+      const needleLen = outer * .72;
+      const needleWidth = outer * .035;
+      const nx = Math.cos(needleAngle);
+      const ny = Math.sin(needleAngle);
+      const px = Math.cos(needleAngle + Math.PI / 2) * needleWidth;
+      const py = Math.sin(needleAngle + Math.PI / 2) * needleWidth;
+      pushTri(vertices,
+        cx + px, cy + py,
+        cx - px, cy - py,
+        cx + nx * needleLen, cy + ny * needleLen,
+        [.93, .96, 1, .98]
+      );
+      pushCircle(vertices, cx, cy, outer * .07, [.93, .96, 1, .98], 36);
+      pushCircle(vertices, cx, cy, outer * .04, [.1, .15, .25, 1], 36);
+
+      const barW = w * .64;
+      const barH = 8 * dpr;
+      const barX = (w - barW) / 2;
+      const barY = h * .925;
+      pushRect(vertices, barX, barY, barW, barH, [1,1,1,.10]);
+      pushRect(vertices, barX, barY, barW * pct, barH, [.4,.84,1,.9]);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
+      const stride = 6 * 4;
+      gl.enableVertexAttribArray(positionLoc);
+      gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(colorLoc);
+      gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, stride, 2 * 4);
+      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 6);
+
+      drawText(textCtx, w, h);
+
+      // Overlay text using a 2D canvas transferred through CSS by placing it as a background-like bitmap.
+      // This keeps the gauge itself WebGL1 while giving crisp readable diagnostics.
+      const ctx2d = canvas.getContext('2d');
+      if (ctx2d) ctx2d.drawImage(textCanvas, 0, 0);
+
+      requestAnimationFrame(render);
+    }
+
+    // A canvas cannot hold WebGL and 2D contexts at the same time in every browser.
+    // Use an absolutely positioned text canvas overlay for readable diagnostics.
+    const overlay = document.createElement('canvas');
+    overlay.style.position = 'absolute';
+    overlay.style.pointerEvents = 'none';
+    overlay.style.left = '0';
+    overlay.style.top = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '390px';
+    canvas.parentElement.style.position = 'relative';
+    canvas.insertAdjacentElement('afterend', overlay);
+    const overlayCtx = overlay.getContext('2d');
+
+    function renderOverlay() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const rect = canvas.getBoundingClientRect();
+      overlay.style.top = `${canvas.offsetTop}px`;
+      overlay.style.height = `${canvas.clientHeight}px`;
+      const w = Math.max(1, Math.floor(rect.width * dpr));
+      const h = Math.max(1, Math.floor(rect.height * dpr));
+      if (overlay.width !== w || overlay.height !== h) {
+        overlay.width = w;
+        overlay.height = h;
+      }
+      drawText(overlayCtx, w, h);
+      requestAnimationFrame(renderOverlay);
+    }
+
+    // Remove the attempted same-canvas 2D overlay path by monkey-patching getContext after WebGL setup is complete.
+    // The visual text is drawn on the overlay canvas above.
+    requestAnimationFrame(render);
+    requestAnimationFrame(renderOverlay);
+    updateDom();
+  </script>
+</body>
+</html>
