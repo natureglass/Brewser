@@ -18,11 +18,15 @@
         "url": "../pages/apps/speedtest/index.html"
     },
     {
-        "title":"YouTube",
-        "description": "Watch videos directly on your console.",
-        "logo": "../pages/apps/youtube/assets/youtube_logo.png",
-        "url": "../pages/apps/youtube/index.html"
+        "title":"TikTok",
+        "description": "Scroll through TikTok videos directly on your console.",
+        "logo": "../pages/apps/TikTok/assets/tiktok_logo.png",
+        "url": "../pages/apps/TikTok/index.html"
+    },
+    {
+        "title":"Twitch",
+        "description": "Scroll through Twitch videos directly on your console.",
+        "logo": "../pages/apps/twitch/assets/twitch_logo.png",
+        "url": "../pages/apps/twitch/index.html"
     }
-
-    
 ]

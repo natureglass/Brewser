@@ -1,0 +1,8 @@
+{
+  "_comment": "switch-web-browser Twitch app config. Channel + variant default. Edit on the SD card to change without rebuilding the .nro.",
+
+  "defaultChannel": "dino_xx",
+
+  "_quality_comment": "Accepted quality values: 'source' (max bandwidth, any fps), 'auto' (highest-bandwidth variant with fps<=30 — safest on Switch), or an explicit Twitch variant: '1080p60', '720p60', '480p30', '360p30', '160p30'. If the requested variant isn't in the channel's master playlist, falls back to 'auto'.",
+  "quality": "480p30"
+}

@@ -137,6 +137,10 @@ the rendering pipeline.</p>
   <strong><a href="browser://html-experiments/async-fetch/">async-fetch</a></strong>
   <br><span class="desc">Inline <code>&lt;script&gt;</code> that <code>await</code>s a <code>fetch</code> and draws the response into a canvas — exercises the async-script path.</span>
 </li>
+<li>
+  <strong><a href="browser://html-experiments/tiktok/">tiktok</a></strong>
+  <br><span class="desc">End-to-end real-world HTTPS video: inline script <code>fetch</code>es a TikTok embed page, regex-extracts the progressive MP4 URL from the inline <code>&lt;video src&gt;</code>, and hands it to a <code>&lt;video&gt;</code> element. Decoded directly from the CDN by libavformat's <code>https</code> protocol (libnx TLS backend) &mdash; no disk roundtrip.</span>
+</li>
 </ul>
 
 <p><a href="browser://welcome/">back to welcome</a></p>

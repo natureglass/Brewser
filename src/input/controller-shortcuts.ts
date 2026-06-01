@@ -5,7 +5,9 @@ import {
 	EXIT_COMBO_HOLD_MS,
 } from '../browser-config.js';
 import {
+	dispatchPageKeyEvent,
 	getLiveRoot, getLiveWindow, hitTestLive,
+	pageHasListenerFor,
 	setInternalLiveScrollY, setInternalLiveViewport,
 	type LiveElement, type LiveViewport,
 } from '../scripts/live-dom.js';
@@ -391,6 +393,20 @@ let pageScrollSession: {
 	lastY: number;
 	moved: boolean;
 } | null = null;
+/** Video-swipe session — opened on `touchstart` when the touch lands on
+ * (or inside) a `<video>` element WITHOUT the `controls` attribute.
+ * Swallows touchmove (no page scroll), and on touchend past
+ * `VIDEO_SWIPE_THRESHOLD` dispatches a synthetic `keydown` to the page:
+ * swipe up → `ArrowDown` (next), swipe down → `ArrowUp` (prev). The
+ * TikTok app uses this for finger-swipe navigation; a chromed `<video>`
+ * (native controls bar visible) falls back to the normal page-scroll
+ * behavior so tappable seek bars / play buttons still work as expected. */
+let videoSwipeSession: {
+	videoEl: LiveElement;
+	startY: number;
+	moved: boolean;
+} | null = null;
+const VIDEO_SWIPE_THRESHOLD = 40;
 /** Move-threshold (px) before a touch is treated as a swipe instead of
  * a tap. Matches the `liveScrollSession.moved` threshold so both
  * page-level and element-level scrolls use the same gesture cutoff —
@@ -416,6 +432,21 @@ function findScrollableAncestor(el: LiveElement): LiveElement | null {
 		const cs = getComputedLiveStyle(n);
 		const oy = cs.overflowY ?? 'visible';
 		if (oy === 'auto' || oy === 'scroll') return n;
+	}
+	return null;
+}
+
+/** Walk up `el` looking for a `<video>` element that has no `controls`
+ * attribute. The TikTok app's chromeless `<video>` opts into
+ * finger-swipe navigation this way: touchstart on the video (or any
+ * descendant — overlays / caption / sidebar buttons all live inside
+ * the same .stage subtree but the engine hit-tests the deepest hit
+ * first) opens a `videoSwipeSession`. A chromed `<video>` (controls
+ * attribute present) returns null here so the existing tap-to-play /
+ * seek-bar UX keeps working. */
+function findChromelessVideoAncestor(el: LiveElement): LiveElement | null {
+	for (let n: LiveElement | null = el; n; n = n.parent) {
+		if (n.tagName === 'VIDEO' && !n.hasAttribute('controls')) return n;
 	}
 	return null;
 }
@@ -529,6 +560,8 @@ export function installCanvasTouch(): void {
 				// scroll doesn't accidentally activate a button under
 				// the finger.
 				const scrollHost = findScrollableAncestor(liveHit);
+				const chromelessVideo = scrollHost ? null
+					: findChromelessVideoAncestor(liveHit);
 				if (scrollHost) {
 					const lb = getLayoutBox(scrollHost)!;
 					liveScrollSession = {
@@ -538,6 +571,15 @@ export function installCanvasTouch(): void {
 						maxScroll: Math.max(0, lb.intrinsicContentH - lb.contentH),
 						moved: false,
 					};
+				} else if (chromelessVideo
+					&& browserMode === 'normal' && !isKeyboardOpen()) {
+					// Touch landed on a chromeless `<video>` (or inside its
+					// overlays). Open a video-swipe session — touchmove
+					// won't drive page scroll, and touchend past threshold
+					// dispatches ArrowUp / ArrowDown on the page so the
+					// app's keydown handler treats finger swipes the same
+					// as D-pad presses.
+					videoSwipeSession = { videoEl: chromelessVideo, startY: y, moved: false };
 				} else if (browserMode === 'normal' && !isFormWidget(liveHit) && !isKeyboardOpen()) {
 					// No inner overflow:auto/scroll ancestor + the hit isn't
 					// a form widget (sliders own their own drag) → open a
@@ -655,6 +697,15 @@ export function installCanvasTouch(): void {
 			));
 			liveScrollSession.element.scrollTop = target;
 			if (Math.abs(dy) > SWIPE_MOVE_THRESHOLD) liveScrollSession.moved = true;
+		} else if (videoSwipeSession) {
+			// Just track the move — page scroll is suppressed for chromeless
+			// videos. Flip `moved` once we've crossed the click-suppression
+			// threshold so the trailing touchend skips dispatching `click` /
+			// `video-frame-tap` (otherwise a swipe would also toggle
+			// play/pause or enter fullscreen).
+			if (Math.abs(y - videoSwipeSession.startY) > SWIPE_MOVE_THRESHOLD) {
+				videoSwipeSession.moved = true;
+			}
 		} else if (pageScrollSession) {
 			// Page-level swipe. Use the INCREMENTAL delta (since last
 			// touchmove) rather than the cumulative dy because
@@ -735,13 +786,34 @@ export function installCanvasTouch(): void {
 			stopPropagation: baseEvent.stopPropagation,
 		});
 
+		// Video-swipe commit: if the touch crossed VIDEO_SWIPE_THRESHOLD
+		// on a chromeless video, dispatch the matching keydown to the
+		// page and suppress the trailing click. Mapping matches the
+		// keyboard handler in the TikTok app: swipe UP (finger up,
+		// dy < 0) → next → ArrowDown. Swipe DOWN → prev → ArrowUp. We
+		// dispatch regardless of whether anyone is currently listening
+		// because the page may register/unregister the handler
+		// dynamically; `dispatchPageKeyEvent` is a no-op when no listener
+		// is attached.
+		if (videoSwipeSession) {
+			const dy = y - videoSwipeSession.startY;
+			if (Math.abs(dy) >= VIDEO_SWIPE_THRESHOLD) {
+				const key = dy < 0 ? 'ArrowDown' : 'ArrowUp';
+				dispatchPageKeyEvent('keydown', key, key);
+			}
+		}
+
 		// M2.5: dispatch the deferred click + form-tap UNLESS the
 		// session was actually a scroll-drag (moved > threshold). For
 		// scroll-drags we skip click so finger-swipe doesn't activate
 		// a button under the finger. Both element-level (overflow:auto
 		// inner container) and page-level (body swipe) sessions count.
+		// The video-swipe session also suppresses click — a sub-threshold
+		// touch on the video still falls through (so tap-to-fullscreen /
+		// tap-to-play keeps working).
 		const wasDrag = (liveScrollSession?.moved === true)
-			|| (pageScrollSession?.moved === true);
+			|| (pageScrollSession?.moved === true)
+			|| (videoSwipeSession?.moved === true);
 		if (!wasDrag) {
 			const target = liveDragSession.element;
 			target.dispatchEvent({ type: 'click', ...baseEvent });
@@ -819,6 +891,7 @@ export function installCanvasTouch(): void {
 		// M2.5: close the scroll-drag session.
 		liveScrollSession = null;
 		pageScrollSession = null;
+		videoSwipeSession = null;
 	});
 }
 
@@ -889,6 +962,20 @@ let dpadUpRepeatFires = 0;
 let dpadDownHeldSince = 0;
 let dpadDownLastFire = 0;
 let dpadDownRepeatFires = 0;
+
+/** Right-stick Y rising-edge tracker for video-fullscreen keydown
+ * dispatch. We treat a stick deflection that crosses the deadzone as a
+ * single virtual D-pad press: one keydown immediately, then auto-repeat
+ * at DPAD_HOLD_REPEAT_MS while the stick stays deflected past the same
+ * threshold. Resets when the stick returns through the deadzone, so a
+ * release+re-deflect re-fires the initial keydown. Direction is encoded
+ * as -1 (up) / +1 (down) / 0 (neutral). Module-level so the state
+ * survives between input-loop iterations (matches the dpad pattern). */
+let rightStickDir = 0;
+let rightStickHeldSince = 0;
+let rightStickLastFire = 0;
+const RIGHT_STICK_EDGE = 0.55;
+const RIGHT_STICK_RELEASE = 0.30;
 
 /** Diagnostic snapshot of the D-pad hold state, exposed for the
  * benchmark page to read so we can verify auto-repeat is engaging. */
@@ -970,20 +1057,67 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 
 		let scrolledThisTick = false;
 		if (options.onScroll) {
+			// D-pad up/down + right-stick Y are forwarded to the page as
+			// synthetic `keydown` events (ArrowUp / ArrowDown) ANY time a
+			// page handler is registered — not just in video-fullscreen
+			// mode. If the page handler calls `preventDefault()`, the
+			// engine skips the scroll for that input on that tick;
+			// otherwise the normal scroll runs. Standard web semantics.
+			// Pages with no keydown listener (most welcome / settings
+			// pages) pay zero extra cost and scroll exactly as before.
+			const pageWantsKeys = pageHasListenerFor('keydown');
+			function fireKey(direction: 'up' | 'down'): boolean {
+				if (!pageWantsKeys) return false;
+				const key = direction === 'up' ? 'ArrowUp' : 'ArrowDown';
+				return dispatchPageKeyEvent('keydown', key, key);
+			}
+
 			const stickDelta = readStickScroll(pad);
 			if (stickDelta !== 0) {
 				options.onScroll(stickDelta);
 				scrolledThisTick = true;
 			}
 			const nowMs = performance.now();
+
+			// --- Right-stick Y → virtual D-pad for video-fullscreen pages ---
+			if (pageWantsKeys) {
+				const axis = pad?.axes[RIGHT_STICK_Y_AXIS] ?? 0;
+				const absAxis = Math.abs(axis);
+				if (rightStickDir === 0) {
+					if (absAxis >= RIGHT_STICK_EDGE) {
+						rightStickDir = axis < 0 ? -1 : 1;
+						rightStickHeldSince = nowMs;
+						rightStickLastFire = nowMs;
+						fireKey(rightStickDir === -1 ? 'up' : 'down');
+					}
+				} else if (absAxis < RIGHT_STICK_RELEASE
+				           || (rightStickDir === -1 && axis > 0)
+				           || (rightStickDir === 1 && axis < 0)) {
+					rightStickDir = 0;
+					rightStickHeldSince = 0;
+				} else if (
+					nowMs - rightStickHeldSince >= DPAD_HOLD_DELAY_MS &&
+					nowMs - rightStickLastFire >= DPAD_HOLD_REPEAT_MS
+				) {
+					fireKey(rightStickDir === -1 ? 'up' : 'down');
+					rightStickLastFire = nowMs;
+				}
+			} else {
+				rightStickDir = 0;
+				rightStickHeldSince = 0;
+			}
+
 			// D-pad up: single step on rising edge; once the button has
 			// been held continuously for `DPAD_HOLD_DELAY_MS`, repeat
 			// every `DPAD_HOLD_REPEAT_MS` until release. Hold state is
 			// module-level so a brief return from this function (e.g.,
 			// a touch event) doesn't reset the timer.
 			if (rising(prev, next, 'dpadUp')) {
-				options.onScroll(-DPAD_SCROLL_STEP);
-				scrolledThisTick = true;
+				const handled = fireKey('up');
+				if (!handled) {
+					options.onScroll(-DPAD_SCROLL_STEP);
+					scrolledThisTick = true;
+				}
 				dpadUpHeldSince = nowMs;
 				dpadUpLastFire = nowMs;
 			} else if (next.dpadUp) {
@@ -997,8 +1131,11 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 					nowMs - dpadUpHeldSince >= DPAD_HOLD_DELAY_MS &&
 					nowMs - dpadUpLastFire >= DPAD_HOLD_REPEAT_MS
 				) {
-					options.onScroll(-DPAD_SCROLL_STEP);
-					scrolledThisTick = true;
+					const handled = fireKey('up');
+					if (!handled) {
+						options.onScroll(-DPAD_SCROLL_STEP);
+						scrolledThisTick = true;
+					}
 					dpadUpLastFire = nowMs;
 					dpadUpRepeatFires++;
 				}
@@ -1007,8 +1144,11 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 			}
 			// D-pad down: same logic, opposite direction.
 			if (rising(prev, next, 'dpadDown')) {
-				options.onScroll(DPAD_SCROLL_STEP);
-				scrolledThisTick = true;
+				const handled = fireKey('down');
+				if (!handled) {
+					options.onScroll(DPAD_SCROLL_STEP);
+					scrolledThisTick = true;
+				}
 				dpadDownHeldSince = nowMs;
 				dpadDownLastFire = nowMs;
 			} else if (next.dpadDown) {
@@ -1019,8 +1159,11 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 					nowMs - dpadDownHeldSince >= DPAD_HOLD_DELAY_MS &&
 					nowMs - dpadDownLastFire >= DPAD_HOLD_REPEAT_MS
 				) {
-					options.onScroll(DPAD_SCROLL_STEP);
-					scrolledThisTick = true;
+					const handled = fireKey('down');
+					if (!handled) {
+						options.onScroll(DPAD_SCROLL_STEP);
+						scrolledThisTick = true;
+					}
 					dpadDownLastFire = nowMs;
 					dpadDownRepeatFires++;
 				}

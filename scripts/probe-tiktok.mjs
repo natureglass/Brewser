@@ -29,6 +29,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
 const args = process.argv.slice(2);
 const videoId = args.find((a) => !a.startsWith('--')) || '6718335390845095173';
 const headProbe = args.includes('--head');
+const metaProbe = args.includes('--meta');
 
 function extractScriptJson(html, id) {
   const re = new RegExp(
@@ -136,6 +137,59 @@ async function main() {
     videoUrl = decodeEntities(videoTagMatch[1]);
     console.log('[probe] inline <video src> (full):');
     console.log('   ' + videoUrl);
+  }
+
+  if (metaProbe) {
+    // Walk the FRONTITY_CONNECT_STATE for itemInfos/authorInfos and
+    // dump them, plus any caption-y string we find near the item entry.
+    const state = extractScriptJson(html, '__FRONTITY_CONNECT_STATE__');
+    if (state && !state.__parseError) {
+      function walk(obj, path = '$') {
+        if (obj == null || typeof obj !== 'object') return;
+        for (const [k, v] of Object.entries(obj)) {
+          if (k === 'itemInfos' || k === 'authorInfos' ||
+              k === 'musicInfos' || k === 'challengeInfoList' ||
+              k === 'textExtra') {
+            console.log('[state]', path + '.' + k, '=', JSON.stringify(v).slice(0, 800));
+          }
+          if (typeof v === 'object') walk(v, path + '.' + k);
+        }
+      }
+      walk(state);
+    }
+
+    // Dump the bare HTML around recognisable metadata markers so we can
+    // build regex extractors that don't depend on parsing the entire
+    // state JSON. Strategy: print the few KB surrounding the inline
+    // <video> tag (caption + author usually live in the same React
+    // mount) and any cheap signature strings.
+    const idx = html.indexOf('<video');
+    if (idx >= 0) {
+      const slice = html.slice(Math.max(0, idx - 4000), idx + 4000);
+      console.log('[probe-meta] ---- 8KB around <video> tag ----');
+      console.log(slice);
+      console.log('[probe-meta] ---- end window ----');
+    }
+    const signatures = [
+      'authorName', 'uniqueId', 'nickname',
+      'desc', 'itemInfo', 'itemStruct',
+      'diggCount', 'commentCount', 'shareCount', 'playCount',
+      'musicMeta', 'musicName', 'musicAuthor',
+      'challenges', 'hashtag', 'title',
+    ];
+    for (const sig of signatures) {
+      const where = html.indexOf('"' + sig + '"');
+      console.log('[probe-meta] sig', sig, '=>', where >= 0 ? where : 'not found');
+    }
+    // Dump 600-byte windows around each interesting hit so we can see
+    // the JSON shape.
+    for (const sig of ['authorName', 'diggCount', 'musicName', 'title', 'itemInfos']) {
+      const where = html.indexOf('"' + sig + '"');
+      if (where < 0) continue;
+      console.log('[probe-meta] ---- window @', sig, '----');
+      console.log(html.slice(Math.max(0, where - 800), where + 800));
+      console.log('[probe-meta] ---- end ----');
+    }
   }
 
   if (videoUrl && headProbe) {

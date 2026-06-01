@@ -16,9 +16,17 @@
 // surface (currentTime, paused, play(), pause(), duration) that
 // delegates here.
 //
-// URL support in slice 2a: only paths the native FFmpeg + libnx fopen can
-// open directly — sdmc:/, romfs:/, absolute / relative paths to disk.
-// Network URLs (https://, browser://) are deferred to slice 2c+.
+// URL support:
+//   - Local paths the native FFmpeg + libnx fopen can open directly:
+//     sdmc:/, romfs:/, absolute / relative disk paths.
+//   - http(s) URLs: libavformat opens them itself via its http + tls
+//     protocols. The TLS backend is libnx (Switch system SSL service);
+//     enabled in the switch-ffmpeg port via tls.patch + the configure
+//     line `--enable-protocol=...,https,tls,...`. Required for the
+//     TikTok demo at romfs/pages/html-experiments/tiktok/, which feeds
+//     a CDN MP4 URL directly to the <video src>.
+//   - browser://, page-relative paths: resolved by resolveLiveResourceUrl
+//     before they reach the protocol check below.
 
 import { resolveLiveResourceUrl, type LiveElement } from './live-dom.js';
 
@@ -149,6 +157,14 @@ export function setVideoTryHwAccel(enabled: boolean): void {
 // video, then everything works.
 let gHwStallDetected = false;
 const HW_STALL_TIMEOUT_MS = 1500;
+// Citron NVTEGRA failure mode #2 (2026-06-01, seen on the TikTok demo):
+// first frame decodes fine, audio plays through, but the video decoder
+// silently stops producing frames after frame 0. Doesn't trip HW_STALL
+// (that's gated on !hasFirstFrame). Doesn't set decoder.error (no fatal
+// avcodec_send_packet failure surfaces). Watchdog: after the first frame
+// arrived, if the decoder has audio AND audioTime advances past this
+// many ms but currentPts hasn't moved in that window, fall back to sw.
+const HW_FRAME_STALL_AFTER_FIRST_MS = 1500;
 type NxImageBitmap = CanvasImageSource & { width: number; height: number };
 interface BitmapBridge {
 	createBitmapFromRGBA?: (
@@ -203,6 +219,13 @@ interface VideoState {
 	// Cleared when hasFirstFrame goes true or when the decoder is
 	// re-opened or stopped.
 	playRequestedAt: number | null;
+	// Tracks the first frame's wall-clock arrival + the PTS at that
+	// moment. After the first frame, if decoder.audioTime advances by
+	// HW_FRAME_STALL_AFTER_FIRST_MS but currentPts hasn't budged, we
+	// assume the NVTEGRA decoder silently stopped (Citron failure mode
+	// #2) and fall back to sw — see HW_FRAME_STALL_AFTER_FIRST_MS.
+	firstFrameAtMs: number | null;
+	firstFramePts: number;
 	// Slice 2b followup #5: set true by scanForVideoPosters when a
 	// decoder was opened+played at page load purely to capture the
 	// first frame as a static preview. tickVideo pauses + unmutes the
@@ -242,6 +265,8 @@ function ensureState(el: LiveElement): VideoState {
 			hasFirstFrame: false,
 			hwFallbackAttempted: false,
 			playRequestedAt: null,
+			firstFrameAtMs: null,
+			firstFramePts: 0,
 			needsPosterPause: false,
 			volume: 1,
 			muted: false,
@@ -271,7 +296,13 @@ function resolveSourceForDecoder(el: LiveElement): string | null {
 		// `browser://...`) the same way `<img>` does, then accept the native
 		// paths the FFmpeg + libnx fopen can open.
 		const r = resolveLiveResourceUrl(c);
-		if (r.startsWith('sdmc:/') || r.startsWith('romfs:/') || r.startsWith('/')) {
+		if (
+			r.startsWith('sdmc:/') ||
+			r.startsWith('romfs:/') ||
+			r.startsWith('https://') ||
+			r.startsWith('http://') ||
+			r.startsWith('/')
+		) {
 			return r;
 		}
 	}
@@ -293,7 +324,7 @@ function openDecoder(
 	}
 	const url = resolveSourceForDecoder(el);
 	if (!url) {
-		st.loadError = 'no playable source (accepts sdmc:/ / romfs:/ / absolute paths only)';
+		st.loadError = 'no playable source (accepts sdmc:/, romfs:/, http(s)://, or absolute paths)';
 		return;
 	}
 	// Session-wide HW kill switch: once any decoder has stalled while
@@ -370,6 +401,8 @@ function closeDecoder(el: LiveElement, st: VideoState): void {
 	}
 	st.hasFirstFrame = false;
 	st.playRequestedAt = null;
+	st.firstFrameAtMs = null;
+	st.firstFramePts = 0;
 	activeVideos.delete(el);
 	// Note: posterBitmap is deliberately NOT closed here. The whole
 	// point of the poster is to outlive its preview decoder so the
@@ -508,15 +541,31 @@ export function tickVideo(): boolean {
 		//     latch so all subsequent opens force sw.
 		const hwError = !st.hwFallbackAttempted && st.decoder.error != null;
 		let hwStall = false;
+		let hwFrameStall = false;
 		try {
 			hwStall = !st.hwFallbackAttempted
 				&& !st.hasFirstFrame
 				&& st.playRequestedAt != null
 				&& st.decoder.usedHw === true
 				&& (performance.now() - st.playRequestedAt) > HW_STALL_TIMEOUT_MS;
+			// Post-first-frame watchdog (Citron NVTEGRA failure mode #2).
+			// Use audioTime as the "is wall-clock advancing" proxy —
+			// independent of the video pipeline. If audio has advanced
+			// past HW_FRAME_STALL_AFTER_FIRST_MS since the first frame
+			// but our video PTS hasn't moved, hw decoder silently froze.
+			if (!hwStall && !st.hwFallbackAttempted
+			    && st.hasFirstFrame
+			    && st.firstFrameAtMs != null
+			    && st.decoder.usedHw === true
+			    && st.decoder.usedAudio === true
+			    && st.currentPts === st.firstFramePts
+			    && (performance.now() - st.firstFrameAtMs)
+			        > HW_FRAME_STALL_AFTER_FIRST_MS) {
+				hwFrameStall = true;
+			}
 		} catch { /* decoder closed; treat as not stalled */ }
-		if (hwError || hwStall) {
-			if (hwStall) gHwStallDetected = true;
+		if (hwError || hwStall || hwFrameStall) {
+			if (hwStall || hwFrameStall) gHwStallDetected = true;
 			if (!hwFallback) hwFallback = [];
 			hwFallback.push(el);
 			continue;
@@ -604,6 +653,10 @@ export function tickVideo(): boolean {
 			st.frameW = f.width;
 			st.frameH = f.height;
 			st.currentPts = f.pts;
+			if (!st.hasFirstFrame) {
+				st.firstFrameAtMs = performance.now();
+				st.firstFramePts = f.pts;
+			}
 			st.hasFirstFrame = true;
 			st.playRequestedAt = null;
 			anyAdvanced = true;
@@ -992,10 +1045,11 @@ export function videoPause(el: LiveElement): void {
 	const st = videoStateMap.get(el);
 	if (st && st.decoder) {
 		try { st.decoder.pause(); } catch {}
-		// Wall-clock elapsed while paused isn't decode time — clear the
-		// watchdog so a paused-for-2s video doesn't trip the hw-stall
+		// Wall-clock elapsed while paused isn't decode time — clear both
+		// watchdogs so a paused-for-2s video doesn't trip the hw-stall
 		// fallback on resume.
 		st.playRequestedAt = null;
+		st.firstFrameAtMs = null;
 	}
 }
 
@@ -1034,6 +1088,8 @@ export function videoResetSource(el: LiveElement): void {
 	st.loadError = null;
 	st.hasFirstFrame = false;
 	st.playRequestedAt = null;
+	st.firstFrameAtMs = null;
+	st.firstFramePts = 0;
 }
 
 /** Toggle muted state on the decoder. */

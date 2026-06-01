@@ -1522,6 +1522,42 @@ let liveDocumentRef: unknown = null;
 export function getLiveWindow(): LiveWindow { return liveWindow; }
 
 /**
+ * Dispatch a synthetic `keydown` (or other key event) into the live
+ * page's window+document registry (which the documentShim shares with
+ * LiveWindow). Returns `true` if any handler called `preventDefault()`.
+ *
+ * Used by `controller-shortcuts.ts` to forward D-pad / right-stick
+ * presses to page scripts while in `video-fullscreen` mode, so the
+ * TikTok-style apps can implement controller-driven swipe navigation.
+ * Outside video-fullscreen the engine keeps its normal scroll behavior.
+ */
+export function dispatchPageKeyEvent(
+	type: 'keydown' | 'keyup',
+	key: string,
+	code?: string,
+): boolean {
+	const ev = {
+		type,
+		key,
+		code: code ?? key,
+		bubbles: true,
+		defaultPrevented: false,
+		preventDefault() { this.defaultPrevented = true; },
+		stopPropagation() { /* single-target dispatch; included for compat */ },
+	};
+	liveWindow.dispatchEvent(ev);
+	return ev.defaultPrevented === true;
+}
+
+/** True iff any page-registered listener exists for the named event
+ * on the shared window+document registry. Cheap pre-check so the input
+ * loop can skip building a synthetic event when nothing will consume
+ * it. */
+export function pageHasListenerFor(type: string): boolean {
+	return liveWindow.hasListeners(type);
+}
+
+/**
  * Returns a Proxy that surface-shadows `window` per page. Intercepts
  * `addEventListener` / `removeEventListener` / `dispatchEvent` so
  * synthetic mouse/touch events from the canvas touch handler land in

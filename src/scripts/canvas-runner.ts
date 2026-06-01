@@ -1182,14 +1182,28 @@ function buildDocumentShim(
 			node.data = data == null ? '' : String(data);
 			return node;
 		},
-		/** Document-level event listener no-op. Three.js's `Timer.connect(document)`
-		 * registers visibility / blur listeners we don't dispatch on this
-		 * platform; accept silently to avoid breaking the demo. */
-		addEventListener(_type: string, _listener: unknown, _opts?: unknown): void {
-			/* no-op */
+		/** Document-level event listener. Three.js's `Timer.connect(document)`
+		 * registers visibility / blur listeners we still don't dispatch on
+		 * this platform — those just live harmlessly in the registry — but
+		 * `keydown` is now wired up so pages can react to synthetic events
+		 * the engine fires for D-pad / right-stick while a video is
+		 * fullscreen (see controller-shortcuts.ts). Sharing the LiveWindow
+		 * registry means handlers added via `document.addEventListener`
+		 * AND `window.addEventListener` both fire on a single dispatch,
+		 * which is close enough to the spec's bubble-through-document-
+		 * then-window for our purposes. */
+		addEventListener(type: string, listener: unknown, _opts?: unknown): void {
+			if (typeof listener === 'function') {
+				getLiveWindow().addEventListener(type, listener as Function);
+			}
 		},
-		removeEventListener(_type: string, _listener: unknown, _opts?: unknown): void {
-			/* no-op */
+		removeEventListener(type: string, listener: unknown, _opts?: unknown): void {
+			if (typeof listener === 'function') {
+				getLiveWindow().removeEventListener(type, listener as Function);
+			}
+		},
+		dispatchEvent(event: { type: string; [key: string]: unknown }): boolean {
+			return getLiveWindow().dispatchEvent(event);
 		},
 	};
 	setOwnerDocument(shim);

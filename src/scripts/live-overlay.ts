@@ -1191,7 +1191,13 @@ export function overlayLiveAnimatedCanvases(
 						// bar paint — otherwise repeated passes (cache
 						// blit, walker, walker, walker...) would compound
 						// the alpha and darken the bar over time.
-						if (!havePainted) {
+						// Gated on `controls`: with no bar painted there's
+						// no alpha to build up, AND the wipe would otherwise
+						// draw a stray black strip on the placeholder for an
+						// opt-out page (e.g. the TikTok app's chromeless
+						// video).
+						const hasControls = el.hasAttribute('controls');
+						if (!havePainted && hasControls) {
 							const barH = Math.min(VIDEO_CONTROLS_BAR_H, box.h);
 							ctx.fillStyle = '#000000';
 							ctx.fillRect(
@@ -1199,7 +1205,9 @@ export function overlayLiveAnimatedCanvases(
 								box.w, barH,
 							);
 						}
-						paintVideoControls(ctx, el, screenX, screenY, box.w, box.h);
+						if (hasControls) {
+							paintVideoControls(ctx, el, screenX, screenY, box.w, box.h);
+						}
 					}
 				}
 			}
@@ -2084,8 +2092,11 @@ function paintVideoPlaceholder(
 		// Static controls bar (2026-05-27): drawn into the cache so the
 		// buttons are visible before any decoder is opened. Live time
 		// updates come from the overlay walker, which repaints the bar
-		// on top of the frame each tick.
-		paintVideoControls(ctx, el, box.x, box.y, box.w, box.h);
+		// on top of the frame each tick. Gated on `controls` so chromeless
+		// videos (TikTok app) stay clean.
+		if (el.hasAttribute('controls')) {
+			paintVideoControls(ctx, el, box.x, box.y, box.w, box.h);
+		}
 	} finally { ctx.restore(); }
 }
 
