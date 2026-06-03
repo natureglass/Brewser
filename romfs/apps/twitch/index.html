@@ -1,0 +1,1088 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Twitch</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0e0c14;
+    color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+
+  /* Layout: sidebar (left, "Live now" ONLY) + stage (right, swaps
+     login-area ↔ video). Sidebar stays visible across both phases so
+     the user can switch channels via live pills at any time. */
+  .layout {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: flex;
+  }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    width: 280px;
+    height: 100%;
+    background: #16101f;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    letter-spacing: 0.12em;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    width: 100%;
+  }
+  .live-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    /* Per-container overflow so the list scrolls independently of
+       the rest of the sidebar — survives animated-page paint mode
+       better than sidebar-level overflow ([[reference-swb-live-dom-inner-scroll]]).
+       Solid bg so the scroll-cache redraw fully overwrites any
+       lingering pixels (otherwise faint gray ghost lines appear). */
+    flex: 1;
+    overflow-y: auto;
+    background: #16101f;
+  }
+
+  /* Status / error block shown in the sidebar before live-list is
+     populated. Stays visible until the fetch resolves with channels;
+     shows a retry button on failure. */
+  .live-status {
+    padding: 24px 16px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+    text-align: center;
+    line-height: 1.5;
+  }
+  .live-status-error { color: rgba(255, 180, 180, 0.8); }
+  .retry-btn {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 8px 18px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 16px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .retry-btn:active { background: rgba(255, 255, 255, 0.18); }
+  .live-item {
+    /* Explicit min-height because the engine doesn't always inflate
+       a flex-column child to (padding-top + content + padding-bottom)
+       — using min-height forces a known size that's finger-tap-friendly. */
+    min-height: 64px;
+    padding: 8px 22px 8px 12px;
+    border-radius: 8px;
+    /* Solid (not translucent) bg so scroll-cache redraws fully cover
+       the previous frame — no ghost lines after scrolling. */
+    background: #1d1729;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    user-select: none;
+    outline: none;
+  }
+  .live-item:active { background: #2a2138; }
+  /* Currently-watching channel — Twitch-purple tinted highlight. */
+  .live-item.selected {
+    background: #3a2566;
+  }
+  .live-item.selected .live-name {
+    color: #c7a6ff;
+  }
+  .live-item.selected .live-viewers {
+    color: rgba(199, 166, 255, 0.7);
+  }
+  .live-row1 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+  .live-dot {
+    color: #ed4245;
+    font-size: 9px;
+  }
+  .live-name {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+  }
+  .live-viewers {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .live-game {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    margin-top: 4px;
+    margin-left: 14px;
+  }
+
+  /* ---------- stage (right side) ---------- */
+  .stage {
+    flex: 1;
+    height: 100%;
+    position: relative;
+    background: #000;
+  }
+  .player {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  /* Login area — the original full design (big logo, heading, input
+     pill, Watch button, recent pills), centered in the stage area
+     when no channel is active. Hides when a channel is selected. */
+  .login-area {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #0e0c14;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+  }
+  .login-inner {
+    width: 600px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+  .header-logo {
+    width: 96px;
+    height: 96px;
+    /* No background / radius — show the raw logo PNG. Adjust sizing
+       here if the asset's intrinsic aspect ratio changes. */
+  }
+  .heading {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #fff;
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Input pill. Inner <input> needs explicit non-transparent bg —
+     memory swb-input-transparent-bg-trap. */
+  .input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 22px;
+    padding: 4px 16px;
+    width: 460px;
+  }
+  .input-row .prefix {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .input-row input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.14);
+    border: none;
+    border-radius: 14px;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 600;
+    min-height: 38px;
+    padding: 0 12px;
+    margin-left: 4px;
+  }
+
+  .watch-btn {
+    background: #9147ff;
+    color: #fff;
+    border-radius: 8px;
+    padding: 12px 40px;
+    font-size: 16px;
+    font-weight: 700;
+    min-width: 160px;
+    margin: 0 auto;
+    text-align: center;
+  }
+  .watch-btn:active { background: #6441a5; }
+
+  #recents-section {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.1em;
+    margin-top: 6px;
+    width: 100%;
+    text-align: center;
+  }
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    width: 100%;
+  }
+  .pill {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+  }
+  .pill:active { background: rgba(255, 255, 255, 0.2); }
+
+  .hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Loading view — covers stage briefly while a channel resolves. */
+  .loading-view {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #0e0c14;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 6;
+  }
+  .loading-inner {
+    width: 540px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .status, .status-sub, .meta-title {
+    width: 100%;
+    text-align: center;
+  }
+  .status { font-size: 18px; color: rgba(255, 255, 255, 0.85); }
+  .status-sub { font-size: 14px; color: rgba(255, 255, 255, 0.5); }
+  .meta-title { font-size: 18px; font-weight: 600; color: #fff; line-height: 1.3; }
+  .meta-row {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+  }
+  .meta-dot { color: #ed4245; margin-right: 6px; }
+  .meta-game { color: #fff; font-weight: 500; }
+  .meta-sep { color: rgba(255, 255, 255, 0.3); margin: 0 6px; }
+  .meta-viewers, .meta-uptime { color: rgba(255, 255, 255, 0.65); }
+
+  .error-chip {
+    margin-top: 4px;
+    background: rgba(255, 90, 90, 0.18);
+    border: 1px solid rgba(255, 90, 90, 0.4);
+    color: #ffd5d5;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: center;
+    max-width: 480px;
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="layout" class="layout">
+
+  <!-- ============================== SIDEBAR (LIVE NOW ONLY) ============================== -->
+  <aside id="sidebar" class="sidebar">
+    <div id="sidebar-title" class="sidebar-title hidden">Live now</div>
+    <div id="live-status" class="live-status">Loading live streams…</div>
+    <div id="live-list" class="live-list"></div>
+  </aside>
+
+  <!-- ============================== STAGE (LOGIN ↔ VIDEO) ============================== -->
+  <main id="stage" class="stage">
+    <video id="player" class="player"></video>
+
+    <!-- Initial / post-error login screen -->
+    <div id="login-area" class="login-area">
+      <div class="login-inner">
+        <img class="header-logo" src="assets/twitch_logo.png" alt="Twitch" />
+        <div class="heading">Twitch</div>
+        <div class="input-row">
+          <span class="prefix">twitch.tv/</span>
+          <input id="channel-input" type="text" placeholder="channel name" />
+        </div>
+        <div id="watch-btn" class="watch-btn">Watch</div>
+        <div id="recents-section" class="hidden">
+          <div id="recents-row" class="pill-row"></div>
+        </div>
+        <div id="error-chip" class="error-chip hidden"></div>
+        <div class="hint">
+          Pick a channel · Double-tap video for fullscreen · B exits
+        </div>
+      </div>
+    </div>
+
+    <!-- Brief loading view while a channel resolves -->
+    <div id="loading-view" class="loading-view hidden">
+      <div class="loading-inner">
+        <div id="status" class="status">Connecting to Twitch…</div>
+        <div id="status-sub" class="status-sub"></div>
+        <div id="meta-title" class="meta-title hidden"></div>
+        <div id="meta-row" class="meta-row hidden">
+          <span class="meta-dot">●</span>
+          <span id="meta-game" class="meta-game"></span>
+          <span id="meta-game-sep" class="meta-sep hidden">·</span>
+          <span id="meta-viewers"></span>
+          <span id="meta-uptime-sep" class="meta-sep hidden">·</span>
+          <span id="meta-uptime"></span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+  // ---------- config ----------
+  const CONFIG_URL = 'brewser://apps/twitch/assets/config.json';
+  const DEFAULT_CHANNEL = 'dino_xx';
+  const DEFAULT_QUALITY = 'auto';
+  const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+  const PAT_HASH = '0828119ded1c13477966434e15800ff57ddacf13ba1911c129dc2200705b0712';
+  const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  const LOG_PATH = 'sdmc:/switch/brewser/logs/twitch-app.log';
+  const RECENTS_PATH = 'sdmc:/switch/brewser/webprofiles/default/twitch-recent.json';
+  const RECENTS_MAX = 5;
+  const APP_VERSION = 'slice4-async-mutate-repaint';
+  const TOP_LIVE_COUNT = 20;
+
+  // ---------- el refs ----------
+  const layoutEl = document.getElementById('layout');
+  const playerEl = document.getElementById('player');
+  const loginAreaEl = document.getElementById('login-area');
+  const loadingViewEl = document.getElementById('loading-view');
+  const channelInputEl = document.getElementById('channel-input');
+  const watchBtnEl = document.getElementById('watch-btn');
+  const recentsSectionEl = document.getElementById('recents-section');
+  const recentsRowEl = document.getElementById('recents-row');
+  const sidebarTitleEl = document.getElementById('sidebar-title');
+  const liveStatusEl = document.getElementById('live-status');
+  const liveListEl = document.getElementById('live-list');
+  const statusEl = document.getElementById('status');
+  const statusSubEl = document.getElementById('status-sub');
+  const errorChip = document.getElementById('error-chip');
+
+  let recents = [];
+  let appConfig = null;
+  // Tracks whether a stream is active (loading or playing). Drives the
+  // multi-stage B-button behavior: in stream → B returns to login;
+  // at login → B exits the app (engine default goBack).
+  let isStreamActive = false;
+  // Login of the currently-watching channel, or null. Used to
+  // highlight the matching item in the Live-now sidebar.
+  let currentChannel = null;
+
+  function log(msg) {
+    console.debug('[twitch-app]', msg);
+    try {
+      const sw = globalThis.Switch;
+      if (sw && typeof sw.appendFileSync === 'function') {
+        const ts = new Date().toISOString().replace('T', ' ').slice(0, 23);
+        sw.appendFileSync(LOG_PATH, '[' + ts + '] ' + msg + '\n');
+      }
+    } catch (_e) { /* file log is best effort */ }
+  }
+
+  function setStatus(s) {
+    statusEl.textContent = s;
+    log('status: ' + s);
+  }
+
+  // Error path: hide loading-view, show login-area with the error chip
+  // pinned underneath the recents. The sidebar stays visible the whole
+  // time so the user can also recover by tapping a Live-now item.
+  function showError(msg) {
+    loadingViewEl.classList.add('hidden');
+    loginAreaEl.classList.remove('hidden');
+    errorChip.classList.remove('hidden');
+    errorChip.textContent = msg;
+    log('ERROR ' + msg);
+  }
+  function clearError() {
+    errorChip.classList.add('hidden');
+    errorChip.textContent = '';
+  }
+
+  // ---------- GQL: metadata, top-live, access token ----------
+  async function fetchStreamMetadata(channel) {
+    const query =
+      'query LiveStreamInfo($login: String!) {' +
+      '  user(login: $login) {' +
+      '    id displayName' +
+      '    stream { id title viewersCount createdAt game { id displayName } }' +
+      '  }' +
+      '}';
+    log('POST gql.twitch.tv/gql (LiveStreamInfo ' + channel + ')');
+    const resp = await fetch('https://gql.twitch.tv/gql', {
+      method: 'POST',
+      headers: {
+        'Client-ID': CLIENT_ID,
+        'Content-Type': 'application/json',
+        'user-agent': DESKTOP_UA,
+      },
+      body: JSON.stringify({ query: query, variables: { login: channel } }),
+    });
+    log('  meta gql status ' + resp.status);
+    if (!resp.ok) throw new Error('Meta GQL HTTP ' + resp.status);
+    const json = await resp.json();
+    const user = json && json.data && json.data.user;
+    if (!user) throw new Error('No user in metadata response');
+    const stream = user.stream;
+    return {
+      displayName: user.displayName || channel,
+      title: stream && stream.title ? stream.title : null,
+      viewersCount: stream && typeof stream.viewersCount === 'number' ? stream.viewersCount : null,
+      createdAt: stream && stream.createdAt ? stream.createdAt : null,
+      gameDisplayName: stream && stream.game ? stream.game.displayName : null,
+    };
+  }
+
+  async function fetchTopLive(limit) {
+    const query =
+      'query TopStreams($limit: Int!) {' +
+      '  streams(first: $limit) {' +
+      '    edges { node {' +
+      '      id title viewersCount' +
+      '      broadcaster { login displayName }' +
+      '      game { id displayName }' +
+      '    } }' +
+      '  }' +
+      '}';
+    log('POST gql.twitch.tv/gql (TopStreams limit=' + limit + ')');
+    // 15-second abort timeout so the sidebar UX doesn't hang forever
+    // if the engine fetch chain regresses or the network stalls.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(function () {
+      log('  top-live: 15s timeout, aborting');
+      controller.abort();
+    }, 15000);
+    let resp;
+    try {
+      resp = await fetch('https://gql.twitch.tv/gql', {
+        method: 'POST',
+        headers: {
+          'Client-ID': CLIENT_ID,
+          'Content-Type': 'application/json',
+          'user-agent': DESKTOP_UA,
+        },
+        body: JSON.stringify({ query: query, variables: { limit: limit } }),
+        signal: controller.signal,
+      });
+    } finally {
+      // Don't cancel the timeout yet — body read can still hang.
+    }
+    log('  top-live status ' + resp.status);
+    if (!resp.ok) {
+      clearTimeout(timeoutId);
+      throw new Error('TopStreams HTTP ' + resp.status);
+    }
+    const json = await resp.json();
+    clearTimeout(timeoutId);
+    const edges = (json && json.data && json.data.streams &&
+                   json.data.streams.edges) || [];
+    const items = edges
+      .map(function (e) { return e && e.node; })
+      .filter(function (n) { return n && n.broadcaster && n.broadcaster.login; })
+      .map(function (n) {
+        return {
+          login: n.broadcaster.login,
+          displayName: n.broadcaster.displayName || n.broadcaster.login,
+          viewersCount: typeof n.viewersCount === 'number' ? n.viewersCount : 0,
+          gameDisplayName: n.game ? n.game.displayName : null,
+          title: n.title || '',
+        };
+      });
+    return items;
+  }
+
+  async function fetchAccessToken(channel) {
+    const body = {
+      operationName: 'PlaybackAccessToken',
+      extensions: { persistedQuery: { version: 1, sha256Hash: PAT_HASH } },
+      variables: { isLive: true, login: channel, isVod: false, vodID: '', playerType: 'site' },
+    };
+    log('POST gql.twitch.tv/gql (PlaybackAccessToken ' + channel + ')');
+    const resp = await fetch('https://gql.twitch.tv/gql', {
+      method: 'POST',
+      headers: {
+        'Client-ID': CLIENT_ID,
+        'Content-Type': 'application/json',
+        'user-agent': DESKTOP_UA,
+      },
+      body: JSON.stringify(body),
+    });
+    log('  gql status ' + resp.status);
+    if (!resp.ok) throw new Error('GQL HTTP ' + resp.status);
+    const json = await resp.json();
+    const tok = json && json.data && json.data.streamPlaybackAccessToken;
+    if (!tok || !tok.value || !tok.signature) {
+      throw new Error('Channel offline or unknown: ' + channel);
+    }
+    log('  token ok sig=' + tok.signature.slice(0, 8) + '… value chars=' + tok.value.length);
+    return tok;
+  }
+
+  // ---------- formatting + meta display ----------
+  function formatCount(n) {
+    if (n == null || typeof n !== 'number' || !isFinite(n)) return '';
+    const abs = Math.abs(n);
+    if (abs < 1000) return String(n | 0);
+    if (abs < 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    if (abs < 1000000) return Math.round(n / 1000) + 'K';
+    if (abs < 10000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    return Math.round(n / 1000000) + 'M';
+  }
+  function formatUptime(isoString) {
+    if (!isoString) return '';
+    const t = Date.parse(isoString);
+    if (isNaN(t)) return '';
+    const ms = Date.now() - t;
+    if (ms < 0) return '';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return mins + 'm';
+    const hrs = Math.floor(mins / 60);
+    return hrs + 'h ' + (mins % 60) + 'm';
+  }
+  function populateMetadata(meta) {
+    log('  meta: ' + meta.displayName +
+        ' · "' + (meta.title || '(no title)') + '"' +
+        ' · ' + (meta.viewersCount != null ? meta.viewersCount + ' viewers' : '?') +
+        ' · ' + (meta.gameDisplayName || '(no game)'));
+    statusSubEl.textContent = meta.displayName;
+    if (meta.title) {
+      const t = document.getElementById('meta-title');
+      t.textContent = meta.title;
+      t.classList.remove('hidden');
+    }
+    const gameEl = document.getElementById('meta-game');
+    const gameSepEl = document.getElementById('meta-game-sep');
+    const viewersEl = document.getElementById('meta-viewers');
+    const uptimeSepEl = document.getElementById('meta-uptime-sep');
+    const uptimeEl = document.getElementById('meta-uptime');
+    if (meta.gameDisplayName) {
+      gameEl.textContent = meta.gameDisplayName;
+      gameSepEl.classList.remove('hidden');
+    }
+    if (meta.viewersCount != null) {
+      viewersEl.textContent = formatCount(meta.viewersCount) + ' viewers';
+    }
+    const uptimeStr = formatUptime(meta.createdAt);
+    if (uptimeStr) {
+      uptimeSepEl.classList.remove('hidden');
+      uptimeEl.textContent = 'live ' + uptimeStr;
+    }
+    if (meta.gameDisplayName || meta.viewersCount != null || uptimeStr) {
+      document.getElementById('meta-row').classList.remove('hidden');
+    }
+  }
+
+  // ---------- config ----------
+  async function loadConfig() {
+    let channel = DEFAULT_CHANNEL;
+    let quality = DEFAULT_QUALITY;
+    try {
+      log('GET ' + CONFIG_URL);
+      const resp = await fetch(CONFIG_URL);
+      log('  config status ' + resp.status);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const cfg = await resp.json();
+      if (cfg && typeof cfg.defaultChannel === 'string' && cfg.defaultChannel) {
+        channel = cfg.defaultChannel;
+      }
+      if (cfg && typeof cfg.quality === 'string' && cfg.quality) {
+        quality = cfg.quality;
+      }
+    } catch (err) {
+      log('  config load failed (' +
+          (err && err.message ? err.message : err) +
+          '); falling back to built-in defaults');
+    }
+    log('  config: channel=' + channel + ' quality=' + quality);
+    return { channel: channel, quality: quality };
+  }
+
+  // ---------- variant picker ----------
+  function parseQualitySpec(spec) {
+    if (!spec || typeof spec !== 'string') return null;
+    const m = spec.match(/^(\d+)p(\d+)$/);
+    if (!m) return null;
+    return { height: parseInt(m[1], 10), fps: parseInt(m[2], 10) };
+  }
+
+  async function pickVariant(masterUrl, quality) {
+    log('GET master m3u8…');
+    const resp = await fetch(masterUrl);
+    log('  master status ' + resp.status);
+    if (!resp.ok) throw new Error('Master HTTP ' + resp.status);
+    const body = await resp.text();
+    log('  master bytes=' + body.length);
+    const lines = body.split('\n');
+    const variants = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line.startsWith('#EXT-X-STREAM-INF:')) continue;
+      const attrs = line.slice('#EXT-X-STREAM-INF:'.length);
+      const bwM = attrs.match(/BANDWIDTH=(\d+)/);
+      const resM = attrs.match(/RESOLUTION=(\d+x\d+)/);
+      const codM = attrs.match(/CODECS="([^"]+)"/);
+      const frM = attrs.match(/FRAME-RATE=([\d.]+)/);
+      let url = null;
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].trim();
+        if (!next || next.charAt(0) === '#') continue;
+        url = next;
+        break;
+      }
+      if (!url) continue;
+      const codecs = codM ? codM[1] : '';
+      if (codecs && codecs.indexOf('avc1') === -1) continue;
+      variants.push({
+        bandwidth: bwM ? parseInt(bwM[1], 10) : 0,
+        resolution: resM ? resM[1] : '?',
+        frameRate: frM ? parseFloat(frM[1]) : null,
+        codecs: codecs,
+        url: url,
+      });
+    }
+    if (variants.length === 0) throw new Error('No video variants in master playlist');
+    variants.sort(function (a, b) { return a.bandwidth - b.bandwidth; });
+    for (const v of variants) {
+      log('  variant: bw=' + v.bandwidth +
+          ' res=' + v.resolution +
+          ' fps=' + (v.frameRate == null ? '?' : v.frameRate) +
+          ' codecs=' + v.codecs);
+    }
+    const policy = (quality || DEFAULT_QUALITY).toLowerCase();
+    let picked = null;
+    let pickReason = '';
+    if (policy === 'source') {
+      picked = variants[variants.length - 1];
+      pickReason = 'source (highest bandwidth)';
+    } else {
+      const spec = parseQualitySpec(policy);
+      if (spec) {
+        for (const v of variants) {
+          const h = v.resolution.split('x')[1];
+          if (h && parseInt(h, 10) === spec.height &&
+              v.frameRate != null &&
+              Math.abs(v.frameRate - spec.fps) < 1.0) {
+            picked = v;
+            pickReason = 'exact match for ' + policy;
+            break;
+          }
+        }
+        if (!picked) {
+          log('  config quality "' + policy + '" not in master; falling back to auto');
+        }
+      } else if (policy !== 'auto') {
+        log('  unrecognised quality "' + policy + '"; falling back to auto');
+      }
+    }
+    if (!picked) {
+      for (let i = variants.length - 1; i >= 0; i--) {
+        const v = variants[i];
+        if (v.frameRate != null && v.frameRate <= 30.5) {
+          picked = v;
+          pickReason = 'auto (highest <=30fps)';
+          break;
+        }
+      }
+    }
+    if (!picked) {
+      picked = variants[0];
+      pickReason = 'fallback to lowest (no <=30fps variant)';
+    }
+    log('  picked: ' + picked.resolution +
+        ' @ ' + picked.bandwidth + ' bps fps=' + picked.frameRate +
+        ' [' + pickReason + ']');
+    return picked;
+  }
+
+  function buildUsherUrl(channel, tok) {
+    const p = new URLSearchParams({
+      allow_source: 'true',
+      fast_bread: 'true',
+      player_backend: 'mediaplayer',
+      playlist_include_framerate: 'true',
+      reassignments_supported: 'true',
+      sig: tok.signature,
+      token: tok.value,
+      cdm: 'wv',
+      player_version: '1.30.0',
+      p: String(Math.floor(Math.random() * 1e6)),
+    });
+    return 'https://usher.ttvnw.net/api/channel/hls/' +
+      encodeURIComponent(channel) + '.m3u8?' + p.toString();
+  }
+
+  // ---------- recents ----------
+  function readRecents() {
+    try {
+      const sw = globalThis.Switch;
+      if (!sw || typeof sw.readFileSync !== 'function') return [];
+      const buf = sw.readFileSync(RECENTS_PATH);
+      if (!buf) return [];
+      const txt = typeof buf === 'string' ? buf
+        : new TextDecoder('utf-8').decode(buf);
+      const parsed = JSON.parse(txt);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(function (s) {
+        return typeof s === 'string' && s.length > 0;
+      }).slice(0, RECENTS_MAX);
+    } catch (_e) {
+      return [];
+    }
+  }
+  function writeRecents() {
+    try {
+      const sw = globalThis.Switch;
+      if (!sw || typeof sw.writeFileSync !== 'function') return;
+      sw.writeFileSync(RECENTS_PATH, JSON.stringify(recents));
+    } catch (err) {
+      log('  recents write failed: ' + (err && err.message ? err.message : err));
+    }
+  }
+  function pushRecent(channel) {
+    const norm = channel.toLowerCase();
+    const idx = recents.findIndex(function (c) { return c.toLowerCase() === norm; });
+    if (idx >= 0) recents.splice(idx, 1);
+    recents.unshift(channel);
+    if (recents.length > RECENTS_MAX) recents = recents.slice(0, RECENTS_MAX);
+    writeRecents();
+    renderRecents();
+  }
+  function renderRecents() {
+    recentsRowEl.innerHTML = '';
+    if (recents.length === 0) {
+      recentsSectionEl.classList.add('hidden');
+      return;
+    }
+    recentsSectionEl.classList.remove('hidden');
+    for (const ch of recents) {
+      const pill = document.createElement('div');
+      pill.className = 'pill';
+      pill.textContent = ch;
+      pill.addEventListener('click', function () {
+        log('recent pill tapped: ' + ch);
+        setChannelInput(ch);
+        selectChannel(ch);
+      });
+      recentsRowEl.appendChild(pill);
+    }
+  }
+
+  // ---------- live-now (sidebar) ----------
+  // Status panel rendered in the sidebar before live-list populates.
+  // State machine: 'loading' (default) → 'hidden' (success) or
+  // 'error' (failure, with a Retry button).
+  function setLiveStatus(state, msg) {
+    if (state === 'hidden') {
+      liveStatusEl.classList.add('hidden');
+      return;
+    }
+    liveStatusEl.classList.remove('hidden');
+    liveStatusEl.innerHTML = '';
+    if (state === 'loading') {
+      liveStatusEl.className = 'live-status';
+      liveStatusEl.textContent = msg || 'Loading live streams…';
+      return;
+    }
+    // 'error' — text + Retry button
+    liveStatusEl.className = 'live-status live-status-error';
+    const text = document.createElement('div');
+    text.textContent = msg || 'Couldn\'t load live streams';
+    liveStatusEl.appendChild(text);
+    const btn = document.createElement('div');
+    btn.className = 'retry-btn';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', loadLiveChannels);
+    liveStatusEl.appendChild(btn);
+  }
+
+  // Orchestrator: shows loading status, fires the fetch, either
+  // populates the list on success or shows an error+retry on failure.
+  async function loadLiveChannels() {
+    setLiveStatus('loading');
+    sidebarTitleEl.classList.add('hidden');
+    liveListEl.innerHTML = '';
+    try {
+      const list = await fetchTopLive(TOP_LIVE_COUNT);
+      if (!list || list.length === 0) {
+        setLiveStatus('error', 'No live streams found right now');
+        return;
+      }
+      setLiveStatus('hidden');
+      renderLiveChannels(list);
+    } catch (err) {
+      const msg = (err && err.message) ? err.message : String(err);
+      log('  top-live fetch FAILED: ' + msg);
+      // User-friendly messages for common failure modes.
+      let display = 'Couldn\'t load live streams';
+      if (/abort/i.test(msg)) display = 'Live streams took too long — tap Retry';
+      else if (/HTTP/.test(msg)) display = 'Twitch returned an error (' + msg + ')';
+      setLiveStatus('error', display);
+    }
+  }
+
+  // Re-apply the .selected class to whichever item matches the
+  // currently-watching channel. Cheap walk — fine for 20 items.
+  function updateLiveSelection() {
+    const norm = currentChannel ? currentChannel.toLowerCase() : null;
+    for (const item of liveListEl.children) {
+      const login = item._twLogin; // attached at render time
+      if (norm && login && login.toLowerCase() === norm) {
+        item.classList.add('selected');
+      } else {
+        item.classList.remove('selected');
+      }
+    }
+  }
+
+  function renderLiveChannels(list) {
+    liveListEl.innerHTML = '';
+    if (!list || list.length === 0) {
+      sidebarTitleEl.classList.add('hidden');
+      return;
+    }
+    sidebarTitleEl.classList.remove('hidden');
+    for (const item of list) {
+      const row = document.createElement('div');
+      row.className = 'live-item';
+      row._twLogin = item.login;
+
+      const row1 = document.createElement('div');
+      row1.className = 'live-row1';
+
+      const dot = document.createElement('span');
+      dot.className = 'live-dot';
+      dot.textContent = '●';
+      row1.appendChild(dot);
+
+      const name = document.createElement('span');
+      name.className = 'live-name';
+      name.textContent = item.displayName;
+      row1.appendChild(name);
+
+      const viewers = document.createElement('span');
+      viewers.className = 'live-viewers';
+      viewers.textContent = formatCount(item.viewersCount);
+      row1.appendChild(viewers);
+
+      row.appendChild(row1);
+
+      if (item.gameDisplayName) {
+        const game = document.createElement('div');
+        game.className = 'live-game';
+        game.textContent = item.gameDisplayName;
+        row.appendChild(game);
+      }
+
+      row.addEventListener('click', function () {
+        log('live item tapped: ' + item.login + ' (' + item.viewersCount + ')');
+        setChannelInput(item.login);
+        selectChannel(item.login);
+      });
+      liveListEl.appendChild(row);
+    }
+    updateLiveSelection();
+    log('rendered ' + list.length + ' live items');
+  }
+
+  // ---------- input + selection ----------
+  function setChannelInput(value) {
+    channelInputEl.setAttribute('value', value);
+    channelInputEl.value = value;
+  }
+  function sanitizeChannel(s) {
+    if (!s) return '';
+    return String(s).toLowerCase().trim().replace(/[^a-z0-9_]/g, '');
+  }
+
+  // Pick a channel. The login-area hides (the right side becomes the
+  // video stage), loading-view shows briefly, then the video plays.
+  // Sidebar (Live-now) stays visible the whole time.
+  function selectChannel(rawChannel) {
+    const channel = sanitizeChannel(rawChannel);
+    if (!channel) {
+      log('selectChannel: empty channel after sanitise; ignoring');
+      return;
+    }
+    log('selectChannel: ' + channel);
+    pushRecent(channel);
+    clearError();
+    isStreamActive = true;
+    currentChannel = channel;
+    updateLiveSelection();
+
+    loginAreaEl.classList.add('hidden');
+    loadingViewEl.classList.remove('hidden');
+
+    // Reset metadata UI for the new channel.
+    statusSubEl.textContent = channel;
+    document.getElementById('meta-title').classList.add('hidden');
+    document.getElementById('meta-row').classList.add('hidden');
+    document.getElementById('meta-game').textContent = '';
+    document.getElementById('meta-viewers').textContent = '';
+    document.getElementById('meta-uptime').textContent = '';
+    document.getElementById('meta-game-sep').classList.add('hidden');
+    document.getElementById('meta-uptime-sep').classList.add('hidden');
+    setStatus('Connecting to Twitch…');
+    start(channel);
+  }
+
+  // ---------- back-button handling ----------
+  // The shell dispatches a synthetic `Escape` keydown when the user
+  // presses B (outside fullscreen mode — fullscreen-B exits fullscreen
+  // first, handled engine-side). If we're streaming, swallow the
+  // event and return to login. If we're at login, do NOT preventDefault
+  // so the shell falls through to history goBack → exits the app.
+  function returnToLogin() {
+    log('returnToLogin: stopping stream + showing login-area');
+    isStreamActive = false;
+    currentChannel = null;
+    updateLiveSelection();
+    // Stop video playback: clear src + load(). Without this the
+    // compositor would keep painting the last frame over the login.
+    try {
+      playerEl.removeAttribute('src');
+      if (typeof playerEl.load === 'function') playerEl.load();
+    } catch (e) {
+      log('  returnToLogin: video stop threw: ' +
+          (e && e.message ? e.message : e));
+    }
+    loadingViewEl.classList.add('hidden');
+    loginAreaEl.classList.remove('hidden');
+    clearError();
+  }
+
+  // ---------- playback pipeline ----------
+  async function start(channel) {
+    try {
+      fetchStreamMetadata(channel)
+        .then(populateMetadata)
+        .catch(function (e) {
+          log('  meta fetch FAILED: ' + (e && e.message ? e.message : e));
+        });
+
+      setStatus('Requesting access token…');
+      const tok = await fetchAccessToken(channel);
+
+      const masterUrl = buildUsherUrl(channel, tok);
+      log('master URL chars=' + masterUrl.length);
+
+      setStatus('Picking quality…');
+      const variant = await pickVariant(masterUrl, appConfig ? appConfig.quality : null);
+
+      setStatus('Tuning in… ' + variant.resolution);
+
+      playerEl.setAttribute('src', variant.url);
+      if (typeof playerEl.load === 'function') playerEl.load();
+      try {
+        if (typeof playerEl.play === 'function') playerEl.play();
+      } catch (e) {
+        log('play() threw: ' + (e && e.message ? e.message : e));
+      }
+      // Hide the loading-view; compositor takes over the stage region.
+      loadingViewEl.classList.add('hidden');
+      log('handed URL to <video>; libavformat HLS demuxer takes over');
+    } catch (err) {
+      let msg = (err && err.message) ? err.message : String(err);
+      if (/Master HTTP 404/i.test(msg)) {
+        msg = channel + ' is offline (no live stream right now)';
+      }
+      showError(msg);
+    }
+  }
+
+  // ---------- boot ----------
+  async function boot() {
+    log('--- twitch-app ' + APP_VERSION + ' boot ' +
+        new Date().toISOString() + ' ---');
+
+    appConfig = await loadConfig();
+    recents = readRecents();
+    log('  recents loaded: ' + recents.length + ' channels');
+
+    const preselect = (recents.length > 0) ? recents[0] : appConfig.channel;
+    setChannelInput(preselect);
+
+    renderRecents();
+
+    // Fire the discovery fetch via the orchestrator so the sidebar
+    // shows a loading status until results land (or an error + Retry).
+    loadLiveChannels();
+
+    channelInputEl.addEventListener('change', function () {
+      const val = (channelInputEl.value || '').trim();
+      if (val) selectChannel(val);
+    });
+    watchBtnEl.addEventListener('click', function () {
+      const val = (channelInputEl.value || '').trim();
+      if (val) selectChannel(val);
+    });
+
+    // Multi-stage Back: shell dispatches synthetic 'Escape' keydown
+    // when B is pressed outside fullscreen. Consume only if we're
+    // streaming — bounce back to login. At login, let the shell goBack
+    // (exits the app to the apps page).
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (isStreamActive) {
+        log('B button: returning to login');
+        returnToLogin();
+        e.preventDefault();
+      }
+      // else: not consumed; shell will goBack and exit the app
+    });
+
+    log('  boot complete; awaiting channel pick (preselect=' + preselect + ')');
+  }
+
+  boot().catch(function (err) {
+    log('boot FAILED: ' + (err && err.message ? err.message : err));
+  });
+</script>
+
+</body>
+</html>

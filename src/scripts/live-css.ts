@@ -280,11 +280,20 @@ export interface ComputedLiveStyle {
 	leftPct?: number;
 	rightPct?: number;
 	bottomPct?: number;
-	/** Parsed `transform` translate (only translateX/Y/translate). Baked
-	 * into the box position in the absolute-layout pass; `%` resolves
-	 * against the element's OWN box (so `translateX(-50%)` + `left:50%`
-	 * centers). Other transform functions (scale/rotate) are ignored. */
-	transform?: { tx?: CssLength; ty?: CssLength };
+	/** Parsed `transform`. `tx`/`ty` are translate values (baked into the
+	 * box position in the absolute-layout pass; `%` resolves against the
+	 * element's OWN box). `rotateRad` / `scaleX` / `scaleY` are applied
+	 * at PAINT time by the live-overlay wrapper — ctx.translate(center)
+	 * → ctx.rotate → ctx.scale → ctx.translate(-center). Both static
+	 * inline transforms AND animated CSS keyframe transforms land here
+	 * (the animation runtime overwrites `rotateRad` per frame via
+	 * `_animatedTransform`, leaving this static value untouched). */
+	transform?: { tx?: CssLength; ty?: CssLength; rotateRad?: number; scaleX?: number; scaleY?: number };
+	/** Parsed `animation: <name> <duration> [<timing>] [<iter>] [<delay>]`
+	 * shorthand. Picked up by the CSS-animation tick in live-dom.ts to
+	 * spin up a 60Hz runtime that interpolates the keyframes for this
+	 * element. Only set when both name AND duration are present. */
+	animation?: { name: string; durationMs: number; iterationCount: number | 'infinite'; timing: string };
 	zIndex?: number;
 	// M2.3 layout.
 	paddingTop?: number;
@@ -1351,6 +1360,47 @@ function applyDeclToComputed(
 			if (tf) computed.transform = tf;
 			return;
 		}
+		case 'animation': {
+			const an = parseAnimationShorthand(value);
+			if (an) computed.animation = an;
+			return;
+		}
+		case 'animation-name': {
+			const trimmed = value.trim();
+			if (!trimmed) return;
+			computed.animation = {
+				name: trimmed,
+				durationMs: computed.animation?.durationMs ?? 0,
+				iterationCount: computed.animation?.iterationCount ?? 1,
+				timing: computed.animation?.timing ?? 'linear',
+			};
+			return;
+		}
+		case 'animation-duration': {
+			const tm = /^([\d.]+)(ms|s)$/i.exec(value.trim());
+			if (!tm) return;
+			const n = parseFloat(tm[1]);
+			if (!Number.isFinite(n)) return;
+			const durationMs = tm[2] === 's' ? n * 1000 : n;
+			computed.animation = {
+				name: computed.animation?.name ?? '',
+				durationMs,
+				iterationCount: computed.animation?.iterationCount ?? 1,
+				timing: computed.animation?.timing ?? 'linear',
+			};
+			return;
+		}
+		case 'animation-iteration-count': {
+			const v = value.trim().toLowerCase();
+			const iter: number | 'infinite' = v === 'infinite' ? 'infinite' : Math.max(0, parseFloat(v) || 1);
+			computed.animation = {
+				name: computed.animation?.name ?? '',
+				durationMs: computed.animation?.durationMs ?? 0,
+				iterationCount: iter,
+				timing: computed.animation?.timing ?? 'linear',
+			};
+			return;
+		}
 		case 'z-index': {
 			const n = parsePxOrNum(value);
 			if (n !== undefined) computed.zIndex = Math.trunc(n);
@@ -1660,14 +1710,18 @@ function assignPosEdge(
 	}
 }
 
-/** Parse the translate part of a `transform` value (`translateX(..)`,
- * `translateY(..)`, `translate(x[, y])`). Lengths may be px or `%` (kept
- * as CssLength for own-box resolution at layout time). Returns undefined
- * when no translate is present (scale/rotate/etc. are ignored). */
-function parseTransformTranslate(value: string): { tx?: CssLength; ty?: CssLength } | undefined {
+/** Parse `transform:` into translate (`tx`/`ty` as CssLength for own-box
+ * resolution at layout time), `rotateRad` (radians) and `scaleX`/`scaleY`.
+ * Returns undefined when none of the supported functions match. Functions:
+ * translate/translateX/translateY/rotate/scale/scaleX/scaleY.
+ * Skew/matrix/perspective are ignored. */
+function parseTransformTranslate(value: string): { tx?: CssLength; ty?: CssLength; rotateRad?: number; scaleX?: number; scaleY?: number } | undefined {
 	let tx: CssLength | undefined;
 	let ty: CssLength | undefined;
-	const re = /(translate[XY]?)\s*\(([^)]*)\)/gi;
+	let rotateRad: number | undefined;
+	let scaleX: number | undefined;
+	let scaleY: number | undefined;
+	const re = /(translate[XY]?|rotate|scale[XY]?)\s*\(([^)]*)\)/gi;
 	let m: RegExpExecArray | null;
 	let saw = false;
 	while ((m = re.exec(value)) !== null) {
@@ -1675,13 +1729,223 @@ function parseTransformTranslate(value: string): { tx?: CssLength; ty?: CssLengt
 		const args = m[2].split(',').map((s) => s.trim()).filter(Boolean);
 		if (fn === 'translatex') { const v = parseLength(args[0] ?? ''); if (v !== undefined) { tx = v; saw = true; } }
 		else if (fn === 'translatey') { const v = parseLength(args[0] ?? ''); if (v !== undefined) { ty = v; saw = true; } }
-		else { // translate(x[, y])
+		else if (fn === 'translate') {
 			const vx = parseLength(args[0] ?? '');
 			if (vx !== undefined) { tx = vx; saw = true; }
 			if (args.length > 1) { const vy = parseLength(args[1]); if (vy !== undefined) { ty = vy; saw = true; } }
 		}
+		else if (fn === 'rotate') {
+			const rad = parseAngle(args[0] ?? '');
+			if (rad !== undefined) { rotateRad = rad; saw = true; }
+		}
+		else if (fn === 'scalex') { const n = parseFloat(args[0] ?? ''); if (Number.isFinite(n)) { scaleX = n; saw = true; } }
+		else if (fn === 'scaley') { const n = parseFloat(args[0] ?? ''); if (Number.isFinite(n)) { scaleY = n; saw = true; } }
+		else if (fn === 'scale') {
+			const sx = parseFloat(args[0] ?? '');
+			if (Number.isFinite(sx)) { scaleX = sx; saw = true; }
+			const sy = args.length > 1 ? parseFloat(args[1]) : sx;
+			if (Number.isFinite(sy)) { scaleY = sy; saw = true; }
+		}
 	}
-	return saw ? { tx, ty } : undefined;
+	return saw ? { tx, ty, rotateRad, scaleX, scaleY } : undefined;
+}
+
+/** Parse a CSS angle (`Ndeg`/`Nrad`/`Nturn`/`Ngrad`) into radians.
+ * Bare numbers (no unit) → degrees. */
+function parseAngle(value: string): number | undefined {
+	const m = /^(-?\d*\.?\d+)(deg|rad|turn|grad)?$/i.exec(value.trim());
+	if (!m) return undefined;
+	const n = parseFloat(m[1]);
+	if (!Number.isFinite(n)) return undefined;
+	const unit = (m[2] || 'deg').toLowerCase();
+	if (unit === 'rad') return n;
+	if (unit === 'turn') return n * 2 * Math.PI;
+	if (unit === 'grad') return n * (Math.PI / 200);
+	return n * (Math.PI / 180);
+}
+
+/** Parse `animation: <name> <duration> [<timing>] [<iter>]` shorthand
+ * into the runtime-consumable shape. Tier-1: timing function string is
+ * recorded but the runtime ignores it (linear only). Returns undefined
+ * when name or duration is missing. */
+function parseAnimationShorthand(value: string): { name: string; durationMs: number; iterationCount: number | 'infinite'; timing: string } | undefined {
+	const parts = value.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return undefined;
+	let name: string | undefined;
+	let durationMs: number | undefined;
+	let iterationCount: number | 'infinite' = 1;
+	let timing = 'linear';
+	for (const p of parts) {
+		const lower = p.toLowerCase();
+		if (lower === 'infinite') { iterationCount = 'infinite'; continue; }
+		const tm = /^([\d.]+)(ms|s)$/i.exec(lower);
+		if (tm) {
+			const n = parseFloat(tm[1]);
+			if (Number.isFinite(n) && durationMs === undefined) {
+				durationMs = (tm[2] === 's' ? n * 1000 : n);
+			}
+			continue;
+		}
+		if (/^[\d.]+$/.test(lower)) { iterationCount = Math.max(0, parseFloat(lower)); continue; }
+		if (lower === 'linear' || lower === 'ease' || lower === 'ease-in'
+			|| lower === 'ease-out' || lower === 'ease-in-out'
+			|| lower === 'step-start' || lower === 'step-end'
+			|| lower.startsWith('cubic-bezier(') || lower.startsWith('steps(')) {
+			timing = lower;
+			continue;
+		}
+		if (name === undefined) name = p;
+	}
+	if (!name || durationMs === undefined) return undefined;
+	return { name, durationMs, iterationCount, timing };
+}
+
+// =========================================================================
+// @keyframes registry
+// =========================================================================
+//
+// Each registered `@keyframes` block becomes a map from percentage (0..1)
+// to the partial style declarations at that frame. The CSS-animation tick
+// in live-dom.ts interpolates between the two flanking frames each tick.
+//
+// Tier-1: only `transform` (rotate + scale only — translate is layout-time
+// and can't animate cleanly here) and `opacity` are interpolated; all
+// other properties at a keyframe are silently ignored.
+
+export type KeyframeStop = { offset: number; rotateRad?: number; scaleX?: number; scaleY?: number; opacity?: number };
+const keyframesRegistry: Map<string, KeyframeStop[]> = new Map();
+
+export function getKeyframes(name: string): KeyframeStop[] | undefined {
+	return keyframesRegistry.get(name);
+}
+
+function parseKeyframeSelectorList(prelude: string): number[] {
+	const out: number[] = [];
+	for (const raw of prelude.split(',')) {
+		const tok = raw.trim().toLowerCase();
+		if (tok === 'from') out.push(0);
+		else if (tok === 'to') out.push(1);
+		else if (tok.endsWith('%')) {
+			const n = parseFloat(tok);
+			if (Number.isFinite(n)) out.push(Math.max(0, Math.min(1, n / 100)));
+		}
+	}
+	return out;
+}
+
+// =========================================================================
+// @font-face registry
+// =========================================================================
+//
+// The nx.js runtime already maintains a `fonts` FontFaceSet (a real-DOM
+// `document.fonts` equivalent). Canvas-context-2d's font setter does
+// `findFont(fonts, parsed)` then early-returns silently for unrecognised
+// families — see [[reference-nxjs-canvas-font-fallback]]. ALL we need to
+// do here is parse `@font-face { font-family: X; src: url(Y); }` and
+// populate `fonts` with `new FontFace(X, ttfBytes)`. The canvas (and the
+// swb DOM text painter, which uses the same ctx.font setter) will then
+// find the font automatically on the next paint.
+
+declare const Switch: { readFileSync?(path: string): ArrayBuffer | null };
+
+interface FontFaceCtor {
+	new (family: string, source: ArrayBuffer | Uint8Array): unknown;
+}
+interface FontFaceSetLike { add(face: unknown): unknown }
+
+const registeredFontFamilies = new Set<string>();
+
+function fetchFontBytesSync(url: string): ArrayBuffer | null {
+	if (url.startsWith('sdmc:/') || url.startsWith('romfs:/')) {
+		try {
+			const sw = (globalThis as { Switch?: { readFileSync?: (p: string) => ArrayBuffer | null } }).Switch;
+			if (sw?.readFileSync) {
+				const ab = sw.readFileSync(url);
+				return ab ?? null;
+			}
+		} catch (_) { /* fall through */ }
+		return null;
+	}
+	// http(s) / brewser:// would need an async path — Tier-1 punts.
+	// A future enhancement: kick off fetch() and registerFontFace
+	// when bytes arrive, then requestFullRepaint.
+	return null;
+}
+
+function extractFirstUrl(src: string): string | undefined {
+	// `src: url("/path.ttf") format('truetype'), local("Foo");`
+	// Tier-1: grab the first `url(...)`, strip quotes, ignore format() and local().
+	const m = /url\s*\(\s*(['"]?)([^'")]+)\1\s*\)/i.exec(src);
+	return m ? m[2].trim() : undefined;
+}
+
+function registerFontFace(blockNode: CssNode): void {
+	let family: string | undefined;
+	let src: string | undefined;
+	const block = blockNode as { children: { forEach: (cb: (c: CssNode) => void) => void } };
+	if (!block.children || typeof block.children.forEach !== 'function') return;
+	block.children.forEach((decl) => {
+		const d = decl as { type: string; property?: string; value?: CssNode };
+		if (d.type !== 'Declaration' || !d.property || !d.value) return;
+		const prop = d.property.toLowerCase();
+		const val = safeGenerate(d.value).trim();
+		if (prop === 'font-family') {
+			family = val.replace(/^['"]|['"]$/g, '');
+		} else if (prop === 'src') {
+			src = val;
+		}
+	});
+	if (!family || !src) return;
+	const url = extractFirstUrl(src);
+	if (!url) return;
+	const key = family.toLowerCase();
+	if (registeredFontFamilies.has(key)) return; // already registered
+	const bytes = fetchFontBytesSync(url);
+	if (!bytes) return;
+	try {
+		const FontFaceCtor = (globalThis as unknown as { FontFace?: FontFaceCtor }).FontFace;
+		const fonts = (globalThis as unknown as { fonts?: FontFaceSetLike }).fonts;
+		if (!FontFaceCtor || !fonts) return;
+		const face = new FontFaceCtor(family, bytes);
+		fonts.add(face);
+		registeredFontFamilies.add(key);
+	} catch (_) { /* swallow — bad bytes / runtime mismatch */ }
+}
+
+function registerKeyframes(name: string, blockNode: CssNode): void {
+	const stops: KeyframeStop[] = [];
+	const block = blockNode as { children: { forEach: (cb: (c: CssNode) => void) => void } };
+	if (!block.children || typeof block.children.forEach !== 'function') return;
+	block.children.forEach((kf) => {
+		const kfRule = kf as { type: string; prelude?: CssNode; block?: CssNode };
+		if (kfRule.type !== 'Rule') return;
+		const preludeStr = kfRule.prelude ? safeGenerate(kfRule.prelude) : '';
+		const offsets = parseKeyframeSelectorList(preludeStr);
+		if (offsets.length === 0 || !kfRule.block) return;
+		const decls: Record<string, string> = Object.create(null);
+		const inner = kfRule.block as { children: { forEach: (cb: (c: CssNode) => void) => void } };
+		inner.children?.forEach((decl) => {
+			const d = decl as { type: string; property?: string; value?: CssNode };
+			if (d.type !== 'Declaration' || !d.property || !d.value) return;
+			decls[d.property.toLowerCase()] = safeGenerate(d.value).trim();
+		});
+		const stopBase: Omit<KeyframeStop, 'offset'> = {};
+		if (decls['transform']) {
+			const tf = parseTransformTranslate(decls['transform']);
+			if (tf) {
+				if (tf.rotateRad !== undefined) stopBase.rotateRad = tf.rotateRad;
+				if (tf.scaleX !== undefined) stopBase.scaleX = tf.scaleX;
+				if (tf.scaleY !== undefined) stopBase.scaleY = tf.scaleY;
+			}
+		}
+		if (decls['opacity']) {
+			const n = parseFloat(decls['opacity']);
+			if (Number.isFinite(n)) stopBase.opacity = n;
+		}
+		for (const off of offsets) stops.push({ offset: off, ...stopBase });
+	});
+	stops.sort((a, b) => a.offset - b.offset);
+	if (stops.length > 0) keyframesRegistry.set(name, stops);
 }
 
 /** Normalize a `justify-items` / `place-items` inline-axis token. `flex-*`
@@ -2352,8 +2616,16 @@ function walkRulesWithMedia(
 			if (at.block) walkRulesWithMedia(at.block, innerActive, visit);
 			return;
 		}
-		// Other at-rules (@font-face, @supports, @keyframes) — skip their
-		// inner Rule nodes for M2.2.
+		if (name === 'keyframes' || name === '-webkit-keyframes') {
+			const animName = at.prelude ? safeGenerate(at.prelude).trim() : '';
+			if (animName && at.block) registerKeyframes(animName, at.block);
+			return;
+		}
+		if (name === 'font-face') {
+			if (at.block) registerFontFace(at.block);
+			return;
+		}
+		// Other at-rules (@supports) — skip their inner Rule nodes for M2.2.
 		return;
 	}
 	if (node.type === 'Rule') {

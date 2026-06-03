@@ -20,7 +20,7 @@ every navigation. The strip contains:
 - The controller hint flush right.
 
 Below the strip, page content is painted by either the active
-`browser://` JS bundle (`new-tab`, `error`, etc.) drawing direct to the
+`brewser://` JS bundle (`new-tab`, `error`, etc.) drawing direct to the
 canvas, or by the HTML pipeline's `paintLayout` rendering a
 `LayoutResult`. The HTML pipeline owns the entire content area
 (`y in [CHROME_HEIGHT, canvasHeight)`) and clips its drawing to that

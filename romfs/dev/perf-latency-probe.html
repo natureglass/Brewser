@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Phase 0.5 Latency Probe</title>
+<style>
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at top, rgba(122, 162, 255, 0.12), transparent 32%),
+      #0b1220;
+    color: #e0e8f4;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 18px;
+    padding: 28px 48px;
+  }
+  h1 { color: #ffd35e; margin-bottom: 8px; }
+  .lead { color: #9bb1d6; margin-top: 0; margin-bottom: 16px; }
+  code { color: #c2e0ff; }
+  a { color: #7eda9f; }
+  .panel {
+    background: #14202d;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-top: 16px;
+    color: #c2e0ff;
+  }
+</style>
+</head>
+<body>
+<h1>Phase 0.5 — Latency Probe</h1>
+<p class="lead">Investigates the ~520 ms fixed-latency tax measured in
+<a href="brewser://dev/perf-image-stress/">Phase 0</a>. Runs six tests
+back-to-back varying N, load mode (Image vs fetch vs sync read), and
+firing pattern (parallel vs staggered serial). Writes a structured
+report to <code>sdmc:/switch/brewser/logs/perf-latency-probe.log</code>
+with interpretation hints at the end.</p>
+
+<canvas id="status" width="1100" height="540"></canvas>
+
+<div class="panel">
+  Each run takes ~10-20 s. Reload (<code>Y</code>) to re-run from the
+  top.
+</div>
+
+<script>
+  const LOG_PATH = 'sdmc:/switch/brewser/logs/perf-latency-probe.log';
+  const log = function (s) {
+    try { Switch.appendFileSync(LOG_PATH, s + '\n'); } catch (_) { /* no SD = no log */ }
+  };
+
+  const ASSET_DIR = 'sdmc:/switch/brewser/webprofiles/default/assets/';
+  const BASE_URLS = [
+    ASSET_DIR + 'Brewser_logo.png',
+    ASSET_DIR + 'home.png',
+    ASSET_DIR + 'refresh.png',
+    ASSET_DIR + 'settings.png',
+    ASSET_DIR + 'left.png',
+    ASSET_DIR + 'right.png',
+    ASSET_DIR + 'bookmark_true.png',
+    ASSET_DIR + 'bookmark_false.png',
+    ASSET_DIR + 'toolbar_back.png',
+    ASSET_DIR + 'keyboard_back.png',
+  ];
+
+  function buildUrls(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(BASE_URLS[i % BASE_URLS.length]);
+    return out;
+  }
+
+  // Aggregate per-image timing results into a summary the
+  // interpretation step can compare against the others.
+  function aggregate(results, wall, name) {
+    const ok = results.filter(function (r) { return r && r.ok; });
+    const times = ok.map(function (r) { return r.total; }).sort(function (a, b) { return a - b; });
+    const sum = times.reduce(function (a, b) { return a + b; }, 0);
+    const avg = times.length ? sum / times.length : 0;
+    const min = times.length ? times[0] : 0;
+    const max = times.length ? times[times.length - 1] : 0;
+    const median = times.length ? times[Math.floor(times.length / 2)] : 0;
+    return {
+      name: name, n: results.length, ok: ok.length,
+      wall: wall, sum: sum, avg: avg, min: min, max: max, median: median,
+      pf: wall > 0 ? sum / wall : 0,
+    };
+  }
+
+  // ----- Test modes -----
+
+  function loadImageParallel(urls) {
+    const start = performance.now();
+    const results = new Array(urls.length);
+    return new Promise(function (resolve) {
+      let completed = 0;
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        const img = new Image();
+        const t0 = performance.now();
+        img.onload = (function (idx, capturedT0) {
+          return function () {
+            results[idx] = { total: performance.now() - capturedT0, ok: true };
+            completed++;
+            if (completed === urls.length) resolve({ results: results, wall: performance.now() - start });
+          };
+        })(i, t0);
+        img.onerror = (function (idx, capturedT0) {
+          return function () {
+            results[idx] = { total: performance.now() - capturedT0, ok: false };
+            completed++;
+            if (completed === urls.length) resolve({ results: results, wall: performance.now() - start });
+          };
+        })(i, t0);
+        img.src = url;
+      }
+    });
+  }
+
+  async function loadImageSerial(urls) {
+    const start = performance.now();
+    const results = [];
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      const t0 = performance.now();
+      await new Promise(function (resolve) {
+        const img = new Image();
+        img.onload = function () { resolve(true); };
+        img.onerror = function () { resolve(false); };
+        img.src = url;
+      });
+      results.push({ total: performance.now() - t0, ok: true });
+    }
+    return { results: results, wall: performance.now() - start };
+  }
+
+  async function fetchOnly(urls) {
+    const start = performance.now();
+    const results = await Promise.all(urls.map(async function (url) {
+      const t0 = performance.now();
+      try {
+        const res = await fetch(url);
+        const buf = await res.arrayBuffer();
+        return { total: performance.now() - t0, ok: true, bytes: buf.byteLength };
+      } catch (_) {
+        return { total: performance.now() - t0, ok: false };
+      }
+    }));
+    return { results: results, wall: performance.now() - start };
+  }
+
+  // Switch.readFileSync — synchronous SDMC read, no decode, no Cairo,
+  // no async dispatch. Pure file-I/O cost. If this takes ~500 ms for
+  // 30 files, suspect-c (FS serial) is the answer.
+  function readFsSerial(urls) {
+    const start = performance.now();
+    const results = [];
+    for (let i = 0; i < urls.length; i++) {
+      const t0 = performance.now();
+      let ok = false;
+      let bytes = 0;
+      try {
+        const data = Switch.readFileSync(urls[i]);
+        ok = !!data;
+        bytes = data ? data.byteLength : 0;
+      } catch (_) { /* ok stays false */ }
+      results.push({ total: performance.now() - t0, ok: ok, bytes: bytes });
+    }
+    return Promise.resolve({ results: results, wall: performance.now() - start });
+  }
+
+  // ----- Test list -----
+
+  const TESTS = [
+    { name: 'smoke', n: 1, mode: 'image-parallel',
+      note: 'baseline single-image cost' },
+    { name: 'small-batch', n: 10, mode: 'image-parallel',
+      note: 'small parallel batch — should reveal if fixed overhead exists' },
+    { name: 'medium-batch', n: 30, mode: 'image-parallel',
+      note: 'matches Phase 0 baseline' },
+    { name: 'large-batch', n: 60, mode: 'image-parallel',
+      note: 'doubles N — does wall scale or plateau?' },
+    { name: 'image-serial', n: 10, mode: 'image-serial',
+      note: 'await onload before firing next — isolates per-image cost' },
+    { name: 'fetch-parallel', n: 30, mode: 'fetch',
+      note: 'parallel fetches via runtime fetch loader (no Image, no Cairo, no decode)' },
+    { name: 'fs-serial', n: 30, mode: 'fs',
+      note: 'sync Switch.readFileSync × 30 — raw FS-only cost' },
+  ];
+
+  // ----- Test runner -----
+
+  log('');
+  log('=== PHASE 0.5 LATENCY PROBE at ' + new Date().toISOString() + ' ===');
+  log('Total tests: ' + TESTS.length);
+  log('');
+
+  const summaries = [];
+  runAll();
+
+  async function runAll() {
+    for (let i = 0; i < TESTS.length; i++) {
+      const t = TESTS[i];
+      updateStatus('Running test ' + (i + 1) + '/' + TESTS.length + ': ' + t.name + ' (N=' + t.n + ', mode=' + t.mode + ')');
+      log('--- Test ' + (i + 1) + ': ' + t.name + ' (N=' + t.n + ', mode=' + t.mode + ') ---');
+      log('note: ' + t.note);
+
+      const urls = buildUrls(t.n);
+      let res;
+      try {
+        if (t.mode === 'image-parallel') res = await loadImageParallel(urls);
+        else if (t.mode === 'image-serial') res = await loadImageSerial(urls);
+        else if (t.mode === 'fetch') res = await fetchOnly(urls);
+        else if (t.mode === 'fs') res = await readFsSerial(urls);
+      } catch (e) {
+        log('FAILED: ' + (e && e.message ? e.message : String(e)));
+        continue;
+      }
+
+      const s = aggregate(res.results, res.wall, t.name);
+      s.n = t.n;
+      s.mode = t.mode;
+      summaries.push(s);
+
+      // Total bytes for fs/fetch modes — useful for throughput math.
+      let bytesTotal = 0;
+      for (let j = 0; j < res.results.length; j++) {
+        if (res.results[j] && typeof res.results[j].bytes === 'number') {
+          bytesTotal += res.results[j].bytes;
+        }
+      }
+      s.bytes = bytesTotal;
+
+      log('wallMs=' + Math.round(s.wall)
+        + ' ok=' + s.ok + '/' + s.n
+        + ' perImageAvgMs=' + Math.round(s.avg)
+        + ' min=' + Math.round(s.min)
+        + ' max=' + Math.round(s.max)
+        + ' median=' + Math.round(s.median)
+        + ' parallelismFactor=' + s.pf.toFixed(2)
+        + (bytesTotal > 0 ? ' bytesTotal=' + bytesTotal : ''));
+      log('');
+
+      // Give the engine a beat to settle between tests so cache-build
+      // chunks from one don't bleed into the next.
+      await new Promise(function (r) { setTimeout(r, 80); });
+    }
+
+    interpretResults();
+    drawResults();
+    updateStatus('DONE — see logs/perf-latency-probe.log');
+  }
+
+  function interpretResults() {
+    log('=== INTERPRETATION HINTS ===');
+
+    const byName = {};
+    for (const s of summaries) byName[s.name] = s;
+
+    const smoke = byName['smoke'];
+    const small = byName['small-batch'];
+    const medium = byName['medium-batch'];
+    const large = byName['large-batch'];
+    const serial = byName['image-serial'];
+    const fetch_ = byName['fetch-parallel'];
+    const fs = byName['fs-serial'];
+
+    if (smoke && medium) {
+      const ratio = medium.wall / smoke.wall;
+      log('smoke (N=1) wall=' + Math.round(smoke.wall) + 'ms; medium (N=30) wall=' + Math.round(medium.wall) + 'ms; ratio=' + ratio.toFixed(2));
+      log('  -> if ratio ~ 1, the cost is mostly fixed (per-batch overhead independent of N)');
+      log('  -> if ratio ~ 30, the cost is mostly per-image (linear with N)');
+    }
+
+    if (small && medium && large) {
+      log('Scale-up: small (N=10) wall=' + Math.round(small.wall) + ', medium (N=30) wall=' + Math.round(medium.wall) + ', large (N=60) wall=' + Math.round(large.wall));
+      log('  -> linear scaling = per-image cost dominates; flat scaling = fixed overhead dominates');
+      log('  -> mixed (sublinear) = both, ratio reveals which side wins');
+    }
+
+    if (serial && small) {
+      const serialAvg = serial.avg;
+      const parallelAvg = small.avg;
+      log('Per-image avg: image-serial=' + Math.round(serialAvg) + 'ms, image-parallel(N=10)=' + Math.round(parallelAvg) + 'ms');
+      log('  -> if parallel >> serial per-image, batch coordination is taxing each item (suspect b: onload-dispatch queue)');
+      log('  -> if similar, per-image cost is real and uniform (decode/Cairo work)');
+    }
+
+    if (fetch_ && medium) {
+      const ratio = medium.wall / fetch_.wall;
+      log('fetch-only (N=30) wall=' + Math.round(fetch_.wall) + 'ms; Image medium (N=30) wall=' + Math.round(medium.wall) + 'ms; ratio=' + ratio.toFixed(2));
+      log('  -> fetch >> Image: file I/O is the dominant cost (suspect c: FS serial)');
+      log('  -> fetch << Image: decode + Cairo upload is the dominant cost (suspect a)');
+    }
+
+    if (fs && fetch_) {
+      log('fs-serial (N=30 sync) wall=' + Math.round(fs.wall) + 'ms, bytes=' + (fs.bytes || 0));
+      log('fetch-parallel (N=30) wall=' + Math.round(fetch_.wall) + 'ms, bytes=' + (fetch_.bytes || 0));
+      log('  -> if fs-serial ~ fetch-parallel, FS is the bottleneck regardless of parallel dispatch (suspect c confirmed)');
+      log('  -> if fetch-parallel << fs-serial, parallel fetch wins over serial — FS allows concurrency');
+    }
+
+    if (fs && medium) {
+      const fsCost = fs.wall;
+      const imageCost = medium.wall;
+      const decodeShare = imageCost - fsCost;
+      log('Decode + Cairo estimate (medium.wall - fs.wall) = ' + Math.round(decodeShare) + 'ms');
+      log('  -> if positive and substantial, decode+Cairo is a real cost beyond FS');
+      log('  -> if near zero, the image pipeline cost IS the FS cost');
+    }
+
+    log('=== END PROBE ===');
+  }
+
+  function drawResults() {
+    const cnv = document.getElementById('status');
+    const ctx = cnv.getContext('2d');
+    ctx.fillStyle = '#14202d';
+    ctx.fillRect(0, 0, 1100, 540);
+    ctx.fillStyle = '#7aa2ff';
+    ctx.font = '20px sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Phase 0.5 — Latency Probe Results', 16, 16);
+
+    let y = 56;
+    ctx.font = '15px sans-serif';
+    ctx.fillStyle = '#9bb1d6';
+    ctx.fillText('test', 16, y);
+    ctx.fillText('N', 220, y);
+    ctx.fillText('mode', 260, y);
+    ctx.fillText('wall (ms)', 410, y);
+    ctx.fillText('avg/img (ms)', 520, y);
+    ctx.fillText('parallelism', 660, y);
+    ctx.fillText('chart', 790, y);
+    y += 22;
+
+    const maxWall = Math.max.apply(Math, summaries.map(function (s) { return s.wall; })) || 1;
+
+    for (const s of summaries) {
+      ctx.fillStyle = '#e0e8f4';
+      ctx.fillText(s.name, 16, y);
+      ctx.fillText(String(s.n), 220, y);
+      ctx.fillText(s.mode, 260, y);
+      ctx.fillText(String(Math.round(s.wall)), 410, y);
+      ctx.fillText(String(Math.round(s.avg)), 520, y);
+      ctx.fillText(s.pf.toFixed(2), 660, y);
+      // Bar
+      const barW = Math.round((s.wall / maxWall) * 280);
+      ctx.fillStyle = s.pf > 5 ? '#7eda9f' : '#7aa2ff';
+      ctx.fillRect(790, y + 2, barW, 14);
+      y += 22;
+    }
+
+    y += 8;
+    ctx.fillStyle = '#7eda9f';
+    ctx.fillText('See logs/perf-latency-probe.log for interpretation hints.', 16, y);
+  }
+
+  function updateStatus(msg) {
+    const cnv = document.getElementById('status');
+    if (!cnv) return;
+    const ctx = cnv.getContext('2d');
+    ctx.fillStyle = '#14202d';
+    ctx.fillRect(0, 0, 1100, 56);
+    ctx.fillStyle = '#7aa2ff';
+    ctx.font = '20px sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Phase 0.5 — ' + msg, 16, 16);
+  }
+</script>
+
+<p><a href="brewser://dev/">back to dev experiments</a></p>
+</body>
+</html>

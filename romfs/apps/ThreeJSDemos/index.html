@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>WebGL Experiments &mdash; switch-web-browser</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
+  h1 { color: #ffd35e; }
+  h2 { color: #7aa2ff; margin-top: 28px; border-bottom: 1px solid #1d2c43; padding-bottom: 4px; }
+  a { color: #7eda9f; }
+  p.lead { color: #9bb1d6; }
+  p.section-lead { color: #9bb1d6; font-size: 15px; margin-top: 6px; margin-bottom: 10px; }
+  ul { margin-top: 8px; }
+  li { margin-bottom: 6px; }
+  .desc { color: #9bb1d6; font-size: 15px; }
+</style>
+</head>
+<body>
+<h1>WebGL Experiments</h1>
+<p class="lead">Khronos conformance suites and Three.js r162 demos
+running inside an inline &lt;canvas&gt; via the GPU bridge. ThreeJS
+demos are split by which WebGL context they acquire: WebGL 2 demos
+call <code>getContext('webgl2')</code> and depend on the
+<a href="project_nxjs_webgl2_surface.md">WebGL 2 surface</a>; the rest
+ride the WebGL 1 bridge + raw-shader passthrough.</p>
+
+<h2>Khronos Conformance Tests</h2>
+<p class="section-lead">Full Khronos WebGL conformance corpora,
+executed through the same harness used for the per-milestone tests
+shipped alongside each ThreeJS demo. Live pass/fail tally as the suite
+runs.</p>
+<ul>
+<li><strong><a href="brewser://dev/full-webgl1-conformance/">Full WebGL 1 Conformance</a></strong>
+<br><span class="desc">Runs the entire Khronos WebGL 1 conformance corpus (~745 tests).</span></li>
+
+<li><strong><a href="brewser://dev/full-webgl2-conformance/">Full WebGL 2 Conformance</a></strong>
+<br><span class="desc">Runs the entire Khronos WebGL 2 conformance corpus (~1180 tests).</span></li>
+</ul>
+
+<h2>nx.js Demos</h2>
+<p class="section-lead">Hand-rolled WebGL demos that don't sit cleanly
+under the Khronos or Three.js buckets.</p>
+<ul>
+<li><strong><a href="brewser://dev/nxjs-webgl-demo/">nx.js WebGL moonlight Demo</a></strong>
+<br><span class="desc">Raw WebGL 1 ocean cube with sky, moon, animated water, and a logo-textured cube. No Three.js &mdash; written straight against nx.js's WebGL API.</span></li>
+
+<li><strong><a href="brewser://dev/nxjs-webgl2-demo/">nx.js WebGL2 Sunset Demo</a></strong>
+<br><span class="desc">Raw WebGL 2 (GLSL ES 3.00) via <code>#pragma raw_passthrough</code>: a fullscreen-triangle fragment shader renders a procedural sunset sky, FBM-displaced sea, and a logo-textured cube floating on the waves.</span></li>
+</ul>
+
+<h2>WebGL 2 ThreeJS Demos</h2>
+<p class="section-lead">Production demos exercising
+<code>canvas.getContext('webgl2')</code> + GLSL ES 3.00 shaders +
+WebGL 2-specific surface (MRT, UBOs, etc.). See
+<a href="project_nxjs_webgl2_surface.md">nxjs-webgl2-surface</a>.</p>
+<ul>
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-texture3d/">webgl-texture3d</a></strong>
+<br><span class="desc">#34 (🔒 PARKED on Mesa Nouveau): 3D volume renderer (stent.nrrd). Bridge surface complete (texParameteri target widening, TEXTURE_BINDING_3D, texImage3D binding slot); sampler3D returns vec4(0) on driver for ALL formats. r184 fetch-hang blocker also discovered.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-animation-skinning-blending/">webgl-animation-skinning-blending</a></strong>
+<br><span class="desc">#26 (🔒 PARKED on Mesa Nouveau): WebGL 2 surface now wired but Citron's vertex texelFetch on RGBA32F returns garbage with runtime coords. Awaits real-Tegra hw verification.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl2-ubo/">webgl2-ubo</a></strong>
+<br><span class="desc">#33 (🔒 PARKED on Mesa Nouveau): 80 tetra/box meshes sharing two <code>UniformsGroup</code> UBOs. Bridge widening shipped (6 v2 buffer targets + UBO re-apply); driver zeros 2nd UBO sample. Conformance 59/62. Expected to work on real Tegra hw.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl2-multiple-rendertargets/">webgl2-multiple-rendertargets</a></strong>
+<br><span class="desc">#32: TorusKnot G-Buffer via <code>RawShaderMaterial({glslVersion:GLSL3})</code> writing 2 outputs in one pass to a <code>WebGLRenderTarget({count:2})</code>; composite samples both. First production demo of the WebGL 2 surface.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-texture2darray/">webgl-texture2darray</a></strong>
+<br><span class="desc">H3 (r184): 1:1 port of <code>webgl_texture2darray.html</code>. 256&times;256&times;109 RED volume uploaded as <code>DataArrayTexture</code> (<code>TEXTURE_2D_ARRAY</code>); custom GLSL3 <code>ShaderMaterial</code> samples slices via <code>sampler2DArray</code> with an animated depth uniform. Validates fragment-side <code>sampler2DArray</code> on Citron (separate from #34's vertex-<code>texelFetch</code> wedge).</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-shaders-sky/">webgl-shaders-sky</a></strong>
+<br><span class="desc">H4 (r184): 1:1 port of <code>webgl_shaders_sky.html</code>. Preetham analytical skydome + cloud noise overlay (<code>Sky.js</code> IIFE), parameters editable via an UNPATCHED upstream <code>lil-gui</code> panel (<code>lil-gui-unpatched.iife.js</code>). Stress-tests the Phase 2 live-DOM stack (M2.0&ndash;M2.5) against a real-world consumer; OrbitControls dropped (static camera).</span></li>
+
+</ul>
+
+<h2>WebGL 1 ThreeJS Demos</h2>
+<p class="section-lead">Three.js demos riding the WebGL 1 bridge.
+Stock-material demos run via the SHADER_NAME auto-promote
+(<a href="reference_bridge_raw_shader_passthrough.md">passthrough pivot</a>),
+so Three.js's real shaders execute on native GLES even though the
+context is WebGL 1.</p>
+<ul>
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-materials-cubemap/">webgl-materials-cubemap</a></strong>
+<br><span class="desc">#25: 3 Walt heads under a Swedish Royal Castle skybox with reflection / refraction / Mix-combine cubemap materials. Forced per-face cube uploads + <code>generateMipmap(CUBE_MAP)</code> &mdash; first runtime cubemap URL load on the new image-to-texture pipeline.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-materials-texture-filters/">webgl-materials-texture-filters</a></strong>
+<br><span class="desc">#24: split-screen LinearMipmapLinear vs Nearest comparison on a tiled floor + Caravaggio painting. Forced mipmap minFilter acceptance + real <code>generateMipmap</code>.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-shader/">webgl-shader</a></strong>
+<br><span class="desc">#23: the canonical "Monjori" shadertoy demo &mdash; procedural fullscreen <code>ShaderMaterial</code> driven by a <code>time</code> uniform.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-custom-attributes/">webgl-custom-attributes</a></strong>
+<br><span class="desc">#22: 16K-vertex displaced sphere via <code>ShaderMaterial</code> + tiled water DataTexture. Forced lazy-promote of CPU-data textures under passthrough.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-buffergeometry-indexed/">webgl-buffergeometry-indexed</a></strong>
+<br><span class="desc">#21: 121-vertex indexed grid under one <code>HemisphereLight</code>. Forced bridge HemisphereLight path.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-shadowmap/">webgl-shadowmap</a></strong>
+<br><span class="desc">#20: ground + 6 primitives under <code>PCFShadowMap</code>. Forced <code>USE_SHADOWMAP</code>/<code>DEPTH_PACKING</code> auto-promote + critical <code>uniform1i</code> fix.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-depth-texture/">webgl-depth-texture</a></strong>
+<br><span class="desc">#19.5: 10 torus knots through a <code>WebGLRenderTarget</code> + depth-texture post-pass. Forced <code>WEBGL_depth_texture</code>.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-postprocessing/">webgl-postprocessing</a></strong>
+<br><span class="desc">#19: 100 spheres through <code>EffectComposer</code> 4-pass chain (RenderPass &rarr; DotScreen &rarr; RGBShift &rarr; Output). Forced the entire FBO surface.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-loader-gltf/">webgl-loader-gltf</a></strong>
+<br><span class="desc">H1 (r162, ported from r184 upstream): four-model browser (DamagedHelmet, Duck, Flamingo, Horse) cycled via gamepad A/B; full HDR Royal Esplanade env-map + <code>PMREMGenerator</code> IBL + ACES tone mapping. Reverted from r184 to r162 due to <a href="brewser://memory/mesa-nouveau-pmrem-wedge">Mesa Nouveau PMREM wedge</a> &mdash; r184 retry deferred to real hw.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-morphtargets-sphere/">webgl-morphtargets-sphere</a></strong>
+<br><span class="desc">#17: GLTF sphere with 2 morph targets ("Ship"/"Blob") + co-located Points overlay. Forced <code>USE_MORPHTARGETS</code> auto-promote.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-loader-obj/">webgl-loader-obj</a></strong>
+<br><span class="desc">#16: male02 OBJ (14 meshes) with MTL textures + camera-attached point light. Forced derivative-normals.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-instancing-dynamic/">webgl-instancing-dynamic</a></strong>
+<br><span class="desc">#15: 1,000 Suzanne instances in one <code>drawElementsInstanced</code> call. Forced native instancing.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-materials-wireframe/">webgl-materials-wireframe</a></strong>
+<br><span class="desc">#14: Walt head wireframe + barycentric <code>ShaderMaterial</code>. Forced raw-shader passthrough.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-interactive-cubes/">webgl-interactive-cubes</a></strong>
+<br><span class="desc">#13: 200 cubes + Raycaster + hover emissive highlight. Forced emissive uniform.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-materials-blending/">webgl-materials-blending</a></strong>
+<br><span class="desc">#12: 5&times;5 grid of textured planes &times; 5 blending modes + scrolling background.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-geometries/">webgl-geometries</a></strong>
+<br><span class="desc">#11: 12 built-in geometries in a 4&times;3 grid with shared <code>MeshPhongMaterial</code>. Forced Blinn-Phong specular.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-points-sprites/">webgl-points-sprites</a></strong>
+<br><span class="desc">#10: 10K-point cloud &times; 5 <code>THREE.Points</code> with snowflake sprites + FogExp2.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-geometry-dynamic/">webgl-geometry-dynamic</a></strong>
+<br><span class="desc">#9: 128&times;128 rolling water surface; per-frame <code>bufferSubData</code>.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-sprites/">webgl-sprites</a></strong>
+<br><span class="desc">#8: 200 orbital sprites + 5 HUD sprites. Forced sprite math path.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-geometry-shapes/">webgl-geometry-shapes</a></strong>
+<br><span class="desc">11 procedural 2D shapes &times; 9 variants. Forced <code>mapTransform</code> + <code>DoubleSide</code>.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-camera/">webgl-camera</a></strong>
+<br><span class="desc">#6: split-screen perspective/ortho toggle + 10K-particle starfield. Forced <code>GL_POINTS</code>.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/misc-controls-orbit/">misc-controls-orbit</a></strong>
+<br><span class="desc">#5: 500 cones, 2 directional lights + ambient, FogExp2. Left stick orbits.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-layers/">webgl-layers</a></strong>
+<br><span class="desc">#4: 300 cubes across 3 camera layers + camera-attached <code>PointLight</code>. Forced point-light path.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-geometry-colors/">webgl-geometry-colors</a></strong>
+<br><span class="desc">#3: three lit <code>IcosahedronGeometry</code> with HSL/RGB per-vertex coloring. Forced the bridge directional-light path.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-lines-colors/">webgl-lines-colors</a></strong>
+<br><span class="desc">#2: six rotating Hilbert-curve lines with per-vertex HSL coloring.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/webgl-lines-dashed/">webgl-lines-dashed</a></strong>
+<br><span class="desc">#1: Hilbert spline + wireframe box, <code>LineDashedMaterial</code>, linear fog.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/geometry-cube/">geometry-cube</a></strong>
+<br><span class="desc">Port of <code>webgl_geometry_cube</code>: a textured <code>BoxGeometry</code> with <code>crate.png</code>.</span></li>
+
+<li><strong><a href="brewser://apps/ThreeJSDemos/textured-rotating-cube/">textured-rotating-cube</a></strong>
+<br><span class="desc">A 1&times;1&times;1 cube with a 4&times;4 checkerboard <code>DataTexture</code>. First end-to-end test.</span></li>
+</ul>
+
+<p><a href="brewser://home/">back to welcome</a></p>
+</body>
+</html>

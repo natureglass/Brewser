@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Instancing Dynamic</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Instancing Dynamic</h1>
+<p class="lead">Port of <code>webgl_instancing_dynamic.html</code>: 1000
+instances of the Suzanne head mesh, each animated with a per-frame
+matrix update via <code>InstancedMesh.setMatrixAt</code>. Material is
+<code>MeshNormalMaterial</code> (normal-as-color output). The whole
+scene draws in a single <code>drawElementsInstancedANGLE</code> call —
+this milestone introduces native instancing through the bridge's
+raw-shader passthrough path.</p>
+
+<div class="stage">
+  <canvas id="inst-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('inst-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="inst-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('inst-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__instError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 90) : '(none)', !gErr);
+    row(58, 'ANGLE_instanced_arrays:',
+        globalThis.__instExtAngle ? 'available' : 'NULL',
+        !!globalThis.__instExtAngle);
+    row(80, 'model loaded:',
+        globalThis.__instModelLoaded ? 'yes' : '(loading...)',
+        !!globalThis.__instModelLoaded);
+    row(102, 'InstancedMesh added:',
+        globalThis.__instMeshAdded ? ('yes (' + (globalThis.__instInstanceCount | 0) + ' instances)') : '(pending)',
+        !!globalThis.__instMeshAdded);
+    row(124, 'animate() called:',
+        globalThis.__instAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__instAnimateCalled);
+    const fps = +globalThis.__instFps || 0;
+    row(146, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(168, 'renders / frames:',
+        String(globalThis.__instRenderCount | 0) + ' / ' + String(globalThis.__instFrameCount | 0),
+        true);
+    let bridgeDbg = '';
+    try {
+      const canvas2 = document.getElementById('inst-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getBackendInfo === 'function') {
+        const info = ctx2.getBackendInfo();
+        bridgeDbg = (info && info.debugDispatchState) ? String(info.debugDispatchState) : '(empty)';
+      } else {
+        bridgeDbg = '(no getBackendInfo)';
+      }
+    } catch (e) { bridgeDbg = 'err: ' + String(e); }
+    st.fillStyle = '#9bb1d6';
+    st.fillText('bridge dbg:', 14, 200);
+    st.fillStyle = '#ffd35e';
+    st.fillText(bridgeDbg.slice(0, 105), 14, 222);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+  setTimeout(renderStatus, 12000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/extensions-angle-instanced-arrays.html"><code>extensions/angle-instanced-arrays</code></a>
+&mdash; ported upstream Khronos test for the
+<code>ANGLE_instanced_arrays</code> extension. Verifies the extension
+object shape (3 methods + the <code>VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE</code>
+constant), range checks on <code>vertexAttribDivisorANGLE</code>,
+error conditions on both draw entry points (count/primcount &lt; 0,
+disallowed primitive modes, count==0/primcount==0 no-ops, UNSIGNED_BYTE
+indices), and end-to-end rendered output for both
+<code>drawArraysInstancedANGLE</code> and
+<code>drawElementsInstancedANGLE</code> — 4 quadrants colored
+red/green/blue/yellow via per-instance offset and color attributes
+(divisor=1). The output draws exercise the
+<strong>auto-promote-to-passthrough</strong> gate ([[bridge-instancing-support]]):
+no <code>#pragma raw_passthrough</code> needed in the shader sources,
+the divisor&gt;0 setup is what routes through native dispatch.</p>
+
+<p class="note">Look for <code>P+countXinst</code> tags in the bridge
+debug line — those are the instanced passthrough dispatches. A single
+<code>P+2901x1000</code> per frame indicates the whole 1000-Suzanne scene
+is drawing in one native <code>glDrawElementsInstanced</code>. At
+amount=10 (upstream default), expect ~1000 instances. Three.js issues
+one such draw per render. Performance depends entirely on the GPU's
+ability to chew through 967K triangles per frame; the CPU side only
+does per-instance matrix math and an instanceMatrix
+<code>bufferSubData</code> upload.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

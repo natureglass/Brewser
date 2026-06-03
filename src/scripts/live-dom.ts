@@ -58,10 +58,10 @@ import {
 } from './live-video.js';
 import { getInlineLayout, getLayoutBox } from './live-layout.js';
 import {
-	isLiveCacheBuilding, patchLiveCacheRegion, scrollElementIntoView,
-	syncLiveCacheVersion,
+	isLiveCacheBuilding, patchLiveCacheRegion, patchLiveImagePixelsOnly,
+	scrollElementIntoView, syncLiveCacheVersion,
 } from './live-overlay.js';
-import { markLiveDirty, requestFullRepaint } from './live-paint-control.js';
+import { markLiveDirty, markPageHasCanvas2dActivity, requestFullRepaint } from './live-paint-control.js';
 
 const LIVE_ELEMENT_BRAND = Symbol('LiveElement');
 
@@ -71,10 +71,10 @@ const LIVE_ELEMENT_BRAND = Symbol('LiveElement');
 // nx.js's `Image` fetch resolves a relative URL against the runtime base
 // (`romfs:/`), NOT the page — so a page-authored relative path read the
 // BUNDLED romfs copy instead of the editable profile copy (and required a
-// full .nro rebuild + redeploy to update). `browser://` URLs can't be
+// full .nro rebuild + redeploy to update). `brewser://` URLs can't be
 // fetched by Image at all (its fetch's protocol registry has no browser
 // loader). The shell sets the active profile root here so `<img>` srcs that
-// use the profile-pages convention (`../pages/<rest>`, `browser://<rest>`)
+// use the profile-pages convention (`../pages/<rest>`, `brewser://<rest>`)
 // resolve to the absolute `<profile>/pages/<rest>` SD-card path, loading the
 // same file the rest of the browser serves — editable via a profile sync.
 let liveProfileRoot = '';
@@ -112,6 +112,112 @@ const activeGifAnimations = new Set<{ cancel: () => void }>();
 export function clearGifAnimations(): void {
 	for (const t of activeGifAnimations) t.cancel();
 	activeGifAnimations.clear();
+}
+
+/** Sister registry for CSS-animation tickers (one per element running a
+ * `@keyframes` animation). Shell calls `clearCssAnimations` on page-
+ * change, same lifecycle as the GIF set. */
+const activeCssAnimations = new Set<{ cancel: () => void }>();
+const cssAnimTickerByEl = new WeakMap<LiveElement, { cancel: () => void }>();
+const cssAnimStateByEl = new WeakMap<LiveElement, CssAnimState>();
+
+export function clearCssAnimations(): void {
+	for (const t of activeCssAnimations) t.cancel();
+	activeCssAnimations.clear();
+}
+
+/** Per-frame interpolated values for an element under CSS animation.
+ * The painter reads this in `paintBoxedElement` (via `getCssAnimState`)
+ * and wraps the element's draw with ctx.transform / globalAlpha. */
+export type CssAnimState = {
+	rotateRad?: number;
+	scaleX?: number;
+	scaleY?: number;
+	opacity?: number;
+};
+
+/** Painter-side lookup: current interpolated values for `el`, or
+ * undefined if no animation is running. */
+export function getCssAnimState(el: LiveElement): CssAnimState | undefined {
+	return cssAnimStateByEl.get(el);
+}
+
+/** Painter-side keyframe stop carrier (the registry stores arrays of
+ * these — see live-css's `KeyframeStop`). Re-declared here to avoid
+ * importing CSS internals from a callback signature. */
+type KeyframeStop = { offset: number; rotateRad?: number; scaleX?: number; scaleY?: number; opacity?: number };
+
+/** Start a CSS-animation ticker for `el` if its computed style carries
+ * an `animation: <name> <duration> …` shorthand AND the named
+ * `@keyframes` rule has been registered. Idempotent. */
+export function ensureCssAnimation(
+	el: LiveElement,
+	spec: { name: string; durationMs: number; iterationCount: number | 'infinite' },
+	keyframesLookup: (name: string) => KeyframeStop[] | undefined,
+): void {
+	if (cssAnimTickerByEl.has(el)) return;
+	const stops = keyframesLookup(spec.name);
+	if (!stops || stops.length === 0) return;
+	if (!(spec.durationMs > 0)) return;
+	const start = performance.now();
+	let cancelled = false;
+	let tid: ReturnType<typeof setTimeout> | null = null;
+	const tick = (): void => {
+		if (cancelled) return;
+		const elapsed = performance.now() - start;
+		let t = elapsed / spec.durationMs;
+		if (spec.iterationCount !== 'infinite') {
+			if (t >= spec.iterationCount) {
+				cssAnimStateByEl.set(el, sampleStops(stops, 1));
+				patchLiveCacheRegion(el);
+				requestFullRepaint();
+				activeCssAnimations.delete(ticker);
+				cssAnimTickerByEl.delete(el);
+				return;
+			}
+		}
+		t = t - Math.floor(t);
+		cssAnimStateByEl.set(el, sampleStops(stops, t));
+		patchLiveCacheRegion(el);
+		requestFullRepaint();
+		tid = setTimeout(tick, 33);
+	};
+	const ticker = {
+		cancel: () => {
+			cancelled = true;
+			if (tid !== null) clearTimeout(tid);
+		},
+	};
+	cssAnimTickerByEl.set(el, ticker);
+	activeCssAnimations.add(ticker);
+	tick();
+}
+
+/** Linear interpolation between the two flanking keyframe stops. */
+function sampleStops(stops: KeyframeStop[], t: number): CssAnimState {
+	if (stops.length === 1) {
+		return { rotateRad: stops[0].rotateRad, scaleX: stops[0].scaleX, scaleY: stops[0].scaleY, opacity: stops[0].opacity };
+	}
+	let lo = stops[0], hi = stops[stops.length - 1];
+	for (let i = 0; i < stops.length - 1; i++) {
+		if (t >= stops[i].offset && t <= stops[i + 1].offset) {
+			lo = stops[i]; hi = stops[i + 1]; break;
+		}
+	}
+	const span = (hi.offset - lo.offset) || 1;
+	const u = (t - lo.offset) / span;
+	const lerp = (a?: number, b?: number): number | undefined => {
+		if (a === undefined && b === undefined) return undefined;
+		if (a === undefined) return b;
+		if (b === undefined) return a;
+		return a + (b - a) * u;
+	};
+	return {
+		rotateRad: lerp(lo.rotateRad, hi.rotateRad),
+		scaleX: lerp(lo.scaleX, hi.scaleX),
+		scaleY: lerp(lo.scaleY, hi.scaleY),
+		opacity: lerp(lo.opacity, hi.opacity),
+	};
 }
 
 // =========================================================================
@@ -295,14 +401,14 @@ export function clearBackgroundImageCache(): void {
 
 // =========================================================================
 // Image-load diagnostic — appends every `<img>` load attempt + result to
-// `sdmc:/switch/webprofiles/default/logs/swb_img_diag.log` so we can
+// `sdmc:/switch/brewser/logs/swb_img_diag.log` so we can
 // diagnose missing-image bugs on real hardware (where stdout/stderr aren't
 // easy to see). Capped so a broken page can't fill the SD card. Set
 // `IMG_DIAG` to `false` to silence.
 // =========================================================================
 
 const IMG_DIAG = true;
-const IMG_DIAG_PATH = 'sdmc:/switch/webprofiles/default/logs/swb_img_diag.log';
+const IMG_DIAG_PATH = 'sdmc:/switch/brewser/logs/swb_img_diag.log';
 const IMG_DIAG_CAP = 500;
 let _imgDiagCount = 0;
 function _imgDiag(msg: string): void {
@@ -314,8 +420,97 @@ function _imgDiag(msg: string): void {
 	} catch (_) { /* ignore */ }
 }
 
+// =========================================================================
+// Phase 4 — image-completion coalescing (2026-06-02; see
+// [[project-swb-parallel-processing-milestone]])
+// =========================================================================
+//
+// Each <img> load that completes used to fire bumpLiveTreeVersion +
+// markLiveDirty + requestFullRepaint immediately. For a page with N images
+// landing in close succession (typical home/apps pages with 6+ logos,
+// or Phase 0 stress at N=30), the in-progress chunked cache rebuild
+// restarted on every bump — never finishing while images kept landing
+// (see [[reference-swb-live-dom-partial-repaint]] — the dirty-check
+// at the top of paintLiveOverlay forces a restart when buildVersion
+// changes mid-build). Symptom: paint cadence collapsed to ~14 fps
+// during the onload window, which the user perceived as "images load
+// slow during navigation".
+//
+// Coalescing: each completion adds itself to one of two pending sets
+// (explicit-dimensions images need a region patch only; auto-
+// dimensions images need a layout-affecting invalidation) and
+// schedules a setTimeout(0) flush. The flush drains both sets in one
+// batch — ONE bumpLiveTreeVersion + ONE requestFullRepaint regardless
+// of how many images landed. The chunked rebuild gets to run
+// uninterrupted.
+//
+// Trade-off: a single isolated image load is delayed by one macrotask
+// (~ms) vs. firing immediately. Imperceptible. A batch of N images
+// triggers one rebuild instead of N restarts, which is the user-
+// visible win the milestone targets.
+
+const pendingExplicitImageCompletions = new Set<LiveElement>();
+const pendingAutoImageCompletions = new Set<LiveElement>();
+let imageCompletionFlushScheduled = false;
+
+function queueImageCompletion(el: LiveElement, explicit: boolean): void {
+	// An element can't be in both sets — clear the other first so a
+	// rapid src reassignment that flips between explicit-dimensions
+	// and auto doesn't double-flush. (Edge case; mostly just hygiene.)
+	if (explicit) {
+		pendingAutoImageCompletions.delete(el);
+		pendingExplicitImageCompletions.add(el);
+	} else {
+		pendingExplicitImageCompletions.delete(el);
+		pendingAutoImageCompletions.add(el);
+	}
+	if (imageCompletionFlushScheduled) return;
+	imageCompletionFlushScheduled = true;
+	setTimeout(flushPendingImageCompletions, 0);
+}
+
+function flushPendingImageCompletions(): void {
+	imageCompletionFlushScheduled = false;
+	if (pendingExplicitImageCompletions.size === 0
+		&& pendingAutoImageCompletions.size === 0) return;
+	// Snapshot + clear before applying, so an onload that fires
+	// re-entrantly (shouldn't happen, but defensive) doesn't get
+	// double-applied.
+	const explicit = Array.from(pendingExplicitImageCompletions);
+	const auto = Array.from(pendingAutoImageCompletions);
+	pendingExplicitImageCompletions.clear();
+	pendingAutoImageCompletions.clear();
+	// Explicit-dimensions images: LIGHTWEIGHT patch. Paint just each
+	// IMG's own box on top of the existing cache; the bg stack behind
+	// each IMG (card gradient + shadow + border) was painted into the
+	// cache during the initial build and DOES NOT NEED TO BE
+	// REPAINTED. Measured: ~193 ms/img → ~0-2 ms/img on Featured app
+	// cards (Cairo gradient + box-shadow skipped).
+	if (explicit.length > 0) patchLiveImagePixelsOnly(explicit);
+	// Auto-dimensions images: layout depends on the decoded size, so
+	// route through the dirty-set path — patchLiveDirtyRegions on the
+	// next paint will re-layout each subtree with the now-known
+	// natural width/height and repaint the changed region.
+	for (const el of auto) markLiveDirty(el);
+	// Batched invalidation — one bump + one repaint for the whole batch.
+	if (auto.length > 0) bumpLiveTreeVersion();
+	if (explicit.length > 0 && !isLiveCacheBuilding()) syncLiveCacheVersion();
+	requestFullRepaint();
+}
+
+/** Drop any pending image-completion work on navigation. Called by
+ * `resetLiveRoot` so a deferred flush from the previous page doesn't
+ * fire against detached elements after the new page has loaded. */
+function clearPendingImageCompletions(): void {
+	pendingExplicitImageCompletions.clear();
+	pendingAutoImageCompletions.clear();
+	// Leave `imageCompletionFlushScheduled = true` if it already is —
+	// the scheduled timer will fire harmlessly on an empty set and
+	// reset the flag.
+}
+
 /** SD-card directory of the page currently loaded (e.g.
- * `sdmc:/switch/webprofiles/default/pages/apps/mediaplayer/`). Set by
+ * `sdmc:/switch/brewser/apps/mediaplayer/` for app pages, or `sdmc:/switch/brewser/webprofiles/default/<rest>/` for per-profile pages). Set by
  * the shell per navigation; used to resolve PAGE-relative `<img>` srcs
  * (`./assets/x.png`) so `index.html` acts as the base, like a real browser. */
 export function setLivePageBase(dir: string): void { livePageBase = dir; }
@@ -342,11 +537,11 @@ export function resolveLiveResourceUrl(src: string): string {
 	if (!s) return s;
 	// Already a fetchable absolute scheme → use as-is.
 	if (/^(?:sdmc|romfs|file|data|blob|https?):/i.test(s)) return s;
-	// `browser://<rest>` is an absolute browser URL → map to the profile
-	// pages path (Image can't fetch the `browser:` scheme).
-	if (/^browser:\/\//i.test(s)) {
+	// `brewser://<rest>` is an absolute browser URL → map to the profile
+	// pages path (Image can't fetch the `brewser:` scheme).
+	if (/^brewser:\/\//i.test(s)) {
 		if (!liveProfileRoot) return s;
-		const rel = s.replace(/^browser:\/\//i, '').replace(/^pages\//, '');
+		const rel = s.replace(/^brewser:\/\//i, '').replace(/^pages\//, '');
 		return `${liveProfileRoot}pages/${rel}`;
 	}
 	// Everything else is PAGE-relative — resolved against the page's own
@@ -475,6 +670,59 @@ export class LiveTokenList {
  * identity issues if the module ever gets re-evaluated). */
 export function isLiveElement(v: unknown): v is LiveElement {
 	return !!v && typeof v === 'object' && (v as { [LIVE_ELEMENT_BRAND]?: true })[LIVE_ELEMENT_BRAND] === true;
+}
+
+/**
+ * Make page-script 2D-canvas drawing visible. Native ctx mutation methods
+ * (fillRect, drawImage, etc.) write directly to the OffscreenCanvas and
+ * never touch live-tree state — the engine's paint loop has no signal
+ * that the canvas region needs re-blitting and silently sleeps. Pages
+ * that animate a 2D canvas via setTimeout/rAF (e.g. demo-breakout) end
+ * up with the render loop firing but the framebuffer never updating
+ * past the initial paint.
+ *
+ * The fix: replace the painter methods on the returned context with
+ * versions that delegate to the original then `bumpLiveTreeVersion()` +
+ * `requestFullRepaint()`. Done once per context instance via instance
+ * shadowing (own-property overrides the prototype) so the originals
+ * stay reachable through the captured `orig` closure. Sibling family
+ * to the appendChild / textContent / bg-image-onload repaint hooks.
+ *
+ * Only true pixel-writing methods are wrapped — beginPath / moveTo /
+ * arc / save / clip etc. don't paint, so they stay native.
+ */
+const CANVAS_PAINTER_METHODS = [
+	'fillRect', 'clearRect', 'strokeRect',
+	'fill', 'stroke',
+	'fillText', 'strokeText',
+	'drawImage', 'putImageData',
+] as const;
+const CTX_WRAPPED_FLAG = Symbol('liveCtx2dWrapped');
+export function wrapCanvasCtx2dForRepaint(ctx: OffscreenCanvasRenderingContext2D): void {
+	// Idempotent — page-script flows that re-call getContext on the
+	// same canvas (canvas-runner shim does this every time) must not
+	// re-wrap, or each call would double-shadow and the closure stack
+	// would multiply repaint signals per draw. Flag the instance.
+	const tagged = ctx as unknown as { [CTX_WRAPPED_FLAG]?: true };
+	if (tagged[CTX_WRAPPED_FLAG]) return;
+	tagged[CTX_WRAPPED_FLAG] = true;
+	for (const name of CANVAS_PAINTER_METHODS) {
+		const orig = (ctx as unknown as Record<string, unknown>)[name];
+		if (typeof orig !== 'function') continue;
+		(ctx as unknown as Record<string, unknown>)[name] = function (this: OffscreenCanvasRenderingContext2D, ...args: unknown[]) {
+			const result = (orig as (...a: unknown[]) => unknown).apply(this, args);
+			bumpLiveTreeVersion();
+			requestFullRepaint();
+			// Tells the shell to run overlayLiveAnimatedCanvases each
+			// frame — without this the cached-layout fast path skips
+			// the canvas re-blit and the framebuffer freezes at the
+			// initial paint. rAF use sets a parallel flag in
+			// canvas-runner; 2D canvas drawing sets this one. Both ORed
+			// in the shell's gate.
+			markPageHasCanvas2dActivity();
+			return result;
+		};
+	}
 }
 
 export class LiveElement {
@@ -608,7 +856,9 @@ export class LiveElement {
 	 * = rules`) replace the previous registration. */
 	get textContent(): string { return this._text; }
 	set textContent(v: string) {
-		this._text = v == null ? '' : String(v);
+		const newText = v == null ? '' : String(v);
+		const changed = this._text !== newText || this.children.length > 0;
+		this._text = newText;
 		// Setting textContent removes all children per DOM spec. lil-gui
 		// uses this pattern on `$display.innerHTML = '...'` to replace
 		// the current select option text — there are no real children to
@@ -621,6 +871,16 @@ export class LiveElement {
 			registerStyleSheet(this, this._text);
 		}
 		invalidateLiveStyle(this);
+		// REGRESSION-FIX 2026-06-03: previously called bumpLiveTreeVersion
+		// + requestFullRepaint unconditionally to wake the paint loop for
+		// async text updates (see [[feedback-swb-textcontent-no-repaint]]).
+		// That broke mediaplayer (no audio, time-bar frozen), <video> (no
+		// frame advance), and Web Audio (no sound) on real HW — the heavy
+		// per-text-change repaints starve the audrv setInterval, killing
+		// audio output. Guarded behind `changed` AND only marks dirty (no
+		// requestFullRepaint) so the next paint picks up the change but
+		// doesn't immediately preempt the timer queue.
+		if (changed) markLiveDirty(this);
 	}
 
 	/** `innerHTML`. A plain string (no `<`) takes the fast path and
@@ -787,7 +1047,7 @@ export class LiveElement {
 		else if (lower === 'class') this.classList.value = value;
 		// Batch B: `<img src="...">` triggers an async load. onload bumps
 		// the live tree version so the cache rebuilds with the loaded
-		// image. `romfs:/` / `sdmc:/` work; `browser://` may not per
+		// image. `romfs:/` / `sdmc:/` work; `brewser://` may not per
 		// [[nxjs-image-bypasses-global-fetch]].
 		else if (lower === 'src' && this.tagName === 'IMG') {
 			this.loadImage(value);
@@ -879,34 +1139,20 @@ export class LiveElement {
 					|| this.getAttribute('width') !== null;
 				const hasH = this.style.height !== undefined || cs.height !== undefined
 					|| this.getAttribute('height') !== null;
-				if (hasW && hasH) {
-					patchLiveCacheRegion(this);
-					// Don't advance the cache version while a build is in
-					// flight (it owns the version handshake); the in-progress
-					// build keeps running and our patch lands in the same
-					// offscreen. Only the steady-state path syncs.
-					if (!isLiveCacheBuilding()) syncLiveCacheVersion();
-					requestFullRepaint();
-				} else {
-					// Auto-dimension image — layout depends on the decoded
-					// size, so the box needs to grow from the pre-load
-					// fallback (parent width × default intrinsic height) to
-					// the natural width/height. Bump the live tree version
-					// AND mark this element dirty so the next paint either
-					// reaches the full-rebuild fallback (when the dirty set
-					// drains empty for other reasons) or routes through
-					// `patchLiveDirtyRegions`, which re-lays-out this
-					// element with the now-known naturalWidth/Height and
-					// repaints both the old (small) and new (grown) regions.
-					// Without the mark, the patch path can sync the cache
-					// version without doing the layout update — leaving the
-					// IMG painted at the fallback box (the symptom on slower
-					// SDMC fetches: the animated-GIF ticker starts patching
-					// frames into a pre-load 1280×24 strip).
-					markLiveDirty(this);
-					bumpLiveTreeVersion();
-					requestFullRepaint();
-				}
+				// Phase 4 coalescing: defer the patch / mark-dirty +
+				// bump + repaint to a setTimeout(0) flush so N
+				// near-simultaneous onloads cause ONE batched
+				// invalidation instead of N restarts of the chunked
+				// cache rebuild. See the Phase 4 block near IMG_DIAG
+				// for the full rationale.
+				//
+				// Explicit-dimension images (hasW && hasH) only need
+				// their box patched in place — layout doesn't change.
+				// Auto-dimension images need a layout invalidation so
+				// patchLiveDirtyRegions re-lays-out the box with the
+				// now-known natural width/height; mark dirty + bump
+				// happens once-per-batch in the flush.
+				queueImageCompletion(this, hasW && hasH);
 			};
 			img.onerror = (ev: unknown) => {
 				// Best-effort error message extraction (ErrorEvent.error
@@ -925,11 +1171,12 @@ export class LiveElement {
 				// Genuinely broken image: flag it so the painter switches
 				// from "render nothing (still loading)" to the alt-text
 				// placeholder, and repaint that region so it shows. Box is
-				// already reserved by layout, so a region patch suffices.
+				// already reserved by layout, so a region patch suffices
+				// — route through the Phase 4 coalescing queue so an
+				// onerror that lands among a batch of successful onloads
+				// participates in the same flush.
 				this.imageLoadFailed = true;
-				patchLiveCacheRegion(this);
-				if (!isLiveCacheBuilding()) syncLiveCacheVersion();
-				requestFullRepaint();
+				queueImageCompletion(this, true);
 			};
 			img.src = resolved;
 		} catch (e) {
@@ -1042,6 +1289,13 @@ export class LiveElement {
 		propagateAttached(child, this.attached);
 		markLiveDirty(this);
 		bumpLiveTreeVersion();
+		// `bumpLiveTreeVersion` only invalidates the cache — on idle
+		// pages the paint loop sleeps, so DOM mutations from async
+		// paths (e.g. fetch().then() → appendChild) wouldn't visually
+		// show up until the next user-driven repaint. Active repaint
+		// matches what bg-image onload does (memory:
+		// feedback-swb-bg-image-repaint).
+		requestFullRepaint();
 		return child;
 	}
 	removeChild(child: LiveElement): LiveElement {
@@ -1053,6 +1307,7 @@ export class LiveElement {
 			if (child.tagName === 'STYLE') unregisterStyleSheet(child);
 			markLiveDirty(this);
 			bumpLiveTreeVersion();
+			requestFullRepaint();
 		}
 		return child;
 	}
@@ -1071,6 +1326,7 @@ export class LiveElement {
 		propagateAttached(child, this.attached);
 		markLiveDirty(this);
 		bumpLiveTreeVersion();
+		requestFullRepaint();
 		return child;
 	}
 	replaceChild(newChild: LiveElement, oldChild: LiveElement): LiveElement {
@@ -1085,6 +1341,7 @@ export class LiveElement {
 		propagateAttached(newChild, this.attached);
 		markLiveDirty(this);
 		bumpLiveTreeVersion();
+		requestFullRepaint();
 		return oldChild;
 	}
 	/** Detach from parent. lil-gui's `destroy()` removes its panel via
@@ -1160,6 +1417,7 @@ export class LiveElement {
 		}
 		if (!this.canvasCtx2d) {
 			this.canvasCtx2d = this.offscreen.getContext('2d');
+			if (this.canvasCtx2d) wrapCanvasCtx2dForRepaint(this.canvasCtx2d);
 		}
 		return this.canvasCtx2d;
 	}
@@ -1478,6 +1736,10 @@ export function resetLiveRoot(): void {
 	// owned by the previous page session; flush so the new page's url()
 	// references trigger fresh loads against the new base URL.
 	clearBackgroundImageCache();
+	// Phase 4: drop any pending image-completion work so a deferred
+	// flush from the previous page doesn't fire against detached
+	// elements after the new page has loaded.
+	clearPendingImageCompletions();
 }
 
 /**

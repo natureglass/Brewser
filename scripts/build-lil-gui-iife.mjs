@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, '..', '..', 'three-latest', 'examples', 'jsm', 'libs', 'lil-gui.module.min.js');
-const DST = resolve(__dirname, '..', 'romfs', 'pages', 'threejs-demos', 'libs', 'lil-gui.iife.js');
+const DST = resolve(__dirname, '..', 'romfs', 'apps', 'ThreeJSDemos', 'libs', 'lil-gui.iife.js');
 
 const HEADER = `/**
  * lil-gui (v0.17) IIFE conversion for switch-web-browser.

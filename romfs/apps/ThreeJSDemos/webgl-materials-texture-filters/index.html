@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Texture Filters</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Texture Filters</h1>
+<p class="lead">Port of <code>webgl_materials_texture_filters.html</code>:
+two parallel scenes rendered side-by-side via
+<code>renderer.setScissor</code>. <strong>Left half</strong>:
+<code>LinearMipmapLinear</code> on the floor + <code>Linear</code> on
+the painting. <strong>Right half</strong>: <code>Nearest</code>
+everywhere. Both scenes share a 128&times;128 checkerboard floor
+tiled 1000&times; (so it recedes to the horizon and would alias
+badly without mipmaps) and a Caravaggio <em>Canestra di frutta</em>
+on a framed plane with a tilted shadow reflection.
+First milestone to exercise the bridge's <strong>mipmap-aware
+texture filtering</strong> &mdash; nxjs's
+<code>texParameteri</code> now accepts the 4 mipmap minFilter
+variants (NEAREST/LINEAR &times; MIPMAP &times; NEAREST/LINEAR), and
+<code>generateMipmap</code> is no longer a no-op (promotes the
+texture to a persistent GLES handle via the shared
+<code>ensure_texture_promoted</code> helper from milestone #22 +
+calls native <code>glGenerateMipmap</code>).</p>
+
+<div class="stage">
+  <canvas id="filters-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('filters-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="filters-status" width="900" height="360"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('filters-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 360);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__filtersError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const fps = +globalThis.__filtersFps || 0;
+    row(58, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(80, 'frames rendered:', String(globalThis.__filtersFrameCount | 0), true);
+    row(102, 'painting loaded:',
+        globalThis.__filtersPaintingLoaded ? 'yes' : 'no',
+        !!globalThis.__filtersPaintingLoaded);
+    row(124, 'painting size:',
+        (globalThis.__filtersPaintingW | 0) + ' x ' + (globalThis.__filtersPaintingH | 0),
+        (globalThis.__filtersPaintingW | 0) > 0);
+    row(146, 'generateMipmap calls:',
+        String(globalThis.__filtersGenMipmapCalls | 0),
+        (globalThis.__filtersGenMipmapCalls | 0) > 0);
+    row(168, 'LinearMipmapLinear accepted:',
+        globalThis.__filtersMipmapFilterOk ? 'yes' : 'no',
+        !!globalThis.__filtersMipmapFilterOk);
+    const errBefore = globalThis.__filtersGlErrorBefore;
+    const errAfter = globalThis.__filtersGlErrorAfter;
+    row(190, 'gl.getError before render:',
+        '0x' + ((errBefore | 0) >>> 0).toString(16), errBefore === 0);
+    row(212, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16), errAfter === 0);
+    let exts = '';
+    try {
+      const c2 = document.getElementById('filters-canvas');
+      const ctx2 = c2 && c2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 240);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 262);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/textures-mipmap-filter-and-generate.html"><code>textures/mipmap-filter-and-generate</code></a>
+&mdash; hand-rolled, pins the milestone-#24 bridge surface:
+<code>texParameteri</code> accepts the 4 new mipmap MIN_FILTER
+variants while still rejecting them on MAG_FILTER; <code>generateMipmap</code>
+actually generates mipmaps on a CPU-data texture (promoting if
+needed); plus negative cases (undefined texture, CUBE_MAP target,
+junk enums).</p>
+
+<p class="note">Mouse input from the upstream demo (camera follows
+cursor) is replaced by gamepad <strong>left stick</strong> &mdash; pan
+to compare the floor's aliasing characteristics in different
+positions. The 128&times;128 floor checkerboard is built procedurally
+into a <code>DataTexture</code> instead of upstream's <code>CanvasTexture</code>
++ <code>document.createElement('canvas')</code> because nx.js's
+<code>texImage2D</code> doesn't accept canvas elements directly.
+Caravaggio's <em>Canestra di frutta</em> JPG (~149 KB) is loaded
+via <code>Image</code> + <code>OffscreenCanvas</code> +
+<code>DataTexture</code> per
+<a href="brewser://memory/nxjs-image-bypasses-global-fetch">memory</a>.
+Visual contrast: the left floor (LinearMipmapLinear) is smooth
+even at the horizon; the right floor (Nearest) shows the
+characteristic Moir&eacute; / shimmer pattern. The painting
+contrast is more subtle but visible up close on Citron.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

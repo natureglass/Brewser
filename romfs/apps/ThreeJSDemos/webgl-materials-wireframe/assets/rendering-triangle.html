@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL rendering/triangle (raw-shader passthrough)</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<canvas id="example" width="50" height="50"></canvas>
+<canvas id="khronos-status" width="900" height="240"></canvas>
+
+<!--
+  Port of WebGL/sdk/tests/conformance/rendering/triangle.html.
+
+  Adapted for switch-web-browser's harness + the new raw-shader
+  passthrough path. Both shader sources are prefixed with
+  `#pragma raw_passthrough` so nxjs marks the program for native
+  glDrawArrays dispatch instead of the bridge's hardcoded-program swap
+  — without this, the user's `gl_FragColor = vec4(1,0,0,1)` would be
+  replaced by the bridge's own teal default and the test would fail.
+  This is the first conformance test to exercise the passthrough path
+  and the architectural rationale that previously put rendering-suite
+  tests in the [[nxjs-no-custom-fragment-shader]] AVOID bucket.
+
+  Adaptations from upstream:
+    - js-test-pre.js / webgl-test-utils.js → harness.js
+    - Status canvas + finishTest()
+    - readPixels y-coord flipped: upstream reads at WebGL-y=15 (i.e.
+      canvas-y=34, near the triangle's wide base). nx.js's readPixels
+      uses canvas-y (top-down — see [[nxjs-webgl-shader-names]]
+      "Viewport / scissor / readPixels x/y are canvas-y" block), so the
+      equivalent assertion is at canvas-y=34.
+-->
+
+<script>
+  globalThis.__khronosTestName = 'rendering-triangle-passthrough';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script id="vshader" type="x-shader/x-vertex">
+#pragma raw_passthrough
+attribute vec4 vPosition;
+void main()
+{
+    gl_Position = vPosition;
+}
+</script>
+
+<script id="fshader" type="x-shader/x-fragment">
+#pragma raw_passthrough
+precision mediump float;
+void main()
+{
+    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+}
+</script>
+
+<script>
+try {
+    description('WebGL rendering/triangle via raw-shader passthrough');
+
+    var wtu = WebGLTestUtils;
+    var gl = wtu.create3DContext('example');
+
+    var program = wtu.setupProgram(gl, ['vshader', 'fshader'], ['vPosition']);
+    assertMsg(program != null, 'setupProgram returned non-null');
+
+    // In switch-web-browser, every inline canvas's getContext('webgl')
+    // returns the SAME shared screen GL context (per [[swb-webgl-inline]]).
+    // `context->canvas` inside nx.js points at the screen canvas, so
+    // `gl.readPixels`'s internal canvas-y-to-native-y translation uses
+    // the SCREEN height, not the test's 50×50 `<canvas>` size.
+    //
+    // Also: nx.js's bridge interprets `gl.viewport(x, y, w, h)`'s y as
+    // canvas-y (top-down) and flips internally to native GL bottom-up
+    // — see [[nxjs-webgl-shader-names]]. So `viewport(0, 0, 50, 50)`
+    // places the triangle in the top-left 50×50 corner of the drawing
+    // buffer (top-down), which is exactly where the test's
+    // `readPixels(x, 0..49)` reads from.
+    gl.viewport(0, 0, 50, 50);
+
+    var vertexObject = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexObject);
+    gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([0, 0.5, 0,  -0.5, -0.5, 0,  0.5, -0.5, 0]),
+        gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'drawArrays produced no GL error');
+
+    // Pixel assertions. The viewport above places the triangle in the
+    // top-left 50×50 region of the screen's drawing buffer. The
+    // runtime's `readPixels(x, y, w, h)` reads with `y` measured
+    // top-down from the drawing buffer's origin (translation uses the
+    // screen canvas height), so canvas-y 0..49 corresponds directly to
+    // the 50 rows our triangle covers.
+    //
+    // Triangle vertices: (0, 0.5), (-0.5, -0.5), (0.5, -0.5). Under a
+    // 50×50 viewport that maps to:
+    //   - top vertex at viewport pixel (25, 37.5)  → canvas-y 12.5
+    //   - base at viewport pixel y=12.5            → canvas-y 37.5
+    // So the triangle is roughly the canvas-y 12..37 strip.
+
+    // First row (canvas-y=0) — above the triangle, transparent black.
+    wtu.checkCanvasRect(gl, 0, 0, 50, 1, [0, 0, 0, 0],
+        'top row (canvas-y=0) above triangle is transparent black');
+
+    // Mid-triangle scanline. canvas-y=34 is near the wide base; the
+    // triangle's x-span at y=34 is roughly 14..36, so any 10-pixel run
+    // within (15..35) reads pure red.
+    wtu.checkCanvasRect(gl, 20, 34, 10, 1, [255, 0, 0, 255],
+        'mid scanline (canvas-y=34) inside triangle is red');
+
+    // Last row (canvas-y=49) — below the triangle, transparent black.
+    wtu.checkCanvasRect(gl, 0, 49, 50, 1, [0, 0, 0, 0],
+        'bottom row (canvas-y=49) below triangle is transparent black');
+
+} catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : String(e)));
+} finally {
+    finishTest();
+}
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-materials-wireframe/">back to Materials Wireframe demo</a></p>
+</body>
+</html>

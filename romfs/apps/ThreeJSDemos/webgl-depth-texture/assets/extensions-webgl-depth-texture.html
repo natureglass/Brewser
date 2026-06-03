@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>WEBGL_depth_texture conformance &mdash; extensions/webgl-depth-texture</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         font-family: system-ui; }
+  h1 { color: #ffd35e; }
+  a { color: #7eda9f; }
+</style>
+</head>
+<body>
+<h1>Conformance: <code>extensions/webgl-depth-texture</code></h1>
+
+<p>Hand-rolled to pin the WEBGL_depth_texture surface added in milestone
+#19.5 (<code>bridge-depth-texture-support</code>). Adapted from the
+Khronos conformance test of the same name, scoped to the API shape and
+error returns nx.js actually implements (we don't surface
+<code>DEPTH_BITS</code>/<code>STENCIL_BITS</code>
+<code>getParameter</code> pnames, <code>INVALID_FRAMEBUFFER_OPERATION</code>,
+<code>copyTexImage2D</code>, or <code>copyTexSubImage2D</code> that the
+upstream test depends on for its pixel-output verification path).
+Covers:</p>
+
+<ul>
+<li><code>WEBGL_depth_texture</code> listed in
+<code>getSupportedExtensions</code> + <code>OES_depth_texture</code>
+sibling listed too</li>
+<li><code>getExtension('WEBGL_depth_texture')</code> returns a non-null
+object exposing <code>UNSIGNED_INT_24_8_WEBGL</code> = 0x84FA</li>
+<li><code>getExtension('OES_depth_texture')</code> alias works the same</li>
+<li><code>gl.UNSIGNED_INT_24_8_WEBGL</code> constant defined on the
+context proto (0x84FA)</li>
+<li><code>gl.DEPTH_COMPONENT</code> constant defined (0x1902)</li>
+<li><code>texImage2D</code> happy-path for
+<code>(DEPTH_COMPONENT, UNSIGNED_SHORT, null)</code></li>
+<li><code>texImage2D</code> happy-path for
+<code>(DEPTH_COMPONENT, UNSIGNED_INT, null)</code></li>
+<li><code>texImage2D</code> happy-path for
+<code>(DEPTH_STENCIL, UNSIGNED_INT_24_8_WEBGL, null)</code></li>
+<li><code>texImage2D</code> rejects non-null data on depth formats with
+<code>INVALID_OPERATION</code></li>
+<li><code>framebufferTexture2D</code> with depth texture attachment
+succeeds</li>
+<li><code>checkFramebufferStatus</code> returns
+<code>FRAMEBUFFER_COMPLETE</code> for color + depth-texture attachments</li>
+<li>Render-to-FBO smoke test: clear with depth, read back color
+attachment via readPixels (verifies the depth-texture-attached FBO is
+fully writable)</li>
+</ul>
+
+<canvas id="example" width="64" height="64"></canvas>
+<canvas id="khronos-status" width="900" height="640"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'extensions-webgl-depth-texture';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script>
+"use strict";
+var wtu = WebGLTestUtils;
+(async function () {
+  try {
+    description('extensions/webgl-depth-texture (WEBGL_depth_texture surface)');
+    const gl = wtu.create3DContext('example');
+    assertMsg(gl != null, 'gl context acquired');
+
+    // ── Constants exposed on the gl prototype ──
+    assertMsg(gl.DEPTH_COMPONENT === 0x1902,
+      'gl.DEPTH_COMPONENT === 0x1902');
+    assertMsg(gl.UNSIGNED_INT_24_8_WEBGL === 0x84FA,
+      'gl.UNSIGNED_INT_24_8_WEBGL === 0x84FA');
+    assertMsg(gl.DEPTH_STENCIL === 0x84F9,
+      'gl.DEPTH_STENCIL === 0x84F9');
+    assertMsg(gl.DEPTH_COMPONENT16 === 0x81A5,
+      'gl.DEPTH_COMPONENT16 === 0x81A5');
+
+    // ── getSupportedExtensions lists both names ──
+    const exts = gl.getSupportedExtensions() || [];
+    assertMsg(exts.indexOf('WEBGL_depth_texture') !== -1,
+      'getSupportedExtensions includes WEBGL_depth_texture');
+    assertMsg(exts.indexOf('OES_depth_texture') !== -1,
+      'getSupportedExtensions includes OES_depth_texture (sibling)');
+
+    // ── getExtension returns object with the constant ──
+    const ext = gl.getExtension('WEBGL_depth_texture');
+    assertMsg(ext != null, 'getExtension(WEBGL_depth_texture) is non-null');
+    assertMsg(ext.UNSIGNED_INT_24_8_WEBGL === 0x84FA,
+      'ext.UNSIGNED_INT_24_8_WEBGL === 0x84FA');
+
+    const extOes = gl.getExtension('OES_depth_texture');
+    assertMsg(extOes != null, 'getExtension(OES_depth_texture) is non-null');
+    assertMsg(extOes.UNSIGNED_INT_24_8_WEBGL === 0x84FA,
+      'OES alias also exposes UNSIGNED_INT_24_8_WEBGL');
+
+    // ── texImage2D(DEPTH_COMPONENT, UNSIGNED_SHORT, null) ──
+    const texD16 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texD16);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, 64, 64, 0,
+      gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'texImage2D(DEPTH_COMPONENT, UNSIGNED_SHORT, NULL) succeeds');
+
+    // ── texImage2D(DEPTH_COMPONENT, UNSIGNED_INT, null) ──
+    const texD32 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texD32);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, 64, 64, 0,
+      gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'texImage2D(DEPTH_COMPONENT, UNSIGNED_INT, NULL) succeeds');
+
+    // ── texImage2D(DEPTH_STENCIL, UNSIGNED_INT_24_8_WEBGL, null) ──
+    const texDS = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texDS);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_STENCIL, 64, 64, 0,
+      gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8_WEBGL, null);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'texImage2D(DEPTH_STENCIL, UNSIGNED_INT_24_8_WEBGL, NULL) succeeds');
+
+    // ── Reject depth-format with non-null data → INVALID_OPERATION ──
+    gl.bindTexture(gl.TEXTURE_2D, texD16);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, 1, 1, 0,
+      gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, new Uint16Array(1));
+    wtu.glErrorShouldBe(gl, gl.INVALID_OPERATION,
+      'texImage2D depth-format with data rejected with INVALID_OPERATION');
+
+    // ── Reject depth-format with non-null typed array (UNSIGNED_INT) ──
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, 1, 1, 0,
+      gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, new Uint32Array(1));
+    wtu.glErrorShouldBe(gl, gl.INVALID_OPERATION,
+      'texImage2D depth-format (UNSIGNED_INT) with data rejected');
+
+    // ── Reject depth-stencil with non-null data ──
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_STENCIL, 1, 1, 0,
+      gl.DEPTH_STENCIL, gl.UNSIGNED_INT_24_8_WEBGL, new Uint32Array(1));
+    wtu.glErrorShouldBe(gl, gl.INVALID_OPERATION,
+      'texImage2D depth-stencil with data rejected');
+
+    // ── Reject mismatched internalformat/format combos with INVALID_ENUM ──
+    // (the WEBGL_depth_texture spec requires internalformat == format for
+    // unsized formats; mixing them is rejected.)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
+      gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'texImage2D rejects RGBA-internal + DEPTH_COMPONENT-format mismatch');
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, 1, 1, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, null);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'texImage2D rejects DEPTH_COMPONENT-internal + RGBA-format mismatch');
+
+    // ── Reject unsupported type for DEPTH_COMPONENT (e.g. UNSIGNED_BYTE) ──
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT, 1, 1, 0,
+      gl.DEPTH_COMPONENT, gl.UNSIGNED_BYTE, null);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'texImage2D rejects DEPTH_COMPONENT + UNSIGNED_BYTE');
+
+    // ── Build a complete FBO: color tex + depth-texture attachment ──
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+
+    const colorTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, colorTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 64, 64, 0, gl.RGBA,
+      gl.UNSIGNED_BYTE, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D, colorTex, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D COLOR_ATTACHMENT0 accepted');
+
+    // The depth-texture (texD16) was created earlier; attach it now.
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+      gl.TEXTURE_2D, texD16, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D DEPTH_ATTACHMENT with depth texture accepted');
+
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    assertMsg(status === gl.FRAMEBUFFER_COMPLETE,
+      'checkFramebufferStatus is FRAMEBUFFER_COMPLETE with depth-texture ' +
+      'attachment (got 0x' + status.toString(16) + ')');
+
+    // ── Clear into the FBO + readback verifies color path still works ──
+    gl.viewport(0, 0, 64, 64);
+    gl.clearColor(0.5, 0.25, 0.75, 1.0);
+    gl.clearDepth(1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'clear color + depth into FBO with depth-texture attachment succeeds');
+
+    const pixels = new Uint8Array(64 * 64 * 4);
+    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'readPixels from FBO with depth-texture attachment succeeds');
+
+    const idx = (32 * 64 + 32) * 4;
+    const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2],
+          a = pixels[idx + 3];
+    const tol = 4;
+    const ok = Math.abs(r - 128) <= tol && Math.abs(g - 64) <= tol &&
+               Math.abs(b - 191) <= tol && Math.abs(a - 255) <= tol;
+    assertMsg(ok,
+      'center pixel after clearColor(0.5,0.25,0.75,1) reads back near ' +
+      '(128,64,191,255) — got (' + r + ',' + g + ',' + b + ',' + a + ')');
+
+    // ── Detach + reattach depth texture ──
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+      gl.TEXTURE_2D, null, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D detach depth (null texture) accepted');
+
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+      gl.TEXTURE_2D, texD32, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D DEPTH_ATTACHMENT with UNSIGNED_INT depth ' +
+      'texture accepted');
+    const status2 = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    assertMsg(status2 === gl.FRAMEBUFFER_COMPLETE,
+      'FBO COMPLETE after swap to UNSIGNED_INT depth texture (got 0x' +
+        status2.toString(16) + ')');
+
+    // ── Reattach DEPTH_STENCIL texture via DEPTH_STENCIL_ATTACHMENT ──
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+      gl.TEXTURE_2D, null, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT,
+      gl.TEXTURE_2D, texDS, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D DEPTH_STENCIL_ATTACHMENT accepted');
+
+    // Cleanup.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(colorTex);
+    gl.deleteTexture(texD16);
+    gl.deleteTexture(texD32);
+    gl.deleteTexture(texDS);
+  } catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : e));
+  } finally {
+    finishTest();
+  }
+})();
+</script>
+
+<p><a href="../">back to webgl-depth-texture</a></p>
+</body>
+</html>

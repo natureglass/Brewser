@@ -2,48 +2,15 @@
 <html lang="en">
 <head>
 <title>Settings — switch-web-browser</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
 <style>
-  body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
-  h1 { color: #ffd35e; }
-  h2 { color: #7aa2ff; margin-top: 28px; }
-  a { color: #9bb1d6; text-decoration: none; }
-  .lead { color: #9bb1d6; }
-  .empty { color: #6a7c95; font-style: italic; }
-  ul.settings-list { list-style-type: none; }
-  ul.settings-list li {
-    background-color: #14202d;
-    padding: 8px 14px;
-    margin-top: 4px;
-    border-left: 3px solid #1f2c4d;
-  }
-  ul.settings-list .url { color: #6a7c95; }
-  ul.settings-list .desc {
-    display: block;
-    color: #6a7c95;
-    font-size: 15px;
-    margin-top: 2px;
-  }
-  /* Template rows are full-width buttons. The currently-active row
-     carries the `.active` class and (in the loader's output) lacks a
-     data-action, so tapping it is a no-op. Greyed-out colours make
-     the "disabled" status obvious. */
-  button.template-row {
-    background-color: #1f2c4d;
-    color: #e0e8f4;
-    margin-top: 6px;
-  }
-  button.template-row.active {
-    background-color: #14202d;
-    color: #6a7c95;
-  }
-  button.template-row .path { color: #9bb1d6; }
-  button.template-row.active .path { color: #6a7c95; }
+  body { padding: 28px 48px; }
+  h2 { margin-top: 28px; }
 </style>
 </head>
 <body>
 <h1>Settings</h1>
-<p class="lead">Tap a template to switch designs, or tap a bookmark /
-history row to open it.</p>
+<p class="lead">Tap a template to switch designs.</p>
 
 <h2>Templates</h2>
 <!-- The loader replaces <browser-templates> with a list of the
@@ -54,15 +21,14 @@ history row to open it.</p>
      reload. -->
 <browser-templates></browser-templates>
 
-<h2>Bookmarks</h2>
-<!-- The loader replaces <browser-bookmarks> with a rendered list of
-     saved bookmarks (most recent first). Add `limit="N"` to cap the
-     count; default is all of them. -->
-<browser-bookmarks></browser-bookmarks>
-
-<h2>History</h2>
-<!-- Same shape: replaced with a list of recent visits. `limit="N"`
-     caps the count; default is 50. -->
-<browser-history limit="30"></browser-history>
+<h2>Developer</h2>
+<!-- Dev surface moved here from the home top-bar 2026-06-02 so the
+     home page stays focused on Featured Apps. Single row pointing
+     at brewser://dev/ (test fixtures + Khronos conformance corpora). -->
+<ul class="settings-list">
+  <li><a href="brewser://dev/">Dev experiments</a>
+    <span class="desc">HTML / CSS / canvas / WebGL test fixtures and the full Khronos WebGL 1 / WebGL 2 conformance suites.</span>
+  </li>
+</ul>
 </body>
 </html>

@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Switch Hardware Diagnostics Suite</title>
+<style>
+:root{
+  --neon-red:#ff3c41;
+  --neon-blue:#00c3e3;
+  --bg-0:#0a0e16;
+  --bg-1:#10151f;
+  --bg-2:#161d2b;
+  --panel:#141a26;
+  --line:rgba(255,255,255,.07);
+  --txt:#e8edf5;
+  --txt-dim:#8a93a6;
+  --good:#3ddc84;
+  --warn:#ffc83d;
+  --bad:#ff3c41;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden}
+body{
+  font-family:'Outfit',sans-serif;
+  background:
+    radial-gradient(900px 600px at 12% -5%, rgba(0,195,227,.14), transparent 60%),
+    radial-gradient(900px 600px at 88% 105%, rgba(255,60,65,.14), transparent 60%),
+    var(--bg-0);
+  color:var(--txt);
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 3px);
+  opacity:.5;
+}
+
+/* Fullscreen 3×2 dashboard grid — mediaplayer pattern. The wrap IS the
+ * grid container; cards drop into auto-flow cells filling the viewport,
+ * no body scroll. */
+.wrap{
+  position:relative;z-index:1;
+  width:100vw;height:100vh;
+  padding:14px;
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  grid-template-rows:1fr 1fr;
+  gap:14px;
+}
+.card{
+  min-width:0;min-height:0;
+  background:linear-gradient(180deg,var(--bg-2),var(--panel));
+  border:1px solid var(--line);
+  border-radius:18px;padding:18px;position:relative;overflow:hidden;
+}
+.card::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--neon-blue),var(--neon-red))}
+.card-title{font-family:'Chakra Petch';font-size:24px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.tag{margin-left:auto;font-size:12px;font-weight:600;letter-spacing:1px;padding:4px 11px;border-radius:30px;text-transform:uppercase}
+.tag.ok{background:rgba(61,220,132,.14);color:var(--good)}
+.tag.na{background:rgba(138,147,166,.14);color:var(--txt-dim)}
+.ic{width:34px;height:34px;display:inline-block;border-radius:9px;background:rgba(0,195,227,.12);color:var(--neon-blue);font-size:14px}
+
+/* generic rows */
+.row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:17px}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--txt-dim)}
+.row .v{font-family:'Chakra Petch';font-weight:600;flex:0 1 auto;text-align:right; min-width:100px;}
+.v.good{color:var(--good)}.v.warn{color:var(--warn)}.v.blue{color:var(--neon-blue)}.v.dim{color:var(--txt-dim)}
+
+/* bars */
+.bar{height:10px;border-radius:6px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--neon-blue),var(--neon-red))}
+.barlabel{display:flex;justify-content:space-between;font-size:14px;color:var(--txt-dim);margin-top:12px}
+
+/* battery */
+.battviz{display:flex;align-items:center;gap:16px;margin:6px 0;}
+.batt{width:110px;height:52px;border:3px solid var(--txt);border-radius:9px;position:relative;padding:4px}
+.batt::after{content:"";position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:7px;height:22px;background:var(--txt);border-radius:0 3px 3px 0}
+.batt .fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--good),#7af0aa);width:72%}
+.batt .bolt{position:absolute;inset:0;color:#0a0e16;text-align:center;padding-top:15px}
+.bigpct{font-family:'Chakra Petch';font-size:42px;font-weight:700}
+
+/* gyro */
+.cube-scene{height:120px;display:flex;justify-content:center;align-items:center}
+#gyroCube{width:320px;height:120px;display:block}
+.axisrow{display:flex;gap:10px;margin-top:10px}
+.axis{flex:1;text-align:center;background:rgba(255,255,255,.04);border-radius:9px;padding:9px 0;font-family:'Chakra Petch';font-size:16px}
+.axis small{display:block;color:var(--txt-dim);font-size:11px;letter-spacing:1.5px;margin-bottom:2px}
+
+/* rumble */
+.rumble-btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.chip{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:30px;padding:10px 12px;font-size:14px;font-family:'Chakra Petch';cursor:pointer;color:var(--txt);outline:none;-webkit-appearance:none;appearance:none}
+.chip:hover{border-color:var(--neon-red);color:#fff}
+.chip.active{background:var(--neon-red);border-color:var(--neon-red);color:#fff}
+.rumble-wrap{display:flex;justify-content:center;margin-top:14px}
+#rumbleCanvas{width:320px;height:84px;display:block}
+
+
+</style>
+</head>
+<body>
+<div class="wrap">
+
+    <!-- BATTERY -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/battery.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Battery &amp; Charging</h3>
+      <div class="battviz">
+        <div class="batt"><div class="fill" id="batFill" style="width:0%"></div><div class="bolt"><img src="assets/zap.png" style="width:26px;height:26px;display:inline-block" alt=""></div></div>
+        <div><div class="bigpct" id="batPct">—</div><div style="color:var(--txt-dim);font-size:12px" id="batSub">on-demand</div></div>
+      </div>
+      <div class="row"><span class="k">State</span><span class="v good" id="batState">—</span></div>
+      <div class="row"><span class="k">Voltage</span><span class="v" id="batVoltage">—</span></div>
+      <div class="row"><span class="k">Temperature</span><span class="v" id="batTemp">—</span></div>
+      <div class="row"><span class="k">Charger</span><span class="v" id="batCharger">—</span></div>
+      <div class="row"><span class="k">Health (age)</span><span class="v good" id="batHealth">—</span></div>
+    </div>
+
+    <!-- GYRO / ACCEL -->
+    <div class="card" id="gyroCard" style="cursor:pointer">
+      <h3 class="card-title"><span class="ic"><img src="assets/compass.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Gyro &amp; Accelerometer <span class="tag ok" id="gyroTag">LIVE</span></h3>
+      <div class="cube-scene"><canvas id="gyroCube" width="320" height="120"></canvas></div>
+      <div class="axisrow">
+        <div class="axis"><small>PITCH</small><span id="gPitch">—</span></div>
+        <div class="axis"><small>ROLL</small><span id="gRoll">—</span></div>
+        <div class="axis"><small>YAW</small><span id="gYaw">—</span></div>
+      </div>
+      <div class="row" style="margin-top:8px"><span class="k">Accel (g)</span><span class="v" id="accelText">—</span></div>
+    </div>
+
+    <!-- HD RUMBLE -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/vibration_mode.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> HD Rumble <span class="tag ok">Linear Actuator</span></h3>
+      <div class="rumble-btns" id="rumbleBtns">
+        <button type="button" class="chip rumble-chip" data-r="light">Light</button>
+        <button type="button" class="chip rumble-chip" data-r="pulse">Pulse</button>
+        <button type="button" class="chip rumble-chip" data-r="wave">Ocean Wave</button>
+        <button type="button" class="chip rumble-chip" data-r="heavy">Heavy Burst</button>
+      </div>
+      <div class="rumble-wrap"><canvas id="rumbleCanvas" width="320" height="84"></canvas></div>
+      <div class="row"><span class="k">Intensity</span><span class="v blue" id="rumbleInt">0%</span></div>
+      <div class="row"><span class="k">Frequency</span><span class="v" id="rumbleFreq">—</span></div>
+    </div>
+
+    <!-- DOCK MODE -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/desktop_computer.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Operating Mode <span class="tag ok" id="modeTag">…</span></h3>
+      <div class="row"><span class="k">Current mode</span><span class="v blue" id="modeName">—</span></div>
+      <div class="row"><span class="k">Dock connection</span><span class="v" id="modeDock">—</span></div>
+      <div class="row"><span class="k">Video output</span><span class="v" id="modeVideo">—</span></div>
+      <div class="row"><span class="k">Output resolution</span><span class="v" id="modeRes">—</span></div>
+      <div class="row"><span class="k">Applet type</span><span class="v" id="modeApplet">—</span></div>
+    </div>
+
+    <!-- WIFI -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/signal_strength.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> Wireless Status <span class="tag ok" id="wlTag">…</span></h3>
+      <div class="row"><span class="k">IP address</span><span class="v blue" id="wlIp">—</span></div>
+      <div class="row"><span class="k">Subnet mask</span><span class="v" id="wlSubnet">—</span></div>
+      <div class="row"><span class="k">Gateway</span><span class="v" id="wlGw">—</span></div>
+      <div class="row"><span class="k">Primary DNS</span><span class="v" id="wlDns">—</span></div>
+      <div class="row"><span class="k">Secondary DNS</span><span class="v dim" id="wlDns2">—</span></div>
+    </div>
+
+    <!-- SD CARD -->
+    <div class="card">
+      <h3 class="card-title"><span class="ic"><img src="assets/floppy_disk.png" style="width:24px;height:24px;margin:5px;display:block" alt=""></span> microSD Card <span class="tag ok" id="sdTag">…</span></h3>
+      <div class="barlabel"><span>Storage used</span><span id="sdUsedTotal">—</span></div>
+      <div class="bar"><i id="sdBar" style="width:0%"></i></div>
+      <div class="row" style="margin-top:8px"><span class="k">Free</span><span class="v good" id="sdFree">—</span></div>
+      <div class="row"><span class="k">Total</span><span class="v" id="sdTotal">—</span></div>
+      <div class="row"><span class="k">Used</span><span class="v" id="sdUsed">—</span></div>
+      <div class="row"><span class="k">Mount point</span><span class="v dim">sdmc:/</span></div>
+    </div>
+
+</div>
+
+<script>
+/* On-demand hardware sensor polling.
+ *
+ * No per-frame work unless explicitly toggled (Gyro card → live rAF; NFC card
+ * → 2 Hz interval). Refresh button + initial load do single-shot polls of all
+ * other sensors. Every call is logged with a relative timestamp to
+ * `sdmc:/switch/brewser/logs/swb_sensors.log` so the user can grab the file and share it back. */
+
+// Any console call would route through nx.js's $.print and flip the canvas to
+// text-render mode mid-frame ([[console-error-switches-render-mode]]). Silence
+// pre-emptively so any unexpected warning in the WebGL setup or the live-DOM
+// path can't freeze the screen.
+console.warn = () => {}; console.log = () => {};
+console.error = () => {}; console.info = () => {};
+
+const LOG = 'sdmc:/switch/brewser/logs/swb_sensors.log';
+const T0 = Date.now();
+const enc = new TextEncoder();
+
+function log(msg) {
+  try {
+    Switch.appendFileSync(LOG, enc.encode('[+' + (Date.now() - T0) + 'ms] ' + msg + '\n').buffer);
+  } catch (_) { /* logging is optional */ }
+}
+
+function setT(id, v) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== String(v)) el.textContent = v;
+}
+const _lastW = {};
+function setW(id, pct) {
+  const v = Math.max(0, Math.min(100, pct));
+  if (_lastW[id] === v) return;
+  _lastW[id] = v;
+  const el = document.getElementById(id);
+  if (el) el.style.width = v + '%';
+}
+function setClass(id, cls) {
+  const el = document.getElementById(id);
+  if (el) el.className = cls;
+}
+
+/* ---- Battery (web API + native PSM extras) ---- */
+async function pollBattery() {
+  try {
+    const bm = await navigator.getBattery();
+    const pct = Math.round(bm.level * 100);
+    setT('batPct', pct + '%');
+    setT('batState', bm.charging ? 'Charging' : 'Discharging');
+    setW('batFill', pct);
+    log('battery web: level=' + bm.level + ' charging=' + bm.charging);
+  } catch (e) {
+    setT('batPct', 'n/a'); setT('batState', 'unavailable');
+    log('battery web err: ' + (e && e.message || e));
+  }
+  try {
+    const info = Switch.diagnostics.battery();
+    setT('batVoltage', (info.voltageMv / 1000).toFixed(2) + ' V');
+    setT('batTemp', info.temperatureC.toFixed(1) + ' °C');
+    setT('batHealth', Math.round(info.agePercent) + '%');
+    const chargerNames = ['None', 'PD', 'USB-C', 'Unknown'];
+    setT('batCharger', chargerNames[info.chargerType] || ('type ' + info.chargerType));
+    setT('batTag', info.charging ? 'CHARGING' : 'DISCHARGING');
+    log('battery native: ' + JSON.stringify(info));
+  } catch (e) {
+    setT('batVoltage', 'n/a'); setT('batTemp', 'n/a'); setT('batHealth', 'n/a'); setT('batCharger', 'n/a');
+    log('battery native err: ' + (e && e.message || e));
+  }
+}
+
+/* ---- Operating Mode + Applet ---- */
+function pollMode() {
+  try {
+    const m = Switch.operationMode();
+    const isHandheld = m === 0;
+    const labels = ['Handheld', 'Docked', 'Console'];
+    // Short uppercase tag — long words like "HANDHELD" overflow the title bar.
+    const tagLabels = ['HAND', 'DOCK', 'CON'];
+    setT('modeName', labels[m] || ('mode ' + m));
+    setT('modeDock', isHandheld ? 'Undocked' : 'Docked');
+    setT('modeVideo', isHandheld ? 'LCD' : 'HDMI');
+    setT('modeRes', isHandheld ? '1280×720' : '1920×1080');
+    setT('modeTag', tagLabels[m] || '—');
+    log('mode: ' + labels[m] + ' (' + m + ')');
+  } catch (e) {
+    setT('modeName', 'unavailable');
+    log('mode err: ' + (e && e.message || e));
+  }
+  try {
+    setT('modeApplet', String(Switch.appletType ? Switch.appletType() : '—'));
+  } catch (_) {}
+}
+
+/* ---- Wireless: nifm IP/subnet/gateway/DNS ---- The wlaninf RSSI + state
+ *      side was dropped because the service isn't accessible to homebrew on
+ *      real hardware (always returned `available:false`). The card now
+ *      reflects only what nifm exposes, which works reliably. */
+function pollWlan() {
+  try {
+    const ni = Switch.networkInfo();
+    const ip = ni.ip || '0.0.0.0';
+    setT('wlIp', ip);
+    setT('wlSubnet', ni.subnetMask || '—');
+    setT('wlGw', ni.gateway || '—');
+    setT('wlDns', ni.primaryDnsServer || '—');
+    setT('wlDns2', ni.secondaryDnsServer && ni.secondaryDnsServer !== '0.0.0.0' ? ni.secondaryDnsServer : '—');
+    setT('wlTag', ip !== '0.0.0.0' ? 'ONLINE' : 'OFFLINE');
+    log('wlan: ' + JSON.stringify(ni));
+  } catch (e) {
+    setT('wlIp', 'n/a'); setT('wlSubnet', 'n/a'); setT('wlGw', 'n/a');
+    setT('wlDns', 'n/a'); setT('wlDns2', 'n/a');
+    setT('wlTag', 'ERR');
+    log('wlan err: ' + (e && e.message || e));
+  }
+}
+
+/* ---- SD Card via Switch.FileSystem ---- */
+function fmtBytes(n) {
+  if (!Number.isFinite(n)) return 'n/a';
+  const gb = n / (1024 ** 3);
+  if (gb >= 1) return gb.toFixed(1) + ' GB';
+  const mb = n / (1024 ** 2);
+  return mb.toFixed(0) + ' MB';
+}
+function pollSd() {
+  try {
+    const fs = Switch.FileSystem.openSdmc();
+    const free = Number(fs.freeSpace());
+    const total = Number(fs.totalSpace());
+    const used = total - free;
+    const pct = total > 0 ? (used / total) * 100 : 0;
+    setT('sdFree', fmtBytes(free));
+    setT('sdTotal', fmtBytes(total));
+    setT('sdUsed', fmtBytes(used));
+    setT('sdUsedTotal', fmtBytes(used) + ' / ' + fmtBytes(total));
+    setW('sdBar', pct);
+    setT('sdTag', pct.toFixed(0) + '% USED');
+    log('sd: free=' + free + ' total=' + total);
+  } catch (e) {
+    setT('sdFree', 'n/a'); setT('sdTotal', 'n/a'); setT('sdUsed', 'n/a');
+    log('sd err: ' + (e && e.message || e));
+  }
+}
+
+/* ---- WebGL gyro cube — raw WebGL 1 solid-blue cube driven by libnx
+ *      fused-angle radians. Patterned on the working ocean-cube demo at
+ *      `brewser://dev/nxjs-webgl-demo/`: shaders opt into the bridge's
+ *      raw-shader passthrough (`#pragma raw_passthrough`) so the user
+ *      GLSL runs on native GLES (the bridge's name-allowlist textured
+ *      path was dropping front faces when winding didn't match its
+ *      assumed CCW). Interleaved pos+normal vertices, no indices, no
+ *      CULL_FACE — every triangle always draws regardless of winding. */
+let cubeGl = null, cubeProgram = null;
+let cubeVbo = null, cubeVertCount = 0;
+let cubeProj = null, cubeView = null;
+let cubeLocs = null;
+const cubeRotation = [0.45, 0.65, 0];
+const cubeRotVec3 = new Float32Array(3);
+const CUBE_CAMERA_Z = 2.7;
+function initGyroCube() {
+  if (cubeGl) return true;
+  try {
+    const canvas = document.getElementById('gyroCube');
+    if (!canvas) { log('cube: #gyroCube missing'); return false; }
+    const gl = canvas.getContext('webgl', {
+      alpha: false, antialias: false, depth: true, stencil: false, preserveDrawingBuffer: false,
+    });
+    if (!gl) { log('cube: getContext(webgl) returned null'); return false; }
+    // Opt this context into the bridge's raw-shader passthrough so our
+    // custom uniform/attribute names skip the bridge program swap.
+    if (typeof gl.enableGpuBridgePrototype === 'function') {
+      gl.enableGpuBridgePrototype(true);
+    }
+    const W = canvas.width, H = canvas.height;
+
+    function shader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        throw new Error('shader compile: ' + gl.getShaderInfoLog(s));
+      }
+      return s;
+    }
+    function program(vs, fs) {
+      const p = gl.createProgram();
+      gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
+      gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        throw new Error('program link: ' + gl.getProgramInfoLog(p));
+      }
+      return p;
+    }
+
+    const vsrc = `#pragma raw_passthrough
+      precision mediump float;
+      attribute vec3 aPos;
+      attribute vec3 aNormal;
+      attribute vec2 aUv;
+      uniform mat4 uProj;
+      uniform mat4 uView;
+      uniform vec3 uRot;
+      varying vec3 vNormal;
+      varying vec3 vFaceNormal;
+      varying vec2 vUv;
+      mat3 rotX(float a){float c=cos(a),s=sin(a);return mat3(1.0,0.0,0.0, 0.0,c,s, 0.0,-s,c);}
+      mat3 rotY(float a){float c=cos(a),s=sin(a);return mat3(c,0.0,-s, 0.0,1.0,0.0, s,0.0,c);}
+      mat3 rotZ(float a){float c=cos(a),s=sin(a);return mat3(c,s,0.0, -s,c,0.0, 0.0,0.0,1.0);}
+      void main(){
+        mat3 r = rotX(uRot.x) * rotY(uRot.y) * rotZ(uRot.z);
+        vec3 p = r * aPos;
+        vNormal = normalize(r * aNormal);
+        // Original (model-space) face normal — used for letter selection so
+        // the X/Y/Z glyph stays bound to its geometric face as the cube
+        // rotates. vNormal would otherwise swap letters across faces.
+        vFaceNormal = aNormal;
+        vUv = aUv;
+        gl_Position = uProj * uView * vec4(p, 1.0);
+      }
+    `;
+    const fsrc = `#pragma raw_passthrough
+      precision mediump float;
+      varying vec3 vNormal;
+      varying vec3 vFaceNormal;
+      varying vec2 vUv;
+      // Signed distance from p to line segment ab.
+      float seg(vec2 p, vec2 a, vec2 b){
+        vec2 pa = p - a, ba = b - a;
+        float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+        return length(pa - ba * h);
+      }
+      // Each letter = a min() of its strokes' SDFs → a single distance field
+      // for the whole glyph. smoothstep gives an anti-aliased mask.
+      float letterX(vec2 p){
+        float d = min(seg(p, vec2(0.25,0.25), vec2(0.75,0.75)),
+                      seg(p, vec2(0.25,0.75), vec2(0.75,0.25)));
+        return 1.0 - smoothstep(0.06, 0.09, d);
+      }
+      float letterY(vec2 p){
+        float d = min(min(seg(p, vec2(0.25,0.20), vec2(0.50,0.50)),
+                          seg(p, vec2(0.75,0.20), vec2(0.50,0.50))),
+                      seg(p, vec2(0.50,0.50), vec2(0.50,0.80)));
+        return 1.0 - smoothstep(0.06, 0.09, d);
+      }
+      float letterZ(vec2 p){
+        float d = min(min(seg(p, vec2(0.22,0.22), vec2(0.78,0.22)),
+                          seg(p, vec2(0.78,0.22), vec2(0.22,0.78))),
+                      seg(p, vec2(0.22,0.78), vec2(0.78,0.78)));
+        return 1.0 - smoothstep(0.06, 0.09, d);
+      }
+      void main(){
+        // Solid cyan with one fixed key light so adjacent faces are
+        // distinguishable as the cube rotates.
+        vec3 light = normalize(vec3(0.4, 0.7, 0.5));
+        float l = max(dot(normalize(vNormal), light), 0.0) * 0.65 + 0.35;
+        // --neon-blue (#00c3e3) — matches the rest of the page's cyan accents.
+        vec3 base = vec3(0.0, 0.765, 0.890);
+        vec3 color = base * l;
+        // Pick the letter from the ORIGINAL (model-space) face normal so
+        // each face's letter is glued to its geometric identity — the
+        // rotated vNormal would swap letters as faces rotate past the axes.
+        vec3 an = abs(vFaceNormal);
+        float mask;
+        if (an.x > an.y && an.x > an.z) mask = letterX(vUv);
+        else if (an.y > an.z)           mask = letterY(vUv);
+        else                            mask = letterZ(vUv);
+        // White letter, mixed over the cyan face. Boost alpha where the
+        // glyph is so the letter stays readable against any background even
+        // though the face itself is 40% transparent.
+        color = mix(color, vec3(1.0), mask);
+        float a = mix(0.6, 0.95, mask);
+        gl_FragColor = vec4(color, a);
+      }
+    `;
+    const prog = program(vsrc, fsrc);
+
+    // 6 faces × 2 triangles × 3 vertices = 36 vertices. Interleaved
+    // pos.xyz + normal.xyz + uv.xy = 32 bytes per vertex. Layout + UV
+    // convention (u=0 left, v=0 top, looking at the face from outside)
+    // copied from nxjs-webgl-demo's makeCube so all four corners of the
+    // letter SDF land at (0,0)/(1,0)/(0,1)/(1,1) consistently per face.
+    const s = 0.5;
+    const verts = new Float32Array([
+      // +Z
+      -s,-s, s, 0,0,1, 0,1,   s,-s, s, 0,0,1, 1,1,   s, s, s, 0,0,1, 1,0,
+      -s,-s, s, 0,0,1, 0,1,   s, s, s, 0,0,1, 1,0,  -s, s, s, 0,0,1, 0,0,
+      // -Z
+       s,-s,-s, 0,0,-1, 0,1, -s,-s,-s, 0,0,-1, 1,1, -s, s,-s, 0,0,-1, 1,0,
+       s,-s,-s, 0,0,-1, 0,1, -s, s,-s, 0,0,-1, 1,0,  s, s,-s, 0,0,-1, 0,0,
+      // +X
+       s,-s, s, 1,0,0, 0,1,   s,-s,-s, 1,0,0, 1,1,   s, s,-s, 1,0,0, 1,0,
+       s,-s, s, 1,0,0, 0,1,   s, s,-s, 1,0,0, 1,0,   s, s, s, 1,0,0, 0,0,
+      // -X
+      -s,-s,-s,-1,0,0, 0,1,  -s,-s, s,-1,0,0, 1,1,  -s, s, s,-1,0,0, 1,0,
+      -s,-s,-s,-1,0,0, 0,1,  -s, s, s,-1,0,0, 1,0,  -s, s,-s,-1,0,0, 0,0,
+      // +Y
+      -s, s, s, 0,1,0, 0,1,   s, s, s, 0,1,0, 1,1,   s, s,-s, 0,1,0, 1,0,
+      -s, s, s, 0,1,0, 0,1,   s, s,-s, 0,1,0, 1,0,  -s, s,-s, 0,1,0, 0,0,
+      // -Y
+      -s,-s,-s, 0,-1,0, 0,1,  s,-s,-s, 0,-1,0, 1,1,  s,-s, s, 0,-1,0, 1,0,
+      -s,-s,-s, 0,-1,0, 0,1,  s,-s, s, 0,-1,0, 1,0, -s,-s, s, 0,-1,0, 0,0,
+    ]);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+
+    // Projection + view. View is a fixed translate down -Z so the camera
+    // sits in front of the origin-centered cube; rotation happens in the
+    // vertex shader.
+    const fov = 40 * Math.PI / 180;
+    const aspect = W / H, near = 0.1, far = 100;
+    const f = 1 / Math.tan(fov / 2);
+    const nf = 1 / (near - far);
+    cubeProj = new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0,
+    ]);
+    // view[13] > 0 lifts the cube on screen (equivalent to a camera that
+    // sits slightly below origin and looks up at the cube). 0.12 world
+    // units ≈ 7 px shift up on a 120-px canvas at FOV 40° / z 2.7, which
+    // gives the cube a bit more breathing room above and lets the Accel
+    // row land where it should.
+    cubeView = new Float32Array([
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0.12, -CUBE_CAMERA_Z, 1,
+    ]);
+
+    cubeGl = gl;
+    cubeProgram = prog;
+    cubeVbo = vbo;
+    cubeVertCount = verts.length / 8;
+    cubeLocs = {
+      aPos: gl.getAttribLocation(prog, 'aPos'),
+      aNormal: gl.getAttribLocation(prog, 'aNormal'),
+      aUv: gl.getAttribLocation(prog, 'aUv'),
+      uProj: gl.getUniformLocation(prog, 'uProj'),
+      uView: gl.getUniformLocation(prog, 'uView'),
+      uRot: gl.getUniformLocation(prog, 'uRot'),
+    };
+
+    gl.viewport(0, 0, W, H);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.enable(gl.DEPTH_TEST);
+    // Blend the cube fragments over the card-matching clear color so the
+    // 0.6-alpha faces look 40% transparent against the background.
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // No CULL_FACE — matches the working ocean-cube demo, sidesteps any
+    // winding mismatch under the bridge.
+    // Match the card's gradient at the canvas's vertical position (mid-card,
+    // ~41% of the way between --bg-2 #161d2b and --panel #141a26 → #151c29)
+    // so the opaque canvas blends in and the cube looks like it floats on
+    // the card.
+    gl.clearColor(0x15 / 255, 0x1c / 255, 0x29 / 255, 1);
+    log('cube: WebGL init OK (raw_passthrough, ' + cubeVertCount + ' verts, ' + W + 'x' + H + ')');
+    return true;
+  } catch (e) {
+    log('cube init err: ' + (e && e.message || e));
+    return false;
+  }
+}
+function renderGyroCube() {
+  if (!cubeGl && !initGyroCube()) return;
+  try {
+    const gl = cubeGl;
+    gl.useProgram(cubeProgram);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeVbo);
+    if (cubeLocs.aPos >= 0) {
+      gl.enableVertexAttribArray(cubeLocs.aPos);
+      gl.vertexAttribPointer(cubeLocs.aPos, 3, gl.FLOAT, false, 32, 0);
+    }
+    if (cubeLocs.aNormal >= 0) {
+      gl.enableVertexAttribArray(cubeLocs.aNormal);
+      gl.vertexAttribPointer(cubeLocs.aNormal, 3, gl.FLOAT, false, 32, 12);
+    }
+    if (cubeLocs.aUv >= 0) {
+      gl.enableVertexAttribArray(cubeLocs.aUv);
+      gl.vertexAttribPointer(cubeLocs.aUv, 2, gl.FLOAT, false, 32, 24);
+    }
+
+    gl.uniformMatrix4fv(cubeLocs.uProj, false, cubeProj);
+    gl.uniformMatrix4fv(cubeLocs.uView, false, cubeView);
+    cubeRotVec3[0] = cubeRotation[0];
+    cubeRotVec3[1] = cubeRotation[1];
+    cubeRotVec3[2] = cubeRotation[2];
+    gl.uniform3fv(cubeLocs.uRot, cubeRotVec3);
+
+    gl.drawArrays(gl.TRIANGLES, 0, cubeVertCount);
+  } catch (e) { log('cube render err: ' + (e && e.message || e)); }
+}
+
+/* ---- Canvas-2D rumble waveform — N vertical bars whose heights are driven
+ *      by the active rumble pattern, smoothed per-frame. Replaces the
+ *      previous CSS .wavewrap spans (live-DOM doesn't honor style.height
+ *      transitions). Uses the 2D context rather than WebGL because nx.js's
+ *      bridge has ONE FBO shared across every inline-canvas WebGL context,
+ *      so a second WebGL canvas on the page would mirror whatever the cube
+ *      shader last drew ([[canvas-runner.ts]] §"shared screen WebGL"). 2D
+ *      canvases route through drawImage(offscreen) instead and don't share
+ *      state with the cube. */
+const RUMBLE_BARS = 18;
+const RUMBLE_GAP_PX = 3;
+const RUMBLE_MIN_H = 0.18;
+const rumbleTargets = new Float32Array(RUMBLE_BARS).fill(RUMBLE_MIN_H);
+const rumbleCurrents = new Float32Array(RUMBLE_BARS).fill(RUMBLE_MIN_H);
+let rumbleCtx = null;
+let rumbleCanvasW = 320, rumbleCanvasH = 54;
+function initRumble() {
+  if (rumbleCtx) return true;
+  try {
+    const canvas = document.getElementById('rumbleCanvas');
+    if (!canvas) { log('rumble: #rumbleCanvas missing'); return false; }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { log('rumble: getContext(2d) returned null'); return false; }
+    rumbleCtx = ctx;
+    rumbleCanvasW = canvas.width;
+    rumbleCanvasH = canvas.height;
+    log('rumble: 2D init OK (' + RUMBLE_BARS + ' bars, ' + rumbleCanvasW + 'x' + rumbleCanvasH + ')');
+    return true;
+  } catch (e) {
+    log('rumble init err: ' + (e && e.message || e));
+    return false;
+  }
+}
+function renderRumble() {
+  if (!rumbleCtx && !initRumble()) return;
+  try {
+    const ctx = rumbleCtx;
+    const W = rumbleCanvasW, H = rumbleCanvasH;
+    // Smooth toward the target heights (~0.25 lerp ≈ 4-frame settle) so the
+    // 90-ms setInterval ticks don't pop visually.
+    for (let i = 0; i < RUMBLE_BARS; i++) {
+      rumbleCurrents[i] += (rumbleTargets[i] - rumbleCurrents[i]) * 0.25;
+    }
+    // Card-gradient sample at this row's vertical position — same color the
+    // cube canvas uses, so both canvases blend into the card uniformly.
+    ctx.fillStyle = '#151c29';
+    ctx.fillRect(0, 0, W, H);
+    const slotW = W / RUMBLE_BARS;
+    const innerW = slotW - RUMBLE_GAP_PX;
+    const midY = H / 2;
+    for (let i = 0; i < RUMBLE_BARS; i++) {
+      const x = i * slotW + (slotW - innerW) / 2;
+      const h = Math.max(RUMBLE_MIN_H, rumbleCurrents[i]) * H;
+      const yT = midY - h / 2;
+      // Per-bar gradient — top of bar cyan (--neon-blue), bottom red
+      // (--neon-red) — matches the original CSS linear-gradient(180deg).
+      const grad = ctx.createLinearGradient(0, yT, 0, yT + h);
+      grad.addColorStop(0, '#00c3e3');
+      grad.addColorStop(1, '#ff3c41');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, yT, innerW, h);
+    }
+  } catch (e) { log('rumble render err: ' + (e && e.message || e)); }
+}
+
+/* ---- Six-axis (gyro + accel + fused angle) — opt-in via card tap ---- */
+let cubeLoopRaf = null;
+let sixAxisActive = false;
+let cubeAutoStartT = Date.now();
+// Idle auto-rotate: slow continuous yaw + a gentle pitch oscillation around
+// the same default orientation the cube initializes at (0.45, 0.65). Same
+// time-base whether we're in IDLE state or fell back to it because the sensor
+// returned null this frame, so reads that come and go don't pop visually.
+function applyCubeAutoRotation() {
+  const t = (Date.now() - cubeAutoStartT) / 1000;
+  cubeRotation[0] = 0.45 + 0.25 * Math.sin(t * 0.3);
+  cubeRotation[1] = 0.65 + t * 0.4;
+  cubeRotation[2] = 0;
+}
+function startCubeLoop() {
+  if (cubeLoopRaf) return;
+  cubeAutoStartT = Date.now();
+  let frame = 0, nullReads = 0;
+  const tick = () => {
+    try {
+      if (sixAxisActive) {
+        const s = Switch.diagnostics.sixAxis.read();
+        if (s) {
+          setT('gPitch', s.angle.x.toFixed(1) + '°');
+          setT('gRoll', s.angle.z.toFixed(1) + '°');
+          setT('gYaw', s.angle.y.toFixed(1) + '°');
+          setT('accelText', 'X ' + s.acceleration.x.toFixed(2) + ' · Y ' + s.acceleration.y.toFixed(2) + ' · Z ' + s.acceleration.z.toFixed(2));
+          // libnx fused angles are cumulative rotation in radians — feed the
+          // WebGL cube's modelViewMatrix builder directly.
+          cubeRotation[0] = s.angle.x;
+          cubeRotation[1] = s.angle.y;
+          cubeRotation[2] = s.angle.z;
+          // Slide the auto-rotate phase forward in sync with wall-clock so a
+          // mid-frame fall-back to applyCubeAutoRotation (e.g. sensor returns
+          // null next frame on Citron) picks up at the right time instead of
+          // jumping back to t=0.
+          cubeAutoStartT = Date.now();
+          // Sample one full reading to the log every ~30 frames (~0.5s) so we
+          // can see live values without flooding. Includes raw gyro + accel +
+          // angle so we can spot whether Citron is feeding the IMU at all.
+          if (frame % 30 === 0) log('sixAxis sample f=' + frame + ': ' + JSON.stringify({
+            accel: s.acceleration, gyro: s.angularVelocity, angle: s.angle,
+            samplingNumber: String(s.samplingNumber), deltaTime: String(s.deltaTime),
+          }));
+        } else {
+          // No data this frame — fall back to the idle auto-rotate so the
+          // cube isn't dead. Covers Citron (sensor permanently starved) and
+          // any transient null between two valid reads on real hardware.
+          applyCubeAutoRotation();
+          nullReads++;
+          // Surface "read returned null" once per second so we can tell
+          // whether the sensor handle is good but starved of samples
+          // (Citron) vs. a working sensor that's silent for one frame.
+          if (frame % 60 === 0) log('sixAxis null-reads in last 60 frames: ' + nullReads);
+          if (frame % 60 === 0) nullReads = 0;
+        }
+      } else {
+        applyCubeAutoRotation();
+      }
+    } catch (e) { log('cube tick err: ' + (e && e.message || e)); }
+    renderGyroCube();
+    renderRumble();
+    frame++;
+    cubeLoopRaf = requestAnimationFrame(tick);
+  };
+  tick();
+}
+function stopCubeLoop() {
+  if (cubeLoopRaf) {
+    cancelAnimationFrame(cubeLoopRaf);
+    cubeLoopRaf = null;
+  }
+}
+function startSixAxis() {
+  if (sixAxisActive) return;
+  try {
+    const ok = Switch.diagnostics.sixAxis.start();
+    if (!ok) {
+      setT('gPitch', 'no sensor'); setT('gRoll', 'no sensor'); setT('gYaw', 'no sensor');
+      setT('gyroTag', 'NO SENSOR');
+      log('sixAxis start: no sensor handles');
+      return;
+    }
+    sixAxisActive = true;
+    setT('gyroTag', 'LIVE');
+    log('sixAxis started');
+  } catch (e) {
+    setT('gyroTag', 'ERR');
+    log('sixAxis start err: ' + (e && e.message || e));
+  }
+}
+function stopSixAxis() {
+  if (!sixAxisActive) return;
+  sixAxisActive = false;
+  try { Switch.diagnostics.sixAxis.stop(); } catch (_) {}
+  // Reset the auto-rotate phase so the cube doesn't pop to a random angle.
+  cubeAutoStartT = Date.now();
+  setT('gyroTag', 'IDLE');
+  log('sixAxis stopped');
+}
+
+/* ---- HD Rumble (navigator.vibrate) — chip click fires vibration AND
+ *      drives the rumbleTargets array. The WebGL canvas (renderRumble in the
+ *      cube loop) smooths toward those targets so the waveform reflects the
+ *      active pattern's intensity. */
+const rInt = document.getElementById('rumbleInt');
+const rFreq = document.getElementById('rumbleFreq');
+let rumbleTimer;
+const patterns = {
+  light: { int: 25, freq: 320, vib: [30] },
+  pulse: { int: 55, freq: 200, vib: [60, 40, 60] },
+  wave:  { int: 70, freq: 160, vib: [40, 30, 80, 30, 120] },
+  heavy: { int: 100, freq: 120, vib: [200] },
+};
+const rumbleChips = document.querySelectorAll('.rumble-chip');
+log('rumble-chip handlers bound: ' + rumbleChips.length);
+rumbleChips.forEach(c => c.addEventListener('click', () => {
+  const tag = c.getAttribute('data-r');
+  log('rumble-chip clicked: ' + tag);
+  document.querySelectorAll('.rumble-chip').forEach(x => x.classList.remove('active'));
+  c.classList.add('active');
+  const p = patterns[tag];
+  rInt.textContent = p.int + '%';
+  // Non-breaking space between the number and unit so the engine's
+  // word-tokenizer (splits on chars ≤ 32) doesn't treat the gap as a
+  // wrap point — keeps "20 Hz" on a single line.
+  rFreq.textContent = p.freq + ' Hz';
+  try {
+    const fired = navigator.vibrate ? navigator.vibrate(p.vib) : false;
+    log('vibrate ' + tag + ' fired=' + fired);
+  } catch (e) { log('vibrate err: ' + (e && e.message || e)); }
+  clearInterval(rumbleTimer);
+  let frames = 0;
+  rumbleTimer = setInterval(() => {
+    // Each tick: random per-bar target in [0.15, 0.15 + 0.85·p.int/100],
+    // mirroring the original "15 + Math.random() * p.int * 0.85" percent.
+    const intNorm = p.int / 100;
+    for (let i = 0; i < RUMBLE_BARS; i++) {
+      rumbleTargets[i] = 0.15 + Math.random() * intNorm * 0.85;
+    }
+    if (++frames > 20) {
+      clearInterval(rumbleTimer);
+      for (let i = 0; i < RUMBLE_BARS; i++) rumbleTargets[i] = RUMBLE_MIN_H;
+      c.classList.remove('active');
+      rInt.textContent = '0%';
+    }
+  }, 90);
+}));
+
+/* ---- Master refresh ---- */
+async function refreshAll(reason) {
+  const t0 = Date.now();
+  setT('sysStatus', 'POLLING…');
+  log('=== refreshAll start (' + (reason || 'manual') + ') ===');
+  const tBat = Date.now(); await pollBattery();
+  const tMode = Date.now(); pollMode();
+  const tWlan = Date.now(); pollWlan();
+  const tSd = Date.now(); pollSd();
+  const tEnd = Date.now();
+  setT('sysStatus', 'NOMINAL');
+  log('=== refreshAll done in ' + (tEnd - t0) + 'ms'
+    + ' [bat=' + (tMode - tBat) + 'ms'
+    + ' mode=' + (tWlan - tMode) + 'ms'
+    + ' wlan=' + (tSd - tWlan) + 'ms'
+    + ' sd=' + (tEnd - tSd) + 'ms] ===');
+}
+
+/* Lightweight auto-poll for fast-changing sensors (operation mode, battery).
+ * Wi-Fi + SD are slower / change less often and stay on the manual Refresh
+ * button. Keeps the dock/handheld pill + battery % current without per-frame
+ * work or affecting other pages. */
+let liveInterval = null;
+function startLivePoll() {
+  if (liveInterval) return;
+  log('live-poll start (mode+battery @ 2s)');
+  liveInterval = setInterval(() => {
+    log('--- live tick ---');
+    pollMode();
+    pollBattery();
+  }, 2000);
+}
+function stopLivePoll() {
+  if (liveInterval) {
+    clearInterval(liveInterval);
+    liveInterval = null;
+    log('live-poll stop');
+  }
+}
+
+/* Hooks: Gyro card tap toggles live six-axis sampling. */
+const gyroCard = document.getElementById('gyroCard');
+if (gyroCard) gyroCard.addEventListener('click', () => {
+  if (sixAxisActive) stopSixAxis(); else startSixAxis();
+});
+
+/* Cleanup when navigating away — stop opt-in sampling + the live poll. */
+window.addEventListener('unload', () => {
+  stopLivePoll();
+  stopSixAxis();
+  stopCubeLoop();
+});
+
+/* Initial poll on load + start the live auto-poll for fast-changing sensors. */
+log('--- page loaded screen=' + screen.width + 'x' + screen.height + ' ---');
+refreshAll('load');
+startLivePoll();
+startSixAxis();
+// Cube loop runs unconditionally — renders gyro angles when sixAxisActive,
+// slow auto-rotates otherwise (IDLE state OR sensor returning null).
+startCubeLoop();
+</script>
+</body>
+</html>

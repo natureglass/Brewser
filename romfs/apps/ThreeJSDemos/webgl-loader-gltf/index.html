@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; GLTFLoader (model browser, full IBL)</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; GLTFLoader (model browser)</h1>
+<p class="lead">Adapted port of <code>webgl_loader_gltf.html</code>
+from <a href="https://threejs.org">three.js</a> latest (r184) &mdash;
+the model browser, gamepad cycling, and HDR environment work. The r184
+1:1 attempt landed on <a href="brewser://memory/mesa-nouveau-pmrem-wedge">a Mesa Nouveau driver wedge</a>
+in PMREM's blur ping-pong, so this build runs on <strong>r162</strong>
+(smaller PMREM cubeUV layout + the WebGL 1 bridge path) until real
+Tegra hardware is available. Loads the Royal Esplanade RGBE equirect
+(<code>royal_esplanade_1k.hdr</code>) and prefilters it via
+<code>PMREMGenerator</code> for IBL; the helmet's visor reads as
+glass again. Cycles through four bundled glTF models: DamagedHelmet
+(PBR canonical), Duck (classic textured sample), Flamingo, and Horse.
+<code>MeshStandardMaterial</code> runs through Three.js's
+auto-generated GLSL via the bridge's SHADER_NAME passthrough.</p>
+
+<div class="stage">
+  <canvas id="gltf-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('gltf-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '20px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - loading helmet...', 12, 12);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/gltf-loader.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/rgbe-loader.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="gltf-status" width="900" height="380"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('gltf-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 380);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    row(36, 'GLTFLoader available:',
+        hasThree && typeof globalThis.__THREE_R162_STAGED__.GLTFLoader === 'function' ? 'yes' : 'no',
+        hasThree && typeof globalThis.__THREE_R162_STAGED__.GLTFLoader === 'function');
+    row(58, 'RGBELoader available:',
+        hasThree && typeof globalThis.__THREE_R162_STAGED__.RGBELoader === 'function' ? 'yes' : 'no',
+        hasThree && typeof globalThis.__THREE_R162_STAGED__.RGBELoader === 'function');
+    row(80, 'HDR loaded:',
+        globalThis.__gltfHdrLoaded ? ('yes (' + (globalThis.__gltfHdrSize || '?') + ')') : 'no',
+        !!globalThis.__gltfHdrLoaded);
+    row(102, 'scene.environment set:',
+        globalThis.__gltfPmremGenerated ? 'yes' : 'no',
+        !!globalThis.__gltfPmremGenerated);
+    row(124, 'current model:',
+        globalThis.__gltfCurrentModel || '(loading...)',
+        !!globalThis.__gltfCurrentModel);
+    row(146, 'model meshes:',
+        String(globalThis.__gltfMeshCount | 0),
+        (globalThis.__gltfMeshCount | 0) > 0);
+    row(168, 'model triangles:',
+        String(globalThis.__gltfTriangleCount | 0),
+        (globalThis.__gltfTriangleCount | 0) > 0);
+    row(190, 'animations loaded:',
+        String(globalThis.__gltfAnimCount | 0), true);
+    row(212, 'load count:',
+        String(globalThis.__gltfLoadCount | 0), true);
+    const fps = +globalThis.__gltfFps || 0;
+    row(234, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(256, 'frames rendered:',
+        String(globalThis.__gltfFrameCount | 0), true);
+    const errAfter = globalThis.__gltfGlErrorAfter;
+    row(278, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16),
+        errAfter === 0);
+    const gErr = globalThis.__gltfError;
+    st.fillStyle = '#9bb1d6';
+    st.fillText('demo error:', 14, 300);
+    st.fillStyle = gErr ? '#ff8a6c' : '#7eda9f';
+    const errText = gErr ? String(gErr) : '(none)';
+    const maxPerLine = 80;
+    for (let i = 0, y = 300; i < errText.length && y < 370; i += maxPerLine, y += 16) {
+      st.fillText(errText.slice(i, i + maxPerLine), i === 0 ? 380 : 14, y);
+    }
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+  setTimeout(renderStatus, 15000);
+</script>
+
+<p class="note">Gamepad <strong>left stick</strong> orbits the camera;
+<strong>triggers</strong> zoom. <strong>A</strong> = previous model,
+<strong>B</strong> = next model. Each model swap re-runs
+<code>fitCameraToSelection()</code> and re-initialises any
+<code>AnimationMixer</code> clips upstream's demo would have played.
+<br><br>
+<strong>Pre-authorized deviations from upstream:</strong>
+(1) Three.js r162 instead of r184 (the upstream version) &mdash; r184's
+PMREMGenerator blur ping-pong hangs Citron's Mesa Nouveau backend,
+see <a href="brewser://memory/mesa-nouveau-pmrem-wedge">memory</a>;
+expected to clear on real Tegra hw.
+(2) <code>UltraHDRLoader</code> (r184-only) replaced with r162's
+<code>RGBELoader</code> + <code>royal_esplanade_1k.hdr</code>
+(asset already on disk; UltraHDRLoader port preserved at
+<code>libs/ultrahdr-loader.js</code> for the eventual re-attempt).
+(3) <code>fetch(model-index.json)</code> from GitHub replaced with a
+bundled hardcoded list of four pre-extracted models (Citron has no
+TCP sockets).
+(4) <code>lil-gui</code> dropdown replaced with gamepad A/B cycling.
+(5) <code>scene.backgroundBlurriness = 0.0001</code> &mdash; routes
+WebGLBackground through the PMREM cubeUV path instead of the
+unsupported real WebGLCubeRenderTarget path.
+(6) <code>OrbitControls</code> mouse mapped to gamepad sticks.
+(7) <code>renderer.compileAsync</code> dropped &mdash; nx.js has no
+parallel-shader-compile.
+(8) Morph-target animations (Flamingo, Horse) do not play &mdash;
+our in-house GLTFLoader does not yet implement the <code>weights</code>
+animation path. Skeletal + TRS animations do play. Static meshes
+render correctly.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS Demos</a></p>
+</body>
+</html>

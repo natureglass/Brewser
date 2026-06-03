@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Shader (Monjori)</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Shader (Monjori)</h1>
+<p class="lead">Port of <code>webgl_shader.html</code>: a fullscreen
+<code>PlaneGeometry(2,&nbsp;2)</code> rendered by an
+<code>OrthographicCamera(-1, 1, 1, -1, 0, 1)</code>, drawn with a
+custom <code>ShaderMaterial</code> running the canonical "Monjori"
+(by Mic) shadertoy-style fragment shader &mdash; ~40
+<code>sin</code>/<code>cos</code>/<code>pow</code>/<code>sqrt</code>/<code>mod</code>
+calls per fragment driven by a single <code>time</code> uniform that
+updates from <code>performance.now() / 1000</code> each frame.
+Vertex shader is a pure passthrough (<code>gl_Position = vec4(position, 1.0)</code>),
+fragment shader is the procedural color pattern. Both shader source
+strings get <code>#pragma&nbsp;raw_passthrough</code> prepended so the
+bridge routes through the raw-shader passthrough path
+(<a href="brewser://memory/bridge-raw-shader-passthrough">memory</a>),
+running the user's GLSL verbatim on native GLES.</p>
+
+<div class="stage">
+  <canvas id="shader-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('shader-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="shader-status" width="900" height="280"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('shader-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 280);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__shaderError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const fps = +globalThis.__shaderFps || 0;
+    row(58, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(80, 'frames rendered:', String(globalThis.__shaderFrameCount | 0), true);
+    row(102, "getUniformLocation('time'):",
+        globalThis.__shaderTimeLocOk ? 'non-null' : 'null',
+        !!globalThis.__shaderTimeLocOk);
+    row(124, 'live time uniform value:',
+        (+globalThis.__shaderTimeValue || 0).toFixed(3) + 's',
+        (+globalThis.__shaderTimeValue || 0) > 0);
+    const errBefore = globalThis.__shaderGlErrorBefore;
+    const errAfter = globalThis.__shaderGlErrorAfter;
+    row(146, 'gl.getError before render:',
+        '0x' + ((errBefore | 0) >>> 0).toString(16), errBefore === 0);
+    row(168, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16), errAfter === 0);
+    let exts = '';
+    try {
+      const c2 = document.getElementById('shader-canvas');
+      const ctx2 = c2 && c2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 196);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 218);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="note">No new bridge surface forced &mdash; the path was
+fully built by milestones #14 (custom-fragment-shader rendering via
+raw_passthrough), #20 (auto-promote markers in
+<code>compileShader</code>'s source-scan), and #22 (custom-uniform-name
+forwarding via passthrough). This demo simply rides them: one custom
+<code>uniform float time</code> per frame, <code>OrthographicCamera</code>
+projection ignored by the shader (NDC fullscreen quad), no textures.
+Fragment shader complexity is the only thing to watch &mdash; ~40
+trig + transcendental ops per fragment with no LODs, so 640&times;360
+should be ~30+ FPS but 1280&times;720 fullscreen may dip to single
+digits. lil-gui not present in upstream; no DOM stubs needed.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

@@ -4,7 +4,7 @@ import { captureNativeFetch, nxScreen, WebView, type WebViewDelegate } from '@sw
 // before/after the navigateTo dispatch — narrows whether a click ever
 // reached navigateTo, vs. the touch listener never firing, vs. the
 // navigation hanging in load().
-const _SHELL_INPUT_DIAG_PATH = 'sdmc:/switch/webprofiles/default/logs/shell-nav-diag.log';
+const _SHELL_INPUT_DIAG_PATH = 'sdmc:/switch/brewser/logs/shell-nav-diag.log';
 const _shellInputDiagStart = Date.now();
 function _shellInputDiag(label: string): void {
 	try {
@@ -15,6 +15,7 @@ function _shellInputDiag(label: string): void {
 		}
 	} catch { /* swallow */ }
 }
+
 
 import {
 	BROWSER_INTERNAL_ORIGIN,
@@ -34,8 +35,8 @@ import {
 	tickAnimationFrames,
 	type PageScriptContext,
 } from './scripts/canvas-runner.js';
-import { clearGifAnimations, getLiveRoot, getLiveTreeVersion, resetLiveRoot, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
-import { getComputedLiveStyle, setMediaColorScheme } from './scripts/live-css.js';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, pageHasListenerFor, resetLiveRoot, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
+import { setMediaColorScheme } from './scripts/live-css.js';
 import { setCssViewport } from './scripts/inline-css.js';
 import { setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
 import {
@@ -60,7 +61,11 @@ import {
 	resetLiveOverlayCache, setLiveBuildChunkMs, setLiveScrollChunkMs,
 } from './scripts/live-overlay.js';
 import {
-	consumeFullRepaintRequest, isKeyboardOpen, requestFullRepaint,
+	clearPageHasCanvas2dActivity,
+	consumeFullRepaintRequest,
+	hasPageCanvas2dActivity,
+	isKeyboardOpen,
+	requestFullRepaint,
 } from './scripts/live-paint-control.js';
 import { getLayoutBox } from './scripts/live-layout.js';
 import { isExternalCssLoading, loadHeadLinkStylesheetsWithFlag, populateLiveRoot } from './scripts/html-to-live.js';
@@ -175,6 +180,15 @@ export class BrowserShell {
 	 * `setColorScheme` can update the outgoing Client-Hint header
 	 * without rebuilding the loader. Null when network is disabled. */
 	private uaFetchLoader: SwitchUaFetchLoader | null = null;
+	/** Chained-setTimeout pump that prods `requestFullRepaint` so the
+	 * shell paint loop keeps ticking while the loading overlay is
+	 * shown. Null when not running. Self-cancels when the overlay
+	 * stops being painted. */
+	private cssLoadingOverlayPumpTid: ReturnType<typeof setTimeout> | null = null;
+	/** Wallclock of the most recent `paintCssLoadingOverlay` call. The
+	 * paint pump stops itself if this drifts too far in the past
+	 * (overlay no longer painting → don't burn CPU). */
+	private cssLoadingOverlayLastPaintMs = 0;
 
 	constructor() {
 		this.policy = new BrowserPermissionPolicy();
@@ -184,7 +198,7 @@ export class BrowserShell {
 		// the user's `maxHistory` cap (loadConfig falls back to DEFAULT_CONFIG
 		// on first run before seedTemplates has copied the romfs default in;
 		// either way maxHistory ends up at the same value).
-		const startupConfig = loadConfig(this.profile.storageRoot);
+		const startupConfig = loadConfig(this.profile.appRoot);
 		this.colorScheme = startupConfig.theme;
 		// Push the colour-scheme preference into the CSS cascade up front so
 		// the first stylesheet parse evaluates `@media (prefers-color-scheme:
@@ -227,13 +241,25 @@ export class BrowserShell {
 				// since the rAF queue is module-level in canvas-runner,
 				// the leaked callbacks accumulate forever).
 				clearAnimationFrames();
+				clearPageHasCanvas2dActivity();
 				clearAllVideos();
+				// Terminate any active Web Workers the previous page spawned
+				// so their pthreads + JSRuntimes don't leak across nav. Calls
+				// pthread_join on each — sync; blocks briefly per worker.
+				// See [[project-swb-web-workers-milestone]].
+				try {
+					const g = globalThis as unknown as { __terminateAllWorkers?: () => void };
+					if (typeof g.__terminateAllWorkers === 'function') g.__terminateAllWorkers();
+				} catch (_) { /* swallow — never let nav fail on worker cleanup */ }
 				// Stop any animated-GIF tickers from the prior page —
 				// they hold closures over now-detached LiveElements and
 				// would otherwise keep firing `setFrame` +
 				// patchLiveCacheRegion on stale boxes, clobbering the
 				// new page's cache.
 				clearGifAnimations();
+				// Same lifecycle for CSS-keyframes tickers — they're per-
+				// element setTimeout loops that should die with the page.
+				clearCssAnimations();
 				// Wipe the shared screen GL bridge FBO so the next
 				// page's first paint (which may copyBridgeToScreen
 				// before any new rAF tick has fired) doesn't carry
@@ -265,7 +291,7 @@ export class BrowserShell {
 				permissionPolicy: this.policy,
 				// JSON API loaders come first so they claim their `.json`
 				// URLs before the static-page loader's classifier would
-				// route them as static-asset 404s. `browser://history/`
+				// route them as static-asset 404s. `brewser://history/`
 				// (no .json) falls through to the static-page loader,
 				// which serves `pages/history.html`.
 				//
@@ -287,7 +313,8 @@ export class BrowserShell {
 					new BrowserHistoryLoader(this.historyStore),
 					new BrowserBookmarksLoader(this.bookmarksStore),
 					new BrowserResourceLoader({
-						profileRoot: this.profile.storageRoot,
+						storageRoot: this.profile.storageRoot,
+						appRoot: this.profile.appRoot,
 						bookmarksStore: this.bookmarksStore,
 						historyStore: this.historyStore,
 					}),
@@ -334,20 +361,22 @@ export class BrowserShell {
 		// (existence check + skip for files that already exist) so the
 		// user's edits survive but a deleted file is restored next run.
 		await this.profile.seedBuiltinPages();
+		await this.profile.seedBuiltinAppPages();
+		await this.profile.seedBuiltinDevPages();
 		await this.profile.seedBuiltinAssets();
 		await this.profile.seedTemplates();
 		// Apply shell-level preferences from config.json. Done before
 		// loadTemplate so any future config-driven template overrides
 		// can layer on top, and before scanForAutoplayVideos runs (it
 		// reads videoTryHwAccel via openDecoder).
-		const shellConfig = loadConfig(this.profile.storageRoot);
+		const shellConfig = loadConfig(this.profile.appRoot);
 		setVideoTryHwAccel(shellConfig.videoNVTEGRA);
 		setLiveBuildChunkMs(shellConfig.renderChunkMs);
 		setLiveScrollChunkMs(shellConfig.scrollChunkMs);
 		// Load the design template + push it into the UI, keyboard,
 		// and touch dispatcher so the very first chrome paint already
 		// reflects the user's customisations.
-		this.template = loadTemplate(this.profile.storageRoot);
+		this.template = loadTemplate(this.profile.appRoot);
 		this.ui.setTemplate(this.template);
 		this.keyboard.setTemplate(this.template);
 		this.publishChromeRegion();
@@ -538,6 +567,18 @@ export class BrowserShell {
 						if (this.mode === 'video-fullscreen' || this.mode === 'fullscreen-canvas') {
 							await this.exitFullscreen();
 						} else {
+							// Give the page a chance to consume B as a
+							// synthetic `Escape` keydown — same model as
+							// the ArrowUp/Down forwarding ([[swb-page-input-limits]]).
+							// Page handlers call preventDefault() to keep
+							// the shell from navigating back, enabling
+							// multi-stage Back (close modal → exit). If no
+							// page handler or page doesn't preventDefault,
+							// fall through to history goBack as before.
+							if (pageHasListenerFor('keydown')) {
+								const consumed = dispatchPageKeyEvent('keydown', 'Escape', 'Escape');
+								if (consumed) break;
+							}
 							await this.runNavigation(() => this.navigation.goBack());
 						}
 						break;
@@ -548,7 +589,7 @@ export class BrowserShell {
 						await this.navigateTo(DEFAULT_HOME_URL);
 						break;
 					case 'settings':
-						await this.navigateTo('browser://settings/');
+						await this.navigateTo('brewser://settings/');
 						break;
 					case 'star':
 						this.toggleBookmark();
@@ -623,8 +664,8 @@ export class BrowserShell {
 
 	/** Resolve a link `href` against the current page's URL, mirroring how
 	 * `<img>` srcs resolve page-relative. Absolute URLs (any scheme) pass
-	 * through. `browser://` bases follow the engine's own segment-walking
-	 * rules to produce another `browser://` URL. `http(s)://` bases
+	 * through. `brewser://` bases follow the engine's own segment-walking
+	 * rules to produce another `brewser://` URL. `http(s)://` bases
 	 * (external pages like google.com) defer to the standard URL parser
 	 * so `/search` becomes `https://<host>/search` etc. — required for
 	 * tier3 form-submit navigation and for relative `<a href>` on
@@ -641,10 +682,10 @@ export class BrowserShell {
 				return u;
 			}
 		}
-		if (!/^browser:\/\//i.test(base)) return u;            // no recognised base → leave as-is
+		if (!/^brewser:\/\//i.test(base)) return u;            // no recognised base → leave as-is
 		if (u.startsWith('#')) return base.split('#')[0] + u;  // same-page fragment
-		if (u.startsWith('/')) return `browser://${u.replace(/^\/+/, '')}`; // root-relative
-		const basePath = base.replace(/^browser:\/\//i, '').split('?')[0].split('#')[0];
+		if (u.startsWith('/')) return `brewser://${u.replace(/^\/+/, '')}`; // root-relative
+		const basePath = base.replace(/^brewser:\/\//i, '').split('?')[0].split('#')[0];
 		const slash = basePath.lastIndexOf('/');
 		const parts = (slash >= 0 ? basePath.slice(0, slash) : '').split('/').filter(Boolean);
 		const [path, tail] = [u.split(/[?#]/)[0], u.slice(u.split(/[?#]/)[0].length)];
@@ -653,7 +694,7 @@ export class BrowserShell {
 			if (seg === '..') { parts.pop(); continue; }
 			parts.push(seg);
 		}
-		return `browser://${parts.join('/')}${tail}`;
+		return `brewser://${parts.join('/')}${tail}`;
 	}
 
 	private async navigateTo(url: string): Promise<void> {
@@ -672,7 +713,7 @@ export class BrowserShell {
 		const mode = readOperationMode();
 		const modeLabel = mode === 0 ? 'HANDHELD' : mode === 1 ? 'DOCKED' : '';
 		// Only real web pages (http/https) can be bookmarked — local
-		// `browser://` pages hide the star. Keep the touch handler's
+		// `brewser://` pages hide the star. Keep the touch handler's
 		// star-slot gate in sync so its tap falls through to the URL bar.
 		const bookmarkable = isBookmarkable(url);
 		setStarEnabled(bookmarkable);
@@ -699,7 +740,7 @@ export class BrowserShell {
 	 */
 	private toggleBookmark(): void {
 		const url = this.navigation.currentURL;
-		// Only http/https pages are bookmarkable; local browser:// pages
+		// Only http/https pages are bookmarkable; local brewser:// pages
 		// have no star (defensive — the tap handler already gates this).
 		if (!url || !isBookmarkable(url)) return;
 		const title = this.navigation.currentTitle || url;
@@ -789,15 +830,15 @@ export class BrowserShell {
 		return Math.max(0, contentBottom - visibleHeight - this.paintScrollAdjust());
 	}
 
-	/** SD-card directory of a `browser://` page, used as the base for
+	/** SD-card directory of a `brewser://` page, used as the base for
 	 * page-relative `<img>` srcs (`./assets/x.png`), like a browser uses the
 	 * document URL. Mirrors `BrowserResourceLoader.classifyUrl`'s HTML
 	 * resolution so the base matches the file that actually loaded:
 	 *   - explicit file (`.../index.html`) → its parent dir.
-	 *   - directory form (`browser://welcome/`) → the loader tries
-	 *     `<path>.html` first (→ base is the PARENT, e.g. welcome.html lives
+	 *   - directory form (`brewser://home/`) → the loader tries
+	 *     `<path>.html` first (→ base is the PARENT, e.g. home.html lives
 	 *     in `pages/`), then `<path>/index.html` (→ base is `<path>/`).
-	 * Non-`browser://` URLs return '' (no page base). */
+	 * Non-`brewser://` URLs return '' (no page base). */
 	private computeLivePageBase(url: string): string {
 		// External http(s) pages: return the full page URL so the
 		// live-DOM resource resolver can hand it straight to `new URL`
@@ -805,31 +846,37 @@ export class BrowserShell {
 		// pages like google.com whose logo is referenced as a root-
 		// relative `/images/branding/…gif` — without the page URL as
 		// base, the IMG src reaches the image pipeline as a path with
-		// no scheme/host and 404s. The browser:// path below keeps its
+		// no scheme/host and 404s. The brewser:// path below keeps its
 		// own directory-style resolution because the runtime fetch
-		// can't see `browser:` and we need to map to a profile dir.
+		// can't see `brewser:` and we need to map to a profile dir.
 		if (/^https?:\/\//i.test(url)) return url;
-		if (!/^browser:\/\//i.test(url)) return '';
-		const root = this.profile.storageRoot;
-		const stripped = url.replace(/^browser:\/\//i, '')
+		if (!/^brewser:\/\//i.test(url)) return '';
+		const stripped = url.replace(/^brewser:\/\//i, '')
 			.split('?')[0].split('#')[0].replace(/^\/+/, '').replace(/\/+$/, '');
-		if (!stripped) return `${root}pages/`;
+		// Apps live at the app-level root (shared across profiles); the
+		// apps.html launcher (no slash after `apps`) stays per-profile.
+		// `dev/` is the app-level dev-fixtures + Khronos conformance tree.
+		// Mirror of BrowserResourceLoader.resolveContentPath.
+		const root = (stripped.startsWith('apps/') || stripped.startsWith('dev/'))
+			? this.profile.appRoot
+			: this.profile.storageRoot;
+		if (!stripped) return root;
 		const slash = stripped.lastIndexOf('/');
 		const lastSeg = stripped.slice(slash + 1);
 		const parentDir = slash >= 0 ? stripped.slice(0, slash + 1) : '';
 		// Explicit file → base is its parent directory.
 		if (!url.endsWith('/') && lastSeg.includes('.')) {
-			return `${root}pages/${parentDir}`;
+			return `${root}${parentDir}`;
 		}
 		// Directory form: prefer the `<path>.html` candidate (loaded from the
 		// PARENT dir) when that file exists, else `<path>/index.html`.
-		const htmlCandidate = `${root}pages/${stripped}.html`;
+		const htmlCandidate = `${root}${stripped}.html`;
 		let htmlExists = false;
 		try {
 			const sw = (globalThis as { Switch?: { readFileSync?: (p: string) => unknown } }).Switch;
 			if (sw && typeof sw.readFileSync === 'function') htmlExists = !!sw.readFileSync(htmlCandidate);
 		} catch (_) { htmlExists = false; }
-		return htmlExists ? `${root}pages/${parentDir}` : `${root}pages/${stripped}/`;
+		return htmlExists ? `${root}${parentDir}` : `${root}${stripped}/`;
 	}
 
 	/**
@@ -861,7 +908,7 @@ export class BrowserShell {
 		// the toolbar chrome), not the full screen. Set BEFORE scripts run +
 		// the first computed-style resolution so a page's `height: 100vh`
 		// fills exactly the visible content area instead of overflowing it by
-		// the toolbar height (which forced a scroll on the SwitchSurf player's
+		// the toolbar height (which forced a scroll on the Brewser player's
 		// `100vh` grid). resetLiveRoot above cleared the cascade cache, so the
 		// new basis is what every `vh`/`vw` resolves against.
 		{
@@ -880,15 +927,22 @@ export class BrowserShell {
 		// Without this, pages like DDG html-mode that put ALL their CSS
 		// in an external sheet rendered with our UA defaults only (green
 		// `<a>` text, no `.frm__select` width, no logo url() image, …).
-		// Only fired for http(s) pages — `browser://` pages always inline
-		// their `<style>` so the fetch step is wasted work there.
-		if (url.startsWith('http://') || url.startsWith('https://')) {
+		// Also fired for `brewser://` pages so the shared
+		// `brewser://assets/main.css` linked from every per-profile
+		// page actually loads — `loadHeadLinkStylesheets` early-
+		// returns if the parsed tree has zero <link rel=stylesheet>,
+		// so pages without an external sheet pay only a tree walk.
+		if (
+			url.startsWith('http://')
+			|| url.startsWith('https://')
+			|| url.startsWith('brewser://')
+		) {
 			loadHeadLinkStylesheetsWithFlag(tree, url).then(() => {
 				requestFullRepaint();
 			}).catch(() => { /* per-sheet failures already logged */ });
 		}
 
-		const allowScripts = url.startsWith('browser://');
+		const allowScripts = url.startsWith('brewser://');
 		this.scriptCtx = await runPageScripts(tree, {
 			allowScripts,
 			pageUrl: url,
@@ -912,30 +966,15 @@ export class BrowserShell {
 		this.currentPageUrl = url;
 		this.currentScrollY = 0;
 
-		// Apply template-defined body insets via padding on the live root,
-		// but only when the page itself didn't set them (via `<body
-		// style="padding:...">` or similar). The body's box still spans
-		// the full viewport so its bg color extends edge-to-edge; only
-		// the contentX/contentW inset so text + tables don't hug the
-		// screen edges.
-		const liveRoot = getLiveRoot();
-		const sidePad = this.template.page.sidePadding ?? 0;
-		const topPad = this.template.page.topPadding ?? 0;
-		// Skip the template chrome inset for full-bleed pages — a body that
-		// hides overflow is a fixed-viewport app laying itself out to the
-		// screen edges (e.g. a `width:100vw; height:100vh` grid). Injecting
-		// side padding there double-insets the left AND pushes the 100vw
-		// child past the right edge (the SwitchSurf player's big left gap +
-		// clipped library). Such pages own their insets via their own
-		// padding. Scrolling content pages (overflow visible/auto) still get
-		// the inset so text/tables don't hug the screen edges.
-		const rootCs = getComputedLiveStyle(liveRoot);
-		const fullBleed = rootCs.overflowX === 'hidden' || rootCs.overflowY === 'hidden';
-		if (!fullBleed) {
-			if (liveRoot.style.paddingLeft === undefined) liveRoot.style.paddingLeft = sidePad;
-			if (liveRoot.style.paddingRight === undefined) liveRoot.style.paddingRight = sidePad;
-			if (liveRoot.style.paddingTop === undefined) liveRoot.style.paddingTop = topPad;
-		}
+		// Page padding is the page's responsibility — the engine no longer
+		// injects template-defined body insets. The previous behaviour
+		// (applying `template.page.topPadding` / `sidePadding` when the
+		// page hadn't set explicit padding) silently overrode page CSS
+		// that used the `padding:` shorthand, because the check inspected
+		// only the long-hand inline `style.paddingLeft` etc. The
+		// `topPadding` / `sidePadding` fields remain in the template
+		// schema for back-compat but are unused; pages are expected to
+		// set their own `<body>` padding.
 
 		this.repaintAll();
 	}
@@ -998,7 +1037,7 @@ export class BrowserShell {
 	 */
 	private captureScreenshot(): void {
 		const canvas = nxScreen();
-		const dir = `${this.profile.storageRoot}screenshots/`;
+		const dir = `${this.profile.appRoot}screenshots/`;
 		try { Switch.mkdirSync(dir); } catch (_) { /* already exists */ }
 		const ts = new Date().toISOString().replace(/[:.]/g, '-');
 		const path = `${dir}screenshot_${ts}.png`;
@@ -1173,8 +1212,16 @@ export class BrowserShell {
 		);
 		const t0 = performance.now();
 		paintLiveOverlay(ctx, getLiveRoot(), viewport, effectiveScrollY);
-		// Skip the walk on otherwise-static pages.
-		if (pageHasAnimationActivity() || pageHasActiveVideo() || pageHasAnyPoster()) {
+		// Skip the walk on otherwise-static pages. `hasPageCanvas2dActivity`
+		// catches setTimeout-driven 2D canvas games (demo-breakout)
+		// that don't use rAF — without it the cached-layout fast path
+		// freezes the canvas at its first paint.
+		if (
+			pageHasAnimationActivity()
+			|| pageHasActiveVideo()
+			|| pageHasAnyPoster()
+			|| hasPageCanvas2dActivity()
+		) {
 			overlayLiveAnimatedCanvases(
 				ctx, getLiveRoot(), viewport, effectiveScrollY,
 				copyBridgeToScreen,
@@ -1195,28 +1242,80 @@ export class BrowserShell {
 		this.lastRepaintedScrollY = effectiveScrollY;
 	}
 
-	/** Translucent dimmer + "Loading styles…" text painted over the page
-	 * content area while external <link rel=stylesheet>s are still
-	 * fetching. Caller already drew the page underneath; this is a single
-	 * overlay layer so it's cheap. */
+	/** Opaque black overlay + centred rotating-arc spinner painted
+	 * over the page content area while external <link rel=stylesheet>s
+	 * are still fetching. Caller already drew the page underneath;
+	 * this fully masks it so the user never sees the pre-cascade
+	 * flash. Spinner is CSS-painted each frame from a wallclock phase
+	 * — even at this engine's ~1 Hz paint cadence during CSS-parse
+	 * work, an arc-sweep visibly moves around the circle (which a
+	 * stepped GIF frame change does not — frames look static when
+	 * paint lands on the same index twice). */
 	private paintCssLoadingOverlay(
 		ctx: CanvasRenderingContext2D,
 		viewport: { x: number; y: number; width: number; height: number },
 	): void {
+		const now = performance.now();
+		this.cssLoadingOverlayLastPaintMs = now;
+		this.ensureCssLoadingOverlayPaintPump();
 		ctx.save();
-		ctx.fillStyle = 'rgba(15, 20, 30, 0.78)';
+		ctx.fillStyle = '#000';
 		ctx.fillRect(viewport.x, viewport.y, viewport.width, viewport.height);
-		ctx.fillStyle = '#e6edf7';
-		ctx.font = '24px system-ui';
-		ctx.textBaseline = 'middle';
-		ctx.textAlign = 'center';
 		const cx = viewport.x + viewport.width / 2;
 		const cy = viewport.y + viewport.height / 2;
-		ctx.fillText('Loading styles…', cx, cy);
-		ctx.font = '15px system-ui';
-		ctx.fillStyle = '#9bb1d6';
-		ctx.fillText('Fetching external stylesheets', cx, cy + 30);
+		const radius = 44;
+		const lineWidth = 7;
+		// One full rotation per 1.5 s — slow enough that even on a
+		// ~1 Hz paint cadence (Citron during CSS parse) the visible
+		// jump between paints is < 240° rather than a multi-cycle
+		// wrap that looks random.
+		const cycleMs = 1500;
+		const phase = ((now % cycleMs) / cycleMs) * Math.PI * 2;
+		// Background ring — full circle in a faint blue so the spinner
+		// always reads as "loading" even before the active arc renders.
+		ctx.beginPath();
+		ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+		ctx.lineWidth = lineWidth;
+		ctx.strokeStyle = 'rgba(122, 162, 255, 0.20)';
+		ctx.stroke();
+		// Active arc — 270° of the brighter blue accent, rotating
+		// around the ring. lineCap='round' gives the leading edge a
+		// soft head that reads as motion.
+		ctx.beginPath();
+		ctx.arc(cx, cy, radius, phase, phase + Math.PI * 1.5);
+		ctx.lineWidth = lineWidth;
+		ctx.lineCap = 'round';
+		ctx.strokeStyle = '#7aa2ff';
+		ctx.stroke();
 		ctx.restore();
+	}
+
+	/** Chained-setTimeout that periodically prods `requestFullRepaint`
+	 * (plus an empty `requestAnimationFrame`) so the shell paint loop
+	 * keeps ticking while the loading overlay is shown. Self-cancels
+	 * after 3 s without an overlay paint (loading flag flipped off →
+	 * no need to keep the loop hot). */
+	private ensureCssLoadingOverlayPaintPump(): void {
+		if (this.cssLoadingOverlayPumpTid !== null) return;
+		const rafCarrier = globalThis as unknown as {
+			requestAnimationFrame?: (cb: (t: number) => void) => number;
+		};
+		const pump = (): void => {
+			this.cssLoadingOverlayPumpTid = null;
+			if (performance.now() - this.cssLoadingOverlayLastPaintMs > 3000) return;
+			// Queue an empty rAF so the shell's `onTick` hits the
+			// `animFired` branch and runs `repaintContent` — that's the
+			// route that actually presents pixels. A bare
+			// `requestFullRepaint` only sets a flag the idle-tick branch
+			// may not service when nothing else is moving (the engine-
+			// side draw→submit gap noted in
+			// [[feedback-swb-idle-paint-needs-touch]]).
+			try { rafCarrier.requestAnimationFrame?.(() => { /* presence is the point */ }); }
+			catch (_) { /* swallow */ }
+			requestFullRepaint();
+			this.cssLoadingOverlayPumpTid = setTimeout(pump, 40);
+		};
+		this.cssLoadingOverlayPumpTid = setTimeout(pump, 40);
 	}
 
 	private repaintFullscreenCanvas(
@@ -1375,6 +1474,9 @@ export class BrowserShell {
 			case 'clear-history':
 				await this.clearHistory();
 				break;
+			case 'clear-bookmarks':
+				await this.clearBookmarks();
+				break;
 			default:
 				// Unknown action — no-op.
 				break;
@@ -1393,13 +1495,24 @@ export class BrowserShell {
 	}
 
 	/**
+	 * Bookmarks-page "Clear Bookmarks" button handler. Wipes the on-disk
+	 * `BookmarksStore` (rewrites `bookmarks.json` to `[]`) and reloads
+	 * the current page so the `<browser-bookmarks>` expansion re-runs
+	 * against the now-empty store — the list disappears in place.
+	 */
+	private async clearBookmarks(): Promise<void> {
+		this.bookmarksStore.clear();
+		await this.runNavigation(() => this.navigation.reload());
+	}
+
+	/**
 	 * Search-bar handler: opens the on-screen keyboard for a query, then
 	 * navigates to the active search engine's results URL (engine chosen
 	 * via `config.json` → `search_engines.json`). Empty / cancelled
 	 * input just repaints the current page.
 	 */
 	private async promptAndSearch(): Promise<void> {
-		const engine = resolveSearchEngine(this.profile.storageRoot);
+		const engine = resolveSearchEngine(this.profile.appRoot);
 		const typed = await this.keyboard.open('', {
 			onScroll: (delta) => this.handleScroll(delta),
 		});
@@ -1426,7 +1539,7 @@ export class BrowserShell {
 	 * `<browser-templates>` expansion picks up the new active row.
 	 */
 	private async selectTemplate(path: string): Promise<void> {
-		const configPath = `${this.profile.storageRoot}config.json`;
+		const configPath = `${this.profile.appRoot}config.json`;
 		try {
 			// Read the raw existing config and merge `template` onto it
 			// so every other key survives — today that's
@@ -1450,14 +1563,14 @@ export class BrowserShell {
 			} catch (_) {
 				// Missing or unreadable config — fall through and write
 				// a minimal one with sane defaults baked in.
-				next = { ...loadConfig(this.profile.storageRoot), template: path };
+				next = { ...loadConfig(this.profile.appRoot), template: path };
 			}
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {
 			console.debug(`[switch-web-browser] write config.json failed: ${error}`);
 			return;
 		}
-		this.template = loadTemplate(this.profile.storageRoot);
+		this.template = loadTemplate(this.profile.appRoot);
 		this.ui.setTemplate(this.template);
 		this.keyboard.setTemplate(this.template);
 		this.publishChromeRegion();
@@ -1742,13 +1855,13 @@ export class BrowserShell {
 	 * paint replaces it. `await`ed in `run()` so the logo's async decode
 	 * completes before that blocking work begins. Logo loads from romfs
 	 * (mounted at boot, before asset seeding); it must be RGBA — the PNG
-	 * decoder renders RGB as invisible (see SwitchSurf_logo.png). */
+	 * decoder renders RGB as invisible (see Brewser_logo.png). */
 	private async paintBootSplash(): Promise<void> {
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
 		ctx.fillStyle = '#00010a';
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		const logo = await loadOptionalImage('romfs:/assets/SwitchSurf_logo.png');
+		const logo = await loadOptionalImage('romfs:/assets/Brewser_logo.png');
 		const li = logo as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
 		const lw = li ? (li.naturalWidth || li.width || 0) : 0;
 		const lh = li ? (li.naturalHeight || li.height || 0) : 0;
@@ -1764,7 +1877,7 @@ export class BrowserShell {
 			ctx.font = 'bold 36px system-ui';
 			ctx.textBaseline = 'middle';
 			ctx.textAlign = 'center';
-			ctx.fillText('SwitchSurf', canvas.width / 2, canvas.height / 2);
+			ctx.fillText('Brewser', canvas.width / 2, canvas.height / 2);
 			ctx.textAlign = 'start';
 		}
 	}
@@ -1946,7 +2059,7 @@ function readOperationMode(): number {
 	}
 }
 
-/** Only real web pages are bookmarkable. Local `browser://` pages (and
+/** Only real web pages are bookmarkable. Local `brewser://` pages (and
  * any non-http(s) scheme like `romfs:` / `sdmc:`) hide the star button
  * and ignore the bookmark action. */
 function isBookmarkable(url: string | null | undefined): boolean {

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: gl-get-active-attribute</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>programs/gl-get-active-attribute</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/programs/gl-get-active-attribute.html</code>.
+Compiles a vertex shader for each attribute type
+(<code>float</code>, <code>vec2/3/4</code>, <code>mat2/3/4</code>) and
+verifies <code>getActiveAttrib</code> reports the right
+<code>name</code>, <code>type</code>, and <code>size</code>.
+Milestone&nbsp;#3 (webgl-geometry-colors) regression test — the demo
+introduced the bridge's <code>a_normal</code> attribute path; this
+verifies <code>getActiveAttribute</code> forwarding to native GLES
+works across all GLSL attribute types.</p>
+
+<canvas id="example" width="16" height="16"></canvas>
+
+<script id="vshader" type="x-shader/x-vertex">
+attribute $type attr0;
+void main() { gl_Position = vec4(0, 0, 0, attr0$access); }
+</script>
+<script id="fshader" type="x-shader/x-fragment">
+void main() { gl_FragColor = vec4(0,1,0,1); }
+</script>
+
+<canvas id="khronos-status" width="900" height="500"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'programs-gl-get-active-attribute';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+  try {
+    description('Tests getActiveAttrib for various types');
+
+    const wtu = WebGLTestUtils;
+    const gl = wtu.create3DContext('example');
+
+    const tests = [
+      { glType: gl.FLOAT,      size: 1, type: 'float', access: '' },
+      { glType: gl.FLOAT_VEC2, size: 1, type: 'vec2',  access: '[1]' },
+      { glType: gl.FLOAT_VEC3, size: 1, type: 'vec3',  access: '[2]' },
+      { glType: gl.FLOAT_VEC4, size: 1, type: 'vec4',  access: '[3]' },
+      { glType: gl.FLOAT_MAT2, size: 1, type: 'mat2',  access: '[1][1]' },
+      { glType: gl.FLOAT_MAT3, size: 1, type: 'mat3',  access: '[2][2]' },
+      { glType: gl.FLOAT_MAT4, size: 1, type: 'mat4',  access: '[3][3]' },
+    ];
+
+    const source = document.getElementById('vshader').text;
+    const fs = wtu.loadShaderFromScript(gl, 'fshader', gl.FRAGMENT_SHADER);
+
+    for (let tt = 0; tt < tests.length; tt++) {
+      const t = tests[tt];
+      const vs = wtu.loadShader(gl,
+        source.replace('$type', t.type).replace('$access', t.access),
+        gl.VERTEX_SHADER);
+      const program = wtu.setupProgram(gl, [vs, fs]);
+      wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'no errors from setup');
+      if (!program) continue;
+      const numAttribs = gl.getProgramParameter(program, gl.ACTIVE_ATTRIBUTES);
+      let found = false;
+      for (let ii = 0; ii < numAttribs; ii++) {
+        const info = gl.getActiveAttrib(program, ii);
+        if (info && info.name === 'attr0') {
+          found = true;
+          assertMsg(info.type === t.glType,
+            'type must be ' + wtu.glEnumToString(gl, t.glType) +
+            ' was ' + wtu.glEnumToString(gl, info.type));
+          assertMsg(info.size === t.size,
+            'size must be ' + t.size + ' was ' + info.size);
+        }
+      }
+      if (!found) testFailed("attrib 'attr0' not found for type " + t.type);
+    }
+
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-geometry-colors/">back to Geometry Vertex Colors demo</a></p>
+</body>
+</html>

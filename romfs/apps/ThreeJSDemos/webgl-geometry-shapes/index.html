@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Geometry Shapes</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+  kbd { background-color: #1a2840; padding: 1px 6px; border-radius: 3px;
+        font-family: monospace; color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Geometry Shapes</h1>
+<p class="lead">Port of <code>three-r162/examples/webgl_geometry_shapes.html</code>:
+a gallery of 11 procedurally-generated 2D shapes (California outline,
+heart, smiley with holes, fish, spline, etc.), each rendered as 9
+variants in z-stacks: textured flat <code>ShapeGeometry</code>, colored
+flat <code>ShapeGeometry</code>, colored <code>ExtrudeGeometry</code>
+(with bevel), 2 <code>Line</code> outlines, 2 <code>Points</code> sets.
+First milestone to exercise <code>mapTransform</code> mat3 uniform support
+in the bridge — Three.js's <code>texture.repeat.set(0.008, 0.008)</code>
+now scales UVs on the textured flat shapes so the UV grid tiles correctly
+rather than stretching the edge texel across the shape. Also exercises
+<code>side: THREE.DoubleSide</code> for the flat ShapeGeometry meshes.</p>
+
+<p class="lead">Control: <kbd>Right stick</kbd> drag-rotates the group
+around the Y axis (replaces upstream's pointer drag).</p>
+
+<div class="stage">
+  <canvas id="shapes-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('shapes-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="shapes-status" width="900" height="280"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('shapes-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 280);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const sErr = globalThis.__shapesError;
+    row(36, 'shapes error:', sErr ? String(sErr).slice(0, 80) : '(none)', !sErr);
+    row(58, 'texture loaded:',
+        globalThis.__shapesTextureLoaded
+          ? (globalThis.__shapesTextureW + 'x' + globalThis.__shapesTextureH)
+          : 'no',
+        !!globalThis.__shapesTextureLoaded);
+    row(80, 'meshes in group:',
+        String(globalThis.__shapesMeshCount | 0),
+        (globalThis.__shapesMeshCount | 0) > 50);
+    row(102, 'animate() called:',
+        globalThis.__shapesAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__shapesAnimateCalled);
+    const fps = +globalThis.__shapesFps || 0;
+    row(124, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 20);
+    row(146, 'frames rendered:', String(globalThis.__shapesFrameCount | 0), true);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="note">Each shape is laid out in a z-stack of 9 variants (z =
+-175..125 in 50-unit steps). The textured flat ShapeGeometry uses the
+upstream UV-grid texture with <code>RepeatWrapping</code> and
+<code>texture.repeat.set(0.008, 0.008)</code> — that scaling is what
+<code>mapTransform</code> mat3 uniform support in the bridge enables.
+The 2 Points variants render at fixed ~2 px size regardless of
+<code>PointsMaterial({ size: 4 })</code> because the bridge's
+<code>draw_arrays_points</code> doesn't honor the size uniform yet.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

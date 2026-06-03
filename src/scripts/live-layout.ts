@@ -159,7 +159,7 @@ export function layoutFixedRoot(
 	// canvas inside that defines the hit box). For the document body
 	// itself, always use the full available width: the body's
 	// containing block IS the viewport. Without this guard, a page
-	// like html-experiments/rounded with a `<canvas width="240">`
+	// like dev/rounded with a `<canvas width="240">`
 	// somewhere in body would shrink the entire body's content area
 	// to 240px wide and all paragraphs/tables wrap at that width.
 	const isBody = root.tagName === 'BODY';
@@ -1131,7 +1131,7 @@ function computeCrossOrigin(
 
 /** CSS Grid layout — row-major placement into a column track list.
  * Supports `grid-template-columns: repeat(auto-fit, minmax(<min>, 1fr))`
- * (the welcome.html pattern), `repeat(<N>, <track>)`, and explicit
+ * (the home.html pattern, formerly welcome.html), `repeat(<N>, <track>)`, and explicit
  * space-separated tracks. Each row's height stretches to the tallest
  * child so backgrounds extend uniformly. Returns total height. */
 function layoutGrid(

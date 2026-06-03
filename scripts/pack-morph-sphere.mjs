@@ -8,7 +8,7 @@
 //   D:/Workspace/three-r162/examples/models/gltf/AnimatedMorphSphere/glTF/AnimatedMorphSphere.bin
 //
 // Writes:
-//   romfs/pages/threejs-demos/webgl-morphtargets-sphere/assets/morph-sphere.bin
+//   romfs/apps/ThreeJSDemos/webgl-morphtargets-sphere/assets/morph-sphere.bin
 //
 // Format (little-endian throughout):
 //   [0..3]   magic "MRPH"
@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SWB = resolve(HERE, '..');
 const SRC_DIR = 'D:/Workspace/three-r162/examples/models/gltf/AnimatedMorphSphere/glTF';
-const OUT_PATH = resolve(SWB, 'romfs/pages/threejs-demos/webgl-morphtargets-sphere/assets/morph-sphere.bin');
+const OUT_PATH = resolve(SWB, 'romfs/apps/ThreeJSDemos/webgl-morphtargets-sphere/assets/morph-sphere.bin');
 
 const gltf = JSON.parse(readFileSync(`${SRC_DIR}/AnimatedMorphSphere.gltf`, 'utf8'));
 const bin = readFileSync(`${SRC_DIR}/AnimatedMorphSphere.bin`);

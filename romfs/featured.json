@@ -1,0 +1,38 @@
+[
+    {
+        "title":"Media Player",
+        "description": "Enjoy music directly on your console with this media player.",
+        "logo": "sdmc:/switch/brewser/apps/mediaplayer/assets/audioplayer_logo.png",
+        "url": "brewser://apps/mediaplayer/index.html"
+    },
+    {
+        "title":"Sensors",
+        "description": "An application to test the various sensors on your device.",
+        "logo": "sdmc:/switch/brewser/apps/sensors/assets/sensors_logo.png",
+        "url": "brewser://apps/sensors/index.html"
+    },
+    {
+        "title":"TikTok",
+        "description": "Scroll through TikTok videos directly on your console.",
+        "logo": "sdmc:/switch/brewser/apps/TikTok/assets/tiktok_logo.png",
+        "url": "brewser://apps/TikTok/index.html"
+    },
+    {
+        "title":"Twitch",
+        "description": "Scroll through Twitch videos directly on your console.",
+        "logo": "sdmc:/switch/brewser/apps/twitch/assets/twitch_logo.png",
+        "url": "brewser://apps/twitch/index.html"
+    },
+    {
+        "title":"itch.io",
+        "description": "Browse newest browser-playable games from itch.io.",
+        "logo": "sdmc:/switch/brewser/apps/itchio/assets/itchio_logo.png",
+        "url": "brewser://apps/itchio/index.html"
+    },
+    {
+        "title":"ThreeJS Demos",
+        "description": "Khronos WebGL conformance suites and Three.js demos via the GPU bridge.",
+        "logo": "sdmc:/switch/brewser/apps/ThreeJSDemos/assets/threejsdemos_logo.png",
+        "url": "brewser://apps/ThreeJSDemos/index.html"
+    }
+]

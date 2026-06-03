@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Geometries</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Geometries</h1>
+<p class="lead">Port of <code>webgl_geometries.html</code>: 12 built-in
+geometries in a 4&times;3 grid, shared <code>MeshPhongMaterial</code>,
+camera orbit. Exercises the bridge's new <strong>Blinn-Phong specular</strong>.</p>
+
+<div class="stage">
+  <canvas id="geometries-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('geometries-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="geometries-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('geometries-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__geometriesError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    row(58, 'uv grid loaded:',
+        globalThis.__geometriesTextureLoaded ? 'yes' : 'no',
+        !!globalThis.__geometriesTextureLoaded);
+    row(80, 'meshes added:',
+        String(globalThis.__geometriesMeshCount | 0),
+        (globalThis.__geometriesMeshCount | 0) === 12);
+    row(102, 'animate() called:',
+        globalThis.__geometriesAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__geometriesAnimateCalled);
+    const fps = +globalThis.__geometriesFps || 0;
+    row(124, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 10);
+    row(146, 'frames rendered:', String(globalThis.__geometriesFrameCount | 0), true);
+    // Bridge dispatch debug
+    let bridgeDbg = '';
+    try {
+      const canvas2 = document.getElementById('geometries-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getBackendInfo === 'function') {
+        const info = ctx2.getBackendInfo();
+        bridgeDbg = (info && info.debugDispatchState) ? String(info.debugDispatchState) : '(empty)';
+      } else {
+        bridgeDbg = '(no getBackendInfo)';
+      }
+    } catch (e) { bridgeDbg = 'err: ' + String(e); }
+    st.fillStyle = '#9bb1d6';
+    st.fillText('bridge dbg:', 14, 178);
+    st.fillStyle = '#ffd35e';
+    const lines = [];
+    let cursor = 0;
+    while (cursor < bridgeDbg.length) {
+      const remaining = bridgeDbg.length - cursor;
+      const sliceLen = Math.min(110, remaining);
+      lines.push(bridgeDbg.slice(cursor, cursor + sliceLen));
+      cursor += sliceLen;
+    }
+    for (let li = 0; li < Math.min(lines.length, 4); li++) {
+      st.fillText(lines[li], 14, 200 + li * 20);
+    }
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/state-gl-enable-enum-test.html"><code>state/gl-enable-enum-test</code></a>
+&mdash; pins the <code>gl.enable</code>/<code>isEnabled</code>/<code>getParameter</code>
+round-trip across all ES 2.0 capability enums plus the desktop-GL-only
+enum rejection gate (the demo hammers BLEND, CULL_FACE, DEPTH_TEST,
+SCISSOR_TEST).</p>
+
+<p class="note">No input — the demo is purely animated. All meshes share
+the same <code>MeshPhongMaterial</code> with a UV-grid texture, so this
+also acts as a stress test for the bridge under 12 separate
+<code>drawElements</code> calls per frame, all using the same shader
+program but different geometry buffers. Watch the highlights on the
+sphere / icosahedron / torus knot for the new specular term — Three.js
+uses default <code>specular=0x111111</code> + <code>shininess=30</code>
+so the highlight is subtle.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Morph Targets Sphere</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Morph Targets Sphere</h1>
+<p class="lead">Port of <code>webgl_morphtargets_sphere.html</code>: a
+1,876-vertex sphere with two morph targets ("Ship" + "Blob") drawn as
+a <code>MeshPhongMaterial</code> mesh with a co-located
+<code>THREE.Points</code> rendition sharing the same geometry.
+<code>morphTargetInfluences[1]</code> oscillates between 0 and 1 every
+2 seconds, smoothly interpolating between the sphere and the Blob
+shape. First milestone to exercise the bridge's
+<strong>morph target path</strong> &mdash; nxjs's
+<code>nx_webgl_compile_shader</code> source-scan gains a third
+auto-promote marker (<code>#define USE_MORPHTARGETS</code>), so any
+Three.js material applied to a geometry with morph attributes routes
+through the raw-shader passthrough path
+(<a href="brewser://memory/bridge-raw-shader-passthrough">memory</a>),
+running the auto-generated morph compose
+(<code>morphtarget_pars_vertex</code> + <code>morphtarget_vertex</code>
+chunks) verbatim on native GLES. Two <code>PointLight</code>s (red +
+green) plus ambient.</p>
+
+<div class="stage">
+  <canvas id="morph-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('morph-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="morph-status" width="900" height="360"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('morph-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 360);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const hasOc = typeof globalThis.SwitchOrbitControls !== 'undefined';
+    row(36, 'SwitchOrbitControls loaded:', hasOc ? 'yes' : 'no', hasOc);
+    const gErr = globalThis.__morphError;
+    row(58, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const fps = +globalThis.__morphFps || 0;
+    row(80, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(102, 'frames rendered:', String(globalThis.__morphFrameCount | 0), true);
+    row(124, 'asset loaded:',
+        globalThis.__morphAssetLoaded ? 'yes' : 'no',
+        !!globalThis.__morphAssetLoaded);
+    row(146, 'vertex count:', String(globalThis.__morphVertexCount | 0),
+        (globalThis.__morphVertexCount | 0) === 1876);
+    row(168, 'morph target count:', String(globalThis.__morphTargetCount | 0),
+        (globalThis.__morphTargetCount | 0) === 2);
+    row(190, "morphTargetInfluences[1] (live):",
+        (+globalThis.__morphInfluence1 || 0).toFixed(3),
+        true);
+    row(212, 'point texture loaded:',
+        globalThis.__morphPointTexLoaded ? 'yes' : 'no',
+        !!globalThis.__morphPointTexLoaded);
+    const errBefore = globalThis.__morphGlErrorBefore;
+    const errAfter = globalThis.__morphGlErrorAfter;
+    row(234, 'gl.getError before render:',
+        '0x' + ((errBefore | 0) >>> 0).toString(16), errBefore === 0);
+    row(256, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16), errAfter === 0);
+    let exts = '';
+    try {
+      const c2 = document.getElementById('morph-canvas');
+      const ctx2 = c2 && c2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 284);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 306);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="note">GLTFLoader is not bundled in switch-web-browser; the
+upstream <code>AnimatedMorphSphere.gltf</code> + <code>.bin</code> are
+pre-parsed at build time
+(<code>scripts/pack-morph-sphere.mjs</code>) into a single
+<code>morph-sphere.bin</code> with a fixed header layout
+(positions + normals + 2 morph targets &times; positions + normals +
+indices) that the demo loads via <code>fetch</code>+<code>arrayBuffer</code>.
+GLTF deltas in this 218 KB asset survive the round-trip exactly &mdash;
+no resampling, no precision loss. <code>MeshStandardMaterial</code>
+(upstream) is substituted by <code>MeshPhongMaterial({ color:
+0xcccccc })</code> for visual parity through the bridge's lighting
+path; full PBR through raw_passthrough is deferred. Left stick orbits
+the camera. Re-uses the existing <code>SwitchOrbitControls</code>
+addon and inlines a tiny <code>Timer</code> equivalent (~20 LOC of
+<code>getDelta()</code>).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

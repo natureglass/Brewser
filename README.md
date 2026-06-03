@@ -3,9 +3,9 @@
 Future browser shell for Nintendo Switch homebrew. Built on top of
 [`@switch-web/runtime`](../switch-web-runtime).
 
-> **Status: scaffold + `browser://` pipeline + soft-keyboard address bar.**
+> **Status: scaffold + `brewser://` pipeline + soft-keyboard address bar.**
 > Launching the NRO routes through
-> `WebView.load({ url: "browser://new-tab/" })`, which runs the request
+> `WebView.load({ url: "brewser://new-tab/" })`, which runs the request
 > through the runtime fetch wrapper, hits `BrowserResourceLoader`, and
 > executes the returned JS body inside an app session. A chrome strip
 > at the top of the canvas shows the current URL.
@@ -32,7 +32,7 @@ Future browser shell for Nintendo Switch homebrew. Built on top of
 > `BrowserPermissionPolicy` — the runtime would evaluate the fetched body
 > as JS and crash, and on Citron the OS-level fetch attempt hangs the
 > shell entirely. With the deny in place, network URLs short-circuit to a
-> 403 and the shell falls back to `browser://error/`. Pass
+> 403 and the shell falls back to `brewser://error/`. Pass
 > `{ allowNetwork: true }` to the policy once an HTML rendering path
 > exists (growth step 5). No tabs, bookmarks, or persistent history yet.
 
@@ -127,11 +127,11 @@ switch-web-browser/
    ├─ permissions/
    │  └─ browser-permission-policy.ts
    ├─ resources/
-   │  └─ browser-resource-loader.ts  # serves browser://new-tab/, error/, about/
+   │  └─ browser-resource-loader.ts  # serves brewser://new-tab/, error/, about/
    └─ pages/
-      ├─ new-tab-page.ts          # JS bundle string for browser://new-tab/
-      ├─ error-page.ts            # JS bundle string for browser://error/
-      └─ about-page.ts            # JS bundle string for browser://about/
+      ├─ new-tab-page.ts          # JS bundle string for brewser://new-tab/
+      ├─ error-page.ts            # JS bundle string for brewser://error/
+      └─ about-page.ts            # JS bundle string for brewser://about/
 ```
 
 ## Next milestones
@@ -139,8 +139,8 @@ switch-web-browser/
 See [`docs/browser-architecture.md`](docs/browser-architecture.md) for the
 intended growth path:
 
-1. ~~Wire `BrowserResourceLoader` for `browser://` pages and load
-   `browser://new-tab/` via `WebView.load()`.~~ **Done.**
+1. ~~Wire `BrowserResourceLoader` for `brewser://` pages and load
+   `brewser://new-tab/` via `WebView.load()`.~~ **Done.**
 2. ~~Add address-bar input (keyboard overlay + controller shortcuts).~~
    **Done.** ZR (or tap the URL bar) opens the on-canvas keyboard;
    submit hands the typed text to `AddressBarInput.resolve()` →

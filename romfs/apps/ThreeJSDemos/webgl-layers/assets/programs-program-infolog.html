@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: program-infolog</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>programs/program-infolog</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/programs/program-infolog.html</code>.
+Verifies <code>getProgramInfoLog</code> doesn't return a literal
+<code>"\0"</code> (a real-world string-handling bug some implementations
+have hit). Milestone&nbsp;#4 (webgl-layers) regression test — layered
+scenes compile + link multiple programs per render, so correct
+info-log reporting matters when something goes wrong.</p>
+
+<canvas id="canvas" width="2" height="2"></canvas>
+
+<script id="vertexShader" type="x-shader/x-vertex">
+void main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }
+</script>
+<script id="fragmentShader" type="x-shader/x-fragment">
+precision mediump float;
+void main() { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }
+</script>
+
+<canvas id="khronos-status" width="900" height="200"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'programs-program-infolog';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+  try {
+    description("getProgramInfoLog should not return '\\0'");
+    debug('');
+
+    const wtu = WebGLTestUtils;
+    const gl = wtu.create3DContext('canvas');
+    if (!gl) {
+      testFailed('context does not exist');
+    } else {
+      testPassed('context exists');
+    }
+    debug('');
+
+    const program = wtu.setupProgram(gl, ['vertexShader', 'fragmentShader']);
+    const infolog = gl.getProgramInfoLog(program);
+    if (infolog === '\0') {
+      testFailed("getProgramInfoLog should not return '\\0'");
+    } else {
+      testPassed("getProgramInfoLog didn't return '\\0' (got " +
+        (infolog === '' ? 'empty string' :
+         (infolog.length + ' chars')) + ')');
+    }
+
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-layers/">back to WebGL Layers demo</a></p>
+</body>
+</html>

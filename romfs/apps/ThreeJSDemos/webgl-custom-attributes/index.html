@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Custom Attributes</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Custom Attributes</h1>
+<p class="lead">Port of <code>webgl_custom_attributes.html</code>: a
+high-res <code>SphereGeometry(50, 128, 64)</code> drawn with a
+<code>ShaderMaterial</code> whose custom vertex shader displaces each
+vertex along its normal by <code>amplitude * displacement</code>
+(a per-vertex <em>custom-named</em> float attribute rewritten via
+<code>bufferSubData</code> every frame), and whose fragment shader
+samples a tiled grayscale <code>water.jpg</code> texture and modulates
+by a hue-rotating <code>color</code> uniform. First milestone to
+exercise the bridge's <strong>passthrough sampling of CPU-data
+textures</strong> &mdash; a lazy-promote in
+<code>try_draw_passthrough</code> allocates a persistent GLES handle
+for the bound 2D texture on first passthrough use, mirroring the
+texel data via <code>nx_webgl_egl_persistent_texture_image_2d</code>.
+Also pins custom-attribute-name handling
+(<code>attribute float displacement</code>) and custom-uniform-name
+uploads (<code>amplitude</code>, <code>colorTexture</code>) through
+the raw-shader passthrough path
+(<a href="brewser://memory/bridge-raw-shader-passthrough">memory</a>).</p>
+
+<div class="stage">
+  <canvas id="custom-attrs-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('custom-attrs-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="custom-attrs-status" width="900" height="360"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('custom-attrs-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 360);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__caError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const fps = +globalThis.__caFps || 0;
+    row(58, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(80, 'frames rendered:', String(globalThis.__caFrameCount | 0), true);
+    row(102, 'texture loaded:',
+        globalThis.__caTextureLoaded ? 'yes' : 'no',
+        !!globalThis.__caTextureLoaded);
+    row(124, 'vertex count:', String(globalThis.__caVertexCount | 0),
+        (globalThis.__caVertexCount | 0) >= 16000);
+    row(146, "getAttribLocation('displacement'):",
+        String(globalThis.__caDisplacementLoc ?? '(unset)'),
+        (globalThis.__caDisplacementLoc | 0) >= 0);
+    row(168, "getUniformLocation('amplitude'):",
+        globalThis.__caAmplitudeLocOk ? 'non-null' : 'null',
+        !!globalThis.__caAmplitudeLocOk);
+    row(190, "getUniformLocation('colorTexture'):",
+        globalThis.__caColorTextureLocOk ? 'non-null' : 'null',
+        !!globalThis.__caColorTextureLocOk);
+    const errBefore = globalThis.__caGlErrorBefore;
+    const errAfter = globalThis.__caGlErrorAfter;
+    row(212, 'gl.getError before render:',
+        '0x' + ((errBefore | 0) >>> 0).toString(16), errBefore === 0);
+    row(234, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16), errAfter === 0);
+    let exts = '';
+    try {
+      const c2 = document.getElementById('custom-attrs-canvas');
+      const ctx2 = c2 && c2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 262);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 284);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/passthrough-cpu-data-texture-sample.html"><code>passthrough/cpu-data-texture-sample</code></a>
+&mdash; hand-rolled, pins the lazy-promote: creates a 4&times;1 RGBA
+UByte <code>DataTexture</code>, samples it from a
+<code>#pragma raw_passthrough</code> shader with a custom-named UV
+attribute, and asserts the readback pixels match the input. Also pins
+custom-attribute-location resolution (<code>getAttribLocation</code>
+on a non-allowlisted name returns a valid index) and custom-uniform
+forwarding (<code>uniform1f</code>/<code>uniform3f</code>/<code>uniform1i</code>
+on non-allowlisted names reach native GLES).</p>
+
+<p class="note">Texture is the same <code>water.jpg</code> as
+milestone&nbsp;#9 (<code>webgl-geometry-dynamic</code>); sourced
+from <code>sdmc:/.../webgl-geometry-dynamic/assets/water.jpg</code>
+per <a href="brewser://memory/nxjs-image-bypasses-global-fetch">memory</a>
+(Image bypass of <code>brewser://</code> scheme). The displacement
+attribute is a 1-component float rewritten every frame via
+<code>bufferSubData</code>; sphere has 16,641 vertices, ~32,768
+triangles, all flowing through native GLES via
+<code>#pragma raw_passthrough</code> injected into both shader
+source strings before <code>ShaderMaterial</code> sees them. lil-gui
+toggle dropped (single bool, no obvious gamepad mapping).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

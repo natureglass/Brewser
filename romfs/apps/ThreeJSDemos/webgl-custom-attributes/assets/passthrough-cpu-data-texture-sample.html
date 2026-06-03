@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL passthrough/cpu-data-texture-sample</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<canvas id="example" width="50" height="50"></canvas>
+<canvas id="khronos-status" width="900" height="320"></canvas>
+
+<!--
+  Hand-rolled conformance test for the milestone-#22
+  (webgl_custom_attributes) bridge surface. Pins three things that
+  weren't covered by the existing passthrough conformance tests:
+
+    1. **Lazy-promote of CPU-data textures.** texImage2D(target, 0,
+       RGBA, w, h, 0, RGBA, UByte, pixels) only lands in
+       `texture->data` (the bridge cache); `gles_handle` stays 0.
+       Without promotion, `bindTexture` short-circuits the native
+       forward — passthrough sampling reads nothing. The new
+       `ensure_passthrough_texture_promoted` helper allocates a
+       persistent GLES handle + uploads the texels + re-forwards
+       activeTexture+bindTexture at first passthrough draw.
+
+    2. **Custom-named vertex attribute** (`myTexCoord` — not in
+       [[nxjs-webgl-shader-names]] allowlist). Pre-passthrough this
+       would return -1 from `getAttribLocation`; under passthrough
+       the GLES linker picks the index and the dispatch's
+       program-active-attributes mask picks it up.
+
+    3. **Custom-named sampler uniform** (`myTexture` — not in the
+       allowlist). Per [[nxjs-uniform1i-fix]], uniform1i now forwards
+       to native for raw_passthrough programs regardless of name.
+
+  Companion to [[swb-threejs-webgl-custom-attributes]]. Same
+  raw_passthrough opt-in mechanism as the milestone-#14 Walt-head
+  ShaderMaterial.
+-->
+
+<script>
+  globalThis.__khronosTestName = 'passthrough-cpu-data-texture-sample';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script id="vshader" type="x-shader/x-vertex">
+#pragma raw_passthrough
+attribute vec4 a_position;
+attribute vec2 myTexCoord;
+varying vec2 v_uv;
+void main() {
+    v_uv = myTexCoord;
+    gl_Position = a_position;
+}
+</script>
+
+<script id="fshader" type="x-shader/x-fragment">
+#pragma raw_passthrough
+precision mediump float;
+uniform sampler2D myTexture;
+varying vec2 v_uv;
+void main() {
+    gl_FragColor = texture2D(myTexture, v_uv);
+}
+</script>
+
+<script>
+try {
+    description('Passthrough sampling of CPU-uploaded DataTexture with custom-named attribute + sampler');
+
+    var wtu = WebGLTestUtils;
+    var gl = wtu.create3DContext('example');
+
+    // Build the program with explicit bindAttribLocation for both
+    // attributes so location indices are deterministic across the
+    // GLES linker's choices. NOTE: under passthrough this also pins
+    // the custom-name path through nxjs's bindAttribLocation queue
+    // (see [[bridge-bindattriblocation]]).
+    var program = wtu.setupProgram(
+        gl, ['vshader', 'fshader'],
+        ['a_position', 'myTexCoord'], [0, 1]);
+    assertMsg(program != null, 'setupProgram returned non-null');
+
+    // Active-uniform / active-attrib introspection must surface the
+    // custom names back to JS.
+    var posLoc = gl.getAttribLocation(program, 'a_position');
+    var uvLoc = gl.getAttribLocation(program, 'myTexCoord');
+    var texLoc = gl.getUniformLocation(program, 'myTexture');
+    assertMsg(posLoc === 0,
+        'getAttribLocation(a_position) === 0 (was ' + posLoc + ')');
+    assertMsg(uvLoc === 1,
+        "getAttribLocation('myTexCoord') === 1 (was " + uvLoc + ")");
+    assertMsg(texLoc !== null,
+        "getUniformLocation('myTexture') is non-null");
+
+    gl.viewport(0, 0, 50, 50);
+
+    // Fullscreen quad position attribute at location 0.
+    var posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1, 0,   1, -1, 0,  -1,  1, 0,
+        -1,  1, 0,   1, -1, 0,   1,  1, 0,
+    ]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+    // Custom-named UV attribute at location 1. Range 0..1 horizontally
+    // so a 50-pixel-wide quad samples the 4-texel texture
+    // proportionally (with Nearest filtering, columns 0..12.5 ->
+    // texel 0, 12.5..25 -> texel 1, 25..37.5 -> texel 2, 37.5..50 ->
+    // texel 3).
+    var uvBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, uvBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0, 0,  1, 0,  0, 0,
+        0, 0,  1, 0,  1, 0,
+    ]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+    // 4x1 RGBA UByte texture with 4 distinct pixels:
+    //   0: red   (255,  0,  0, 255)
+    //   1: green (  0,255,  0, 255)
+    //   2: blue  (  0,  0,255, 255)
+    //   3: yellow(255,255,  0, 255)
+    // This is the first CPU-data texImage2D the test issues, so
+    // pre-fix it would land in `texture->data` only with gles_handle=0.
+    // The lazy-promote helper inside try_draw_passthrough allocates
+    // the persistent handle + uploads + re-issues bindTexture before
+    // the draw.
+    var tex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array([
+            255,   0,   0, 255,
+              0, 255,   0, 255,
+              0,   0, 255, 255,
+            255, 255,   0, 255,
+        ]));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'texImage2D produced no GL error');
+
+    // Bind sampler to texture unit 0. uniform1i on a non-allowlisted
+    // sampler name must forward to native for raw_passthrough
+    // programs (see [[nxjs-uniform1i-fix]]).
+    gl.uniform1i(texLoc, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+        "uniform1i(myTexture, 0) produced no GL error");
+
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'drawArrays produced no GL error');
+
+    // Pixel checks: middle of each of the 4 horizontal bands. Each
+    // band is ~12.5 px wide; sample at canvas-x = 6, 18, 31, 43 to
+    // stay safely inside each band's center.
+    //
+    // canvas-y picked at row 25 (middle vertically — the quad covers
+    // the whole 50x50 viewport so any row works, but the middle
+    // dodges any edge sampling weirdness).
+    wtu.checkCanvasRect(gl, 6,  25, 1, 1, [255,   0,   0, 255],
+        'band 0 (canvas-x=6)  reads texel 0 (red)');
+    wtu.checkCanvasRect(gl, 18, 25, 1, 1, [  0, 255,   0, 255],
+        'band 1 (canvas-x=18) reads texel 1 (green)');
+    wtu.checkCanvasRect(gl, 31, 25, 1, 1, [  0,   0, 255, 255],
+        'band 2 (canvas-x=31) reads texel 2 (blue)');
+    wtu.checkCanvasRect(gl, 43, 25, 1, 1, [255, 255,   0, 255],
+        'band 3 (canvas-x=43) reads texel 3 (yellow)');
+
+} catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : String(e)));
+} finally {
+    finishTest();
+}
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-custom-attributes/">back to Custom Attributes demo</a></p>
+</body>
+</html>

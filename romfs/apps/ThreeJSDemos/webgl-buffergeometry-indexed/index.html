@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; BufferGeometry Indexed</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; BufferGeometry Indexed</h1>
+<p class="lead">Port of <code>webgl_buffergeometry_indexed.html</code>: a
+20&times;20 grid built as an indexed <code>BufferGeometry</code>
+(11&times;11 = 121 vertices, 200 triangles, 600 indices) with
+per-vertex <code>position</code>, <code>normal</code>, and
+<code>color</code> attributes. Rendered with
+<code>MeshPhongMaterial({ side: DoubleSide, vertexColors: true })</code>
+under a single <code>HemisphereLight</code> at <code>intensity = 3</code>.
+First milestone to exercise the bridge's new
+<code>hemisphereLights[0]</code> path &mdash;
+<code>bridge_color_program</code> now recognizes
+<code>.direction</code> / <code>.skyColor</code> /
+<code>.groundColor</code> uniforms and composes the irradiance
+<code>mix(ground, sky, 0.5&middot;dot(N, dir) + 0.5)</code> into the
+ambient term, matching Three.js's
+<code>lights_fragment_begin.glsl.js</code> chunk.</p>
+
+<div class="stage">
+  <canvas id="bgi-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('bgi-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="bgi-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('bgi-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__bgiError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const fps = +globalThis.__bgiFps || 0;
+    row(58, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(80, 'frames rendered:', String(globalThis.__bgiFrameCount | 0), true);
+    row(102, 'vertex count:', String(globalThis.__bgiVertexCount | 0),
+        (globalThis.__bgiVertexCount | 0) === 121);
+    row(124, 'index count:', String(globalThis.__bgiIndexCount | 0),
+        (globalThis.__bgiIndexCount | 0) === 600);
+    const hemiOk = !!globalThis.__bgiHemiUniformsFound;
+    row(146, 'hemisphereLights[0].* found:',
+        hemiOk ? 'yes (3/3)' : String(globalThis.__bgiHemiUniformsFound || 'no'),
+        hemiOk);
+    const errBefore = globalThis.__bgiGlErrorBefore;
+    const errAfter = globalThis.__bgiGlErrorAfter;
+    row(168, 'gl.getError before render:',
+        '0x' + ((errBefore | 0) >>> 0).toString(16), errBefore === 0);
+    row(190, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16), errAfter === 0);
+    let exts = '';
+    try {
+      const c2 = document.getElementById('bgi-canvas');
+      const ctx2 = c2 && c2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 218);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 240);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="note">No Khronos conformance test fits HemisphereLight
+directly (it's a Three.js abstraction, not a WebGL primitive). Visual
+verification is via the rotating grid above, with the status canvas
+confirming the active-uniform list contains the three
+<code>hemisphereLights[0].*</code> names. With
+<code>useLegacyLights = false</code> (the r162 default) and
+<code>intensity = 3</code>, Three.js uploads
+<code>skyColor &asymp; (3, 3, 3)</code> and
+<code>groundColor &asymp; (0.8, 0.8, 0.8)</code> &mdash; the bridge has
+no tone mapping so faces aligned with the up vector saturate. Per
+<code>side: DoubleSide</code>, the back face takes the
+ground-color-tinted irradiance because the bridge does not yet flip
+the geometric normal via <code>gl_FrontFacing</code>; visible as the
+grid rotates past 90&deg;.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: gl-uniformmatrix4fv</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>uniforms/gl-uniformmatrix4fv</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/uniforms/gl-uniformmatrix4fv.html</code>.
+Verifies that <code>uniformMatrix2fv</code> / <code>uniformMatrix3fv</code> /
+<code>uniformMatrix4fv</code> reject undersized + non-multiple-sized arrays
+with <code>INVALID_VALUE</code>, accept correctly-sized data from both
+TypedArrays AND plain JS Arrays, and (per WebGL 1) reject
+<code>transpose=true</code>. This is the direct regression test for
+the 10 new uniform setters and the JS-Array-input fix landed during
+milestone&nbsp;#5 (misc-controls-orbit).</p>
+
+<canvas id="example" width="2" height="2"></canvas>
+
+<script id="vshader" type="x-shader/x-vertex">
+uniform mat2 world2x2;
+uniform mat3 world3x3;
+uniform mat4 world4x4;
+void main() {
+  gl_Position.x += world2x2[0][0];
+  gl_Position.x += world3x3[0][0];
+  gl_Position.x += world4x4[0][0];
+}
+</script>
+<script id="fshader" type="x-shader/x-fragment">
+void main() {}
+</script>
+
+<canvas id="khronos-status" width="900" height="540"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'uniforms-gl-uniformmatrix4fv';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+  try {
+    description("This test ensures WebGL implementations handle uniformMatrix in a OpenGL ES 2.0 spec compliant way");
+    debug('');
+    debug('Checking gl.uniformMatrix.');
+
+    const wtu = WebGLTestUtils;
+    const gl = wtu.create3DContext('example');
+    const contextVersion = wtu.getDefault3DContextVersion();
+
+    const shaders = ['vshader', 'fshader'];
+    const dims = [
+      [2, 2, 'uniformMatrix2fv'],
+      [3, 3, 'uniformMatrix3fv'],
+      [4, 4, 'uniformMatrix4fv'],
+    ];
+
+    const program = wtu.setupProgram(gl, shaders);
+    if (!program) { finishTest(); throw new Error('program link failed'); }
+
+    for (const [A, B, name] of dims) {
+      const loc = gl.getUniformLocation(program, 'world' + A + 'x' + B);
+      if (!loc) { testFailed('missing loc for world' + A + 'x' + B); continue; }
+
+      const mat = [];
+      for (let a = 0; a < A; a++) {
+        for (let b = 0; b < B; b++) mat.push(a === b ? 1 : 0);
+      }
+      const matLess = mat.slice(0, mat.length - 2);
+      const matMore = mat.concat([1]);
+
+      gl[name](loc, false, matLess);
+      wtu.glErrorShouldBe(gl, gl.INVALID_VALUE,
+        'should fail with insufficient array size for ' + name);
+      gl[name](loc, false, mat);
+      wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+        'should succeed with correct array size for ' + name);
+      gl[name](loc, false, matMore);
+      wtu.glErrorShouldBe(gl, gl.INVALID_VALUE,
+        'should fail with more than 1 array size for ' + name);
+
+      // Khronos's test uses `shouldNotThrow(stringExpr)` here, which
+      // relies on `eval` seeing `gl`/`loc`/`name`. Our AsyncFunction
+      // execution doesn't give eval access to those, so inline the
+      // try/catch instead.
+      const validDatas = [
+        new Float32Array(mat.length),
+        new Float32Array(new ArrayBuffer(4 * mat.length)),
+      ];
+      for (let i = 0; i < validDatas.length; i++) {
+        try {
+          gl[name](loc, false, validDatas[i]);
+          testPassed(name + ' with valid TypedArray #' + i + ' did not throw');
+        } catch (e) {
+          testFailed(name + ' with valid TypedArray #' + i + ' threw: ' + e);
+        }
+      }
+
+      gl.getError();  // clear any prior
+      gl[name](loc, false, mat);
+      wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+        'can call ' + name + ' with transpose = false');
+      if (contextVersion <= 1) {
+        gl[name](loc, true, mat);
+        wtu.glErrorShouldBe(gl, gl.INVALID_VALUE,
+          name + ' should return INVALID_VALUE with transpose = true');
+      } else {
+        gl[name](loc, true, mat);
+        wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+          'can call ' + name + ' with transpose = true');
+      }
+    }
+
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/misc-controls-orbit/">back to Orbit Controls demo</a></p>
+</body>
+</html>

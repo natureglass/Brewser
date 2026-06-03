@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL textures/mipmap-filter-and-generate</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<canvas id="example" width="50" height="50"></canvas>
+<canvas id="khronos-status" width="900" height="320"></canvas>
+
+<!--
+  Hand-rolled conformance test for the milestone-#24
+  (webgl_materials_texture_filters) bridge surface. Pins three things:
+
+    1. **`texParameteri(MIN_FILTER, …)` accepts mipmap variants.**
+       Pre-fix [`webgl.c::nx_webgl_tex_parameteri`] only accepted
+       `NEAREST` and `LINEAR` — all 4 mipmap-aware modes set
+       `INVALID_ENUM`. The widened path accepts the 4 mipmap variants
+       (NEAREST_MIPMAP_NEAREST, LINEAR_MIPMAP_NEAREST,
+       NEAREST_MIPMAP_LINEAR, LINEAR_MIPMAP_LINEAR) while keeping
+       MAG_FILTER restricted to NEAREST/LINEAR per GLES 2.0 spec.
+
+    2. **`generateMipmap` actually generates mipmaps.** Pre-fix
+       [`webgl.c::nx_webgl_generate_mipmap`] was a complete no-op
+       (validate target, return). New impl promotes the bound texture
+       to a persistent native handle via the shared
+       `ensure_texture_promoted` helper (extracted from the milestone-#22
+       passthrough lazy-promote), then calls native `glGenerateMipmap`.
+
+    3. **Negative cases**: generateMipmap on an unbound target slot,
+       on a CUBE_MAP target (deferred), on an undefined texture, all
+       set the right error code.
+
+  Companion to [[swb-threejs-webgl-materials-texture-filters]] (this
+  test ports as the conformance-link entry for that demo).
+-->
+
+<script>
+  globalThis.__khronosTestName = 'textures-mipmap-filter-and-generate';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script>
+try {
+    description('texParameteri mipmap variants + generateMipmap behavior');
+
+    var wtu = WebGLTestUtils;
+    var gl = wtu.create3DContext('example');
+
+    // Drain any pre-existing errors from setup.
+    while (gl.getError() !== gl.NO_ERROR) { /* drain */ }
+
+    // === Section 1: MIN_FILTER widened enum acceptance ===
+
+    var tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'bindTexture clean');
+
+    // The 2 always-accepted modes.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MIN_FILTER = NEAREST accepted');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MIN_FILTER = LINEAR accepted');
+
+    // The 4 newly-accepted mipmap modes (milestone #24 widening).
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_NEAREST);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MIN_FILTER = NEAREST_MIPMAP_NEAREST accepted (new)');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MIN_FILTER = LINEAR_MIPMAP_NEAREST accepted (new)');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MIN_FILTER = NEAREST_MIPMAP_LINEAR accepted (new)');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MIN_FILTER = LINEAR_MIPMAP_LINEAR accepted (new)');
+
+    // Junk value rejected.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, 0xDEADBEEF);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM, 'MIN_FILTER = junk rejected with INVALID_ENUM');
+
+    // === Section 2: MAG_FILTER still restricted ===
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MAG_FILTER = NEAREST accepted');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'MAG_FILTER = LINEAR accepted');
+
+    // Mipmap variants are NOT valid on MAG_FILTER per GLES 2.0 spec.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM, 'MAG_FILTER = LINEAR_MIPMAP_LINEAR rejected');
+
+    // === Section 3: generateMipmap negative cases ===
+
+    // CUBE_MAP target is deferred (only 2D supported); set INVALID_OPERATION.
+    gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+    wtu.glErrorShouldBe(gl, gl.INVALID_OPERATION,
+        'generateMipmap(CUBE_MAP) rejects (2D-only impl)');
+
+    // Junk target → INVALID_ENUM (caught by is_texture_binding_target).
+    gl.generateMipmap(0xBAD);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM, 'generateMipmap(junk) rejected');
+
+    // Unbind — generateMipmap on an unbound target → INVALID_OPERATION.
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    wtu.glErrorShouldBe(gl, gl.INVALID_OPERATION,
+        'generateMipmap on unbound TEXTURE_2D rejected');
+
+    // === Section 4: generateMipmap happy path ===
+
+    // Bind a fresh texture but UPLOAD NO DATA — generateMipmap on an
+    // undefined texture must INVALID_OPERATION (no level-0 to source
+    // from).
+    var emptyTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, emptyTex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    wtu.glErrorShouldBe(gl, gl.INVALID_OPERATION,
+        'generateMipmap on undefined texture rejected');
+
+    // Upload a 4x4 RGBA power-of-two texture (mipmap-able). 16 pixels,
+    // alternating red/green checkerboard for visual obviousness if a
+    // later test were to sample it.
+    var dataTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, dataTex);
+    var pixels = new Uint8Array(4 * 4 * 4);
+    for (var y = 0; y < 4; y++) {
+        for (var x = 0; x < 4; x++) {
+            var i = (y * 4 + x) * 4;
+            var red = ((x + y) % 2) === 0;
+            pixels[i + 0] = red ? 255 : 0;
+            pixels[i + 1] = red ? 0 : 255;
+            pixels[i + 2] = 0;
+            pixels[i + 3] = 255;
+        }
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4, 4, 0,
+                  gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'texImage2D(4x4 RGBA) clean');
+
+    // The big one — actually generate mipmaps. Pre-fix this was a
+    // silent no-op; now it allocates a persistent GLES handle (or
+    // reuses one), uploads the level-0 texels, and calls native
+    // glGenerateMipmap. Levels 1..2 (2x2 + 1x1) get auto-filled.
+    gl.generateMipmap(gl.TEXTURE_2D);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+        'generateMipmap(TEXTURE_2D) on 4x4 RGBA UByte texture clean');
+
+    // Subsequent texParameteri with a mipmap minFilter on the now-
+    // mipmap-complete texture should also be clean.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+        'MIN_FILTER = LINEAR_MIPMAP_LINEAR after generateMipmap clean');
+
+} catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : String(e)));
+} finally {
+    finishTest();
+}
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-materials-texture-filters/">back to Texture Filters demo</a></p>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // Idempotent sync of the Khronos WebGL 2 conformance corpus into romfs.
 //
 // Source: D:/Workspace/WebGL/sdk/tests/{conformance2,js}/...
-// Destination: romfs/pages/full-webgl2-conformance/sdk/tests/{conformance2,js}/...
+// Destination: romfs/dev/full-webgl2-conformance/sdk/tests/{conformance2,js}/...
 //
 // Mirror of sync-khronos-tests.mjs but pointing at the WebGL 2 corpus.
 // Two destinations need the same `js/` helpers, but the corpora live under
@@ -25,11 +25,11 @@ const SRC_CONFORMANCE = join(SRC_BASE, 'conformance2').replace(/\\/g, '/');
 const SRC_JS = join(SRC_BASE, 'js').replace(/\\/g, '/');
 const SRC_RESOURCES = join(SRC_BASE, 'resources').replace(/\\/g, '/');
 
-const DST_BASE = join(REPO_ROOT, 'romfs/pages/full-webgl2-conformance/sdk/tests').replace(/\\/g, '/');
+const DST_BASE = join(REPO_ROOT, 'romfs/dev/full-webgl2-conformance/sdk/tests').replace(/\\/g, '/');
 const DST_CONFORMANCE = join(DST_BASE, 'conformance2').replace(/\\/g, '/');
 const DST_JS = join(DST_BASE, 'js').replace(/\\/g, '/');
 const DST_RESOURCES = join(DST_BASE, 'resources').replace(/\\/g, '/');
-const TESTS_JSON_PATH = join(REPO_ROOT, 'romfs/pages/full-webgl2-conformance/assets/tests.json').replace(/\\/g, '/');
+const TESTS_JSON_PATH = join(REPO_ROOT, 'romfs/dev/full-webgl2-conformance/assets/tests.json').replace(/\\/g, '/');
 
 // No top-level dirs to exclude for WebGL 2 (no ogles equivalent).
 const EXCLUDE_DIRS = new Set();

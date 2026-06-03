@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>3D Texture conformance &mdash; textures/webgl2-texture3d</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         font-family: system-ui; }
+  h1 { color: #ffd35e; }
+  a { color: #7eda9f; }
+</style>
+</head>
+<body>
+<h1>Conformance: <code>textures/webgl2-texture3d</code></h1>
+
+<p>Hand-rolled to pin the 3D-texture surface the milestone exercises.</p>
+
+<ul>
+<li><code>TEXTURE_3D</code> + <code>UNPACK_ALIGNMENT</code> +
+<code>R32F</code> + <code>RED</code> + <code>FLOAT</code> constants
+exposed on the WebGL 2 proto</li>
+<li><code>bindTexture(TEXTURE_3D, tex)</code> + querying the binding
+via <code>getParameter(TEXTURE_BINDING_3D)</code></li>
+<li><code>texParameteri(TEXTURE_3D, MIN/MAG_FILTER/WRAP_*)</code>
+accepts the 3D target</li>
+<li><code>texImage3D</code> with both common combos:
+<code>(RGBA, RGBA, UNSIGNED_BYTE)</code> and
+<code>(R32F, RED, FLOAT)</code></li>
+<li>Full round-trip via passthrough: GLSL ES 3.00 fragment shader
+declares <code>uniform sampler3D u_data;</code>, samples a known
+2&times;2&times;2 R32F volume with literal coords, draws to a
+1&times;1 FBO, readback verifies each of 8 texel values</li>
+</ul>
+
+<canvas id="example" width="64" height="64"></canvas>
+<canvas id="khronos-status" width="900" height="640"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'textures-webgl2-texture3d';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script>
+"use strict";
+var wtu = WebGLTestUtils;
+(async function () {
+  try {
+    description('textures/webgl2-texture3d (3D-texture surface)');
+
+    const canvas = document.getElementById('example');
+    const gl = canvas.getContext('webgl2');
+    assertMsg(gl != null, 'canvas.getContext("webgl2") returned non-null');
+    if (!gl) { finishTest(); return; }
+    if (typeof gl.enableGpuBridgePrototype === 'function') {
+      gl.enableGpuBridgePrototype(true);
+    }
+    while (gl.getError() !== gl.NO_ERROR) { /* drain */ }
+
+    // ── Constants ──
+    assertMsg(gl.TEXTURE_3D === 0x806F, 'gl.TEXTURE_3D === 0x806F');
+    assertMsg(gl.TEXTURE_BINDING_3D === 0x806A, 'gl.TEXTURE_BINDING_3D === 0x806A');
+    assertMsg(gl.UNPACK_ALIGNMENT === 0x0CF5, 'gl.UNPACK_ALIGNMENT === 0x0CF5');
+    assertMsg(gl.RED === 0x1903, 'gl.RED === 0x1903');
+    assertMsg(gl.R32F === 0x822E, 'gl.R32F === 0x822E');
+    assertMsg(gl.FLOAT === 0x1406, 'gl.FLOAT === 0x1406');
+    assertMsg(typeof gl.texImage3D === 'function', 'gl.texImage3D is fn');
+
+    const maxTex3D = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE);
+    assertMsg(maxTex3D >= 64, 'MAX_3D_TEXTURE_SIZE >= 64 (got ' + maxTex3D + ')');
+
+    // ── Bind + param 3D texture ──
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, tex);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'bindTexture(TEXTURE_3D, tex) accepted');
+    assertMsg(gl.getParameter(gl.TEXTURE_BINDING_3D) === tex,
+      'getParameter(TEXTURE_BINDING_3D) returns the bound tex');
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, 0x8072 /* TEXTURE_WRAP_R */, gl.CLAMP_TO_EDGE);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'texParameteri(TEXTURE_3D, ...) accepted');
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
+    // ── texImage3D RGBA8 happy path ──
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA, 2, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+      new Uint8Array(8 * 4));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'texImage3D RGBA8 2x2x2 accepted');
+
+    // ── texImage3D R32F happy path with known texel values ──
+    // 8 floats — one per (z, y, x) voxel of a 2×2×2 texture.
+    const voxels = new Float32Array([
+      0.10, 0.20,   // z=0, y=0: x=0, x=1
+      0.30, 0.40,   // z=0, y=1
+      0.50, 0.60,   // z=1, y=0
+      0.70, 0.80,   // z=1, y=1
+    ]);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.R32F, 2, 2, 2, 0, gl.RED, gl.FLOAT, voxels);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'texImage3D R32F (RED+FLOAT) 2x2x2 accepted');
+
+    // ── Build passthrough sampler-3D program + 1x1 probe FBO ──
+    const fbo = gl.createFramebuffer();
+    const colorTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, colorTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D,
+      colorTex, 0);
+    assertMsg(gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE,
+      'probe FBO complete');
+
+    const vsSource =
+      '#version 300 es\n' +
+      '#pragma raw_passthrough\n' +
+      'in vec2 a_pos;\n' +
+      'void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n';
+    // Probe fragment shader: samples u_data at a literal vec3 set per
+    // draw via the u_coord uniform, outputs the red channel scaled
+    // to (RED, 0, 0, 1).
+    const fsSource =
+      '#version 300 es\n' +
+      '#pragma raw_passthrough\n' +
+      'precision highp float;\n' +
+      'precision highp sampler3D;\n' +
+      'uniform sampler3D u_data;\n' +
+      'uniform vec3 u_coord;\n' +
+      'layout(location=0) out vec4 outC;\n' +
+      'void main() { outC = vec4(texture(u_data, u_coord).r, 0.0, 0.0, 1.0); }\n';
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, vsSource); gl.compileShader(vs);
+    assertMsg(gl.getShaderParameter(vs, gl.COMPILE_STATUS),
+      'probe VS compile: ' + (gl.getShaderInfoLog(vs) || ''));
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, fsSource); gl.compileShader(fs);
+    assertMsg(gl.getShaderParameter(fs, gl.COMPILE_STATUS),
+      'probe FS compile (sampler3D): ' + (gl.getShaderInfoLog(fs) || ''));
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    assertMsg(gl.getProgramParameter(prog, gl.LINK_STATUS),
+      'probe link: ' + (gl.getProgramInfoLog(prog) || ''));
+    gl.useProgram(prog);
+
+    const posLoc = gl.getAttribLocation(prog, 'a_pos');
+    const dataLoc = gl.getUniformLocation(prog, 'u_data');
+    const coordLoc = gl.getUniformLocation(prog, 'u_coord');
+    assertMsg(posLoc >= 0, 'a_pos location resolved (' + posLoc + ')');
+    assertMsg(dataLoc != null, 'u_data location resolved');
+    assertMsg(coordLoc != null, 'u_coord location resolved');
+
+    const quad = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    // Bind the R32F volume to TEXTURE_3D unit 0.
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_3D, tex);
+    gl.uniform1i(dataLoc, 0);
+    gl.viewport(0, 0, 1, 1);
+
+    // Use 0.25/0.75 in each dimension to pick the centers of the 8
+    // voxels with NEAREST filtering. Verify the 8 texel values match
+    // what we uploaded.
+    const tol = 4;
+    const expected = [
+      { coord: [0.25, 0.25, 0.25], val: 0.10, label: 'R32F voxel (0,0,0) = 0.10' },
+      { coord: [0.75, 0.25, 0.25], val: 0.20, label: 'R32F voxel (1,0,0) = 0.20' },
+      { coord: [0.25, 0.75, 0.25], val: 0.30, label: 'R32F voxel (0,1,0) = 0.30' },
+      { coord: [0.75, 0.75, 0.25], val: 0.40, label: 'R32F voxel (1,1,0) = 0.40' },
+      { coord: [0.25, 0.25, 0.75], val: 0.50, label: 'R32F voxel (0,0,1) = 0.50' },
+      { coord: [0.75, 0.25, 0.75], val: 0.60, label: 'R32F voxel (1,0,1) = 0.60' },
+      { coord: [0.25, 0.75, 0.75], val: 0.70, label: 'R32F voxel (0,1,1) = 0.70' },
+      { coord: [0.75, 0.75, 0.75], val: 0.80, label: 'R32F voxel (1,1,1) = 0.80' },
+    ];
+    for (const t of expected) {
+      gl.uniform3f(coordLoc, t.coord[0], t.coord[1], t.coord[2]);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      const px = new Uint8Array(4);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const expectedR = Math.round(t.val * 255);
+      assertMsg(Math.abs(px[0] - expectedR) <= tol,
+        t.label + ' → R=' + expectedR + ' (got ' + px[0] + ')');
+    }
+
+    // ── Parallel R8 + UNSIGNED_BYTE probe ──
+    // If R8 samples correctly but R32F doesn't, the bug is specific to
+    // FLOAT 3D textures on Mesa Nouveau. If R8 also fails, sampler3D
+    // itself is broken regardless of format/type.
+    description('R8 + UNSIGNED_BYTE 3D texture probe (same 8-voxel pattern)');
+    const tex8 = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, tex8);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, 0x8072, gl.CLAMP_TO_EDGE);
+    // Same 8 values but quantized to UBYTE (0..255).
+    const voxels8 = new Uint8Array([
+      Math.round(0.10 * 255), Math.round(0.20 * 255),
+      Math.round(0.30 * 255), Math.round(0.40 * 255),
+      Math.round(0.50 * 255), Math.round(0.60 * 255),
+      Math.round(0.70 * 255), Math.round(0.80 * 255),
+    ]);
+    gl.texImage3D(gl.TEXTURE_3D, 0, 0x8229 /* R8 */, 2, 2, 2, 0,
+                  gl.RED, gl.UNSIGNED_BYTE, voxels8);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'texImage3D R8 + RED + UNSIGNED_BYTE accepted');
+
+    gl.bindTexture(gl.TEXTURE_3D, tex8);   // re-bind, in case
+    gl.uniform1i(dataLoc, 0);
+    for (const t of expected) {
+      gl.uniform3f(coordLoc, t.coord[0], t.coord[1], t.coord[2]);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      const px = new Uint8Array(4);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const expectedR = Math.round(t.val * 255);
+      assertMsg(Math.abs(px[0] - expectedR) <= tol,
+        'R8 ' + t.label.replace('R32F ', '') + ' → R=' + expectedR + ' (got ' + px[0] + ')');
+    }
+    gl.deleteTexture(tex8);
+
+    // Cleanup
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(colorTex);
+    gl.deleteTexture(tex);
+    gl.deleteBuffer(vbo);
+    gl.deleteProgram(prog);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+  } catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : e));
+  } finally {
+    finishTest();
+  }
+})();
+</script>
+
+<p><a href="../">back to webgl-texture3d</a></p>
+</body>
+</html>

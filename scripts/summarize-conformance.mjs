@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 
 const DEFAULT_PATH =
-	'C:/Users/NatureGlass/AppData/Roaming/citron/sdmc/switch/webprofiles/default/khronos-logs/full-webgl1-conformance.log';
+	'C:/Users/NatureGlass/AppData/Roaming/citron/sdmc/switch/brewser/logs/full-webgl1-conformance.log';
 const path = process.argv[2] || DEFAULT_PATH;
 
 const text = readFileSync(path, 'utf8');

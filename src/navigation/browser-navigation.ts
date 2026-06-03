@@ -1,11 +1,11 @@
 import { NavigationController, type WebView } from '@switch-web/runtime';
 import type { HistoryStore } from './history-store.js';
 
-const ERROR_URL = 'browser://error/';
-const WELCOME_URL = 'browser://welcome/';
+const ERROR_URL = 'brewser://error/';
+const HOME_URL = 'brewser://home/';
 
 /** URLs that should never be persisted to the visit history. */
-const EXCLUDED_FROM_HISTORY = new Set<string>([WELCOME_URL, ERROR_URL]);
+const EXCLUDED_FROM_HISTORY = new Set<string>([HOME_URL, ERROR_URL]);
 
 /**
  * Ties navigation requests to a `WebView` and the runtime's

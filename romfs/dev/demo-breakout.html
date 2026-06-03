@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breakout — Switch Web Platform Demo</title>
+<style>
+  @font-face {
+    font-family: BreakoutFont;
+    src: url(sdmc:/switch/brewser/dev/api-probe-font.ttf) format('truetype');
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #0b1220;
+    color: #e0e8f4;
+    font-family: BreakoutFont, sans-serif;
+  }
+  .app {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 12px;
+  }
+  #title {
+    text-align: center;
+    color: #ffd35e;
+    font-size: 20px;
+    margin: 0;
+    height: 26px;
+    line-height: 26px;
+    animation: titlePulse 2.4s linear infinite;
+  }
+  @keyframes titlePulse {
+    0%   { opacity: 0.7; }
+    50%  { opacity: 1.0; }
+    100% { opacity: 0.7; }
+  }
+  #hud {
+    text-align: center;
+    color: #c2e0ff;
+    font-size: 18px;
+    height: 26px;
+    line-height: 26px;
+  }
+  #hud .stat { display: inline-block; width: 220px; }
+  #hud .label { color: #9bb1d6; }
+  #hud .val { color: #7eda9f; }
+  #hud .val.hi { color: #ffd35e; }
+  #stage { text-align: center; height: 564px; }
+  #gameCanvas {
+    display: inline-block;
+    background: #14202d;
+    border: 2px solid #2a4060;
+    border-radius: 6px;
+  }
+  #overlay {
+    text-align: center;
+    color: #ffd35e;
+    font-size: 18px;
+    height: 24px;
+    line-height: 24px;
+    overflow: hidden;
+  }
+  #log-tail {
+    color: #6f88a8;
+    font-size: 10px;
+    text-align: center;
+    height: 14px;
+    line-height: 14px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1 id="title">⬛ BREAKOUT ⬛  touch + drag the play area, or left-stick + A</h1>
+  <div id="hud">
+    <span class="stat"><span class="label">Score </span><span class="val" id="hud-score">0</span></span>
+    <span class="stat"><span class="label">Hi </span><span class="val hi" id="hud-hi">0</span></span>
+    <span class="stat"><span class="label">Lives </span><span class="val" id="hud-lives">3</span></span>
+  </div>
+  <div id="stage">
+    <canvas id="gameCanvas" width="1200" height="560"></canvas>
+  </div>
+  <div id="overlay">Touch + drag the play area, or use the left stick. A or tap to launch.</div>
+  <div id="log-tail">log: sdmc:/switch/brewser/logs/demo-breakout.log</div>
+</div>
+
+<script>
+  // =========================================================================
+  // Heavy logging — paste this when reporting any issue.
+  // =========================================================================
+  const LOG_PATH = 'sdmc:/switch/brewser/logs/demo-breakout.log';
+  const startMs = performance.now();
+  function log(s) {
+    const t = Math.round(performance.now() - startMs);
+    const line = '+' + t + 'ms ' + s;
+    try { Switch.appendFileSync(LOG_PATH, line + '\n'); } catch (_) {}
+    try { document.getElementById('log-tail').textContent = line; } catch (_) {}
+  }
+
+  log('');
+  log('=== RUN at ' + new Date().toISOString() + ' ===');
+  log('UA=' + (typeof navigator !== 'undefined' && navigator.userAgent || 'n/a'));
+  log('typeof: AudioContext=' + typeof AudioContext
+    + ' localStorage=' + typeof localStorage
+    + ' requestAnimationFrame=' + typeof requestAnimationFrame
+    + ' navigator=' + typeof navigator
+    + ' globalThis.screen=' + (typeof globalThis !== 'undefined' && typeof globalThis.screen));
+  // Web-audio-stubs polyfill diagnostic — read every flag the polyfill
+  // sets so we can pinpoint exactly where install short-circuited (or
+  // whether it ran at all). Mediaplayer's TypeError-not-a-function on
+  // createMediaElementSource keeps recurring; need to know if the patch
+  // ever reaches AudioContext.prototype as the page-script sees it.
+  try {
+    const g = globalThis;
+    log('stubs flags: buildTag=' + g.__stubsBuildTag
+      + ' installReached=' + g.__stubsInstallReached
+      + ' ACType=' + g.__stubsACType
+      + ' ACHasProto=' + g.__stubsACHasProto
+      + ' beforeMediaSource=' + g.__stubsBeforeMediaSource
+      + ' beforeAnalyser=' + g.__stubsBeforeAnalyser
+      + ' afterMediaSource=' + g.__stubsAfterMediaSource
+      + ' afterAnalyser=' + g.__stubsAfterAnalyser
+      + ' applied=' + g.__webAudioStubsApplied);
+    // Direct probe — does THIS page see the patched prototype?
+    if (typeof AudioContext !== 'undefined' && AudioContext.prototype) {
+      log('AC.prototype.createMediaElementSource as page-script sees it: '
+        + typeof AudioContext.prototype.createMediaElementSource
+        + ', createAnalyser: '
+        + typeof AudioContext.prototype.createAnalyser);
+    }
+  } catch (e) { log('!! stubs flag check threw: ' + (e && e.message || e)); }
+
+  try {
+    if (typeof addEventListener === 'function') {
+      addEventListener('error', function (ev) { log('!! err: ' + (ev && ev.message || ev)); });
+      addEventListener('unhandledrejection', function (ev) {
+        log('!! rej: ' + (ev && ev.reason && ev.reason.message || ev.reason || ev));
+      });
+    }
+  } catch (_) {}
+
+  // =========================================================================
+  // localStorage high-score.
+  // =========================================================================
+  const HI_KEY = 'breakout.hi';
+  let hiScore = 0;
+  try {
+    const raw = localStorage.getItem(HI_KEY);
+    hiScore = raw ? (parseInt(raw, 10) || 0) : 0;
+    log('ls read hi=' + hiScore);
+  } catch (e) { log('!! ls read: ' + (e && e.message || e)); }
+  function saveHiScore() {
+    try { localStorage.setItem(HI_KEY, String(hiScore)); log('ls set hi=' + hiScore); }
+    catch (e) { log('!! ls write: ' + (e && e.message || e)); }
+  }
+
+  // =========================================================================
+  // Audio paths — TWO parallel implementations so we can diagnose which
+  // (if either) actually produces audible sound on real HW.
+  //
+  //   1. Web Audio (AudioContext + Oscillator) — verified working in
+  //      api-probe + web-audio-tone tests; allegedly broken here.
+  //   2. HTMLAudioElement playing romfs:/pages/assets/click.wav — same
+  //      path the mediaplayer uses; known-good.
+  //
+  // On first user input both fire. Log records audio.state + voice
+  // allocation + setTimeout-callback firing so we can see exactly which
+  // path produces sound on the speakers.
+  // =========================================================================
+  let audio = null, audioReady = false;
+  function ensureAudio() {
+    if (audioReady) return true;
+    try {
+      audio = new AudioContext();
+      audioReady = true;
+      log('AudioContext OK state=' + audio.state + ' sr=' + audio.sampleRate
+        + ' currentTime=' + audio.currentTime);
+      try {
+        if (audio.state !== 'running' && typeof audio.resume === 'function') {
+          audio.resume();
+          log('audio.resume()→state=' + audio.state);
+        }
+      } catch (e) { log('!! audio.resume: ' + (e && e.message || e)); }
+      return true;
+    } catch (e) { log('!! AudioContext ctor: ' + (e && e.message || e)); return false; }
+  }
+
+  let beepCounter = 0;
+  function beep(freq, ms, type, vol) {
+    if (!audioReady) return;
+    type = type || 'sine'; vol = (vol === undefined) ? 0.5 : vol;
+    const id = ++beepCounter;
+    try {
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      gain.gain.value = vol; osc.frequency.value = freq; osc.type = type;
+      osc.connect(gain).connect(audio.destination);
+      osc.start();
+      if (id <= 4) log('beep#' + id + ' start freq=' + freq + ' vol=' + vol
+        + ' state=' + audio.state + ' ctime=' + audio.currentTime.toFixed(3));
+      setTimeout(function () {
+        try { osc.stop(); } catch (_) {}
+        if (id <= 4) log('beep#' + id + ' stop');
+      }, ms);
+    } catch (e) { log('!! beep#' + id + ': ' + (e && e.message || e)); }
+  }
+  function sfxBrick(r) { beep(440 + r * 65, 130, 'square',   0.50); }
+  function sfxWall()    { beep(220, 90,           'sine',    0.40); }
+  function sfxPaddle()  { beep(330, 140,          'triangle',0.60); }
+  function sfxLose()    {
+    beep(180, 260, 'sawtooth', 0.55);
+    setTimeout(function () { beep(120, 320, 'sawtooth', 0.55); }, 240);
+  }
+  function sfxWin()     {
+    beep(523, 180, 'triangle', 0.55);
+    setTimeout(function () { beep(659, 180, 'triangle', 0.55); }, 170);
+    setTimeout(function () { beep(784, 260, 'triangle', 0.55); }, 340);
+  }
+
+  // HTMLAudioElement diagnostic — same path mediaplayer uses. If THIS
+  // produces sound but Web Audio doesn't, the issue is Web Audio path
+  // specifically and we know to switch sfx to wav playback.
+  let htmlAudio = null;
+  function ensureHtmlAudio() {
+    if (htmlAudio) return;
+    try {
+      htmlAudio = new Audio('romfs:/pages/assets/click.wav');
+      htmlAudio.volume = 1.0;
+      log('HTMLAudio ctor OK volume=' + htmlAudio.volume + ' src=' + htmlAudio.src);
+      htmlAudio.addEventListener('canplaythrough', function () { log('HTMLAudio canplaythrough'); });
+      htmlAudio.addEventListener('play', function () { log('HTMLAudio play'); });
+      htmlAudio.addEventListener('ended', function () { log('HTMLAudio ended'); });
+      htmlAudio.addEventListener('error', function (e) { log('!! HTMLAudio error: ' + (e && e.message || e)); });
+    } catch (e) { log('!! HTMLAudio ctor: ' + (e && e.message || e)); }
+  }
+  function playHtmlAudio() {
+    if (!htmlAudio) return;
+    try {
+      htmlAudio.currentTime = 0;
+      const p = htmlAudio.play();
+      log('HTMLAudio.play() called');
+      if (p && typeof p.then === 'function') {
+        p.then(function () { log('HTMLAudio.play() promise resolved'); },
+               function (e) { log('!! HTMLAudio.play() rejected: ' + (e && e.message || e)); });
+      }
+    } catch (e) { log('!! HTMLAudio.play threw: ' + (e && e.message || e)); }
+  }
+
+  // Test tone — fires Web Audio + HTMLAudio side-by-side on first input.
+  let testTonePlayed = false;
+  function playTestTone() {
+    if (testTonePlayed) return;
+    if (!ensureAudio()) return;
+    ensureHtmlAudio();
+    testTonePlayed = true;
+    log('--- AUDIO TEST START ---');
+    log('1) Web Audio: 880Hz sine 700ms at vol=0.9');
+    beep(880, 700, 'sine', 0.9);
+    setTimeout(function () {
+      log('2) Web Audio: 440Hz sine 1000ms at vol=0.9');
+      beep(440, 1000, 'sine', 0.9);
+    }, 800);
+    setTimeout(function () {
+      log('3) HTMLAudio: click.wav at volume=1.0');
+      playHtmlAudio();
+    }, 2000);
+    setTimeout(function () { log('--- AUDIO TEST END ---'); }, 3000);
+  }
+
+  // =========================================================================
+  // Game state.
+  // =========================================================================
+  const VIEW_W = 1200, VIEW_H = 560;
+  const PADDLE_W = 140, PADDLE_H = 14, PADDLE_Y = VIEW_H - 36;
+  const BALL_R = 9;
+  const BRICK_ROWS = 6, BRICK_COLS = 12, BRICK_PAD = 4;
+  const BRICK_W = Math.floor((VIEW_W - 40 - BRICK_PAD * (BRICK_COLS - 1)) / BRICK_COLS);
+  const BRICK_H = 24;
+  const BRICK_TOP = 28;
+  const BRICK_LEFT = (VIEW_W - (BRICK_W * BRICK_COLS + BRICK_PAD * (BRICK_COLS - 1))) / 2;
+  const ROW_COLORS = ['#ff6b6b', '#ffa861', '#ffd35e', '#7eda9f', '#7aa2ff', '#c77dff'];
+
+  // Physics tick — the engine throttles BOTH setInterval AND rAF to ~25-30Hz
+  // for page scripts. So we tune per-step deltas for that observed cap, not
+  // the 90Hz target I had before (got us 75px/sec slow-motion).
+  // 25Hz × 14 px/step = 350 px/s — comfortable for a 1200-wide play area.
+  const PHYSICS_HZ = 30;
+  const PHYSICS_DT_MS = 1000 / PHYSICS_HZ;
+  const BALL_VX_INIT = 8;
+  const BALL_VY_INIT = -9;
+  const PADDLE_LERP_PER_STEP = 0.35; // catches up quickly even at low Hz
+
+  let score = 0, lives = 3, level = 1;
+  let paddle = { x: VIEW_W / 2, targetX: VIEW_W / 2 };
+  let ball = { x: VIEW_W / 2, y: PADDLE_Y - BALL_R - 2, vx: 0, vy: 0, live: false };
+  let bricks = [];
+  let renderFrames = 0;
+  let renderWindowStart = performance.now();
+  let physicsSteps = 0;
+  let physicsWindowStart = performance.now();
+
+  function buildLevel() {
+    bricks = [];
+    for (let r = 0; r < BRICK_ROWS; r++) {
+      for (let c = 0; c < BRICK_COLS; c++) {
+        bricks.push({
+          x: BRICK_LEFT + c * (BRICK_W + BRICK_PAD),
+          y: BRICK_TOP + r * (BRICK_H + BRICK_PAD),
+          w: BRICK_W, h: BRICK_H,
+          color: ROW_COLORS[r], alive: true, row: r,
+        });
+      }
+    }
+    log('buildLevel ' + bricks.length + ' bricks lvl=' + level);
+  }
+  function resetBall() {
+    ball.x = paddle.x; ball.y = PADDLE_Y - BALL_R - 2;
+    ball.vx = 0; ball.vy = 0; ball.live = false;
+  }
+  function launchBall() {
+    if (ball.live) { log('launchBall: already live'); return; }
+    ball.live = true;
+    ball.vx = (Math.random() < 0.5 ? -1 : 1) * BALL_VX_INIT;
+    ball.vy = BALL_VY_INIT;
+    log('launchBall vx=' + ball.vx.toFixed(2) + ' vy=' + ball.vy.toFixed(2));
+    setOverlay('Go!');
+  }
+  function resetGame() {
+    log('resetGame');
+    score = 0; lives = 3; level = 1; buildLevel(); resetBall(); updateHud();
+    setOverlay('Touch the play area or use the left stick. A or tap to launch.');
+  }
+  function updateHud() {
+    try {
+      document.getElementById('hud-score').textContent = String(score);
+      document.getElementById('hud-hi').textContent = String(hiScore);
+      document.getElementById('hud-lives').textContent = String(lives);
+    } catch (e) { log('!! hud: ' + (e && e.message || e)); }
+  }
+  function setOverlay(t) {
+    try { document.getElementById('overlay').textContent = t; }
+    catch (e) { log('!! overlay: ' + (e && e.message || e)); }
+  }
+
+  buildLevel();
+  updateHud();
+
+  // =========================================================================
+  // Render — runs from rAF, paints current state, never advances physics.
+  // =========================================================================
+  const cnv = document.getElementById('gameCanvas');
+  const ctx2d = cnv ? cnv.getContext('2d') : null;
+  if (!ctx2d) log('!! getContext null');
+  log('canvas ' + VIEW_W + 'x' + VIEW_H + ' ctx=' + (ctx2d ? 'OK' : 'NULL'));
+
+  function draw() {
+    if (!ctx2d) return;
+    ctx2d.fillStyle = '#14202d';
+    ctx2d.fillRect(0, 0, VIEW_W, VIEW_H);
+    for (let i = 0; i < bricks.length; i++) {
+      const b = bricks[i]; if (!b.alive) continue;
+      ctx2d.fillStyle = b.color; ctx2d.fillRect(b.x, b.y, b.w, b.h);
+    }
+    ctx2d.fillStyle = '#7eda9f';
+    ctx2d.fillRect(paddle.x - PADDLE_W / 2, PADDLE_Y, PADDLE_W, PADDLE_H);
+    ctx2d.fillStyle = '#ffffff';
+    ctx2d.beginPath(); ctx2d.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2); ctx2d.fill();
+  }
+
+  // Global cancellation flag — checked by both loops so they STOP on
+  // page-unload. Without this the setTimeout chain runs forever in
+  // the global timer queue (page scripts share the runtime's
+  // setTimeout) and starves audrv update + everything else
+  // platform-wide AFTER the user navigates away. Major regression
+  // source. See [[feedback-swb-page-script-timer-cleanup]].
+  let __loopsActive = true;
+  try {
+    addEventListener('beforeunload', function () {
+      __loopsActive = false;
+      try { if (audio && typeof audio.close === 'function') audio.close(); } catch (_) {}
+      try { if (htmlAudio && typeof htmlAudio.pause === 'function') htmlAudio.pause(); } catch (_) {}
+      log('beforeunload → loops cancelled, audio closed');
+    });
+  } catch (_) {}
+
+  function renderTick() {
+    if (!__loopsActive) return;
+    renderFrames++;
+    const now = performance.now();
+    if ((renderFrames % 60) === 0) {
+      const fps = Math.round(60000 / (now - renderWindowStart));
+      log('render fps=' + fps + ' (live=' + ball.live + ' bricks='
+        + bricks.filter(function (b) { return b.alive; }).length + ')');
+      renderWindowStart = now;
+    }
+    draw();
+    setTimeout(renderTick, 16);
+  }
+
+  // =========================================================================
+  // Physics — fixed-rate substeps via setInterval. Each call advances the
+  // simulation by one (1) discrete step at PHYSICS_HZ. Render reads the
+  // current state. This decouples motion smoothness from rAF cadence.
+  // =========================================================================
+  let physicsIntervalId = null;
+  function physicsStep() {
+    if (!__loopsActive) {
+      if (physicsIntervalId !== null) { clearInterval(physicsIntervalId); physicsIntervalId = null; }
+      return;
+    }
+    physicsSteps++;
+    const now = performance.now();
+    if ((physicsSteps % 300) === 0) {
+      const hz = Math.round(300000 / (now - physicsWindowStart));
+      log('physics hz=' + hz + ' (target=' + PHYSICS_HZ + ')');
+      physicsWindowStart = now;
+    }
+
+    pollGamepadOnce();
+
+    // Paddle slides toward targetX (smooth follow, per-step rate).
+    paddle.x += (paddle.targetX - paddle.x) * PADDLE_LERP_PER_STEP;
+    if (paddle.x < PADDLE_W / 2) paddle.x = PADDLE_W / 2;
+    if (paddle.x > VIEW_W - PADDLE_W / 2) paddle.x = VIEW_W - PADDLE_W / 2;
+
+    if (!ball.live) {
+      ball.x = paddle.x;
+      ball.y = PADDLE_Y - BALL_R - 2;
+      return;
+    }
+
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    if (ball.x < BALL_R) { ball.x = BALL_R; ball.vx = -ball.vx; sfxWall(); }
+    if (ball.x > VIEW_W - BALL_R) { ball.x = VIEW_W - BALL_R; ball.vx = -ball.vx; sfxWall(); }
+    if (ball.y < BALL_R) { ball.y = BALL_R; ball.vy = -ball.vy; sfxWall(); }
+
+    if (ball.vy > 0
+        && ball.y + BALL_R >= PADDLE_Y
+        && ball.y - BALL_R <= PADDLE_Y + PADDLE_H
+        && ball.x >= paddle.x - PADDLE_W / 2 - BALL_R
+        && ball.x <= paddle.x + PADDLE_W / 2 + BALL_R) {
+      ball.vy = -Math.abs(ball.vy);
+      const rel = (ball.x - paddle.x) / (PADDLE_W / 2 + BALL_R);
+      ball.vx = rel * 11;
+      const sp = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+      if (sp < 11) { ball.vx *= 1.05; ball.vy *= 1.05; }
+      sfxPaddle();
+    }
+
+    for (let i = 0; i < bricks.length; i++) {
+      const b = bricks[i]; if (!b.alive) continue;
+      if (ball.x + BALL_R >= b.x && ball.x - BALL_R <= b.x + b.w
+          && ball.y + BALL_R >= b.y && ball.y - BALL_R <= b.y + b.h) {
+        b.alive = false;
+        const ox = Math.min(ball.x + BALL_R - b.x, b.x + b.w - (ball.x - BALL_R));
+        const oy = Math.min(ball.y + BALL_R - b.y, b.y + b.h - (ball.y - BALL_R));
+        if (ox < oy) ball.vx = -ball.vx; else ball.vy = -ball.vy;
+        score += (BRICK_ROWS - b.row) * 10;
+        sfxBrick(b.row);
+        if (score > hiScore) {
+          const mile = (Math.floor(hiScore / 100) !== Math.floor(score / 100));
+          hiScore = score; if (mile) saveHiScore();
+        }
+        updateHud();
+        log('brick r=' + b.row + ' score=' + score + ' rem='
+          + bricks.filter(function (bb) { return bb.alive; }).length);
+        break;
+      }
+    }
+
+    if (ball.y > VIEW_H + BALL_R) {
+      lives--;
+      log('ball lost lives=' + lives);
+      sfxLose(); updateHud();
+      if (lives <= 0) {
+        log('GAME OVER final=' + score + ' hi=' + hiScore); saveHiScore();
+        score = 0; lives = 3; level = 1; buildLevel(); updateHud();
+        setOverlay('Game Over — touch or A to play again');
+      } else {
+        setOverlay('Lost a ball — touch or A for next');
+      }
+      resetBall();
+    }
+
+    let allDead = true;
+    for (let i = 0; i < bricks.length; i++) { if (bricks[i].alive) { allDead = false; break; } }
+    if (allDead) {
+      level++; log('LEVEL ' + level); sfxWin(); saveHiScore();
+      buildLevel(); resetBall(); setOverlay('Level ' + level + ' — touch or A to launch');
+    }
+  }
+
+  // =========================================================================
+  // Input — touch + gamepad. Buttons removed per user feedback.
+  // =========================================================================
+  let canvasLeftPage = 40;
+  function refreshCanvasLeft() {
+    try {
+      if (cnv && typeof cnv.getBoundingClientRect === 'function') {
+        const r = cnv.getBoundingClientRect();
+        if (r && typeof r.left === 'number') canvasLeftPage = r.left;
+      }
+    } catch (_) {}
+  }
+  refreshCanvasLeft();
+  log('canvas pageLeft=' + Math.round(canvasLeftPage));
+
+  function handleTouchAt(pageX) {
+    const localX = pageX - canvasLeftPage;
+    if (localX < -50 || localX > VIEW_W + 50) return false;
+    paddle.targetX = Math.max(PADDLE_W / 2, Math.min(VIEW_W - PADDLE_W / 2, localX));
+    return true;
+  }
+
+  let touchActive = false;
+  let activeTouchId = null;
+  function onTouchStart(ev) {
+    const tlist = ev && (ev.changedTouches || ev.touches);
+    if (!tlist || !tlist[0]) { return; }
+    const t = tlist[0];
+    const x = (t.clientX !== undefined) ? t.clientX : (t.pageX !== undefined) ? t.pageX : -1;
+    const y = (t.clientY !== undefined) ? t.clientY : (t.pageY !== undefined) ? t.pageY : -1;
+    log('touchstart x=' + Math.round(x) + ' y=' + Math.round(y));
+    if (activeTouchId === null) activeTouchId = t.identifier;
+    touchActive = true;
+    handleTouchAt(x);
+    playTestTone();
+    if (!ball.live) launchBall();
+  }
+  function onTouchMove(ev) {
+    if (!touchActive) return;
+    const tlist = ev && (ev.changedTouches || ev.touches);
+    if (!tlist) return;
+    for (let i = 0; i < tlist.length; i++) {
+      const t = tlist[i];
+      if (activeTouchId === null || t.identifier === activeTouchId) {
+        const x = (t.clientX !== undefined) ? t.clientX : (t.pageX !== undefined) ? t.pageX : -1;
+        handleTouchAt(x);
+        return;
+      }
+    }
+  }
+  function onTouchEnd() { touchActive = false; activeTouchId = null; }
+
+  function attachAll(name, fn) {
+    const targets = [];
+    try { if (typeof globalThis.screen !== 'undefined' && globalThis.screen && globalThis.screen.addEventListener) targets.push(globalThis.screen); } catch (_) {}
+    try { if (typeof window !== 'undefined' && window.addEventListener) targets.push(window); } catch (_) {}
+    try { if (typeof document !== 'undefined' && document.addEventListener) targets.push(document); } catch (_) {}
+    try { if (cnv && cnv.addEventListener) targets.push(cnv); } catch (_) {}
+    let n = 0;
+    for (const t of targets) { try { t.addEventListener(name, fn); n++; } catch (_) {} }
+    log('attach ' + name + ' on ' + n + ' targets');
+  }
+  attachAll('touchstart', onTouchStart);
+  attachAll('touchmove', onTouchMove);
+  attachAll('touchend', onTouchEnd);
+  attachAll('touchcancel', onTouchEnd);
+
+  // Gamepad polling — left stick X moves paddle, A launches/restarts.
+  let lastButtonState = false;
+  let lastGamepadLogTime = 0;
+  function pollGamepadOnce() {
+    try {
+      if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') return;
+      const pads = navigator.getGamepads();
+      if (!pads) return;
+      const gp = pads[0];
+      if (!gp || !gp.axes) return;
+      const x = gp.axes[0] || 0;
+      const dead = 0.18;
+      if (Math.abs(x) > dead) {
+        // 14 px/step at full deflection × 30Hz physics = ~420 px/s — about
+        // 1/3 of play area per second, responsive without overshooting.
+        paddle.targetX += x * 14;
+        if (paddle.targetX < PADDLE_W / 2) paddle.targetX = PADDLE_W / 2;
+        if (paddle.targetX > VIEW_W - PADDLE_W / 2) paddle.targetX = VIEW_W - PADDLE_W / 2;
+        const now = performance.now();
+        if (now - lastGamepadLogTime > 1500) {
+          log('gp lx=' + x.toFixed(2) + ' → targetX=' + Math.round(paddle.targetX));
+          lastGamepadLogTime = now;
+        }
+      }
+      // A button (rising edge) launches ball / restarts.
+      const aPressed = !!(gp.buttons && gp.buttons[0] && gp.buttons[0].pressed);
+      if (aPressed && !lastButtonState) {
+        log('gp A pressed');
+        playTestTone();
+        if (!ball.live) launchBall();
+      }
+      lastButtonState = aPressed;
+    } catch (_) {}
+  }
+
+  // =========================================================================
+  // Kick off both loops.
+  // =========================================================================
+  draw();
+  log('init complete; render setTimeout(16ms) + physics setInterval(' + PHYSICS_DT_MS.toFixed(1) + 'ms)');
+  setTimeout(renderTick, 16);
+  physicsIntervalId = setInterval(physicsStep, PHYSICS_DT_MS);
+</script>
+</body>
+</html>

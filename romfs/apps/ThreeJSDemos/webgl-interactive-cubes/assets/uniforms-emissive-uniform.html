@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: uniforms/emissive-uniform</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>uniforms/emissive-uniform</code></h1>
+<p class="lead">Hand-rolled in the spirit of
+<code>WebGL/sdk/tests/conformance/uniforms/gl-uniform-bool.html</code>
+(uniform name lookup + setter round-trip via the nx.js
+allowlist-based <code>getUniformLocation</code>). Milestone&nbsp;#13
+surface: the interactive-cubes demo uses
+<code>material.emissive = red</code> to highlight the hovered cube, which
+forced adding <code>emissive</code> to nx.js's recognized uniform-name
+allowlist plus <code>u_emissive</code> in both
+<code>bridge_color_program</code> and <code>bridge_texture_program</code>
+fragment shaders. This test pins (a) the name-lookup recognition, (b)
+the setter accepts vec3 inputs without error, (c) sibling
+lighting-uniform names (specular, shininess) still resolve.</p>
+
+<canvas id="example" width="50" height="50"></canvas>
+
+<canvas id="khronos-status" width="900" height="700"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'uniforms-emissive-uniform';
+</script>
+<script id="vs" type="x-shader/x-vertex">
+attribute vec3 a_position;
+attribute vec3 a_normal;
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+varying vec3 v_normal;
+void main() {
+  v_normal = a_normal;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(a_position, 1.0);
+}
+</script>
+<script id="fs" type="x-shader/x-fragment">
+precision mediump float;
+uniform vec3 emissive;
+uniform vec3 specular;
+uniform float shininess;
+uniform vec3 diffuse;
+uniform float opacity;
+uniform vec3 ambientLightColor;
+uniform vec3 directionalLights[1];
+varying vec3 v_normal;
+void main() {
+  vec3 N = normalize(v_normal);
+  gl_FragColor = vec4(diffuse + emissive + specular / max(shininess, 1.0), opacity);
+  gl_FragColor.rgb *= ambientLightColor + directionalLights[0];
+  if (N.x > 99.0) discard;
+}
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+
+  description('Tests gl.getUniformLocation recognition for `emissive` + sibling lighting uniforms.');
+
+  const wtu = WebGLTestUtils;
+  const gl = wtu.create3DContext('example');
+
+  try {
+    if (!gl) {
+      testFailed('context not created');
+      throw new Error('no gl');
+    }
+    testPassed('context exists');
+
+    debug('');
+    debug('Build a program with `emissive` declared in the fragment shader:');
+    const program = wtu.setupProgram(gl, ['vs', 'fs']);
+    assertMsg(program != null, 'setupProgram should succeed');
+    gl.useProgram(program);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'no error after compile + link + useProgram');
+
+    debug('');
+    debug('Lookup recognized lighting uniform names:');
+    const emissiveLoc = gl.getUniformLocation(program, 'emissive');
+    assertMsg(emissiveLoc != null,
+      'getUniformLocation("emissive") should be non-null (milestone #13 added to allowlist)');
+    const specularLoc = gl.getUniformLocation(program, 'specular');
+    assertMsg(specularLoc != null,
+      'getUniformLocation("specular") should be non-null (milestone #11)');
+    const shininessLoc = gl.getUniformLocation(program, 'shininess');
+    assertMsg(shininessLoc != null,
+      'getUniformLocation("shininess") should be non-null (milestone #11)');
+    const diffuseLoc = gl.getUniformLocation(program, 'diffuse');
+    assertMsg(diffuseLoc != null,
+      'getUniformLocation("diffuse") should be non-null (milestone #9 — bridge-texture-diffuse-multiply)');
+    const opacityLoc = gl.getUniformLocation(program, 'opacity');
+    assertMsg(opacityLoc != null,
+      'getUniformLocation("opacity") should be non-null (legacy)');
+    const ambientLoc = gl.getUniformLocation(program, 'ambientLightColor');
+    assertMsg(ambientLoc != null,
+      'getUniformLocation("ambientLightColor") should be non-null (milestone #3)');
+    const dirLoc = gl.getUniformLocation(program, 'directionalLights[0].direction');
+    // NOTE: indexed struct field; not the bare `directionalLights[0]` from the
+    // shader source above. Three.js issues the full path; we test that path.
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'no error after uniform name lookups');
+
+    debug('');
+    debug('Unrecognized name returns null:');
+    const bogusLoc = gl.getUniformLocation(program, 'nonexistentUniformXyz');
+    assertMsg(bogusLoc == null,
+      'getUniformLocation("nonexistentUniformXyz") should be null');
+
+    debug('');
+    debug('Set emissive via uniform3f (matches Three.js Color.toArray pattern):');
+    gl.uniform3f(emissiveLoc, 1.0, 0.0, 0.0);  // red (hover highlight)
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'uniform3f(emissiveLoc, red) should succeed');
+    gl.uniform3f(emissiveLoc, 0.0, 0.0, 0.0);  // reset to default
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'uniform3f(emissiveLoc, black) should succeed');
+
+    debug('');
+    debug('Set emissive via uniform3fv with TypedArray:');
+    gl.uniform3fv(emissiveLoc, new Float32Array([0.5, 0.5, 0.5]));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'uniform3fv(emissiveLoc, Float32Array) should succeed');
+
+    debug('');
+    debug('Set emissive via uniform3fv with plain Array (per nxjs-uniform-array-input):');
+    gl.uniform3fv(emissiveLoc, [0.25, 0.5, 0.75]);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'uniform3fv(emissiveLoc, [r,g,b]) should succeed (Array path)');
+
+    debug('');
+    debug('null location is a silent no-op (per uniforms/null-uniform-location):');
+    gl.uniform3f(null, 1.0, 0.0, 0.0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'uniform3f(null, ...) should be a silent no-op');
+    gl.uniform3fv(null, new Float32Array([1, 0, 0]));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'uniform3fv(null, ...) should be a silent no-op');
+
+    debug('');
+    debug('Round-trip via specular sibling (Phong path, also added in #11):');
+    gl.uniform3f(specularLoc, 0.1, 0.1, 0.1);
+    gl.uniform1f(shininessLoc, 30.0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'specular + shininess setters should succeed');
+
+    debug('');
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'no GL errors at end of test');
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-interactive-cubes/">back to Interactive Cubes demo</a></p>
+</body>
+</html>

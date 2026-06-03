@@ -52,6 +52,16 @@ export class BookmarksStore {
 		this.persist();
 	}
 
+	/** Wipe every bookmark. Used by the bookmarks page's
+	 * `Clear Bookmarks` button (`data-action="clear-bookmarks"`).
+	 * No-op when the list is already empty so we don't rewrite the
+	 * file for nothing. */
+	clear(): void {
+		if (this.bookmarks.length === 0) return;
+		this.bookmarks = [];
+		this.persist();
+	}
+
 	/**
 	 * Toggle the given URL. Returns the new "is bookmarked" state — so
 	 * the caller can update the star indicator without a second `has()`

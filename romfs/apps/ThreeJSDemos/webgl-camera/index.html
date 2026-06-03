@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Camera Perspective / Ortho</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+  kbd { background-color: #1a2840; padding: 1px 6px; border-radius: 3px;
+        font-family: monospace; color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Camera Perspective / Ortho</h1>
+<p class="lead">Port of <code>three-r162/examples/webgl_camera.html</code>:
+a camera rig hosts both a <code>PerspectiveCamera</code> and an
+<code>OrthographicCamera</code> that take turns rendering the left half of
+the canvas, while the right half shows a third "narrator" camera's view of
+the rig (visualized by a <code>CameraHelper</code> wireframe).
+First milestone to exercise (a) orthographic projection through the
+bridge's CPU-side <code>transform_position3_depth</code>, (b)
+<code>renderer.setScissorTest</code> + split-screen with two
+<code>renderer.render()</code> calls per frame, and (c) the new
+<code>GL_POINTS</code> draw path in <code>nx_webgl_draw_arrays</code> (each
+point is CPU-expanded to a 2-pixel screen-aligned quad through
+<code>bridge_color_program</code>).</p>
+
+<p class="lead">Toggle the active rig camera with:
+<kbd>B</kbd> perspective ·
+<kbd>A</kbd> orthographic
+(replaces upstream's O/P keys).</p>
+
+<div class="stage">
+  <canvas id="camera-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('camera-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="camera-status" width="900" height="340"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('camera-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 340);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const cErr = globalThis.__cameraError;
+    row(36, 'camera error:', cErr ? String(cErr).slice(0, 80) : '(none)', !cErr);
+    row(58, 'main.js started:',
+        globalThis.__cameraMainStarted ? 'yes' : 'no',
+        !!globalThis.__cameraMainStarted);
+    row(80, 'particles created:',
+        String(globalThis.__cameraParticleCount | 0),
+        (globalThis.__cameraParticleCount | 0) === 10000);
+    row(102, 'animate() called:',
+        globalThis.__cameraAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__cameraAnimateCalled);
+    const fps = +globalThis.__cameraFps || 0;
+    row(124, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 20);
+    row(146, 'frames rendered:', String(globalThis.__cameraFrameCount | 0), true);
+    const active = globalThis.__cameraActiveKind || '(unset)';
+    row(168, 'active rig camera:', active, true);
+    const errBefore = globalThis.__cameraGlErrorBefore;
+    const errAfter = globalThis.__cameraGlErrorAfter;
+    row(190, 'gl.getError before render:',
+        '0x' + ((errBefore | 0) >>> 0).toString(16),
+        (errBefore | 0) === 0);
+    row(212, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16),
+        (errAfter | 0) === 0);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/rendering-gl-drawarrays.html"><code>rendering/gl-drawarrays</code></a>
+&mdash; pins <code>drawArrays</code> primitive-mode gatekeeping
+including the new <code>GL_POINTS</code> path this milestone added
+(starfield).</p>
+
+<p class="note">The scene is rendered TWICE per frame: the left half (black
+background) shows what the currently-active rig camera sees of the wireframe
+sphere cluster and 10,000-point starfield. The right half (charcoal
+background) shows a wide narrator-camera view of the rig from outside,
+with the active camera's frustum drawn as a yellow wireframe via
+<code>CameraHelper</code>. Toggle ortho vs perspective on the active rig
+camera and watch the difference between the two projection types in the
+left half (perspective shows the starfield foreshortened toward a vanishing
+point; orthographic shows it as a uniformly-dense field).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

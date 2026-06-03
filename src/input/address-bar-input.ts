@@ -1,4 +1,4 @@
-const KNOWN_SCHEMES = ['browser', 'http', 'https'] as const;
+const KNOWN_SCHEMES = ['brewser', 'http', 'https'] as const;
 
 function hasScheme(text: string): boolean {
 	return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(text);
@@ -21,7 +21,7 @@ function ensureRootTrailingSlash(url: string): string {
  * Holds the in-progress address-bar text and resolves it to a navigable URL.
  *
  * The resolver is intentionally tiny:
- *   - `browser://`, `http://`, `https://` → use as-is (with a trailing slash
+ *   - `brewser://`, `http://`, `https://` → use as-is (with a trailing slash
  *     on the root if missing).
  *   - any other recognized scheme → use as-is, untouched.
  *   - everything else → treat as a bare host and prepend `https://`.

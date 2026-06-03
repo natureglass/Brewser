@@ -2,16 +2,27 @@
 export const DEFAULT_CANVAS_WIDTH = 1280;
 export const DEFAULT_CANVAS_HEIGHT = 720;
 
-/** Built-in URL the browser opens on launch. The HTML lives on the SD
- * card at `sdmc:/switch/webprofiles/default/pages/welcome.html` (seeded
- * from romfs on first run) so the user can customise it. */
-export const DEFAULT_HOME_URL = 'browser://welcome/';
+/** Built-in URL the browser opens on launch (and the toolbar Home
+ * button targets). The HTML lives on the SD card at
+ * `sdmc:/switch/brewser/webprofiles/default/home.html` (seeded from
+ * romfs on first run) so the user can customise it. Renamed from
+ * `brewser://welcome/` (welcome.html) 2026-06-02. */
+export const DEFAULT_HOME_URL = 'brewser://home/';
 
 /** Logical origin used by the runtime resource/permission layers for built-in pages. */
-export const BROWSER_INTERNAL_ORIGIN = 'browser://internal/';
+export const BROWSER_INTERNAL_ORIGIN = 'brewser://internal/';
 
-/** Profile root on the SD card. Per-origin storage is created under this path. */
-export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/webprofiles/';
+/** Profile root on the SD card. Per-origin storage is created under
+ * `<DEFAULT_PROFILE_ROOT><profile-name>/` (today only `default/` exists)
+ * and holds profile-scoped data: `pages/`, `assets/`, future per-origin
+ * cookies / local-storage. */
+export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/brewser/webprofiles/';
+
+/** App-level root on the SD card. Holds data shared across profiles:
+ * `config.json`, `templates.json`, `apps.json`, `search_engines.json`,
+ * `bookmarks.json`, `history.jsonl`, plus `Templates/`, `logs/`,
+ * `screenshots/`. Lives one level above DEFAULT_PROFILE_ROOT. */
+export const BREWSER_APP_ROOT = 'sdmc:/switch/brewser/';
 
 /** Standard-mapping button indices used by the controller shortcuts. */
 export const COMBO_BUTTONS = {
@@ -72,7 +83,7 @@ export const CHROME_LAYOUT = {
 	/** Where the URL text starts (after a small visual separator). */
 	urlX: 296,
 	/** Settings button — anchored to the right edge of the chrome strip.
-	 * Opens `browser://settings/` (settings.html); icon is
+	 * Opens `brewser://settings/` (settings.html); icon is
 	 * `template.icons.settings`. */
 	settingsX: DEFAULT_CANVAS_WIDTH - CHROME_RIGHT_PADDING - SETTINGS_BUTTON_WIDTH,
 	settingsWidth: SETTINGS_BUTTON_WIDTH,

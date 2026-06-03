@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>FBO conformance — renderbuffers/framebuffer-object-attachment</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         font-family: system-ui; }
+  h1 { color: #ffd35e; }
+  a { color: #7eda9f; }
+</style>
+</head>
+<body>
+<h1>FBO conformance: <code>renderbuffers/framebuffer-object-attachment</code></h1>
+
+<p>Hand-rolled to pin the FBO management surface added in milestone #19
+(<code>bridge-fbo-support</code>). Adapted from the Khronos
+conformance test of the same name, scoped to the API shape and error
+returns nx.js actually implements (we don't surface
+<code>DEPTH_STENCIL_ATTACHMENT</code>,
+<code>INVALID_FRAMEBUFFER_OPERATION</code>, or the
+<code>RED_BITS</code>/<code>DEPTH_BITS</code>/etc. <code>getParameter</code>
+pnames upstream relies on for buffer-bits introspection). Covers:</p>
+
+<ul>
+<li><code>createFramebuffer</code> / <code>deleteFramebuffer</code> /
+<code>isFramebuffer</code> round-trip</li>
+<li><code>bindFramebuffer</code> with valid FBO + null + deleted</li>
+<li><code>createRenderbuffer</code> / <code>deleteRenderbuffer</code> /
+<code>isRenderbuffer</code> round-trip</li>
+<li><code>renderbufferStorage</code> with
+<code>DEPTH_COMPONENT16</code> + invalid pname rejection</li>
+<li><code>framebufferTexture2D</code> with
+<code>COLOR_ATTACHMENT0</code></li>
+<li><code>framebufferRenderbuffer</code> with
+<code>DEPTH_ATTACHMENT</code></li>
+<li><code>checkFramebufferStatus</code> returns
+<code>FRAMEBUFFER_COMPLETE</code> for a properly-built FBO</li>
+<li>Render-into-FBO + readback verifies pixel output reaches the FBO's
+color attachment texture</li>
+</ul>
+
+<canvas id="example" width="64" height="64"></canvas>
+<canvas id="khronos-status" width="900" height="540"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'renderbuffers-framebuffer-object-attachment';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script>
+"use strict";
+var wtu = WebGLTestUtils;
+(async function () {
+  try {
+    description('renderbuffers/framebuffer-object-attachment (FBO + RBO surface)');
+    const gl = wtu.create3DContext('example');
+    assertMsg(gl != null, 'gl context acquired');
+
+    // ── createFramebuffer / isFramebuffer / deleteFramebuffer ──
+    const fb1 = gl.createFramebuffer();
+    assertMsg(fb1 != null, 'createFramebuffer returns non-null');
+    assertMsg(gl.isFramebuffer(fb1) === true,
+      'isFramebuffer(fbo) is true after create');
+    gl.deleteFramebuffer(fb1);
+    assertMsg(gl.isFramebuffer(fb1) === false,
+      'isFramebuffer(fbo) is false after delete');
+
+    // ── bindFramebuffer(null) is the default state ──
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'bindFramebuffer(null) does not error');
+
+    // ── createRenderbuffer / isRenderbuffer / deleteRenderbuffer ──
+    const rb1 = gl.createRenderbuffer();
+    assertMsg(rb1 != null, 'createRenderbuffer returns non-null');
+    assertMsg(gl.isRenderbuffer(rb1) === true,
+      'isRenderbuffer(rbo) is true after create');
+    gl.deleteRenderbuffer(rb1);
+    assertMsg(gl.isRenderbuffer(rb1) === false,
+      'isRenderbuffer(rbo) is false after delete');
+
+    // ── renderbufferStorage / invalid target / invalid dims ──
+    const rbDepth = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rbDepth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 64, 64);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'renderbufferStorage DEPTH_COMPONENT16 accepts valid dims');
+
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 0, 64);
+    wtu.glErrorShouldBe(gl, gl.INVALID_VALUE,
+      'renderbufferStorage rejects width=0 with INVALID_VALUE');
+
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 64, -1);
+    wtu.glErrorShouldBe(gl, gl.INVALID_VALUE,
+      'renderbufferStorage rejects negative height with INVALID_VALUE');
+
+    // Wrong target → INVALID_ENUM
+    gl.renderbufferStorage(gl.FRAMEBUFFER, gl.DEPTH_COMPONENT16, 64, 64);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'renderbufferStorage rejects target=FRAMEBUFFER with INVALID_ENUM');
+
+    // ── Build a complete FBO: color texture + depth renderbuffer ──
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+
+    const colorTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, colorTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 64, 64, 0, gl.RGBA,
+      gl.UNSIGNED_BYTE, null);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'texImage2D(NULL) succeeds for FBO color attachment storage');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    // Re-bind for safety; renderbufferStorage on the still-bound depth rbo.
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rbDepth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 64, 64);
+
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D, colorTex, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D COLOR_ATTACHMENT0 accepted');
+
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT,
+      gl.RENDERBUFFER, rbDepth);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferRenderbuffer DEPTH_ATTACHMENT accepted');
+
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    assertMsg(status === gl.FRAMEBUFFER_COMPLETE,
+      'checkFramebufferStatus returns FRAMEBUFFER_COMPLETE (got 0x' +
+        status.toString(16) + ', expected 0x' +
+        gl.FRAMEBUFFER_COMPLETE.toString(16) + ')');
+
+    // ── framebufferTexture2D invalid attachment → INVALID_ENUM ──
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, 0x9999, gl.TEXTURE_2D, colorTex, 0);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'framebufferTexture2D rejects unknown attachment with INVALID_ENUM');
+
+    // ── framebufferTexture2D invalid textarget → INVALID_ENUM ──
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, 0x9999,
+      colorTex, 0);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'framebufferTexture2D rejects unknown textarget with INVALID_ENUM');
+
+    // ── framebufferTexture2D non-zero level → INVALID_VALUE ──
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D, colorTex, 1);
+    wtu.glErrorShouldBe(gl, gl.INVALID_VALUE,
+      'framebufferTexture2D rejects level=1 with INVALID_VALUE');
+
+    // ── Restore color attachment (the bad calls above might have detached) ──
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D, colorTex, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'framebufferTexture2D re-attach succeeds');
+
+    // ── End-to-end: clear the FBO, read back pixels, expect cleared color ──
+    gl.viewport(0, 0, 64, 64);
+    gl.clearColor(0.25, 0.5, 0.75, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'clear into user FBO succeeds');
+
+    const pixels = new Uint8Array(64 * 64 * 4);
+    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'readPixels from user FBO succeeds');
+
+    // Check center pixel within tolerance.
+    const cx = 32, cy = 32;
+    const idx = (cy * 64 + cx) * 4;
+    const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2],
+          a = pixels[idx + 3];
+    const er = 64, eg = 128, eb = 191, ea = 255;  // 0.25/0.5/0.75/1.0 * 255
+    const tol = 4;
+    const ok = Math.abs(r - er) <= tol && Math.abs(g - eg) <= tol &&
+               Math.abs(b - eb) <= tol && Math.abs(a - ea) <= tol;
+    assertMsg(ok,
+      'center pixel after clearColor(0.25,0.5,0.75,1) reads back near ' +
+      '(64,128,191,255) — got (' + r + ',' + g + ',' + b + ',' + a + ')');
+
+    // ── bindFramebuffer(null) returns dispatch to bridge FBO ──
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'bindFramebuffer(null) restores default');
+
+    // After detach: subsequent rebind to fbo should still work.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    const status2 = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    assertMsg(status2 === gl.FRAMEBUFFER_COMPLETE,
+      'FBO still COMPLETE after a bind-null/bind-fbo round-trip');
+
+    // ── Constants sanity (the milestone added these) ──
+    assertMsg(gl.RENDERBUFFER === 0x8D41,
+      'gl.RENDERBUFFER constant = 0x8D41');
+    assertMsg(gl.COLOR_ATTACHMENT0 === 0x8CE0,
+      'gl.COLOR_ATTACHMENT0 constant = 0x8CE0');
+    assertMsg(gl.DEPTH_ATTACHMENT === 0x8D00,
+      'gl.DEPTH_ATTACHMENT constant = 0x8D00');
+    assertMsg(gl.FRAMEBUFFER_COMPLETE === 0x8CD5,
+      'gl.FRAMEBUFFER_COMPLETE constant = 0x8CD5');
+    assertMsg(gl.DEPTH_COMPONENT16 === 0x81A5,
+      'gl.DEPTH_COMPONENT16 constant = 0x81A5');
+    assertMsg(gl.RGB === 0x1907, 'gl.RGB constant = 0x1907');
+
+    // Cleanup.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteRenderbuffer(rbDepth);
+    gl.deleteTexture(colorTex);
+  } catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : e));
+  } finally {
+    finishTest();
+  }
+})();
+</script>
+
+<p><a href="../">back to webgl-postprocessing</a></p>
+</body>
+</html>

@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r184 &mdash; WebGL2 Multiple Render Targets</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r184 &mdash; WebGL2 Multiple Render Targets</h1>
+<p class="lead">1:1 port of <code>webgl_multiple_rendertargets.html</code>
+from <a href="https://threejs.org">three.js</a> latest (r184): a
+<code>TorusKnotGeometry</code> drawn through a GLSL ES 3.00
+<code>RawShaderMaterial</code> into a
+<code>WebGLRenderTarget({count:2})</code> G-Buffer (diffuse on
+<code>layout(location=0)</code>, view-space normal on
+<code>layout(location=1)</code>), then a fullscreen composite pass
+samples both attachments and outputs
+<code>mix(diffuse, normal, step(0.5, vUv.x))</code>. Left stick orbits
+the camera; <strong>A</strong> cycles MSAA samples
+(4&nbsp;&rarr;&nbsp;2&nbsp;&rarr;&nbsp;1&nbsp;&rarr;&nbsp;0);
+<strong>X</strong> toggles wireframe.</p>
+
+<div class="stage">
+  <canvas id="mrt-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('mrt-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<!-- Write to G-Buffer (verbatim from three-latest/examples/webgl_multiple_rendertargets.html) -->
+<script id="gbuffer-vert" type="x-shader/x-vertex">
+	in vec3 position;
+	in vec3 normal;
+	in vec2 uv;
+
+	out vec3 vNormal;
+	out vec2 vUv;
+
+	uniform mat4 modelViewMatrix;
+	uniform mat4 projectionMatrix;
+	uniform mat3 normalMatrix;
+
+	void main() {
+
+		vUv = uv;
+
+		// get smooth normals
+		vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+
+		vec3 transformedNormal = normalMatrix * normal;
+		vNormal = normalize( transformedNormal );
+
+		gl_Position = projectionMatrix * mvPosition;
+
+	}
+</script>
+<script id="gbuffer-frag" type="x-shader/x-fragment">
+	precision highp float;
+	precision highp int;
+
+	layout(location = 0) out vec4 gColor;
+	layout(location = 1) out vec4 gNormal;
+
+	uniform sampler2D tDiffuse;
+	uniform vec2 repeat;
+
+	in vec3 vNormal;
+	in vec2 vUv;
+
+	void main() {
+
+		// write color to G-Buffer
+		gColor = texture( tDiffuse, vUv * repeat );
+
+		// write normals to G-Buffer
+		gNormal = vec4( normalize( vNormal ), 0.0 );
+
+	}
+</script>
+
+<!-- Read G-Buffer and render to screen (verbatim from upstream) -->
+<script id="render-vert" type="x-shader/x-vertex">
+	in vec3 position;
+	in vec2 uv;
+
+	out vec2 vUv;
+
+	uniform mat4 modelViewMatrix;
+	uniform mat4 projectionMatrix;
+
+	void main() {
+
+		vUv = uv;
+		gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+	}
+</script>
+<script id="render-frag" type="x-shader/x-fragment">
+	precision highp float;
+	precision highp int;
+
+	vec4 LinearTosRGB( in vec4 value ) {
+		return vec4( mix( pow( value.rgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), value.rgb * 12.92, vec3( lessThanEqual( value.rgb, vec3( 0.0031308 ) ) ) ), value.a );
+	}
+
+	layout(location = 0) out vec4 pc_FragColor;
+
+	in vec2 vUv;
+
+	uniform sampler2D tDiffuse;
+	uniform sampler2D tNormal;
+
+	void main() {
+
+		vec4 diffuse = texture( tDiffuse, vUv );
+		vec4 normal = texture( tNormal, vUv );
+
+		pc_FragColor = mix( diffuse, normal, step( 0.5, vUv.x ) );
+		pc_FragColor.a = 1.0;
+
+		pc_FragColor = LinearTosRGB( pc_FragColor );
+
+	}
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/r184-nxjs-bridge.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/three-latest.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="mrt-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('mrt-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 360, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R184_STAGED__ !== 'undefined';
+    row(14, 'THREE r184 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    row(36, 'WebGL2 context acquired:',
+        globalThis.__mrtIsWebGL2 ? 'yes' : 'no',
+        !!globalThis.__mrtIsWebGL2);
+    row(58, 'renderer.capabilities.isWebGL2:',
+        String(globalThis.__mrtCapWebGL2),
+        globalThis.__mrtCapWebGL2 === true);
+    row(80, 'texture loaded:',
+        globalThis.__mrtTextureLoaded ? 'yes' : 'no',
+        !!globalThis.__mrtTextureLoaded);
+    const gErr = globalThis.__mrtError;
+    st.fillStyle = '#9bb1d6';
+    st.fillText('demo error:', 14, 102);
+    st.fillStyle = gErr ? '#ff8a6c' : '#7eda9f';
+    const errText = gErr ? String(gErr) : '(none)';
+    const maxPerLine = 80;
+    for (let i = 0, y = 102; i < errText.length && y < 230; i += maxPerLine, y += 16) {
+      st.fillText(errText.slice(i, i + maxPerLine), i === 0 ? 360 : 14, y);
+    }
+    row(190, 'render count:',
+        String(globalThis.__mrtRenderCount | 0),
+        (globalThis.__mrtRenderCount | 0) > 0);
+    const fps = +globalThis.__mrtFps || 0;
+    row(212, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(234, 'samples / wireframe:',
+        String(globalThis.__mrtSamples) + ' / ' + String(globalThis.__mrtWireframe),
+        true);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/rendering-multiple-render-targets.html"><code>rendering/multiple-render-targets</code></a>
+&mdash; hand-rolled, pins MAX_DRAW_BUFFERS &ge; 2,
+<code>framebufferTexture2D</code> with <code>COLOR_ATTACHMENT0/1</code>,
+<code>checkFramebufferStatus</code> COMPLETE for a 2-attachment FBO,
+<code>drawBuffers</code> accepting both a plain Array and Uint32Array,
+and a GLSL ES 3.00 <code>layout(location=) out vec4</code> shader writing
+2 distinct outputs in one pass.</p>
+
+<p class="note"><strong>MSAA caveat:</strong> on Mesa Nouveau (Citron),
+Three.js's multisampled-RT <code>blitFramebuffer</code>-to-color-textures
+resolve produces zero in the color textures &mdash; default samples = 0
+to bypass that path; the A button still cycles up to 4 for hw
+verification on real Tegra.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to WebGL Experiments</a></p>
+</body>
+</html>

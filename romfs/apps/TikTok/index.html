@@ -1,0 +1,1217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>TikTok</title>
+<style>
+  /* ---------- reset + base ---------- */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+
+  /* ---------- top bar ---------- */
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0));
+  }
+  .tabs { display: flex; gap: 22px; font-size: 16px; font-weight: 600; }
+  .tab { color: rgba(255,255,255,0.55); padding: 4px 2px; }
+  .tab-active { color: #fff; border-bottom: 2px solid #fff; }
+  .search-affordance {
+    position: absolute;
+    right: 18px; top: 11px;
+    width: 28px; height: 28px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.10);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ---------- left-gutter navigation rail ---------- */
+  /* Stack of Prev / position-pill / Next / Play-Pause in the empty left
+     gutter. Tap targets are the always-available input path; D-pad
+     up/down and right-stick Y also work via synthetic keydown
+     forwarding (engine: controller-shortcuts.ts; see memory
+     swb-page-input-limits for the gating rules). */
+  .nav-rail {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 25;
+  }
+  .nav-btn {
+    width: 48px; height: 48px;
+    border-radius: 24px;
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .nav-btn:active { background: rgba(255,255,255,0.22); }
+  .nav-btn svg { width: 22px; height: 22px; fill: #fff; }
+  .pos-pill {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 12px;
+  }
+  .play-pause-btn {
+    margin-top: 6px;
+    background: rgba(254,44,85,0.20);
+    border-color: rgba(254,44,85,0.4);
+  }
+
+  /* ---------- video stage (single shared element, re-targeted per swipe) ---------- */
+  .stage {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 405px;
+    height: 100%;
+    background: #0a0a0a;
+    overflow: hidden;
+  }
+  .player {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: #000;
+  }
+
+  /* ---------- right action sidebar ---------- */
+  /* Lives in the right-gutter (viewport-relative, NOT inside .stage)
+     so it never overlays the centered video. The 405px stage leaves
+     ~437px of gutter on each side at 1280×720 — plenty of room. */
+  .sidebar {
+    position: absolute;
+    right: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    z-index: 20;
+  }
+  .profile-pic {
+    position: relative;
+    width: 48px; height: 48px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, #25f4ee 0%, #fe2c55 100%);
+    border: 2px solid #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 22px; color: #000;
+    margin-bottom: 4px;
+  }
+  .follow-plus {
+    position: absolute;
+    bottom: -8px; left: 50%;
+    transform: translateX(-50%);
+    width: 18px; height: 18px;
+    border-radius: 9px;
+    background: #fe2c55; color: #fff;
+    font-size: 13px; line-height: 16px;
+    text-align: center; font-weight: 700;
+  }
+  .action-btn {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 4px;
+    color: #fff; font-size: 12px; font-weight: 600;
+  }
+  .icon-circle { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+  .icon-circle svg { width: 36px; height: 36px; fill: #fff; }
+  .icon-circle.liked svg { fill: #fe2c55; }
+  .music-disc {
+    width: 44px; height: 44px;
+    border-radius: 22px;
+    background: linear-gradient(135deg, #303030, #0a0a0a 60%, #303030);
+    border: 2px solid #1a1a1a;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .music-disc svg { width: 22px; height: 22px; fill: #fff; }
+
+  /* ---------- caption area (left gutter) ---------- */
+  /* Sits in the left gutter, right of the 80px nav rail, BELOW the
+     50px top bar — viewport-relative, NOT a child of .stage anymore.
+     Width is conservative so emojis/long handles wrap nicely. */
+  .caption-area {
+    position: absolute;
+    left: 96px;
+    bottom: 50px;
+    width: 320px;
+    z-index: 20;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  .handle { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .caption-text { font-size: 14px; line-height: 1.35; margin-bottom: 10px; }
+  .hashtag { color: #fff; font-weight: 600; }
+  .music-pill { display: inline-block; font-size: 13px; padding: 4px 0; }
+  .music-pill .music-note { display: inline-block; width: 14px; }
+
+  /* ---------- loading state ---------- */
+  /* Slice 2 keeps a separate "preloading next…" subtle hint (top-right
+     of stage) so swipes don't feel silent when the next URL isn't yet
+     in the cache. The full-stage loading overlay only covers the very
+     first extract, before any video has played. */
+  .loading {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.85);
+    font-size: 14px;
+    z-index: 50;
+  }
+  .loading.hidden { display: none; }
+  .preload-hint {
+    position: absolute;
+    top: 60px; right: 12px;
+    background: rgba(0,0,0,0.45);
+    color: rgba(255,255,255,0.75);
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    z-index: 22;
+  }
+  .preload-hint.hidden { display: none; }
+
+  /* ---------- footer hint (Switch face-button affordances) ---------- */
+  .hint-bar {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    gap: 22px;
+    background: rgba(0,0,0,0.6);
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+    z-index: 10;
+  }
+  .hint-bar .key {
+    display: inline-block;
+    background: #2a2a2a;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-right: 4px;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  /* ---------- search modal (Slice 4) ---------- */
+  /* Left-side panel, NOT a full-screen overlay. Switch's <video>
+     element is a native compositor layer that paints OVER the DOM
+     canvas regardless of z-index, so a full-viewport modal renders
+     with the video painted through its middle. Constraining the
+     modal to the left gutter (left of the 405px centered stage)
+     keeps it entirely outside the video region.
+     Width 432px lines up with the gutter at 1280×720; on wider
+     viewports the gutter is bigger, on narrower it might clip the
+     suggestion pills — we accept that since the Switch is 1280×720. */
+  .search-modal {
+    position: absolute;
+    left: 0;
+    top: 50px;     /* below the top tab bar */
+    bottom: 28px;  /* above the hint bar */
+    width: 432px;
+    background: rgba(0,0,0,0.95);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 18px;
+    overflow: hidden;
+  }
+  .search-modal.hidden { display: none; }
+  .search-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .search-title { font-size: 22px; font-weight: 700; }
+  .search-close {
+    width: 36px; height: 36px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.10);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 20px; font-weight: 700; line-height: 1;
+  }
+  .search-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .search-tab {
+    padding: 8px 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.7);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .search-tab.active {
+    background: #fe2c55;
+    color: #fff;
+  }
+  .search-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 22px;
+    padding: 4px 10px;
+  }
+  .search-input-row .prefix {
+    width: 22px;
+    font-size: 18px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+  }
+  /* The actual <input> picks up the shell font + a translucent fill.
+     Width 100% inside a flex parent makes it span the rest of the
+     pill. Min-height keeps the tap target large enough for a finger. */
+  .search-input-row input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    min-height: 36px;
+    padding: 0 4px;
+  }
+  .search-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 8px 0 6px;
+  }
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .pill {
+    padding: 6px 12px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .pill:active { background: rgba(255,255,255,0.18); }
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    overflow: hidden;
+    flex: 1;
+    margin-top: 6px;
+  }
+  .result-card {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 6px;
+    color: #fff;
+  }
+  .result-card:active { background: rgba(255,255,255,0.20); }
+  .result-card .badge {
+    font-size: 11px;
+    color: rgba(255,255,255,0.55);
+    margin-bottom: 6px;
+  }
+  .result-card .label {
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+    word-break: break-word;
+  }
+  .results-status {
+    font-size: 13px;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    padding: 20px 0;
+  }
+  .results-status.hidden { display: none; }
+
+  /* Make the top-bar search icon itself a tap target. The wrapper
+     already absolutely-positions the SVG; we just bump z-index above
+     the rest of the bar so taps don't fall through to the tabs. */
+  .search-affordance { z-index: 31; }
+</style>
+</head>
+<body>
+
+<!-- ===== top bar ===== -->
+<div class="top-bar">
+  <div class="tabs">
+    <span class="tab">Following</span>
+    <span class="tab tab-active">For You</span>
+    <span class="tab">Discover</span>
+  </div>
+  <div class="search-affordance">
+    <svg viewBox="0 0 24 24" width="16" height="16">
+      <circle cx="10" cy="10" r="6" fill="none" stroke="#fff" stroke-width="2"/>
+      <line x1="14" y1="14" x2="20" y2="20" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </div>
+</div>
+
+<!-- ===== left-gutter navigation rail ===== -->
+<div class="nav-rail">
+  <button id="btn-prev" class="nav-btn" title="Previous">
+    <svg viewBox="0 0 24 24"><path d="M6 14l6-6 6 6z"/></svg>
+  </button>
+  <div id="pos-pill" class="pos-pill">&hellip;</div>
+  <button id="btn-next" class="nav-btn" title="Next">
+    <svg viewBox="0 0 24 24"><path d="M6 10l6 6 6-6z"/></svg>
+  </button>
+  <button id="btn-playpause" class="nav-btn play-pause-btn" title="Play / Pause">
+    <svg viewBox="0 0 24 24" id="pp-icon"><path d="M8 5v14l11-7z"/></svg>
+  </button>
+</div>
+
+<!-- ===== video stage ===== -->
+<!-- Only the <video> itself lives inside the stage so it can fill the
+     centered 405px column without the chrome overlapping. The right
+     action rail and caption are now siblings of the stage, positioned
+     in the viewport's left/right gutters (see CSS). -->
+<div class="stage">
+  <!-- No `controls` attribute: the TikTok UI replaces the native bar
+       with the right-rail action buttons + the left-gutter play/pause.
+       The engine respects the absence of `controls` and paints no bar
+       (live-video.ts + live-overlay.ts gates). -->
+  <video id="player" class="player" autoplay loop></video>
+
+  <div id="preload-hint" class="preload-hint hidden">Buffering next&hellip;</div>
+  <div id="loading" class="loading">Loading feed&hellip;</div>
+</div>
+
+<!-- right action rail — sits in the right gutter, outside the video -->
+<div class="sidebar">
+  <div id="profile-pic" class="profile-pic">
+    <span id="profile-letter">&nbsp;</span>
+    <div class="follow-plus">+</div>
+  </div>
+
+  <div class="action-btn">
+    <div class="icon-circle liked">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 21s-7-4.5-9.5-9.5C1 8.5 3 5 6.5 5c2 0 3.5 1.5 5.5 4 2-2.5 3.5-4 5.5-4C21 5 23 8.5 21.5 11.5 19 16.5 12 21 12 21z"/>
+      </svg>
+    </div>
+    <span id="like-count">&nbsp;</span>
+  </div>
+
+  <div class="action-btn">
+    <div class="icon-circle">
+      <svg viewBox="0 0 24 24">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H8l-4 4V6c0-1.1.9-2 2-2z"/>
+      </svg>
+    </div>
+    <span id="comment-count">&nbsp;</span>
+  </div>
+
+  <div class="action-btn">
+    <div class="icon-circle">
+      <svg viewBox="0 0 24 24">
+        <path d="M6 3h12c.6 0 1 .4 1 1v17l-7-4-7 4V4c0-.6.4-1 1-1z"/>
+      </svg>
+    </div>
+    <span id="share-count">&nbsp;</span>
+  </div>
+
+  <div class="action-btn">
+    <div class="icon-circle">
+      <svg viewBox="0 0 24 24">
+        <path d="M3 12l13-7v4c4 0 7 3 7 10-2-3-4-5-7-5v4L3 12z"/>
+      </svg>
+    </div>
+    <span id="play-count">&nbsp;</span>
+  </div>
+
+  <div class="music-disc">
+    <svg viewBox="0 0 24 24">
+      <path d="M9 18V6h10v2h-8v8.5a2.5 2.5 0 1 1-2-2.45z"/>
+    </svg>
+  </div>
+</div>
+
+<!-- caption + music — sits in the left gutter, to the right of the
+     nav rail and below the top tab bar, outside the video -->
+<div class="caption-area">
+  <div id="handle" class="handle">&nbsp;</div>
+  <div id="caption-text" class="caption-text">&nbsp;</div>
+  <div class="music-pill">
+    <svg class="music-note" viewBox="0 0 24 24" width="13" height="13">
+      <path d="M9 18V6h10v2h-8v8.5a2.5 2.5 0 1 1-2-2.45z" fill="#fff"/>
+    </svg>
+    <span id="music-label">&nbsp;</span>
+  </div>
+</div>
+
+<!-- ===== search modal (Slice 4) =====
+     Opened by tapping the top-right 🔍 icon. Closed via the ✕ button
+     in the header. The <input> is what the shell's keyboard overlay
+     attaches to — tap it and the on-canvas QWERTY pops up; Submit
+     fires `change` on the input, which the script listens for.
+
+     Results render into #results-grid as text cards (3-col). Tapping a
+     card replaces the feed array with the extracted ids and switches
+     to feed mode at index 0. -->
+<div id="search-modal" class="search-modal hidden">
+  <div class="search-header">
+    <div class="search-title">Search</div>
+    <button id="search-close" class="search-close" title="Close">&times;</button>
+  </div>
+  <div class="search-tabs">
+    <button id="tab-users" class="search-tab active">Users</button>
+    <button id="tab-tags" class="search-tab">Hashtags</button>
+  </div>
+  <div class="search-input-row">
+    <span id="search-prefix" class="prefix">@</span>
+    <input id="search-input" type="text" placeholder="username" />
+  </div>
+  <div id="recents-section">
+    <div class="search-section-title">Recent</div>
+    <div id="recents-row" class="pill-row"></div>
+  </div>
+  <div class="search-section-title">Suggested</div>
+  <div id="suggestions-row" class="pill-row"></div>
+  <div id="results-status" class="results-status hidden"></div>
+  <div id="results-grid" class="results-grid"></div>
+</div>
+
+<!-- ===== hint bar ===== -->
+<div class="hint-bar">
+  <span>Swipe <span class="key">&#x25B2;</span> / <span class="key">&#x25BC;</span> on the video</span>
+  <span><span class="key">D-Pad</span> or <span class="key">R-Stick</span> works too</span>
+  <span>Tap video for fullscreen</span>
+  <span><span class="key">B</span> Back</span>
+</div>
+
+<!-- ============================================================
+     SLICE 3: real metadata
+     - Embed HTML carries the React state blob at
+       <script id="__FRONTITY_CONNECT_STATE__">; videoData lives at
+         state.source.data['/embed/v2/<id>'].videoData
+       with itemInfos / authorInfos / musicInfos.
+     - extractEntry() now returns { mp4Url, meta } and the per-id
+       cache holds both, so the chrome (handle, caption with hashtag
+       pills, music label, like/comment/share/play counts, profile
+       letter) gets bound on each swipe.
+     - schemas verified for both test clips in scripts/probe-tiktok.mjs
+       (--meta flag). State-blob failures degrade gracefully: the URL
+       still resolves, the chrome just stays blank.
+
+     SLICE 2 carry-overs (still apply):
+     - Single shared <video> element re-targeted per swipe.
+     - Per-id cache, inflight de-dupe, 2-entry look-ahead preload.
+     - Input via tap rail + synthetic keydown from D-pad / R-stick /
+       touch swipe (engine layer; see memory swb-page-input-limits).
+     ============================================================ -->
+<script>
+  const LOG_PATH = 'sdmc:/switch/brewser/logs/tiktok-app.log';
+  const player = document.getElementById('player');
+  const loadingEl = document.getElementById('loading');
+  const preloadEl = document.getElementById('preload-hint');
+  const posEl = document.getElementById('pos-pill');
+  const handleEl = document.getElementById('handle');
+  const captionEl = document.getElementById('caption-text');
+  const musicLabelEl = document.getElementById('music-label');
+  const likeCountEl = document.getElementById('like-count');
+  const commentCountEl = document.getElementById('comment-count');
+  const shareCountEl = document.getElementById('share-count');
+  const playCountEl = document.getElementById('play-count');
+  const profileLetterEl = document.getElementById('profile-letter');
+
+  let feed = [];
+  let currentIndex = 0;
+  // id -> { mp4Url, meta } — meta may be null if state-blob parsing
+  // failed but the inline video src still resolved.
+  const entryCache = new Map();
+  const inflight = new Set();
+
+  function log(msg) {
+    console.debug('[tiktok-app]', msg);
+    try {
+      const sw = globalThis.Switch;
+      if (sw && typeof sw.appendFileSync === 'function') {
+        const ts = new Date().toISOString().replace('T', ' ').slice(0, 23);
+        sw.appendFileSync(LOG_PATH, '[' + ts + '] ' + msg + '\n');
+      }
+    } catch (_e) { /* file log is best effort */ }
+  }
+
+  function decodeEntities(s) {
+    return s
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#39;/g, "'");
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // TikTok-style abbreviation: 999 → "999", 1234 → "1.2K", 35100 →
+  // "35.1K", 158200 → "158K", 1234567 → "1.2M". Single decimal in the
+  // small-K / small-M bands matches the visual cadence of the real app.
+  function formatCount(n) {
+    if (n == null || typeof n !== 'number' || !isFinite(n)) return '';
+    const abs = Math.abs(n);
+    if (abs < 1000) return String(n | 0);
+    if (abs < 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    if (abs < 1000000) return Math.round(n / 1000) + 'K';
+    if (abs < 10000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (abs < 1000000000) return Math.round(n / 1000000) + 'M';
+    return (n / 1000000000).toFixed(1).replace(/\.0$/, '') + 'B';
+  }
+
+  // Render caption text with #hashtags styled. itemInfos.text already
+  // contains the hashtag tokens inline (verified in probe-tiktok.mjs).
+  // The split keeps non-hashtag runs and hashtag tokens in source
+  // order so the rendering matches what the embed page shows.
+  function renderCaption(text) {
+    if (!text) return '';
+    const parts = String(text).split(/(#[^\s#]+)/g);
+    return parts.map((p) => {
+      if (!p) return '';
+      if (p.charAt(0) === '#') {
+        return '<span class="hashtag">' + escapeHtml(p) + '</span>';
+      }
+      return escapeHtml(p);
+    }).join('');
+  }
+
+  // First letter for the profile-pic placeholder. We pick the first
+  // ASCII letter of the nickName so it survives leading emoji etc.;
+  // falls back to '?' if none.
+  function firstLetter(s) {
+    if (!s) return '?';
+    const m = String(s).match(/[A-Za-z]/);
+    return m ? m[0].toUpperCase() : '?';
+  }
+
+  function findVideoData(state, id) {
+    if (!state || typeof state !== 'object') return null;
+    const data = state.source && state.source.data;
+    if (!data) return null;
+    return data['/embed/v2/' + id] && data['/embed/v2/' + id].videoData || null;
+  }
+
+  // Parse the FRONTITY_CONNECT_STATE script blob and pull the fields
+  // we display. Returns null (not throw) on any failure — the URL
+  // extract path is the must-have; meta is best-effort chrome polish.
+  function extractMeta(html, id) {
+    try {
+      const re = /<script[^>]*\bid=["']__FRONTITY_CONNECT_STATE__["'][^>]*>([\s\S]*?)<\/script>/i;
+      const m = html.match(re);
+      if (!m) return null;
+      const state = JSON.parse(m[1]);
+      const vd = findVideoData(state, id);
+      if (!vd) return null;
+      const item = vd.itemInfos || {};
+      const author = vd.authorInfos || {};
+      const music = vd.musicInfos || {};
+      const musicName = music.musicName || '';
+      const musicAuthor = music.authorName || '';
+      const musicLabel = musicName && musicAuthor
+        ? (musicName + ' - ' + musicAuthor)
+        : (musicName || musicAuthor || '');
+      return {
+        handle: author.uniqueId ? '@' + author.uniqueId : '',
+        nickName: author.nickName || '',
+        caption: item.text || '',
+        musicLabel: musicLabel,
+        likes: formatCount(item.diggCount),
+        comments: formatCount(item.commentCount),
+        shares: formatCount(item.shareCount),
+        plays: formatCount(item.playCount),
+      };
+    } catch (err) {
+      log('  META parse failed for ' + id + ': ' +
+          (err && err.message ? err.message : err));
+      return null;
+    }
+  }
+
+  // Push meta into the chrome DOM. Null meta clears the fields (used
+  // on transient extract failures so the user sees blank rather than
+  // stale data from the previous video).
+  function bindMeta(meta) {
+    if (!meta) {
+      handleEl.textContent = '';
+      captionEl.innerHTML = '';
+      musicLabelEl.textContent = '';
+      likeCountEl.textContent = '';
+      commentCountEl.textContent = '';
+      shareCountEl.textContent = '';
+      playCountEl.textContent = '';
+      profileLetterEl.textContent = '';
+      return;
+    }
+    handleEl.textContent = meta.handle;
+    captionEl.innerHTML = renderCaption(meta.caption);
+    musicLabelEl.textContent = meta.musicLabel;
+    likeCountEl.textContent = meta.likes;
+    commentCountEl.textContent = meta.comments;
+    shareCountEl.textContent = meta.shares;
+    playCountEl.textContent = meta.plays;
+    profileLetterEl.textContent = firstLetter(meta.nickName || meta.handle);
+  }
+
+  // Extract + cache the CDN MP4 URL + meta for a TikTok video id.
+  // Concurrent calls for the same id share a single network request.
+  async function extractEntry(id) {
+    if (entryCache.has(id)) return entryCache.get(id);
+    if (inflight.has(id)) {
+      while (inflight.has(id) && !entryCache.has(id)) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+      return entryCache.get(id) || null;
+    }
+    inflight.add(id);
+    try {
+      const url = 'https://www.tiktok.com/embed/v2/' + id;
+      log('GET ' + url);
+      const resp = await fetch(url);
+      log('  status ' + resp.status + ' for ' + id);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const html = await resp.text();
+      const m = html.match(/<video[^>]*\bsrc=["']([^"']+)["']/i);
+      if (!m) throw new Error('no inline video src for ' + id);
+      const mp4Url = decodeEntities(m[1]);
+      const meta = extractMeta(html, id);
+      const entry = { mp4Url: mp4Url, meta: meta };
+      entryCache.set(id, entry);
+      log('  cached ' + id + ' -> ' + new URL(mp4Url).host +
+          (meta ? ' meta(@' + meta.handle + ' ' + meta.likes + ' likes)' :
+                  ' meta=null'));
+      return entry;
+    } catch (err) {
+      log('  EXTRACT FAILED ' + id + ': ' + (err && err.message ? err.message : err));
+      throw err;
+    } finally {
+      inflight.delete(id);
+    }
+  }
+
+  function setPosPill() {
+    posEl.textContent = (currentIndex + 1) + ' / ' + feed.length;
+  }
+
+  // Fire-and-forget preload of the next 1–2 entries after currentIndex.
+  // Errors are swallowed — preloading is best effort.
+  function schedulePreload() {
+    if (feed.length < 2) return;
+    for (let off = 1; off <= 2; off++) {
+      const idx = (currentIndex + off) % feed.length;
+      const id = feed[idx].id;
+      if (entryCache.has(id) || inflight.has(id)) continue;
+      extractEntry(id).catch(() => {});
+    }
+  }
+
+  // Show video at the given feed index. URL + meta both come from the
+  // same cached entry, so the chrome updates atomically with the
+  // source-change call. While the network is pending we blank the
+  // chrome (via bindMeta(null)) so the user doesn't see the previous
+  // video's caption next to the new player frame.
+  async function showVideo(index) {
+    if (feed.length === 0) return;
+    const wrapped = ((index % feed.length) + feed.length) % feed.length;
+    currentIndex = wrapped;
+    const entry = feed[wrapped];
+    setPosPill();
+    const needsFetch = !entryCache.has(entry.id);
+    if (needsFetch) {
+      preloadEl.classList.remove('hidden');
+      bindMeta(null);
+    }
+    try {
+      const resolved = await extractEntry(entry.id);
+      if (currentIndex !== wrapped) {
+        preloadEl.classList.add('hidden');
+        return;
+      }
+      bindMeta(resolved.meta);
+      player.src = resolved.mp4Url;
+      if (typeof player.load === 'function') player.load();
+      try { if (typeof player.play === 'function') player.play(); } catch (_e) {}
+      updatePlayPauseIcon();
+      setTimeout(updatePlayPauseIcon, 250);
+      log('showing index ' + wrapped + ' id ' + entry.id +
+          (entry.hint ? ' (' + entry.hint + ')' : ''));
+    } catch (err) {
+      log('FAILED to show index ' + wrapped + ': ' +
+          (err && err.message ? err.message : err));
+    } finally {
+      preloadEl.classList.add('hidden');
+      loadingEl.classList.add('hidden');
+    }
+    schedulePreload();
+  }
+
+  function next() { showVideo(currentIndex + 1); }
+  function prev() { showVideo(currentIndex - 1); }
+
+  function togglePlayPause() {
+    try {
+      if (player.paused) player.play();
+      else player.pause();
+    } catch (_e) {}
+    updatePlayPauseIcon();
+  }
+
+  function updatePlayPauseIcon() {
+    const icon = document.getElementById('pp-icon');
+    if (!icon) return;
+    // Swap between play triangle and pause double-bar SVG paths.
+    const paused = !!player.paused;
+    icon.innerHTML = paused
+      ? '<path d="M8 5v14l11-7z"/>'
+      : '<path d="M6 4h4v16H6zm8 0h4v16h-4z"/>';
+  }
+
+  // On-screen taps drive navigation. The engine also forwards D-pad
+  // up/down, right-stick Y, and finger swipe on the chromeless video
+  // as synthetic ArrowUp / ArrowDown keydown events (see the keydown
+  // handler below + memory swb-page-input-limits for the gating).
+  document.getElementById('btn-prev').addEventListener('click', (e) => {
+    e.stopPropagation && e.stopPropagation();
+    prev();
+  });
+  document.getElementById('btn-next').addEventListener('click', (e) => {
+    e.stopPropagation && e.stopPropagation();
+    next();
+  });
+  document.getElementById('btn-playpause').addEventListener('click', (e) => {
+    e.stopPropagation && e.stopPropagation();
+    togglePlayPause();
+  });
+
+  // D-pad / right-stick / touch-swipe keydown handler. The engine
+  // synthesises ArrowUp / ArrowDown keydown events for all three input
+  // channels when a page has any keydown listener registered, and
+  // suppresses its built-in scroll for that tick if we preventDefault.
+  // Always preventDefault here so a held D-pad doesn't scroll the
+  // (mostly empty) page while we navigate videos.
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      log('keydown ArrowDown -> next');
+      next();
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      log('keydown ArrowUp -> prev');
+      prev();
+    } else if (event.code === 'Space' || event.key === 'Enter') {
+      event.preventDefault();
+      togglePlayPause();
+    }
+  });
+
+  // ============================================================
+  // SLICE 4: search modal
+  // - Tap the top-right 🔍 icon → modal opens, video pauses.
+  // - <input type=text> attaches to the shell's QWERTY overlay
+  //   (live-form.ts setKeyboardOpener); on Submit the input fires
+  //   `change` and triggers the search.
+  // - Anonymous fetch of https://www.tiktok.com/embed/@<user> or
+  //   .../embed/tag/<x>. Regex /@user/video/(\d+) picks out 7-10
+  //   video ids per page (verified in scripts/probe-tiktok.mjs).
+  // - Tap a result card → replace feed with extracted ids, close
+  //   modal, jump to index 0. Tap the "For You" tab → restore the
+  //   curated feed.
+  // - Recents persist to sdmc:/switch/brewser/webprofiles/default/tiktok-recent.json
+  //   via Switch.writeFileSync; failures degrade to in-memory only.
+  // ============================================================
+  const RECENTS_PATH = 'sdmc:/switch/brewser/webprofiles/default/tiktok-recent.json';
+  const RECENTS_MAX = 10;
+  const SUGGESTIONS_URL = 'brewser://apps/TikTok/assets/suggestions.json';
+
+  const modalEl = document.getElementById('search-modal');
+  const searchInputEl = document.getElementById('search-input');
+  const searchPrefixEl = document.getElementById('search-prefix');
+  const tabUsersEl = document.getElementById('tab-users');
+  const tabTagsEl = document.getElementById('tab-tags');
+  const recentsRowEl = document.getElementById('recents-row');
+  const suggestionsRowEl = document.getElementById('suggestions-row');
+  const resultsGridEl = document.getElementById('results-grid');
+  const resultsStatusEl = document.getElementById('results-status');
+
+  // The curated feed from feed.json — kept verbatim so the "For You"
+  // tab can restore it after a search switches feeds.
+  let curatedFeed = [];
+  // Search mode: 'user' or 'tag'. Drives the @/# prefix UX and the
+  // endpoint chosen on submit.
+  let searchMode = 'user';
+  let recents = []; // { kind: 'user'|'tag', id, label }
+  let suggestions = { users: [], tags: [] };
+
+  function readRecents() {
+    try {
+      const sw = globalThis.Switch;
+      if (!sw || typeof sw.readFileSync !== 'function') return [];
+      const buf = sw.readFileSync(RECENTS_PATH);
+      if (!buf) return [];
+      const txt = typeof buf === 'string' ? buf
+        : new TextDecoder('utf-8').decode(buf);
+      const parsed = JSON.parse(txt);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_e) {
+      return [];
+    }
+  }
+
+  function writeRecents() {
+    try {
+      const sw = globalThis.Switch;
+      if (!sw || typeof sw.writeFileSync !== 'function') return;
+      sw.writeFileSync(RECENTS_PATH, JSON.stringify(recents));
+    } catch (err) {
+      log('  recents write failed: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  function pushRecent(entry) {
+    const idx = recents.findIndex((r) =>
+      r.kind === entry.kind && r.id === entry.id);
+    if (idx >= 0) recents.splice(idx, 1);
+    recents.unshift(entry);
+    if (recents.length > RECENTS_MAX) recents.length = RECENTS_MAX;
+    writeRecents();
+    renderRecents();
+  }
+
+  function pillText(entry) {
+    return (entry.kind === 'user' ? '@' : '#') + (entry.label || entry.id);
+  }
+
+  function renderRecents() {
+    recentsRowEl.innerHTML = '';
+    if (recents.length === 0) {
+      recentsRowEl.innerHTML = '<span class="pill" style="opacity:0.5">no recent searches</span>';
+      return;
+    }
+    for (const r of recents) {
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.textContent = pillText(r);
+      pill.addEventListener('click', () => runSearch(r.kind, r.id));
+      recentsRowEl.appendChild(pill);
+    }
+  }
+
+  function renderSuggestions() {
+    suggestionsRowEl.innerHTML = '';
+    const list = searchMode === 'user' ? suggestions.users : suggestions.tags;
+    for (const s of (list || [])) {
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.textContent = (searchMode === 'user' ? '@' : '#') + (s.label || s.id);
+      pill.addEventListener('click', () => runSearch(searchMode, s.id));
+      suggestionsRowEl.appendChild(pill);
+    }
+  }
+
+  function setSearchMode(mode) {
+    searchMode = mode;
+    if (mode === 'user') {
+      tabUsersEl.classList.add('active');
+      tabTagsEl.classList.remove('active');
+      searchPrefixEl.textContent = '@';
+      // setAttribute (NOT property assignment): live-form reads the
+      // placeholder via el.getAttribute('placeholder'); a JS property
+      // set is invisible to the painter.
+      searchInputEl.setAttribute('placeholder', 'username');
+    } else {
+      tabTagsEl.classList.add('active');
+      tabUsersEl.classList.remove('active');
+      searchPrefixEl.textContent = '#';
+      searchInputEl.setAttribute('placeholder', 'hashtag');
+    }
+    renderSuggestions();
+  }
+
+  function setResultsStatus(msg) {
+    if (msg == null) {
+      resultsStatusEl.textContent = '';
+      resultsStatusEl.classList.add('hidden');
+    } else {
+      resultsStatusEl.textContent = msg;
+      resultsStatusEl.classList.remove('hidden');
+    }
+  }
+
+  // Run a search against TikTok's anonymous embed endpoints. The page
+  // HTML inlines `/@user/video/<id>` links for both /embed/@user and
+  // /embed/tag/<x> — we regex them out and render a 3-col grid.
+  // We override User-Agent because TikTok 400s some tag pages when
+  // the request comes from the default Switch UA (`comedy` was the
+  // confirmed-failing test case). The desktop Chrome UA is what
+  // scripts/probe-tiktok.mjs uses in Node and what TikTok's own web
+  // app sends from a normal browser.
+  const SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+    'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+    'Chrome/124.0.0.0 Safari/537.36';
+
+  async function runSearch(kind, rawQuery) {
+    const q = String(rawQuery || '').trim().replace(/^[@#]/, '');
+    if (!q) return;
+    const endpoint = kind === 'user'
+      ? 'https://www.tiktok.com/embed/@' + q
+      : 'https://www.tiktok.com/embed/tag/' + encodeURIComponent(q);
+    log('search ' + kind + ' "' + q + '" -> ' + endpoint);
+    resultsGridEl.innerHTML = '';
+    setResultsStatus('Searching for ' + (kind === 'user' ? '@' : '#') + q + '…');
+    try {
+      const resp = await fetch(endpoint, {
+        headers: { 'user-agent': SEARCH_UA },
+      });
+      log('  search response ' + resp.status);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const html = await resp.text();
+      // Each match is "/@<user>/video/<id>". The first capture is the
+      // user, the second is the 18-19 digit video id.
+      const re = /\/@([\w.\-]+)\/video\/(\d+)/g;
+      const hits = [];
+      const seen = new Set();
+      let m;
+      while ((m = re.exec(html)) !== null) {
+        if (seen.has(m[2])) continue;
+        seen.add(m[2]);
+        hits.push({ id: m[2], user: m[1] });
+      }
+      log('  ' + hits.length + ' unique video ids extracted');
+      if (hits.length === 0) {
+        setResultsStatus('No results for ' + (kind === 'user' ? '@' : '#') + q);
+        return;
+      }
+      setResultsStatus(null);
+      renderResults(hits, kind, q);
+      pushRecent({ kind: kind, id: q, label: q });
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      log('  search FAILED: ' + msg);
+      setResultsStatus('Search failed: ' + msg);
+    }
+  }
+
+  function renderResults(hits, kind, q) {
+    resultsGridEl.innerHTML = '';
+    hits.forEach((h, i) => {
+      const card = document.createElement('div');
+      card.className = 'result-card';
+      const badge = document.createElement('div');
+      badge.className = 'badge';
+      badge.textContent = (i + 1) + ' / ' + hits.length;
+      const lbl = document.createElement('div');
+      lbl.className = 'label';
+      lbl.textContent = '@' + h.user;
+      card.appendChild(badge);
+      card.appendChild(lbl);
+      card.addEventListener('click', () => {
+        const newFeed = hits.map((x) => ({
+          id: x.id,
+          hint: '@' + x.user + (kind === 'tag' ? ' (#' + q + ')' : ''),
+        }));
+        log('result tap idx ' + i + ' id ' + h.id);
+        closeModal();
+        loadFeed(newFeed, i);
+      });
+      resultsGridEl.appendChild(card);
+    });
+  }
+
+  // Swap the active feed wholesale and jump to startIndex. Clears the
+  // per-id cache view by recomputing currentIndex, but keeps the
+  // entryCache itself populated so revisited ids stay instant.
+  async function loadFeed(arr, startIndex) {
+    if (!Array.isArray(arr) || arr.length === 0) return;
+    feed = arr;
+    currentIndex = 0;
+    setPosPill();
+    await showVideo(Math.max(0, Math.min(startIndex | 0, arr.length - 1)));
+  }
+
+  function openModal() {
+    log('openModal() entered; modal hidden before=' + modalEl.classList.contains('hidden'));
+    modalEl.classList.remove('hidden');
+    log('  modal hidden after=' + modalEl.classList.contains('hidden'));
+    setResultsStatus(null);
+    resultsGridEl.innerHTML = '';
+    renderSuggestions();
+    renderRecents();
+    try { player.pause(); } catch (_e) {}
+    updatePlayPauseIcon();
+  }
+
+  function closeModal() {
+    log('closeModal() entered');
+    modalEl.classList.add('hidden');
+    try { player.play(); } catch (_e) {}
+    updatePlayPauseIcon();
+  }
+
+  // 🔍 icon opens the modal. Diagnostic logs trace whether the click
+  // reaches us at all and whether the modal display-flip lands.
+  const searchAffordanceEl = document.querySelector('.search-affordance');
+  log('search-affordance bound: ' + (searchAffordanceEl ? 'yes' : 'NULL'));
+  if (searchAffordanceEl) {
+    searchAffordanceEl.addEventListener('click', (e) => {
+      log('search-affordance click fired');
+      e.stopPropagation && e.stopPropagation();
+      openModal();
+    });
+  }
+
+  // No tap-outside-to-close handler now that the modal is a side
+  // panel: anything "outside" the panel is the player chrome and
+  // taps there should activate the player controls, not dismiss the
+  // search panel. Close ✕ remains the explicit dismiss path.
+
+  // Document-level diagnostic — log every click hit-test target so we
+  // can verify what the engine routes taps to. Remove once slice 4 is
+  // confirmed working in the field.
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t) { log('click: no target'); return; }
+    const tag = t.tagName || '(notag)';
+    const id = (t.attrs && t.attrs.id) || (t.id) || '';
+    const cls = (t.attrs && t.attrs.class) || (t.className) || '';
+    log('click hit: <' + tag + (id ? ' id=' + id : '') +
+        (cls ? ' class=' + String(cls).slice(0, 60) : '') + '>');
+  });
+  document.getElementById('search-close').addEventListener('click', (e) => {
+    e.stopPropagation && e.stopPropagation();
+    closeModal();
+  });
+  tabUsersEl.addEventListener('click', (e) => {
+    e.stopPropagation && e.stopPropagation();
+    setSearchMode('user');
+  });
+  tabTagsEl.addEventListener('click', (e) => {
+    e.stopPropagation && e.stopPropagation();
+    setSearchMode('tag');
+  });
+
+  // The shell's keyboard overlay fires `change` on Submit (live-form.ts
+  // fireEvent: input/change/blur). We listen for change rather than
+  // input so we only trigger once per typing session.
+  searchInputEl.addEventListener('change', () => {
+    const val = (searchInputEl.value || '').trim();
+    if (!val) return;
+    runSearch(searchMode, val);
+    searchInputEl.value = '';
+  });
+
+  // "For You" tab restores the curated feed. Other tabs are visual
+  // placeholders for now (Following = future, Discover = Slice 5).
+  // Note: the engine's querySelectorAll only supports simple selectors
+  // (#id, .class, bare tag) — so we use the simple `.tab` selector and
+  // filter by text content, not the compound `.top-bar .tab`.
+  const tabEls = document.querySelectorAll('.tab');
+  log('top-bar tabs bound: ' + tabEls.length);
+  tabEls.forEach((tab) => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation && e.stopPropagation();
+      const label = (tab.textContent || '').trim();
+      log('tab clicked: ' + label);
+      if (label === 'For You' && curatedFeed.length > 0) {
+        log('For You tab -> restore curated feed');
+        loadFeed(curatedFeed, 0);
+      }
+    });
+  });
+
+  // ---------- boot ----------
+  // Version stamp lets us tell at a glance from tiktok-app.log which
+  // build of the page is actually running on the device. Bump on every
+  // shipped change so a stale page file is obvious.
+  const APP_VERSION = 'slice4.3-left-panel';
+  log('--- TikTok app ' + APP_VERSION + ' boot ' + new Date().toISOString() + ' ---');
+  try {
+    // Absolute brewser:// URL — relative fetches return 404 from
+    // brewser:// pages (same trap as <a href>; documented in
+    // project-swb-apps-page memory). The shell maps
+    // brewser://apps/TikTok/... -> sdmc:/switch/brewser/apps/TikTok/...
+    const FEED_URL = 'brewser://apps/TikTok/assets/feed.json';
+    log('fetching feed: ' + FEED_URL);
+    const feedResp = await fetch(FEED_URL);
+    log('feed response: ' + feedResp.status + ' ' + feedResp.statusText);
+    if (!feedResp.ok) throw new Error('feed.json HTTP ' + feedResp.status +
+      ' at ' + FEED_URL);
+    feed = await feedResp.json();
+    curatedFeed = feed.slice();
+    log('feed loaded: ' + feed.length + ' entries');
+    // Slice 4 boot tail: load suggestions for the search modal (best
+    // effort; if missing, the Suggested section just stays empty),
+    // hydrate recents from disk, paint initial pills.
+    try {
+      const sugResp = await fetch(SUGGESTIONS_URL);
+      if (sugResp.ok) suggestions = await sugResp.json();
+      log('suggestions loaded: users=' + (suggestions.users || []).length +
+          ' tags=' + (suggestions.tags || []).length);
+    } catch (e) {
+      log('  suggestions load failed: ' +
+        (e && e.message ? e.message : e));
+    }
+    recents = readRecents();
+    log('recents hydrated: ' + recents.length + ' entries');
+    setSearchMode('user');
+    renderRecents();
+    if (feed.length === 0) {
+      loadingEl.textContent = 'feed.json is empty';
+    } else {
+      setPosPill();
+      await showVideo(0);
+    }
+  } catch (err) {
+    const msg = (err && err.message) ? err.message : String(err);
+    log('BOOT ERROR: ' + msg);
+    loadingEl.textContent = 'Failed to load feed: ' + msg;
+  }
+</script>
+
+</body>
+</html>

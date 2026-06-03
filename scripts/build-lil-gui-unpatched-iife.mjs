@@ -12,7 +12,7 @@
 // glyphs, multi-family font fallbacks); this build skips all of that
 // so the gaps surface in Citron screenshots.
 //
-// Output: romfs/pages/threejs-demos/libs/lil-gui-unpatched.iife.js
+// Output: romfs/apps/ThreeJSDemos/libs/lil-gui-unpatched.iife.js
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(__dirname, '..', '..', 'three-latest', 'examples', 'jsm', 'libs', 'lil-gui.module.min.js');
-const DST = resolve(__dirname, '..', 'romfs', 'pages', 'threejs-demos', 'libs', 'lil-gui-unpatched.iife.js');
+const DST = resolve(__dirname, '..', 'romfs', 'apps', 'ThreeJSDemos', 'libs', 'lil-gui-unpatched.iife.js');
 
 const HEADER = `/**
  * lil-gui (v0.17) UNPATCHED IIFE conversion for switch-web-browser.

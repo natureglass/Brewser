@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — OBJ Loader</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — OBJ Loader</h1>
+<p class="lead">Port of <code>webgl_loader_obj.html</code>: the male02 OBJ
+model (~5000 triangles across 10 sub-meshes / 14 mesh nodes) loaded with
+<code>OBJLoader</code>. Upstream uses a single <code>uv_grid_opengl.jpg</code>
+UV-debug texture as a blanket override; this port deviates and instead
+loads the OBJ's own <code>male02.mtl</code> to apply each submesh's real
+source JPEG by material name (minimal inline MTL parser; MTLLoader's
+TextureLoader dep wasn't worth porting). Lit by an
+<code>AmbientLight</code> plus a camera-attached <code>PointLight</code>.
+First milestone to exercise an external-asset text loader, and the
+bridge's new <strong>derivative-normals fallback</strong> for
+<code>flatShading: true</code> submeshes (OBJLoader emits Phong materials
+with flatShading driven by the file's smoothing-group flags).</p>
+
+<div class="stage">
+  <canvas id="obj-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('obj-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/obj-loader.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="obj-status" width="900" height="340"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('obj-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 340);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__objError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    row(58, 'MTL loaded:',
+        globalThis.__objMtlLoaded ? 'yes' : '(loading...)',
+        !!globalThis.__objMtlLoaded);
+    row(80, 'textures loaded:',
+        String(globalThis.__objTexturesLoaded | 0) + ' / ' +
+        String(globalThis.__objTexturesTotal | 0),
+        !!globalThis.__objTextureLoaded);
+    row(102, 'OBJ loaded:',
+        globalThis.__objModelLoaded ? 'yes' : '(loading...)',
+        !!globalThis.__objModelLoaded);
+    row(124, 'meshes in scene:',
+        String(globalThis.__objMeshCount | 0) +
+        '   (textured: ' + String(globalThis.__objMappedCount | 0) + ')',
+        (globalThis.__objMeshCount | 0) > 0);
+    row(146, 'flatShading subs:',
+        String(globalThis.__objFlatShadingCount | 0) + ' / ' + String(globalThis.__objMeshCount | 0),
+        true);
+    row(168, 'animate() called:',
+        globalThis.__objAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__objAnimateCalled);
+    const fps = +globalThis.__objFps || 0;
+    row(190, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(212, 'renders / frames:',
+        String(globalThis.__objRenderCount | 0) + ' / ' + String(globalThis.__objFrameCount | 0),
+        true);
+    let bridgeDbg = '';
+    try {
+      const canvas2 = document.getElementById('obj-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getBackendInfo === 'function') {
+        const info = ctx2.getBackendInfo();
+        bridgeDbg = (info && info.debugDispatchState) ? String(info.debugDispatchState) : '(empty)';
+      } else {
+        bridgeDbg = '(no getBackendInfo)';
+      }
+    } catch (e) { bridgeDbg = 'err: ' + String(e); }
+    st.fillStyle = '#9bb1d6';
+    st.fillText('bridge dbg:', 14, 244);
+    st.fillStyle = '#ffd35e';
+    const slice = bridgeDbg.slice(0, 105);
+    st.fillText(slice, 14, 266);
+    let exts = '';
+    try {
+      const canvas2 = document.getElementById('obj-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 292);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 314);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/extensions-oes-standard-derivatives.html"><code>extensions/oes-standard-derivatives</code></a>
+&mdash; port of the Khronos test that verifies the extension is listed
+by <code>getSupportedExtensions</code>, that <code>getExtension</code>
+returns an object exposing
+<code>FRAGMENT_SHADER_DERIVATIVE_HINT_OES</code> (0x8B8B), that
+<code>gl.hint(target, mode)</code> accepts the new pname and rejects
+invalid modes, and that a passthrough fragment shader using
+<code>dFdx</code> / <code>dFdy</code> produces non-uniform pixel output.</p>
+
+<p class="note">Left stick orbits the camera (<code>minDistance=2</code>,
+<code>maxDistance=5</code>; pan + zoom disabled). Render-on-demand: only
+redraws when the orbit stick moves or on first frame after the texture +
+OBJ both finish loading. The bridge's
+<strong>derivative-normals fallback</strong> kicks in for any submesh
+where the OBJ's smoothing-off state put <code>flatShading: true</code> on
+the auto-generated <code>MeshPhongMaterial</code> — without it those
+parts of the figure would render unlit (the
+<code>flatShading</code> optimizer drops the <code>normal</code>
+attribute, the bridge's normals path then silently falls through to
+unlit; see <code>bridge-flatshading-gap</code> memory). Watch the
+status canvas's "extensions" row — the new
+<code>OES_standard_derivatives</code> entry alongside
+<code>ANGLE_instanced_arrays</code> is the milestone's outward sign.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

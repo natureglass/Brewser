@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r184 &mdash; Sky + Sun Shader</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r184 &mdash; Sky + Sun Shader</h1>
+<p class="lead">1:1 port of <code>webgl_shaders_sky.html</code> from
+<a href="https://threejs.org">three.js</a> latest (r184). Skydome
+based on the Preetham analytical daylight model + a custom
+multi-octave cloud noise overlay; sun/cloud parameters editable via
+an UNPATCHED upstream <code>lil-gui</code> panel mounted into the
+live-DOM stack (M2.0&ndash;M2.5). This page exists to stress-test the
+Phase 2 DOM surface against a real-world lil-gui consumer &mdash;
+expect rough edges; we screenshot what shows and triage from there.</p>
+
+<div class="stage">
+  <canvas id="sky-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('sky-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '20px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE marker — sky + sun shader', 12, 12);
+    pre.font = '13px system-ui'; pre.fillStyle = '#9bb1d6';
+    pre.fillText('lil-gui panel mounts to the right of screen.', 12, 46);
+    pre.fillText('Camera is static — no orbit input.', 12, 64);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/r184-nxjs-bridge.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/three-latest.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/sky-shader.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/lil-gui-unpatched.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="sky-status" width="900" height="280"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('sky-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 380, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 280);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R184_STAGED__ !== 'undefined';
+    const hasSky = typeof globalThis.Sky === 'function';
+    const hasGui = typeof globalThis.lilGui === 'object';
+    row(14, 'THREE r184 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    row(36, 'Sky class loaded:', hasSky ? 'yes' : 'no', hasSky);
+    row(58, 'lilGui (unpatched) loaded:', hasGui ? 'yes' : 'no', hasGui);
+    row(80, 'WebGL2 context acquired:',
+        globalThis.__skyIsWebGL2 ? 'yes' : 'no',
+        !!globalThis.__skyIsWebGL2);
+    row(102, 'Sky mesh added to scene:',
+        globalThis.__skySceneReady ? 'yes' : 'no',
+        !!globalThis.__skySceneReady);
+    row(124, 'GUI panel created:',
+        globalThis.__skyGuiCreated ? 'yes' : 'no',
+        !!globalThis.__skyGuiCreated);
+    const fps = +globalThis.__skyFps || 0;
+    row(146, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(168, 'frames rendered:',
+        String(globalThis.__skyFrameCount | 0), true);
+    const errAfter = globalThis.__skyGlErrorAfter;
+    row(190, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16),
+        errAfter === 0);
+    const gErr = globalThis.__skyError;
+    st.fillStyle = '#9bb1d6';
+    st.fillText('demo error:', 14, 212);
+    st.fillStyle = gErr ? '#ff8a6c' : '#7eda9f';
+    const errText = gErr ? String(gErr) : '(none)';
+    const maxPerLine = 80;
+    st.fillText(errText.slice(0, maxPerLine), 380, 212);
+    const gErr = globalThis.__skyError;
+    st.fillStyle = '#7aa2ff';
+    st.fillText('Bridge fix: VAO element-buffer capture preserved across passthrough draws.', 14, 234);
+    st.fillStyle = '#c2dafc';
+    if (gErr) {
+      st.fillStyle = '#ff8a6c';
+      st.fillText('error: ' + String(gErr).slice(0, 90), 14, 256);
+    } else {
+      st.fillStyle = '#7eda9f';
+      st.fillText('(no demo error — sky should render fully across all frames)', 14, 256);
+    }
+  }
+  renderStatus();
+  setTimeout(renderStatus, 1000);
+  setTimeout(renderStatus, 2500);
+  setTimeout(renderStatus, 5000);
+  setTimeout(renderStatus, 8000);
+  setTimeout(renderStatus, 15000);
+</script>
+
+<p class="note">No gamepad input &mdash; the camera is fixed at
+<code>(0, 100, 2000)</code>. The sky animates via the <code>time</code>
+uniform driving the cloud noise.
+<br><br>
+<strong>Pre-authorized deviations from upstream:</strong>
+(1) Three.js r184 loaded via the <code>__THREE_R184_STAGED__</code>
+IIFE + the three nx.js shims at
+<code>libs/r184-nxjs-bridge.js</code>.
+(2) <code>lil-gui</code> loaded as <code>libs/lil-gui-unpatched.iife.js</code>
+&mdash; byte-identical to upstream <code>lil-gui.module.min.js</code>
+modulo IIFE wrap + <code>globalThis.lilGui</code> assignment.
+(3) <code>Sky.js</code> ES module &rarr; IIFE; <code>globalThis.Sky</code>.
+(4) <code>OrbitControls</code> dropped entirely &mdash; static camera.
+(5) Canvas reused from <code>&lt;canvas id="sky-canvas"&gt;</code>;
+no <code>document.body.appendChild(renderer.domElement)</code> /
+<code>setPixelRatio</code> / resize listener.
+(6) WebGL 2 context with the
+<code>constructor.name = 'WebGL2RenderingContext'</code> Proxy +
+<code>bypassWebGL1Check</code>.
+(7) <code>console.warn/log/error/info</code> silenced.
+(8) <code>renderer.resetState()</code> before every render.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS Demos</a></p>
+</body>
+</html>

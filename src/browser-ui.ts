@@ -18,7 +18,7 @@ export interface AddressBarState {
 	 * star button's colour: gold when saved, dim grey when not. */
 	bookmarked?: boolean;
 	/** Whether the current URL can be bookmarked at all (http/https).
-	 * Local `browser://` pages aren't bookmarkable, so the star button
+	 * Local `brewser://` pages aren't bookmarkable, so the star button
 	 * is hidden and the URL reclaims its space. Defaults to true. */
 	bookmarkable?: boolean;
 	/** Result of the boot-time HTTP/HTTPS probe (excluding the
@@ -111,7 +111,7 @@ export class BrowserUI {
 		// Star button sits immediately before the URL — visually part
 		// of the URL bar since its action targets `currentURL`. Two
 		// distinct icons so the toggle state is unambiguous. Hidden on
-		// non-bookmarkable pages (local `browser://`): the URL then
+		// non-bookmarkable pages (local `brewser://`): the URL then
 		// starts at the star's slot instead, reclaiming the space.
 		const bookmarkable = state.bookmarkable ?? true;
 		if (bookmarkable) {

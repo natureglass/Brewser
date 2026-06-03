@@ -1,107 +1,22 @@
 <!doctype html>
 <html lang="en">
 <head>
-<title>Apps · SwitchSurf</title>
+<title>Apps · Brewser</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
 <style>
-  * {
-    box-sizing: border-box;
-  }
-
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background:
-      radial-gradient(circle at top, rgba(122, 162, 255, 0.12), transparent 32%),
-      #0b1220;
-    color: #e0e8f4;
-    font-family: Arial, Helvetica, sans-serif;
-    font-size: 18px;
-    padding: 32px 28px 28px;
-  }
-
-  code { color: #c2e0ff; }
-
-  .app-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-    width: min(1280px, 100%);
-    margin: 0 auto;
-  }
-
-  .app-card {
-    position: relative;
-    display: block;
-    overflow: hidden;
-    padding: 20px 18px 18px;
-    min-height: 156px;
-    text-align: center;
-    color: #eaf2ff;
-    text-decoration: none;
-    background:
-      radial-gradient(circle at top left, rgba(122, 162, 255, 0.28), transparent 36%),
-      linear-gradient(135deg, #14202d, #10192a 72%);
-    border: 1px solid rgba(122, 162, 255, 0.34);
-    border-radius: 16px;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  }
-
-  .app-logo {
-    display: block;
-    width: 64px;
-    height: 64px;
-    object-fit: contain;
-    margin-bottom: 14px;
-  }
-
-  .app-card strong {
-    display: block;
-    color: #ffd35e;
-    font-size: 1.15em;
-    margin-bottom: 8px;
-    text-align: left;
-  }
-
-  .app-card span {
-    display: block;
-    color: #9bb1d6;
-    line-height: 1.35;
-    text-align: left;
-  }
-
-  .empty {
-    background-color: #14202d;
-    padding: 14px 16px;
-    border-left: 3px solid #7aa2ff;
-    color: #9bb1d6;
-    border-radius: 6px;
-  }
-
-  @media (max-width: 900px) {
-    .app-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 620px) {
-    body {
-      padding: 20px;
-    }
-
-    .app-grid {
-      grid-template-columns: 1fr;
-    }
-  }
+  body { padding: 32px 28px 28px; }
 </style>
 </head>
-<body style="padding: 32px 28px 28px;">
+<body>
+<div class="page-shell">
   <div class="app-grid" aria-label="Installed apps">
     <!-- Cards injected from apps.json by the resource loader. Each entry
          becomes an `.app-card` (logo + title + description). The logo is
          the entry's relative `logo` path used verbatim; the card link is
-         the entry's `url` rewritten to a browser:// URL. Edit apps.json
+         the entry's `url` rewritten to a brewser:// URL. Edit apps.json
          to change what shows here. -->
     <browser-apps></browser-apps>
   </div>
+</div>
 </body>
 </html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Orbit Controls</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+  kbd { background-color: #1a2840; padding: 1px 6px; border-radius: 3px;
+        font-family: monospace; color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Orbit Controls</h1>
+<p class="lead">Port of <code>three-r162/examples/misc_controls_orbit.html</code>:
+120 cones on a flat plane (upstream uses 500; reduced for bridge per-draw
+overhead), two directional lights + ambient, exponential fog. First
+interactive demo. OrbitControls replaced with a gamepad-driven
+equivalent in <code>libs/orbit-controls.js</code>:
+<kbd>Left stick</kbd> orbit · <kbd>Right stick</kbd> pan ·
+<kbd>ZL</kbd>/<kbd>ZR</kbd> zoom.</p>
+
+<div class="stage">
+  <canvas id="orbit-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('orbit-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="orbit-status" width="900" height="280"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('orbit-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 280);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const hasOrbit = typeof globalThis.SwitchOrbitControls === 'function';
+    row(36, 'SwitchOrbitControls loaded:', hasOrbit ? 'yes' : 'no', hasOrbit);
+    const oErr = globalThis.__orbitError;
+    row(58, 'orbit error:', oErr ? String(oErr).slice(0, 80) : '(none)', !oErr);
+    row(80, 'cones created:',
+        String(globalThis.__orbitConeCount | 0),
+        (globalThis.__orbitConeCount | 0) > 0);
+    row(102, 'animate() called:',
+        globalThis.__orbitAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__orbitAnimateCalled);
+    const fps = +globalThis.__orbitFps || 0;
+    row(124, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 20);
+    row(146, 'frames rendered:', String(globalThis.__orbitFrameCount | 0), true);
+  }
+  renderStatus();
+  // FPS sampling needs ~3s of frames; re-render twice so the panel
+  // catches up after init and again after a steady-state window.
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/uniforms-gl-uniformmatrix4fv.html"><code>uniforms/gl-uniformmatrix4fv</code></a>
+&mdash; pins the 10 new uniform setters this milestone added
+(<code>uniformMatrix2/3fv</code>, <code>uniform1/2/4fv</code>,
+<code>uniform2/3/4i</code>/<code>iv</code>) plus the JS-Array-input fix
+for <code>state.ambient</code>.</p>
+
+<p class="note">A field of 120 cones lit by two directional lights (white
+key + dim blue fill) plus a gray ambient. Exponential fog fades distant
+cones toward the gray background. Tilt the left stick to orbit the camera
+around the scene center, the right stick to pan, and hold ZL/ZR to zoom
+in/out. Camera distance is clamped between 100 and 500.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

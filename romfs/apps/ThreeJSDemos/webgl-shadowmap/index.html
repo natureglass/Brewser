@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Shadow Map</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Shadow Map</h1>
+<p class="lead">Port of <code>webgl_shadowmap.html</code>: a ground plane
+with 6 primitive caster shapes (boxes, spheres, torus) under
+<code>AmbientLight</code> + <code>DirectionalLight</code> with
+<code>castShadow</code>. <code>renderer.shadowMap.enabled = true</code>
+and <code>renderer.shadowMap.type = PCFShadowMap</code> activate Three.js's
+17-tap PCF shadow path. The auto-generated MeshPhongMaterial
+shadow-receive shader and the MeshDepthMaterial shadow-cast shader BOTH
+route to the bridge's raw-shader passthrough path via the new
+<code>#define USE_SHADOWMAP</code> / <code>#define DEPTH_PACKING</code>
+auto-promote scanners (milestone #20 nxjs-source extension). Also
+forced a critical fix in <code>gl.uniform1i</code> &mdash; it was
+silently rejecting <code>bool</code> uniforms (like Three.js's
+<code>receiveShadow</code>) + sampler bindings to non-zero texture
+units; the receive shader's shadow gate stayed <code>false</code> by
+default, hiding all shadows. Left stick orbits the camera.</p>
+
+<div class="stage">
+  <canvas id="sm-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('sm-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="sm-status" width="900" height="180"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('sm-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 180);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const hasOc = typeof globalThis.SwitchOrbitControls !== 'undefined';
+    row(36, 'SwitchOrbitControls loaded:', hasOc ? 'yes' : 'no', hasOc);
+    const gErr = globalThis.__smError;
+    row(58, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const fps = +globalThis.__smFps || 0;
+    row(80, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(102, 'frames rendered:', String(globalThis.__smFrameCount | 0), true);
+    let exts = '';
+    try {
+      const canvas2 = document.getElementById('sm-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 130);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 152);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="note">Left stick orbits the camera. The bridge auto-promotes
+any Three.js shader containing <code>#define USE_SHADOWMAP</code> (the
+shadow-receive forward shaders) or <code>#define DEPTH_PACKING</code>
+(the MeshDepthMaterial shadow-cast pass) to native-GLES dispatch via
+the same raw-shader passthrough mechanism that powers ShaderMaterial
+demos. Both halves of the shadow pipeline thus run as Three.js
+generates them &mdash; PCF kernel, depth packing, frustum check
+&mdash; without the bridge swapping in its own program at draw time.
+The <code>WebGLShadowMap</code> path needs the FBO surface from
+milestone #19 and the raw_passthrough path from milestone #14; it
+does NOT need WEBGL_depth_texture (the shadow map is RGBA UByte
+with depth RGBA-packed via <code>packDepthToRGBA</code>).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Bookmarks — Brewser</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
+<style>
+  body { padding: 28px; }
+</style>
+</head>
+<body>
+<div class="page-shell">
+  <header class="top-bar">
+    <h1>Bookmarks</h1>
+    <!-- data-action="clear-bookmarks" is intercepted by the shell
+         (browser-shell.ts dispatchButtonAction) — clears the bookmarks
+         store and reloads the page so the list re-renders empty. -->
+    <button class="clear-btn" type="button" data-action="clear-bookmarks">Clear Bookmarks</button>
+  </header>
+
+  <section class="search-section" aria-label="Internet search">
+    <!-- Search bar injected by the resource loader for the active
+         engine (config.json `searchEngine` → search_engines.json):
+         correct logo + the query routes to that engine. Same tag the
+         home page uses. -->
+    <browser-search></browser-search>
+  </section>
+
+  <p class="lead">Saved pages, most recently added first. Tap a row to
+  open it again. Tap ★ in the toolbar on any page to add or remove a
+  bookmark.</p>
+
+  <!-- Replaced by the resource loader with the bookmarks list.
+       `limit="N"` caps how many rows render; omit to show all. -->
+  <browser-bookmarks limit="100"></browser-bookmarks>
+</div>
+</body>
+</html>

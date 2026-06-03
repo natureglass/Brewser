@@ -1,7 +1,7 @@
 // Idempotent sync of the Khronos WebGL 1 conformance corpus into romfs.
 //
 // Source: D:/Workspace/WebGL/sdk/tests/{conformance,js}/...
-// Destination: romfs/pages/full-webgl1-conformance/sdk/tests/{conformance,js}/...
+// Destination: romfs/dev/full-webgl1-conformance/sdk/tests/{conformance,js}/...
 //
 // Also generates `assets/tests.json` with the enumerated test list, parsed
 // from each directory's `00_test_list.txt`. The runner fetches this JSON
@@ -25,10 +25,10 @@ const SRC_BASE = 'D:/Workspace/WebGL/sdk/tests';
 const SRC_CONFORMANCE = join(SRC_BASE, 'conformance').replace(/\\/g, '/');
 const SRC_JS = join(SRC_BASE, 'js').replace(/\\/g, '/');
 
-const DST_BASE = join(REPO_ROOT, 'romfs/pages/full-webgl1-conformance/sdk/tests').replace(/\\/g, '/');
+const DST_BASE = join(REPO_ROOT, 'romfs/dev/full-webgl1-conformance/sdk/tests').replace(/\\/g, '/');
 const DST_CONFORMANCE = join(DST_BASE, 'conformance').replace(/\\/g, '/');
 const DST_JS = join(DST_BASE, 'js').replace(/\\/g, '/');
-const TESTS_JSON_PATH = join(REPO_ROOT, 'romfs/pages/full-webgl1-conformance/assets/tests.json').replace(/\\/g, '/');
+const TESTS_JSON_PATH = join(REPO_ROOT, 'romfs/dev/full-webgl1-conformance/assets/tests.json').replace(/\\/g, '/');
 
 const EXCLUDE_DIRS = new Set(['ogles']);
 

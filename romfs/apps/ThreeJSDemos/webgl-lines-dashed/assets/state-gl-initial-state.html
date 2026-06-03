@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: gl-initial-state</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>state/gl-initial-state</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/state/gl-initial-state.html</code>.
+Verifies that a freshly-created WebGL context reports the spec-mandated
+initial values for the blend-state enums:
+<code>BLEND_SRC_RGB = ONE</code>,
+<code>BLEND_SRC_ALPHA = ONE</code>,
+<code>BLEND_DST_RGB = ZERO</code>,
+<code>BLEND_DST_ALPHA = ZERO</code>. Milestone&nbsp;#1
+(webgl-lines-dashed) regression test — the demo's fog
+mix relies on these defaults being correct.</p>
+
+<canvas id="canvas" width="2" height="2"></canvas>
+
+<canvas id="khronos-status" width="900" height="240"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'state-gl-initial-state';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+  try {
+    description('This test checks the initial value of the OpenGL state');
+    debug('');
+    debug('Canvas.getContext');
+
+    const wtu = WebGLTestUtils;
+    const gl = wtu.create3DContext('canvas');
+    if (!gl) {
+      testFailed('context does not exist');
+    } else {
+      testPassed('context exists');
+      debug('');
+
+      function checkParameterInitialValue(expected, enum_val) {
+        const s = gl.getParameter(gl[enum_val]);
+        if (s === gl[expected]) {
+          testPassed('getParameter(gl.' + enum_val + ') returned ' + expected +
+                     ' which is ' + gl[expected]);
+        } else {
+          testFailed('getParameter(gl.' + enum_val + ') returned ' + s +
+                     ' expected: ' + expected + ' which is ' + gl[expected]);
+        }
+      }
+
+      checkParameterInitialValue('ONE',  'BLEND_SRC_RGB');
+      checkParameterInitialValue('ONE',  'BLEND_SRC_ALPHA');
+      checkParameterInitialValue('ZERO', 'BLEND_DST_RGB');
+      checkParameterInitialValue('ZERO', 'BLEND_DST_ALPHA');
+      wtu.glErrorShouldBe(gl, gl.NO_ERROR);
+    }
+
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-lines-dashed/">back to Dashed Lines demo</a></p>
+</body>
+</html>

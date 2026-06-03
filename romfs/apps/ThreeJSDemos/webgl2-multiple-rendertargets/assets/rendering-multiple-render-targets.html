@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Multiple Render Targets conformance &mdash; rendering/multiple-render-targets</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         font-family: system-ui; }
+  h1 { color: #ffd35e; }
+  a { color: #7eda9f; }
+</style>
+</head>
+<body>
+<h1>Conformance: <code>rendering/multiple-render-targets</code></h1>
+
+<p>Hand-rolled to pin the WebGL 2 MRT surface this milestone exercises.
+Covers:</p>
+
+<ul>
+<li><code>WebGL2RenderingContext</code> available + acquired via
+<code>canvas.getContext('webgl2')</code></li>
+<li><code>MAX_DRAW_BUFFERS</code> &ge; 2 and
+<code>MAX_COLOR_ATTACHMENTS</code> &ge; 2</li>
+<li><code>COLOR_ATTACHMENT0</code> + <code>COLOR_ATTACHMENT1</code>
+constants exposed</li>
+<li><code>framebufferTexture2D</code> attaching two color textures to one
+FBO at attachments 0 and 1</li>
+<li><code>checkFramebufferStatus</code> returns
+<code>FRAMEBUFFER_COMPLETE</code> for the 2-attachment FBO</li>
+<li><code>drawBuffers</code> accepts both a plain JS Array (Three.js's
+call shape) and a Uint32Array</li>
+<li>GLSL ES 3.00 fragment shader with
+<code>layout(location=0/1) out vec4</code> writing two distinct outputs
+in one draw</li>
+<li><code>readBuffer</code> +
+<code>readPixels</code> verifies each attachment received the right
+output</li>
+<li><code>drawBuffers([NONE, COLOR_ATTACHMENT1])</code> masks the first
+attachment &mdash; subsequent readback from attachment 0 should show the
+prior clear color, not the new draw color</li>
+</ul>
+
+<canvas id="example" width="64" height="64"></canvas>
+<canvas id="khronos-status" width="900" height="640"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'rendering-multiple-render-targets';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+
+<script>
+"use strict";
+var wtu = WebGLTestUtils;
+(async function () {
+  try {
+    description('rendering/multiple-render-targets (WebGL 2 MRT surface)');
+
+    // ── WebGL 2 acquisition ──
+    assertMsg(typeof globalThis.WebGL2RenderingContext !== 'undefined',
+      'globalThis.WebGL2RenderingContext defined');
+
+    const canvas = document.getElementById('example');
+    assertMsg(canvas != null, 'example canvas found');
+
+    const gl = canvas.getContext('webgl2');
+    assertMsg(gl != null, 'canvas.getContext("webgl2") returned non-null');
+    if (!gl) { finishTest(); return; }
+    if (typeof gl.enableGpuBridgePrototype === 'function') {
+      gl.enableGpuBridgePrototype(true);
+    }
+    while (gl.getError() !== gl.NO_ERROR) { /* drain */ }
+
+    assertMsg(gl instanceof globalThis.WebGL2RenderingContext,
+      'gl instanceof WebGL2RenderingContext');
+
+    // ── Constants and capability queries ──
+    assertMsg(gl.COLOR_ATTACHMENT0 === 0x8CE0,
+      'gl.COLOR_ATTACHMENT0 === 0x8CE0');
+    assertMsg(gl.COLOR_ATTACHMENT1 === 0x8CE1,
+      'gl.COLOR_ATTACHMENT1 === 0x8CE1');
+    assertMsg(gl.DRAW_FRAMEBUFFER === 0x8CA9,
+      'gl.DRAW_FRAMEBUFFER === 0x8CA9');
+    assertMsg(gl.READ_FRAMEBUFFER === 0x8CA8,
+      'gl.READ_FRAMEBUFFER === 0x8CA8');
+    assertMsg(typeof gl.drawBuffers === 'function',
+      'gl.drawBuffers is a function');
+    assertMsg(typeof gl.readBuffer === 'function',
+      'gl.readBuffer is a function');
+
+    const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
+    assertMsg(maxDrawBuffers >= 2,
+      'MAX_DRAW_BUFFERS >= 2 (got ' + maxDrawBuffers + ')');
+    const maxColorAttachments = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS);
+    assertMsg(maxColorAttachments >= 2,
+      'MAX_COLOR_ATTACHMENTS >= 2 (got ' + maxColorAttachments + ')');
+
+    // ── Build a 2-attachment FBO ──
+    const W = 32, H = 32;
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+
+    function makeColorTexture() {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA,
+        gl.UNSIGNED_BYTE, null);
+      return t;
+    }
+
+    const tex0 = makeColorTexture();
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D, tex0, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D COLOR_ATTACHMENT0 accepted');
+
+    const tex1 = makeColorTexture();
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1,
+      gl.TEXTURE_2D, tex1, 0);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'framebufferTexture2D COLOR_ATTACHMENT1 accepted');
+
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    assertMsg(status === gl.FRAMEBUFFER_COMPLETE,
+      '2-attachment FBO checkFramebufferStatus is FRAMEBUFFER_COMPLETE ' +
+      '(got 0x' + status.toString(16) + ')');
+
+    // ── drawBuffers accepts plain JS Array (Three.js's call shape) ──
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'drawBuffers([COLOR_ATTACHMENT0, COLOR_ATTACHMENT1]) (Array) accepted');
+
+    // ── drawBuffers accepts Uint32Array too ──
+    gl.drawBuffers(new Uint32Array([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'drawBuffers(Uint32Array[...]) accepted');
+
+    // ── Clear initial colors per attachment via separate single-buffer
+    //    draw-buffers ──
+    gl.viewport(0, 0, W, H);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.NONE]);
+    gl.clearColor(0.10, 0.20, 0.30, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
+    gl.clearColor(0.40, 0.50, 0.60, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'per-attachment clear via single-buffer drawBuffers accepted');
+
+    // ── Verify the clears landed in the right attachments via
+    //    readBuffer + readPixels ──
+    function readCenter(attachment) {
+      gl.readBuffer(attachment);
+      const buf = new Uint8Array(W * H * 4);
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      const idx = (Math.floor(H / 2) * W + Math.floor(W / 2)) * 4;
+      return [buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]];
+    }
+
+    const beforeDraw0 = readCenter(gl.COLOR_ATTACHMENT0);
+    const beforeDraw1 = readCenter(gl.COLOR_ATTACHMENT1);
+    const tol = 4;
+    assertMsg(Math.abs(beforeDraw0[0] - 26) <= tol &&
+              Math.abs(beforeDraw0[1] - 51) <= tol &&
+              Math.abs(beforeDraw0[2] - 77) <= tol,
+      'attachment 0 after clear reads (26,51,77,~) — got (' +
+        beforeDraw0.join(',') + ')');
+    assertMsg(Math.abs(beforeDraw1[0] - 102) <= tol &&
+              Math.abs(beforeDraw1[1] - 128) <= tol &&
+              Math.abs(beforeDraw1[2] - 153) <= tol,
+      'attachment 1 after clear reads (102,128,153,~) — got (' +
+        beforeDraw1.join(',') + ')');
+
+    // ── Build a GLSL ES 3.00 program with layout(location=0/1) out vec4 ──
+    // Note: opt the shaders into raw_passthrough so the bridge runs the
+    // user GLSL natively. Without this, the bridge substitutes a GLSL
+    // 1.0 color program (which only writes gl_FragColor → attachment 0)
+    // and the test sees the bridge's hardcoded color instead of what
+    // the user shader specified.
+    const vsSource =
+      '#version 300 es\n' +
+      '#pragma raw_passthrough\n' +
+      'in vec2 a_pos;\n' +
+      'void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n';
+    const fsSource =
+      '#version 300 es\n' +
+      '#pragma raw_passthrough\n' +
+      'precision highp float;\n' +
+      'layout(location = 0) out vec4 outA;\n' +
+      'layout(location = 1) out vec4 outB;\n' +
+      'void main() {\n' +
+      '  outA = vec4(1.0, 0.0, 0.0, 1.0);\n' +
+      '  outB = vec4(0.0, 1.0, 0.0, 1.0);\n' +
+      '}\n';
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, vsSource); gl.compileShader(vs);
+    assertMsg(gl.getShaderParameter(vs, gl.COMPILE_STATUS),
+      'vertex shader (ES 3.00) compile succeeds — log: ' +
+      (gl.getShaderInfoLog(vs) || ''));
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, fsSource); gl.compileShader(fs);
+    assertMsg(gl.getShaderParameter(fs, gl.COMPILE_STATUS),
+      'fragment shader (ES 3.00, layout out) compile succeeds — log: ' +
+      (gl.getShaderInfoLog(fs) || ''));
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    assertMsg(gl.getProgramParameter(prog, gl.LINK_STATUS),
+      'MRT program links — log: ' + (gl.getProgramInfoLog(prog) || ''));
+    gl.useProgram(prog);
+
+    // ── Draw a fullscreen quad writing both attachments in one pass ──
+    const posLoc = gl.getAttribLocation(prog, 'a_pos');
+    assertMsg(posLoc >= 0, 'a_pos attribute location resolved (' + posLoc + ')');
+    const quad = new Float32Array([-1,-1,  1,-1, -1, 1,  -1, 1,  1,-1,  1, 1]);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'MRT drawArrays writing 2 outputs in one pass accepted');
+
+    // ── Verify each attachment got its own output ──
+    const afterDraw0 = readCenter(gl.COLOR_ATTACHMENT0);
+    const afterDraw1 = readCenter(gl.COLOR_ATTACHMENT1);
+    assertMsg(Math.abs(afterDraw0[0] - 255) <= tol &&
+              Math.abs(afterDraw0[1] -   0) <= tol &&
+              Math.abs(afterDraw0[2] -   0) <= tol,
+      'attachment 0 after MRT draw is (255,0,0,~) — got (' +
+        afterDraw0.join(',') + ')');
+    assertMsg(Math.abs(afterDraw1[0] -   0) <= tol &&
+              Math.abs(afterDraw1[1] - 255) <= tol &&
+              Math.abs(afterDraw1[2] -   0) <= tol,
+      'attachment 1 after MRT draw is (0,255,0,~) — got (' +
+        afterDraw1.join(',') + ')');
+
+    // ── Mask out attachment 0 via NONE; draw blue to both outputs ──
+    // outA writes to a NONE buffer (no-op); outB writes to attachment 1.
+    // Re-clear attachment 1 first so the test is meaningful.
+    gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Now draw with a new program that writes blue to both outputs.
+    const fsSource2 =
+      '#version 300 es\n' +
+      '#pragma raw_passthrough\n' +
+      'precision highp float;\n' +
+      'layout(location = 0) out vec4 outA;\n' +
+      'layout(location = 1) out vec4 outB;\n' +
+      'void main() {\n' +
+      '  outA = vec4(0.0, 0.0, 1.0, 1.0);\n' +
+      '  outB = vec4(0.0, 0.0, 1.0, 1.0);\n' +
+      '}\n';
+    const fs2 = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs2, fsSource2); gl.compileShader(fs2);
+    const prog2 = gl.createProgram();
+    gl.attachShader(prog2, vs);
+    gl.attachShader(prog2, fs2);
+    gl.linkProgram(prog2);
+    assertMsg(gl.getProgramParameter(prog2, gl.LINK_STATUS),
+      'mask-test program links');
+    gl.useProgram(prog2);
+    const posLoc2 = gl.getAttribLocation(prog2, 'a_pos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.enableVertexAttribArray(posLoc2);
+    gl.vertexAttribPointer(posLoc2, 2, gl.FLOAT, false, 0, 0);
+
+    // drawBuffers([NONE, COLOR_ATTACHMENT1]) is still active.
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'drawArrays with drawBuffers([NONE, COLOR_ATTACHMENT1]) accepted');
+
+    // Attachment 0 should still hold the prior MRT-draw value (255,0,0,~)
+    // because the most recent drawArrays had attachment 0 masked out.
+    const masked0 = readCenter(gl.COLOR_ATTACHMENT0);
+    const masked1 = readCenter(gl.COLOR_ATTACHMENT1);
+    assertMsg(Math.abs(masked0[0] - 255) <= tol &&
+              Math.abs(masked0[1] -   0) <= tol &&
+              Math.abs(masked0[2] -   0) <= tol,
+      'attachment 0 unchanged after NONE-masked draw — got (' +
+        masked0.join(',') + ')');
+    assertMsg(Math.abs(masked1[0] -   0) <= tol &&
+              Math.abs(masked1[1] -   0) <= tol &&
+              Math.abs(masked1[2] - 255) <= tol,
+      'attachment 1 received blue from masked draw — got (' +
+        masked1.join(',') + ')');
+
+    // Cleanup.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(tex0);
+    gl.deleteTexture(tex1);
+    gl.deleteBuffer(vbo);
+    gl.deleteProgram(prog);
+    gl.deleteProgram(prog2);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    gl.deleteShader(fs2);
+  } catch (e) {
+    testFailed('uncaught exception: ' + (e && e.message ? e.message : e));
+  } finally {
+    finishTest();
+  }
+})();
+</script>
+
+<p><a href="../">back to webgl2-multiple-rendertargets</a></p>
+</body>
+</html>

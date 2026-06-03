@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Web Audio Tier 1 verification</title>
+<style>
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at top, rgba(122, 162, 255, 0.12), transparent 32%),
+      #0b1220;
+    color: #e0e8f4;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 18px;
+    padding: 22px 36px;
+  }
+  h1 { color: #ffd35e; margin: 0 0 6px 0; }
+  h2 { color: #7aa2ff; margin-top: 18px; margin-bottom: 6px; font-size: 22px; }
+  p.lead { color: #9bb1d6; margin: 0 0 10px 0; font-size: 15px; }
+  code { color: #c2e0ff; }
+
+  .test-row {
+    background: #14202d;
+    padding: 8px 14px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+  }
+  .num    { display: inline-block; width: 26px;  color: #9bb1d6; }
+  .name   { display: inline-block; width: 240px; color: #ffd35e; font-weight: bold; }
+  .status { display: inline-block; width: 96px;  color: #e0e8f4; font-weight: bold; }
+  .detail { display: inline-block; color: #c2e0ff; }
+
+  button {
+    background: #2a4060;
+    color: #ffd35e;
+    border: 1px solid #7aa2ff;
+    border-radius: 6px;
+    padding: 8px 16px;
+    margin: 4px 8px 4px 0;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+<h1>Web Audio &mdash; Tier 1 verification</h1>
+<p class="lead">Exercises every wrapper in <code>nxjs-source/packages/runtime/src/web-audio.ts</code>. Each test plays audibly for ~0.8 s &mdash; <strong>turn the volume up</strong> and listen. Tap a button below to start; tests run sequentially with 1 s gaps. Detailed log at <code>sdmc:/switch/brewser/logs/web-audio-tone.log</code>.</p>
+
+<button id="runAllBtn">Run all tests</button>
+<button id="toneBtn">Play 440 Hz tone</button>
+<button id="chordBtn">Play 3-tone chord</button>
+
+<h2>Surface detection</h2>
+<div class="test-row" id="row-surface">
+  <span class="num">0.</span><span class="name">Globals registered</span><span class="status" id="status-surface">PENDING</span><span class="detail" id="detail-surface">checking&hellip;</span>
+</div>
+
+<h2>Functional tests</h2>
+<div class="test-row" id="row-ctx">
+  <span class="num">1.</span><span class="name">new AudioContext()</span><span class="status" id="status-ctx">PENDING</span><span class="detail" id="detail-ctx">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-osc">
+  <span class="num">2.</span><span class="name">OscillatorNode 440 Hz</span><span class="status" id="status-osc">PENDING</span><span class="detail" id="detail-osc">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-gain">
+  <span class="num">3.</span><span class="name">GainNode mid-play change</span><span class="status" id="status-gain">PENDING</span><span class="detail" id="detail-gain">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-square">
+  <span class="num">4.</span><span class="name">OscillatorNode square 220 Hz</span><span class="status" id="status-square">PENDING</span><span class="detail" id="detail-square">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-buffer">
+  <span class="num">5.</span><span class="name">createBuffer + BufferSource</span><span class="status" id="status-buffer">PENDING</span><span class="detail" id="detail-buffer">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-decode">
+  <span class="num">6.</span><span class="name">decodeAudioData(click.wav)</span><span class="status" id="status-decode">PENDING</span><span class="detail" id="detail-decode">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-chord">
+  <span class="num">7.</span><span class="name">3 concurrent voices</span><span class="status" id="status-chord">PENDING</span><span class="detail" id="detail-chord">queued&hellip;</span>
+</div>
+<div class="test-row" id="row-time">
+  <span class="num">8.</span><span class="name">ctx.currentTime advances</span><span class="status" id="status-time">PENDING</span><span class="detail" id="detail-time">queued&hellip;</span>
+</div>
+
+<p class="lead"><a href="brewser://dev/">back to dev index</a></p>
+
+<script>
+  const LOG_PATH = 'sdmc:/switch/brewser/logs/web-audio-tone.log';
+  const log = function (s) { try { Switch.appendFileSync(LOG_PATH, s + '\n'); } catch (_) {} };
+
+  log('');
+  log('=== RUN at ' + new Date().toISOString() + ' ===');
+  log('typeof checks: AudioContext=' + typeof AudioContext
+    + ' webkitAudioContext=' + typeof webkitAudioContext
+    + ' OscillatorNode=' + typeof OscillatorNode
+    + ' GainNode=' + typeof GainNode
+    + ' AudioBuffer=' + typeof AudioBuffer
+    + ' AudioBufferSourceNode=' + typeof AudioBufferSourceNode);
+
+  function setStatus(id, status, detail) {
+    try {
+      document.getElementById('status-' + id).textContent = status;
+      document.getElementById('detail-' + id).textContent = detail || '';
+    } catch (_) {}
+    log('[' + id + '] ' + status + ' :: ' + (detail || ''));
+  }
+
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  // Test 0 — surface
+  (function () {
+    const present = ['AudioContext', 'webkitAudioContext', 'OscillatorNode',
+      'GainNode', 'AudioBuffer', 'AudioBufferSourceNode', 'AudioParam',
+      'AudioNode', 'AudioDestinationNode']
+      .filter(function (n) { return typeof globalThis[n] !== 'undefined'; });
+    const missing = ['AudioContext', 'OscillatorNode', 'GainNode', 'AudioBuffer',
+      'AudioBufferSourceNode']
+      .filter(function (n) { return typeof globalThis[n] === 'undefined'; });
+    if (missing.length === 0) {
+      setStatus('surface', 'PASS', present.length + ' globals: ' + present.join(', '));
+    } else {
+      setStatus('surface', 'FAIL', 'missing: ' + missing.join(', '));
+    }
+  })();
+
+  let ctx = null;
+
+  async function testCtx() {
+    setStatus('ctx', 'RUNNING', 'constructing…');
+    try {
+      ctx = new AudioContext();
+      const startTime = ctx.currentTime;
+      log('[ctx] state=' + ctx.state + ' sampleRate=' + ctx.sampleRate
+        + ' currentTime=' + startTime
+        + ' destination=' + (ctx.destination ? 'present' : 'MISSING'));
+      if (ctx.state === 'running' && ctx.sampleRate > 0 && ctx.destination) {
+        setStatus('ctx', 'PASS', 'state=' + ctx.state + ' sr=' + ctx.sampleRate + 'Hz');
+      } else {
+        setStatus('ctx', 'PARTIAL', 'state=' + ctx.state + ' sr=' + ctx.sampleRate);
+      }
+    } catch (e) {
+      setStatus('ctx', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testOscillator440() {
+    setStatus('osc', 'RUNNING', 'playing 440 Hz sine for 800 ms…');
+    if (!ctx) { setStatus('osc', 'SKIP', 'no ctx'); return; }
+    try {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      g.gain.value = 0.2;
+      osc.frequency.value = 440;
+      osc.type = 'sine';
+      osc.connect(g).connect(ctx.destination);
+      osc.start();
+      await sleep(800);
+      osc.stop();
+      setStatus('osc', 'PASS', '440 Hz sine, 800 ms (verify audibly)');
+    } catch (e) {
+      setStatus('osc', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testGainMidPlay() {
+    setStatus('gain', 'RUNNING', 'ramp 0.4 → 0.05 → 0.4 during playback…');
+    if (!ctx) { setStatus('gain', 'SKIP', 'no ctx'); return; }
+    try {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      g.gain.value = 0.4;
+      osc.frequency.value = 660;
+      osc.connect(g).connect(ctx.destination);
+      osc.start();
+      await sleep(300);
+      g.gain.value = 0.05;
+      await sleep(300);
+      g.gain.value = 0.4;
+      await sleep(300);
+      osc.stop();
+      setStatus('gain', 'PASS', '660 Hz with volume dip mid-note (verify audibly)');
+    } catch (e) {
+      setStatus('gain', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testSquare220() {
+    setStatus('square', 'RUNNING', 'playing 220 Hz square for 600 ms…');
+    if (!ctx) { setStatus('square', 'SKIP', 'no ctx'); return; }
+    try {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      g.gain.value = 0.12;
+      osc.frequency.value = 220;
+      osc.type = 'square';
+      osc.connect(g).connect(ctx.destination);
+      osc.start();
+      await sleep(600);
+      osc.stop();
+      setStatus('square', 'PASS', '220 Hz square (verify timbre)');
+    } catch (e) {
+      setStatus('square', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testCreateBuffer() {
+    setStatus('buffer', 'RUNNING', 'building 0.5 s mono buffer via createBuffer + copyToChannel…');
+    if (!ctx) { setStatus('buffer', 'SKIP', 'no ctx'); return; }
+    try {
+      const sr = ctx.sampleRate;
+      const dur = 0.5;
+      const len = Math.floor(sr * dur);
+      const buf = ctx.createBuffer(1, len, sr);
+      const data = new Float32Array(len);
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        data[i] = Math.sin(2 * Math.PI * 330 * t) * 0.3
+                * Math.exp(-3 * t); // decaying note
+      }
+      buf.copyToChannel(data, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.value = 0.5;
+      src.connect(g).connect(ctx.destination);
+      src.start();
+      await sleep(700);
+      setStatus('buffer', 'PASS', '330 Hz decaying note via createBuffer (verify audibly)');
+    } catch (e) {
+      setStatus('buffer', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testDecodeAudioData() {
+    setStatus('decode', 'RUNNING', 'fetching click.wav…');
+    if (!ctx) { setStatus('decode', 'SKIP', 'no ctx'); return; }
+    try {
+      // Page-script fetch() is gated and 403s for both sdmc:/ and
+      // romfs:/ — read the file via Switch.readFileSync instead (page
+      // scripts have direct Switch.* access). The bytes go straight
+      // into decodeAudioData, same final test of the audio path.
+      // Switch.readFileSync returns ArrayBuffer | null per $.ts:298.
+      const ab = Switch.readFileSync('romfs:/pages/assets/click.wav');
+      if (!ab) { setStatus('decode', 'FAIL', 'Switch.readFileSync returned null'); return; }
+      log('[decode] read click.wav via Switch.readFileSync, bytes=' + ab.byteLength);
+      const buf = await ctx.decodeAudioData(ab);
+      log('[decode] decoded sr=' + buf.sampleRate + ' ch=' + buf.numberOfChannels
+        + ' len=' + buf.length + ' dur=' + buf.duration.toFixed(3) + 's');
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start();
+      await sleep(Math.min(1500, buf.duration * 1000 + 200));
+      setStatus('decode', 'PASS', 'decoded ' + buf.duration.toFixed(2) + 's ' + buf.sampleRate + 'Hz, played');
+    } catch (e) {
+      setStatus('decode', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testChord() {
+    setStatus('chord', 'RUNNING', 'playing 3 concurrent oscillators (C-E-G)…');
+    if (!ctx) { setStatus('chord', 'SKIP', 'no ctx'); return; }
+    try {
+      const freqs = [261.6, 329.6, 392.0]; // C4 / E4 / G4
+      const oscs = [];
+      const g = ctx.createGain();
+      g.gain.value = 0.08;
+      g.connect(ctx.destination);
+      for (const f of freqs) {
+        const o = ctx.createOscillator();
+        o.frequency.value = f;
+        o.type = 'sine';
+        o.connect(g);
+        oscs.push(o);
+      }
+      for (const o of oscs) o.start();
+      await sleep(900);
+      for (const o of oscs) o.stop();
+      setStatus('chord', 'PASS', 'C-E-G chord, 900 ms (verify audibly)');
+    } catch (e) {
+      setStatus('chord', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function testCurrentTime() {
+    setStatus('time', 'RUNNING', 'measuring 500 ms…');
+    if (!ctx) { setStatus('time', 'SKIP', 'no ctx'); return; }
+    try {
+      const t0 = ctx.currentTime;
+      await sleep(500);
+      const t1 = ctx.currentTime;
+      const dt = t1 - t0;
+      log('[time] t0=' + t0.toFixed(4) + ' t1=' + t1.toFixed(4) + ' dt=' + dt.toFixed(4));
+      if (dt > 0.4 && dt < 0.7) {
+        setStatus('time', 'PASS', 'Δt=' + dt.toFixed(3) + 's (expected ~0.5)');
+      } else {
+        setStatus('time', 'FAIL', 'Δt=' + dt.toFixed(3) + 's (expected ~0.5)');
+      }
+    } catch (e) {
+      setStatus('time', 'FAIL', String(e && e.message || e));
+    }
+  }
+
+  async function runAll() {
+    await testCtx();         await sleep(400);
+    await testOscillator440(); await sleep(400);
+    await testGainMidPlay();   await sleep(400);
+    await testSquare220();     await sleep(400);
+    await testCreateBuffer();  await sleep(400);
+    await testDecodeAudioData(); await sleep(400);
+    await testChord();         await sleep(400);
+    await testCurrentTime();
+    log('=== ALL TESTS COMPLETE ===');
+  }
+
+  document.getElementById('runAllBtn').addEventListener('click', function () {
+    log('[ui] runAll tapped');
+    runAll();
+  });
+  document.getElementById('toneBtn').addEventListener('click', async function () {
+    log('[ui] toneBtn tapped');
+    if (!ctx) await testCtx();
+    await testOscillator440();
+  });
+  document.getElementById('chordBtn').addEventListener('click', async function () {
+    log('[ui] chordBtn tapped');
+    if (!ctx) await testCtx();
+    await testChord();
+  });
+</script>
+</body>
+</html>

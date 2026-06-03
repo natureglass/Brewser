@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Textured Rotating Cube</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Textured Rotating Cube</h1>
+<p class="lead">Loads Three.js r162 (via the shared IIFE bundle at
+<code>brewser://apps/ThreeJSDemos/libs/three.iife.js</code>) and runs the
+cube demo from <code>assets/main.js</code>.</p>
+
+<div class="stage">
+  <canvas id="cube-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  // Pre-flight marker: paint the cube canvas with a 2D red border + label
+  // so we can tell whether the canvas element itself made it through
+  // parse + layout, independent of whether the external scripts loaded.
+  // If the canvas area appears red with "PRE-WEBGL" text, parse and 2D
+  // both work; the failure is in script-src loading or WebGL setup.
+  const pre = document.getElementById('cube-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#c0392b';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker — scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="cube-status" width="900" height="500"></canvas>
+</div>
+
+<script>
+  // Post-flight diagnostic. Runs AFTER the two external scripts. Reports
+  // what we found into the status canvas so we can see exactly what
+  // step failed when the cube doesn't show.
+  const st = document.getElementById('cube-status').getContext('2d');
+  st.fillStyle = '#14202d';
+  st.fillRect(0, 0, 900, 500);
+  st.font = '14px system-ui';
+  st.textBaseline = 'top';
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+  row(14, 'globalThis.__THREE_R162_STAGED__:', hasThree ? 'OK (THREE loaded)' : 'undefined', hasThree);
+  if (hasThree) {
+    const T = globalThis.__THREE_R162_STAGED__;
+    row(36, 'THREE.REVISION:', String(T.REVISION ?? '(missing)'), !!T.REVISION);
+    row(58, 'THREE.WebGLRenderer:', typeof T.WebGLRenderer === 'function' ? 'function' : String(typeof T.WebGLRenderer), typeof T.WebGLRenderer === 'function');
+  }
+  const cube = document.getElementById('cube-canvas');
+  row(80, '#cube-canvas exists:', cube ? 'yes' : 'no', !!cube);
+  const hasRAF = typeof globalThis.requestAnimationFrame === 'function';
+  row(102, 'requestAnimationFrame:', hasRAF ? 'function' : 'missing', hasRAF);
+  const cubeErr = globalThis.__cubeError;
+  if (cubeErr) {
+    row(124, 'cube error:', String(cubeErr).slice(0, 80), false);
+  } else {
+    row(124, 'cube error:', '(none recorded)', true);
+  }
+  const ranMain = !!globalThis.__cubeMainStarted;
+  row(146, 'main.js started:', ranMain ? 'yes' : 'no', ranMain);
+  const ranAnim = !!globalThis.__cubeAnimateCalled;
+  row(168, 'animate() called:', ranAnim ? 'yes' : 'no', ranAnim);
+
+  // Sample the cube canvas's OffscreenCanvas to see if the readback
+  // actually wrote pixels (and what they look like).
+  // - (0,0,0,0) at every sample => the readback didn't write anything
+  //   (or wrote transparent); the slot would appear empty / page-bg.
+  // - clearColor at every sample (~16,24,32,255) => Three.js cleared
+  //   the bridge to setClearColor but no cube pixels were drawn.
+  // - varied bright values => the cube IS in the offscreen but
+  //   something's wrong with the painter displaying it.
+  if (cube) {
+    const cubeCtx = cube.getContext('2d');
+    if (cubeCtx) {
+      const samples = [
+        ['(10, 10) top-left:', 10, 10],
+        ['(320, 180) center:', 320, 180],
+        ['(620, 340) bot-right:', 620, 340],
+      ];
+      let py = 200;
+      for (const [label, sx, sy] of samples) {
+        let txt = '?';
+        try {
+          const px = cubeCtx.getImageData(sx, sy, 1, 1).data;
+          txt = '[' + px[0] + ',' + px[1] + ',' + px[2] + ',' + px[3] + ']';
+        } catch (e) {
+          txt = 'getImageData threw: ' + ((e && e.message) || String(e));
+        }
+        row(py, label, txt, true);
+        py += 22;
+      }
+      row(py, 'cube offscreen dims:', cube.width + ' x ' + cube.height, true);
+      py += 22;
+      // GL errors around the first render captured by main.js.
+      const errBefore = globalThis.__cubeGlErrorBefore;
+      const errAfter = globalThis.__cubeGlErrorAfter;
+      row(py, 'gl.getError before render:', '0x' + (errBefore | 0).toString(16), errBefore === 0);
+      py += 22;
+      row(py, 'gl.getError after render:', '0x' + (errAfter | 0).toString(16), errAfter === 0);
+      py += 22;
+      const clearProbe = globalThis.__cubeClearProbe;
+      row(py, 'clear-only probe (magenta):', String(clearProbe || '(none)'), clearProbe === '255,0,255,255');
+      py += 22;
+      const clearStatus = globalThis.__cubeStatusAfterClear;
+      st.fillStyle = '#9bb1d6';
+      st.fillText('status after clear:', 14, py);
+      st.fillStyle = '#ffd35e';
+      st.fillText(String(clearStatus || '').slice(0, 80), 280, py);
+      py += 22;
+      const probe = globalThis.__cubeBridgeProbe;
+      row(py, 'bridge probe after render:', String(probe || '(none)'), !!probe && probe !== '0,0,0,0');
+      py += 22;
+      const renderStatus = globalThis.__cubeStatusAfterRender;
+      st.fillStyle = '#9bb1d6';
+      st.fillText('status after render:', 14, py);
+      st.fillStyle = '#ffd35e';
+      st.fillText(String(renderStatus || '').slice(0, 80), 280, py);
+    }
+  }
+
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/rendering-gl-drawelements.html"><code>rendering/gl-drawelements</code></a>
+&mdash; pins the WebGL 1 validation gates in front of
+<code>gl.drawElements</code> (primitive-mode allowlist, index-type
+allowlist, index-bounds + non-aligned-offset rejection). Co-located
+with this demo because the textured-cube draw path is the canonical
+indexed-triangle dispatch through the bridge.</p>
+
+<p class="note">If the cube canvas is RED with "PRE-WEBGL" text, the
+external scripts didn't run — check the status canvas below for which
+step failed. If the cube canvas is blank, Three.js ran but WebGL
+readback didn't produce pixels.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

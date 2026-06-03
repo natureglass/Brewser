@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Geometry Vertex Colors</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Geometry Vertex Colors</h1>
+<p class="lead">Port of <code>three-r162/examples/webgl_geometry_colors.html</code>:
+three lit <code>IcosahedronGeometry</code> meshes with per-vertex HSL/RGB
+colors under a single <code>DirectionalLight</code>. Each has a black
+wireframe overlay and a radial-gradient floor shadow. First milestone
+to exercise the bridge's directional lighting path
+(<code>a_normal</code> + <code>u_lightDirection</code> + <code>u_lightColor</code>
+in <code>bridge_color_program</code>). Tilt the <strong>left analog stick</strong>
+to pan the camera.</p>
+
+<div class="stage">
+  <canvas id="geo-colors-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('geo-colors-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="geo-colors-status" width="900" height="360"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('geo-colors-status').getContext('2d');
+  st.fillStyle = '#14202d';
+  st.fillRect(0, 0, 900, 360);
+  st.font = '14px system-ui';
+  st.textBaseline = 'top';
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+  row(14, 'globalThis.__THREE_R162_STAGED__:', hasThree ? 'OK (THREE loaded)' : 'undefined', hasThree);
+  const gc = document.getElementById('geo-colors-canvas');
+  row(36, '#geo-colors-canvas exists:', gc ? 'yes' : 'no', !!gc);
+  const hasRAF = typeof globalThis.requestAnimationFrame === 'function';
+  row(58, 'requestAnimationFrame:', hasRAF ? 'function' : 'missing', hasRAF);
+  const gcErr = globalThis.__geoColorsError;
+  row(80, 'geo-colors error:', gcErr ? String(gcErr).slice(0, 80) : '(none recorded)', !gcErr);
+  row(102, 'main.js started:',
+      globalThis.__geoColorsMainStarted ? 'yes' : 'no',
+      !!globalThis.__geoColorsMainStarted);
+  row(124, 'shadow texture loaded:',
+      globalThis.__geoColorsShadowTextureLoaded ? 'yes' : 'no',
+      !!globalThis.__geoColorsShadowTextureLoaded);
+  row(146, 'objects in scene:',
+      String(globalThis.__geoColorsObjectCount | 0),
+      (globalThis.__geoColorsObjectCount | 0) === 7);
+  row(168, 'animate() called:',
+      globalThis.__geoColorsAnimateCalled ? 'yes' : 'no',
+      !!globalThis.__geoColorsAnimateCalled);
+
+  if (gc) {
+    const gcCtx = gc.getContext('2d');
+    if (gcCtx) {
+      const samples = [
+        ['(10, 10) top-left:', 10, 10],
+        ['(320, 180) center:', 320, 180],
+        ['(620, 340) bot-right:', 620, 340],
+      ];
+      let py = 200;
+      for (const [label, sx, sy] of samples) {
+        let txt = '?';
+        try {
+          const px = gcCtx.getImageData(sx, sy, 1, 1).data;
+          txt = '[' + px[0] + ',' + px[1] + ',' + px[2] + ',' + px[3] + ']';
+        } catch (e) {
+          txt = 'getImageData threw: ' + ((e && e.message) || String(e));
+        }
+        row(py, label, txt, true);
+        py += 22;
+      }
+      const errBefore = globalThis.__geoColorsGlErrorBefore;
+      const errAfter = globalThis.__geoColorsGlErrorAfter;
+      row(py, 'gl.getError before render:', '0x' + (errBefore | 0).toString(16), errBefore === 0);
+      py += 22;
+      row(py, 'gl.getError after render:', '0x' + (errAfter | 0).toString(16), errAfter === 0);
+    }
+  }
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/programs-gl-get-active-attribute.html"><code>programs/gl-get-active-attribute</code></a>
+&mdash; verifies <code>getActiveAttrib</code> reports the right name,
+type, and size across every GLSL attribute type (the bridge added
+<code>a_normal</code> for this milestone's lighting path).</p>
+
+<p class="note">Three lit icosahedra with per-vertex HSL/RGB coloring on
+a white background. The bridge applies Lambert diffuse shading using
+view-space normals from the geometry — faces pointing toward the light
+(at <code>(0, 0, 1)</code>) are brighter. Each icosahedron has a black
+wireframe overlay and a radial-gradient floor shadow.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

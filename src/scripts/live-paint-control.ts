@@ -49,6 +49,18 @@ export function clearLiveDirty(): void {
 	dirtyLiveElements.clear();
 }
 
+/** Sticky flag: set true the first time the page calls a painting
+ * method on a 2D canvas context (e.g. fillRect from a setTimeout-driven
+ * render loop). The shell's fast-path skip otherwise gates the
+ * per-frame canvas re-blit walk on `pageHasAnimationActivity()`, which
+ * only fires for `requestAnimationFrame`-using pages — so a pure-2D
+ * setTimeout-driven game (demo-breakout) had its canvas frozen at the
+ * first paint. Cleared on navigation alongside the rAF flag. */
+let pageHasCanvas2dActivityFlag = false;
+export function markPageHasCanvas2dActivity(): void { pageHasCanvas2dActivityFlag = true; }
+export function hasPageCanvas2dActivity(): boolean { return pageHasCanvas2dActivityFlag; }
+export function clearPageHasCanvas2dActivity(): void { pageHasCanvas2dActivityFlag = false; }
+
 export function setKeyboardOpen(v: boolean): void {
 	keyboardOpen = !!v;
 	if (!v) pendingFullRepaint = true;

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Skinning + Animation Blending (Soldier)</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Skinning + Animation Blending (PARKED — Mesa Nouveau)</h1>
+<p class="lead"><strong>Milestone #26 parked on Citron, 2026-05-22.</strong>
+Port of <code>webgl_animation_skinning_blending.html</code>: Mixamo Vanguard
+Soldier (49 bones, 4 clips) blended via <code>AnimationMixer</code>.
+The WebGL 2 surface itself is fully functional &mdash;
+<code>screen.getContext('webgl2')</code> returns a real
+<code>WebGL2RenderingContext</code>, GLSL ES 3.00 shaders compile and link,
+all WebGL 2 entry points work
+(<a href="brewser://memory/nxjs-webgl2-surface">memory:nxjs-webgl2-surface</a>).
+The skinning specifically hits a <strong>Mesa Nouveau driver bug</strong>:
+Three.js's <code>skinning_pars_vertex</code> uses
+<code>texelFetch(boneTexture, ivec2(x, y))</code> with runtime-computed
+coordinates derived from <code>skinIndex.x</code>. On Citron's Mesa
+Nouveau, vertex-shader sampling of RGBA32F immutable storage returns
+garbage when coordinates are computed at runtime; static coords work
+fine. We verified per-vertex <code>skinIndex.x</code> reaches the shader
+correctly, multi-coordinate static <code>texelFetch</code> returns real
+bone matrix data, and the bone texture is uploaded correctly &mdash;
+the bug is in the driver's handling of dynamic texel coords. Unrolling
+into a switch with constant coords per case didn't help. May render
+correctly on real Tegra hardware; deferred until hardware verification
+is possible.</p>
+
+<div class="stage">
+  <canvas id="skin-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('skin-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '18px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - loading soldier...', 12, 12);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/r184-nxjs-bridge.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/three-latest.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/gltf-loader.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="skin-status" width="900" height="400"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('skin-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 360, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 400);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R184_STAGED__ !== 'undefined';
+    row(12, 'THREE r184 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    row(32, 'GLTFLoader available:',
+        typeof globalThis.__THREE_R184_STAGED__?.GLTFLoader === 'function' ? 'yes' : 'no',
+        typeof globalThis.__THREE_R184_STAGED__?.GLTFLoader === 'function');
+    const gErr = globalThis.__skinError;
+    row(52, 'demo error:', gErr ? String(gErr).slice(0, 90) : '(none)', !gErr);
+    const fps = +globalThis.__skinFps || 0;
+    row(72, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 1);
+    row(92, 'frames rendered:', String(globalThis.__skinFrameCount | 0), true);
+    row(112, 'gltf parsed:',
+        globalThis.__skinModelLoaded ? 'yes' : 'no',
+        !!globalThis.__skinModelLoaded);
+    row(132, 'skinned meshes:',
+        String(globalThis.__skinSkinnedCount | 0),
+        (globalThis.__skinSkinnedCount | 0) > 0);
+    row(152, 'bones (skeleton 0):',
+        String(globalThis.__skinBoneCount | 0),
+        (globalThis.__skinBoneCount | 0) > 0);
+    row(172, 'animation clips loaded:',
+        String(globalThis.__skinClipCount | 0),
+        (globalThis.__skinClipCount | 0) > 0);
+    row(192, 'current weights (idle/walk/run):',
+        String(globalThis.__skinWeights || '?'), true);
+    row(212, 'mixer playing:',
+        globalThis.__skinMixerPlaying ? 'yes' : 'no',
+        !!globalThis.__skinMixerPlaying);
+    const errAfter = globalThis.__skinGlErrorAfter;
+    row(232, 'gl.getError after render:',
+        '0x' + ((errAfter | 0) >>> 0).toString(16), errAfter === 0);
+    row(252, 'last button pressed:',
+        String(globalThis.__skinLastBtn || '(none)'), true);
+    st.fillStyle = '#ff8a6c';
+    st.font = '12px monospace';
+    st.fillText('stack[0]: ' + String(globalThis.__skinStack0 || '').slice(0, 130), 14, 280);
+    st.fillText('stack[1]: ' + String(globalThis.__skinStack1 || '').slice(0, 130), 14, 300);
+    st.fillText('stack[2]: ' + String(globalThis.__skinStack2 || '').slice(0, 130), 14, 320);
+    st.fillStyle = '#7eda9f';
+    st.font = '12px monospace';
+    st.fillText('MAX_VERTEX_TEXTURE_IMAGE_UNITS: ' + String(globalThis.__skinMaxVertTex || '?'), 14, 345);
+    st.fillText('first SkinnedMesh: ' + String(globalThis.__skinFirstName || '?') + ' visible=' + String(globalThis.__skinFirstVisible), 14, 362);
+    st.fillText('bounding sphere: ' + String(globalThis.__skinBSphere || '?'), 14, 379);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+  setTimeout(renderStatus, 15000);
+  setInterval(renderStatus, 5000);
+</script>
+
+<p class="note">Gamepad controls (replacing upstream's lil-gui):
+<strong>A</strong> = idle (weights 1,0,0).
+<strong>B</strong> = walk (0,1,0).
+<strong>X</strong> = run (0,0,1).
+<strong>Y</strong> = crossfade walk &rarr; run (smooth 2.5 s).
+<strong>L</strong> = crossfade idle &rarr; walk (0.5 s).
+<strong>R</strong> = crossfade run &rarr; walk (5 s).
+Camera orbits with the <strong>left analog stick</strong> via
+<code>SwitchOrbitControls</code> ([[swb-threejs-misc-controls-orbit]]).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 &mdash; Cubemap (Reflection / Refraction)</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 &mdash; Cubemap (Reflection / Refraction)</h1>
+<p class="lead">Port of <code>webgl_materials_cubemap.html</code>: three
+Walt heads under a Swedish Royal Castle skybox, each lit by an
+<code>AmbientLight</code> + central <code>PointLight</code> and rendered
+with a different cubemap material variant &mdash; plain reflection,
+refraction (<code>CubeRefractionMapping</code>), and reflection mixed with
+diffuse colour (<code>MixOperation</code>). First milestone that exercises
+runtime cubemap URL loading end-to-end on the new image-to-texture
+pipeline.</p>
+
+<div class="stage">
+  <canvas id="cube-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('cube-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/obj-loader.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="cube-status" width="900" height="340"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('cube-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 340);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const gErr = globalThis.__cubeError;
+    row(36, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    row(58, 'cube faces loaded:',
+        String(globalThis.__cubeFacesLoaded | 0) + ' / 6  (refl)  ' +
+        String(globalThis.__cubeFacesLoadedRefr | 0) + ' / 6  (refr)',
+        ((globalThis.__cubeFacesLoaded | 0) === 6) &&
+        ((globalThis.__cubeFacesLoadedRefr | 0) === 6));
+    row(80, 'OBJ loaded:',
+        globalThis.__cubeObjLoaded ? 'yes' : '(loading...)',
+        !!globalThis.__cubeObjLoaded);
+    row(102, 'heads in scene:',
+        String(globalThis.__cubeHeadCount | 0),
+        (globalThis.__cubeHeadCount | 0) === 3);
+    row(124, 'animate() called:',
+        globalThis.__cubeAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__cubeAnimateCalled);
+    const fps = +globalThis.__cubeFps || 0;
+    row(146, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(168, 'renders / frames:',
+        String(globalThis.__cubeRenderCount | 0) + ' / ' +
+        String(globalThis.__cubeFrameCount | 0),
+        true);
+    row(190, 'background pass:',
+        globalThis.__cubeBgPass ? 'skybox visible' : '(pending)',
+        !!globalThis.__cubeBgPass);
+    // Live gamepad axes — orbit-controls.js caches the deadzoned values
+    // it last sampled on `controls._lastAxes`. axes[0]/[1] = left stick
+    // (orbit on Web Gamepad spec); axes[2]/[3] = right stick (would
+    // pan if enablePan were true). Helps diagnose Citron axis mapping.
+    let axes = [0,0,0,0];
+    try {
+      if (globalThis.__cubeControls && globalThis.__cubeControls._lastAxes) {
+        axes = globalThis.__cubeControls._lastAxes;
+      }
+    } catch (e) {}
+    const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2);
+    st.fillStyle = '#9bb1d6';
+    st.fillText('stick axes [0..3]:', 14, 212);
+    st.fillStyle = '#ffd35e';
+    st.fillText(
+      'L(' + fmt(axes[0]) + ', ' + fmt(axes[1]) + ')  ' +
+      'R(' + fmt(axes[2]) + ', ' + fmt(axes[3]) + ')',
+      170, 212);
+    let bridgeDbg = '';
+    try {
+      const canvas2 = document.getElementById('cube-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getBackendInfo === 'function') {
+        const info = ctx2.getBackendInfo();
+        bridgeDbg = (info && info.debugDispatchState) ? String(info.debugDispatchState) : '(empty)';
+      } else {
+        bridgeDbg = '(no getBackendInfo)';
+      }
+    } catch (e) { bridgeDbg = 'err: ' + String(e); }
+    st.fillStyle = '#9bb1d6';
+    st.fillText('bridge dbg:', 14, 234);
+    st.fillStyle = '#ffd35e';
+    st.fillText(bridgeDbg.slice(0, 105), 14, 256);
+    let exts = '';
+    try {
+      const canvas2 = document.getElementById('cube-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 282);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 304);
+  }
+  renderStatus();
+  // Re-paint the status canvas continuously so the live axes row
+  // tracks what the user is doing on the stick. Lightweight (just text
+  // draws on a small 2d canvas).
+  setInterval(renderStatus, 200);
+</script>
+
+<p class="note">Left stick orbits the camera. Upstream's
+<code>controls.minPolarAngle=&pi;/4</code> /
+<code>maxPolarAngle=&pi;/1.5</code> keep the camera off the poles;
+<code>enableZoom</code> and <code>enablePan</code> are disabled so the
+camera distance stays fixed at <code>13</code>. The
+<code>Stats</code> addon (FPS counter) is dropped &mdash; nx.js has no
+DOM, and the status canvas above already surfaces FPS plus richer
+diagnostics. <code>CubeTextureLoader</code> is replaced by manual
+<code>Image</code> + <code>CubeTexture.images[]</code> assignment for the
+same reason the OBJ port replaced <code>TextureLoader</code>: nx.js's
+<code>Image</code> bypasses the global <code>fetch</code>, so URLs must
+be <code>sdmc:/</code> rather than <code>brewser://</code>
+(see <code>nxjs-image-bypasses-global-fetch</code> memory).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

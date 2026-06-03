@@ -5,22 +5,23 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, loadApps, loadConfig, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
+import { type AppEntry, loadApps, loadConfig, loadFeatured, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
 
 /**
  * Serves the browser's built-in pages.
  *
- * All `browser://` pages live on disk under the profile directory and
+ * All `brewser://` pages live on disk under the profile directory and
  * the loader reads them on demand — see `BrowserProfile.seedBuiltinPages()`
  * for how they get there.
  *
  * Two URL shapes are recognised:
- *   - Directory / page URLs: `browser://X/Y/` → tries
+ *   - Directory / page URLs: `brewser://X/Y/` → tries
  *     `pages/X/Y.html` first, then `pages/X/Y/index.html`. Content-type
  *     is always `text/html`. Custom tags (`<browser-bookmarks>`,
- *     `<browser-history>`, `<browser-templates>`) are expanded
+ *     `<browser-history>`, `<browser-templates>`, `<browser-apps>`,
+ *     `<browser-featured>`, `<browser-search>`) are expanded
  *     server-side before the response is returned.
- *   - Static asset URLs: `browser://X/Y/assets/main.js` →
+ *   - Static asset URLs: `brewser://X/Y/assets/main.js` →
  *     `pages/X/Y/assets/main.js` with a MIME type derived from the
  *     extension. Used by demo pages that ship their own JS / CSS /
  *     image assets alongside an `index.html`.
@@ -29,14 +30,17 @@ import { type AppEntry, loadApps, loadConfig, loadTemplateRegistry, resolveSearc
  * with the dot only allowed in the static-asset filename position, so
  * a malformed URL can't escape the profile dir.
  *
- * After reading an HTML file the loader scans for three custom tags
- * and substitutes a rendered list:
+ * After reading an HTML file the loader scans for custom tags and
+ * substitutes a rendered list / form:
  *   `<browser-bookmarks limit="N">` → most-recently-added bookmarks
  *   `<browser-history   limit="N">` → most-recent visits
  *   `<browser-templates>`           → entries from `templates.json`
+ *   `<browser-apps>`                → cards from `apps.json` (full catalog)
+ *   `<browser-featured>`            → cards from `featured.json` (curated subset)
+ *   `<browser-search>`              → search bar for the active engine
  * Substitution is a plain text replace, so authors can place the tags
  * anywhere in the document, wrap them in containers, or restyle the
- * resulting `<ul class="settings-list">` via the page's own CSS.
+ * resulting markup via the page's own CSS.
  */
 
 const decoder = new TextDecoder();
@@ -74,24 +78,42 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 };
 
 export interface BrowserResourceLoaderOptions {
-	profileRoot: string;
+	/** Per-profile root for `pages/` lookups. */
+	storageRoot: string;
+	/** App-level root for `loadApps` / `loadConfig` / `loadSearchEngines` / `loadTemplateRegistry`. */
+	appRoot: string;
 	bookmarksStore: BookmarksStore;
 	historyStore: HistoryStore;
 }
 
 export class BrowserResourceLoader implements ResourceLoader {
-	private readonly profileRoot: string;
+	private readonly storageRoot: string;
+	private readonly appRoot: string;
 	private readonly bookmarksStore: BookmarksStore;
 	private readonly historyStore: HistoryStore;
 
 	constructor(options: BrowserResourceLoaderOptions) {
-		this.profileRoot = options.profileRoot;
+		this.storageRoot = options.storageRoot;
+		this.appRoot = options.appRoot;
 		this.bookmarksStore = options.bookmarksStore;
 		this.historyStore = options.historyStore;
 	}
 
 	canLoad(request: ResourceRequest): boolean {
-		return request.url.startsWith('browser://');
+		return request.url.startsWith('brewser://');
+	}
+
+	/** Decide whether a `brewser://`-derived `<rel>` reads from the
+	 * app-level `apps/` tree (shared across profiles), the app-level
+	 * `dev/` tree (HTML/CSS/canvas/WebGL test fixtures + Khronos
+	 * conformance corpus), or the per-profile flat content root. The
+	 * `apps.html` launcher does NOT start with `apps/`, so it correctly
+	 * stays at `<storageRoot>apps.html`; `apps/<rest>` and `dev/<rest>`
+	 * (where `<rest>` is non-empty) go to the app root. */
+	private resolveContentPath(rel: string): string {
+		if (rel.startsWith('apps/')) return `${this.appRoot}${rel}`;
+		if (rel.startsWith('dev/')) return `${this.appRoot}${rel}`;
+		return `${this.storageRoot}${rel}`;
 	}
 
 	async load(request: ResourceRequest): Promise<Response> {
@@ -100,7 +122,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 
 		if (classification?.kind === 'static') {
 			try {
-				const data = Switch.readFileSync(`${this.profileRoot}pages/${classification.relPath}`);
+				const data = Switch.readFileSync(this.resolveContentPath(classification.relPath));
 				if (data) {
 					const body = classification.binary
 						? data
@@ -122,7 +144,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			// else.
 			for (const filename of classification.candidates) {
 				try {
-					const data = Switch.readFileSync(`${this.profileRoot}pages/${filename}`);
+					const data = Switch.readFileSync(this.resolveContentPath(filename));
 					if (data) {
 						const html = this.expandCustomTags(decoder.decode(data));
 						return new Response(html, {
@@ -139,7 +161,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			}
 		}
 
-		console.debug(`[switch-web-browser] unknown browser:// page: ${request.url}`);
+		console.debug(`[switch-web-browser] unknown brewser:// page: ${request.url}`);
 		return notFoundResponse(request.url);
 	}
 
@@ -169,6 +191,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-apps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-apps\s*>)?/gi,
 			() => this.renderApps(),
 		);
+		out = out.replace(
+			/<browser-featured(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-featured\s*>)?/gi,
+			() => this.renderFeatured(),
+		);
 		return out;
 	}
 
@@ -178,11 +204,23 @@ export class BrowserResourceLoader implements ResourceLoader {
 	 * markup, mirroring `renderBookmarks`. Empty / missing catalog →
 	 * an empty-state `<p>`. */
 	private renderApps(): string {
-		const apps = loadApps(this.profileRoot);
+		const apps = loadApps(this.appRoot);
 		if (apps.length === 0) {
 			return '<p class="empty">No apps installed yet. Add entries to <code>apps.json</code>.</p>';
 		}
 		return renderAppCards(apps);
+	}
+
+	/** Render the welcome-page "Featured Apps" grid from `featured.json`.
+	 * Reuses the same `.app-card` markup as `renderApps`, so the welcome
+	 * page just needs `apps.html`-style CSS for the grid + card. Empty /
+	 * missing catalog → an empty-state `<p>`. */
+	private renderFeatured(): string {
+		const featured = loadFeatured(this.appRoot);
+		if (featured.length === 0) {
+			return '<p class="empty">No featured apps yet. Add entries to <code>featured.json</code>.</p>';
+		}
+		return renderAppCards(featured);
 	}
 
 	/** Render the welcome-page search bar for the active engine (per
@@ -191,7 +229,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 	 * `data-action="search"` so a tap opens the keyboard and routes the
 	 * query to the engine (the shell's `search` button-action). */
 	private renderSearch(): string {
-		const engine = resolveSearchEngine(this.profileRoot);
+		const engine = resolveSearchEngine(this.appRoot);
 		// `logo` is a ready-to-use relative path (e.g.
 		// `../pages/assets/google_logo.png`) — used verbatim as the img src.
 		const logo = htmlEscape(engine.logo);
@@ -223,25 +261,28 @@ export class BrowserResourceLoader implements ResourceLoader {
 		return renderList(list);
 	}
 
-	/** Render the templates registry. The currently-selected template
-	 * (per `config.json`) is a plain styled button with no
-	 * `data-action`, so taps don't fire — visually distinct via the
-	 * `.active` CSS class. Every other row is a clickable
+	/** Render the templates registry as radio-style rows. Each row is
+	 * a `<button>` with a circle indicator on the left + the
+	 * title/path label on the right. The currently-selected template
+	 * (per `config.json`) carries `.active` (filled inner dot) and has
+	 * no `data-action`, so taps don't fire. Every other row carries
 	 * `<button data-action="select-template:<path>">` whose tap the
 	 * shell intercepts to rewrite `config.json` and reload. */
 	private renderTemplates(): string {
-		const entries = loadTemplateRegistry(this.profileRoot);
+		const entries = loadTemplateRegistry(this.appRoot);
 		if (entries.length === 0) {
 			return '<p class="empty">No templates registered. Edit <code>templates.json</code> to add one.</p>';
 		}
-		const config = loadConfig(this.profileRoot);
+		const config = loadConfig(this.appRoot);
+		const indicator = '<span class="radio-indicator"><span class="radio-dot"></span></span>';
 		return entries.map((e) => {
 			const title = htmlEscape(e.title);
 			const path = htmlEscape(e.path);
+			const label = `<span class="template-label">${title} · <span class="path">${path}</span></span>`;
 			if (e.path === config.template) {
-				return `<button class="template-row active">${title} · <span class="path">${path}</span> · <em>active</em></button>`;
+				return `<button class="template-row active" type="button">${indicator}${label}</button>`;
 			}
-			return `<button class="template-row" data-action="select-template:${path}">${title} · <span class="path">${path}</span></button>`;
+			return `<button class="template-row" type="button" data-action="select-template:${path}">${indicator}${label}</button>`;
 		}).join('');
 	}
 }
@@ -272,13 +313,13 @@ type UrlClassification =
 	| { kind: 'static'; relPath: string; mime: string; binary: boolean }
 	| { kind: 'html'; candidates: readonly string[] };
 
-/** Classify a canonical `browser://...` URL into either a static-asset
+/** Classify a canonical `brewser://...` URL into either a static-asset
  * lookup or an HTML page lookup, validating each path segment against
  * `DIR_SEGMENT` / `FILE_SEGMENT` to keep callers from escaping the
  * profile dir via `../` or other weirdness. Returns `null` if the URL
  * shape doesn't match either route. */
 function classifyUrl(canonical: string): UrlClassification | null {
-	const stripped = canonical.replace(/^browser:\/\//, '').replace(/\/+$/, '');
+	const stripped = canonical.replace(/^brewser:\/\//, '').replace(/\/+$/, '');
 	if (!stripped) return null;
 
 	const segments = stripped.split('/');
@@ -314,7 +355,9 @@ function parseLimit(attrs: string | undefined): number | null {
 	return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** `format="cards"` renders the welcome-page `.quick-card` design;
+/** `format="cards"` renders the legacy home-page `.quick-card` design
+ * (the styling was last present on the old welcome.html quick-links
+ * grid before the 2026-06-02 Featured Apps refactor removed it);
  * anything else (default) renders the settings `<ul>` list. */
 function parseFormat(attrs: string | undefined): 'list' | 'cards' {
 	if (!attrs) return 'list';
@@ -322,10 +365,12 @@ function parseFormat(attrs: string | undefined): 'list' | 'cards' {
 	return m && m[1].toLowerCase() === 'cards' ? 'cards' : 'list';
 }
 
-/** Render bookmarks as welcome-page cards: an `<a class="quick-card">`
- * with the title in `<strong>` and the description in `<span>`. The
- * `.quick-card` styling + the `::after` arrow live in welcome.html's
- * stylesheet, so this only emits the structural markup. */
+/** Render bookmarks as legacy `.quick-card` anchors (title in
+ * `<strong>`, description in `<span>`). The styling has been removed
+ * from the home page (formerly welcome.html); this function survives
+ * for any future page that opts back in via
+ * `<browser-bookmarks format="cards">` and ships its own `.quick-card`
+ * CSS. */
 function renderBookmarkCards(
 	entries: ReadonlyArray<{ url: string; title?: string; description?: string }>,
 ): string {
@@ -342,7 +387,7 @@ function renderBookmarkCards(
  * so this only emits structural markup (mirrors `renderBookmarkCards`).
  * The `logo` path is used verbatim as the img src (resolved like the
  * welcome page's relative asset paths); `url` is rewritten to an
- * absolute `browser://` link the resource loader can serve. */
+ * absolute `brewser://` link the resource loader can serve. */
 function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 	return entries.map((e) => {
 		const href = htmlEscape(appUrlToBrowserHref(e.url));
@@ -358,15 +403,15 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
  * authored relative to the profile's `pages/` dir (`../pages/<rest>`),
  * matching how the welcome page references its assets. Navigation goes
  * through `globalThis.fetch`, which has no base-URL resolution and only
- * `browser://` loaders registered (local fetch is disabled), so a bare
+ * `brewser://` loaders registered (local fetch is disabled), so a bare
  * relative path would 404 to the error page. Strip the leading
  * `../`/`./` and the `pages/` prefix and re-express the remainder as a
- * `browser://` URL, which `BrowserResourceLoader` maps back to
+ * `brewser://` URL, which `BrowserResourceLoader` maps back to
  * `<profile>/pages/<rest>`. Already-absolute URLs pass through. */
 function appUrlToBrowserHref(url: string): string {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
 	const rel = url.replace(/^(?:\.\.?\/)+/, '').replace(/^pages\//, '');
-	return `browser://${rel}`;
+	return `brewser://${rel}`;
 }
 
 function renderList(entries: ReadonlyArray<{ url: string; title?: string; description?: string }>): string {

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r184 &mdash; WebGL 2 Volume Render (3D Texture)</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r184 &mdash; WebGL 2 Volume Render (3D Texture)</h1>
+<p class="lead">Port of <code>webgl_texture3d.html</code> from
+<strong>Three.js r184</strong> (first r184 demo in this suite). A
+<code>Data3DTexture</code> with <code>RedFormat</code> +
+<code>FloatType</code> (R32F) holds the volumetric data from
+<code>stent.nrrd</code> (881 KB, medical imaging "stent" scan). A
+<code>ShaderMaterial</code> raymarches through the box mesh via
+<code>sampler3D</code>, mapping density to color via a 1D colormap
+texture. Left stick orbits the camera.
+<strong>A</strong> cycles render style (MIP &harr; ISO);
+<strong>X</strong> cycles colormap (viridis &harr; gray).</p>
+
+<div class="stage">
+  <canvas id="t3d-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('t3d-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/r184-nxjs-bridge.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/three-latest.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/nrrd-loader.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/orbit-controls.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="t3d-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('t3d-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 360, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasR184 = typeof globalThis.__THREE_R184_STAGED__ !== 'undefined';
+    const hasR162 = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE loaded version:',
+        String(globalThis.__t3dThreeVer || (hasR184 ? 'r184' : hasR162 ? 'r162' : 'none')),
+        (hasR184 || hasR162));
+    const hasNrrd = typeof globalThis.SwitchNRRDLoader !== 'undefined';
+    row(36, 'NRRDLoader loaded:', hasNrrd ? 'yes' : 'no', hasNrrd);
+    const hasShader = typeof globalThis.SwitchVolumeShader !== 'undefined';
+    row(58, 'VolumeShader loaded:', hasShader ? 'yes' : 'no', hasShader);
+    row(80, 'WebGL2 context acquired:',
+        globalThis.__t3dIsWebGL2 ? 'yes' : 'no',
+        !!globalThis.__t3dIsWebGL2);
+    row(102, 'renderer.capabilities.isWebGL2:',
+        String(globalThis.__t3dCapWebGL2),
+        globalThis.__t3dCapWebGL2 === true);
+    row(124, 'NRRD loaded:',
+        globalThis.__t3dNrrdLoaded ? 'yes' : 'no',
+        !!globalThis.__t3dNrrdLoaded);
+    row(146, 'NRRD step:',
+        String(globalThis.__t3dNrrdStep || '(not started)'),
+        true);
+    row(168, 'colormap loaded:',
+        globalThis.__t3dColormapLoaded ? 'yes' : 'no',
+        !!globalThis.__t3dColormapLoaded);
+    const gErr = globalThis.__t3dError;
+    st.fillStyle = '#9bb1d6';
+    st.fillText('demo error:', 14, 168);
+    st.fillStyle = gErr ? '#ff8a6c' : '#7eda9f';
+    const errText = gErr ? String(gErr) : '(none)';
+    const maxPerLine = 80;
+    for (let i = 0, y = 168; i < errText.length && y < 250; i += maxPerLine, y += 16) {
+      st.fillText(errText.slice(i, i + maxPerLine), i === 0 ? 360 : 14, y);
+    }
+    row(232, 'renderstyle / colormap:',
+        String(globalThis.__t3dRenderstyle || '?') + ' / ' +
+        String(globalThis.__t3dColormap || '?'),
+        true);
+    const fps = +globalThis.__t3dFps || 0;
+    row(254, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(276, 'render count:',
+        String(globalThis.__t3dRenderCount | 0), true);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/textures-webgl2-texture3d.html"><code>textures/webgl2-texture3d</code></a>
+&mdash; pins the 3D texture surface this milestone exercises:
+<code>bindTexture(TEXTURE_3D)</code>, <code>texImage3D</code> with
+RGBA8 and R32F (RedFormat + FloatType) format/type combos,
+<code>texParameteri(TEXTURE_3D, ...)</code>, full passthrough draw
+sampling a 2&times;2&times;2 R32F 3D texture via
+<code>sampler3D</code> + <code>texture(u_data, vec3 uv)</code> +
+<code>readPixels</code> verifying the sampled values.</p>
+
+<p class="note">First r184 demo in this suite &mdash; loads via
+<code>libs/three-latest.iife.js</code> instead of the r162 IIFE.
+NRRDLoader + VolumeRenderShader1 bundled as
+<code>libs/nrrd-loader.iife.js</code> (~653 KB; includes its own
+copy of the THREE classes it needs internally). The shader uses
+<code>precision mediump sampler3D; uniform sampler3D u_data;</code>
+&mdash; GLES 3.00 syntax. Runs natively on Tegra GLES3 via the
+<a href="reference_bridge_raw_shader_passthrough.md">raw-shader
+passthrough</a> path (Three.js auto-emits <code>#define SHADER_NAME</code>
+for ShaderMaterial which triggers the auto-promote). The volume
+ranges from 0 (transparent) to 1 (opaque); MIP mode shows the
+maximum intensity along each ray, ISO mode shows the first surface
+where density crosses the threshold.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to WebGL Experiments</a></p>
+</body>
+</html>

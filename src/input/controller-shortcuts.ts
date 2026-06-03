@@ -192,7 +192,7 @@ export function setChromeRegion(y0: number, y1: number): void {
 
 /** Whether the star (bookmark) button is currently shown + tappable.
  * The shell sets this false on non-bookmarkable pages (local
- * `browser://`); a tap in the star's x-slot then falls through to the
+ * `brewser://`); a tap in the star's x-slot then falls through to the
  * address-bar branch, matching the UI where the URL reclaims that slot. */
 let starEnabled = true;
 export function setStarEnabled(enabled: boolean): void {
@@ -656,7 +656,7 @@ export function installCanvasTouch(): void {
 				pushInput({ kind: 'home' });
 			} else if (starEnabled && x >= CHROME_LAYOUT.starX && x < starEnd) {
 				// Star tap only when the button is shown (bookmarkable
-				// http/https page). On local browser:// pages the star is
+				// http/https page). On local brewser:// pages the star is
 				// hidden and the URL occupies its slot, so the tap falls
 				// through to the address-bar branch below.
 				pushInput({ kind: 'star' });
@@ -895,7 +895,7 @@ export function installCanvasTouch(): void {
 	});
 }
 
-const _TOUCH_DIAG_PATH = 'sdmc:/switch/webprofiles/default/logs/shell-nav-diag.log';
+const _TOUCH_DIAG_PATH = 'sdmc:/switch/brewser/logs/shell-nav-diag.log';
 const _touchDiagStart = Date.now();
 function _touchDiag(label: string): void {
 	try {

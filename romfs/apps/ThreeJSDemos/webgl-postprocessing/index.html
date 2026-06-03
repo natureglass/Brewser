@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Post-Processing</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Post-Processing</h1>
+<p class="lead">Port of <code>webgl_postprocessing.html</code>: 100
+flat-shaded white spheres tumbling on a black-fog backdrop, run through
+an <code>EffectComposer</code> chain of
+<code>RenderPass</code> → <code>DotScreenShader</code> →
+<code>RGBShiftShader</code> → <code>OutputPass</code>. First milestone to
+exercise nx.js's new <strong>WebGLRenderTarget / FBO support</strong> —
+each intermediate pass renders into a real native GLES framebuffer and
+the next pass samples its color texture. The post-process shaders run
+end-to-end on native GLES via the
+<code>#pragma raw_passthrough</code> opt-in
+(<code>bridge-raw-shader-passthrough</code>). Two pre-authorized
+deviations: (1) the pragma is injected into the four stock post-process
+shaders at script-load time by the
+<code>libs/effect-composer.js</code> bundle; (2) intermediate
+RenderTargets default to UByte storage instead of upstream's
+<code>HalfFloatType</code> (no half-float color-buffer exposure yet on
+the bridge).</p>
+
+<div class="stage">
+  <canvas id="pp-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('pp-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/effect-composer.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="pp-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('pp-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const hasComp = typeof globalThis.SwitchEffectComposer !== 'undefined';
+    row(36, 'SwitchEffectComposer loaded:', hasComp ? 'yes' : 'no', hasComp);
+    const gErr = globalThis.__ppError;
+    row(58, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    row(80, 'passes in chain:', String(globalThis.__ppPassCount | 0),
+        (globalThis.__ppPassCount | 0) >= 4);
+    row(102, 'FBO status:',
+        String(globalThis.__ppFboStatus || '(pending)'),
+        String(globalThis.__ppFboStatus || '').indexOf('COMPLETE') === 0);
+    row(124, 'animate() called:',
+        globalThis.__ppAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__ppAnimateCalled);
+    const fps = +globalThis.__ppFps || 0;
+    row(146, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(168, 'renders / frames:',
+        String(globalThis.__ppRenderCount | 0) + ' / ' +
+        String(globalThis.__ppFrameCount | 0),
+        true);
+    let bridgeDbg = '';
+    try {
+      const canvas2 = document.getElementById('pp-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getBackendInfo === 'function') {
+        const info = ctx2.getBackendInfo();
+        bridgeDbg = (info && info.debugDispatchState) ? String(info.debugDispatchState) : '(empty)';
+      } else {
+        bridgeDbg = '(no getBackendInfo)';
+      }
+    } catch (e) { bridgeDbg = 'err: ' + String(e); }
+    st.fillStyle = '#9bb1d6';
+    st.fillText('bridge dbg:', 14, 200);
+    st.fillStyle = '#ffd35e';
+    st.fillText(bridgeDbg.slice(0, 105), 14, 222);
+    let exts = '';
+    try {
+      const canvas2 = document.getElementById('pp-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 250);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 272);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/renderbuffers-framebuffer-object-attachment.html"><code>renderbuffers/framebuffer-object-attachment</code></a>
+&mdash; port of the Khronos FBO conformance test that drives every
+combination of <code>framebufferTexture2D</code> + <code>framebufferRenderbuffer</code>
++ <code>checkFramebufferStatus</code> and validates error returns for
+invalid attachment targets / formats / dimensions.</p>
+
+<p class="note">No interactive controls — pure animation. The
+<code>EffectComposer</code> chain ping-pongs between two
+<code>WebGLRenderTarget</code>s (rt1 ↔ rt2), each a 640×360 RGBA8
+texture + DEPTH_COMPONENT16 renderbuffer. <code>RenderPass</code> writes
+the scene into <code>readBuffer</code>, the two
+<code>ShaderPass</code>es read from there and write to
+<code>writeBuffer</code> (swapping each time), and the final
+<code>OutputPass</code> with <code>renderToScreen = true</code> binds
+<code>null</code> and composites to the bridge FBO — which then flows
+through the standard <code>flush_bridge_present</code> readback path to
+the screen canvas. Watch the status canvas's "FBO status" row for the
+<code>COMPLETE</code> verification, and "bridge dbg" for the per-draw
+dispatch tag stream (you'll see <code>T+N</code> for the scene's textured
+triangles routing into the user FBO, then <code>P+N</code> tags for the
+passthrough shader-pass draws).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

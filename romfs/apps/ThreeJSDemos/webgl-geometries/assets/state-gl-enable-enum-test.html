@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: state/gl-enable-enum-test</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>state/gl-enable-enum-test</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/state/gl-enable-enum-test.html</code>.
+Validates <code>gl.enable</code> / <code>gl.disable</code> /
+<code>gl.isEnabled</code> / <code>gl.getParameter</code> for capability
+enums: valid ES 2.0 caps must succeed; desktop-GL-only caps must
+return <code>INVALID_ENUM</code>. Milestone&nbsp;#11 surface: the
+geometries demo exercises BLEND, CULL_FACE, DEPTH_TEST, SCISSOR_TEST
+heavily (12 lit textured meshes per frame, each touching state
+caches in Three.js's WebGLState). This test pins the validation gate
+and round-trip state machinery.</p>
+
+<canvas id="example" width="50" height="50"></canvas>
+
+<canvas id="khronos-status" width="900" height="900"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'state-gl-enable-enum-test';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+
+  // Desktop-GL-only enums inlined from WebGL/sdk/tests/js/desktop-gl-constants.js.
+  // WebGL contexts must reject these via INVALID_ENUM since they don't exist
+  // in OpenGL ES 2.0. Picked only the values the upstream test uses; the
+  // numeric codes are stable across GL spec versions.
+  const desktopGL = {
+    ALPHA_TEST: 0x0BC0,
+    AUTO_NORMAL: 0x0D80,
+    CLIP_PLANE0: 0x3000,
+    CLIP_PLANE1: 0x3001,
+    COLOR_LOGIC_OP: 0x0BF2,
+    COLOR_MATERIAL: 0x0B57,
+    COLOR_SUM: 0x8458,
+    COLOR_TABLE: 0x80D0,
+    FOG: 0x0B60,
+    HISTOGRAM: 0x8024,
+    INDEX_LOGIC_OP: 0x0BF1,
+    LIGHT0: 0x4000,
+    LIGHT1: 0x4001,
+    LIGHTING: 0x0B50,
+    LINE_SMOOTH: 0x0B20,
+    LINE_STIPPLE: 0x0B24,
+    MAP1_COLOR_4: 0x0D90,
+    MAP1_INDEX: 0x0D91,
+    MAP1_NORMAL: 0x0D92,
+    MAP1_TEXTURE_COORD_1: 0x0D93,
+    MAP1_TEXTURE_COORD_2: 0x0D94,
+    MAP1_TEXTURE_COORD_3: 0x0D95,
+    MAP1_TEXTURE_COORD_4: 0x0D96,
+    MAP1_VERTEX_3: 0x0D97,
+    MAP1_VERTEX_4: 0x0D98,
+    MAP2_COLOR_4: 0x0DB0,
+    MAP2_INDEX: 0x0DB1,
+    MAP2_NORMAL: 0x0DB2,
+    MAP2_TEXTURE_COORD_1: 0x0DB3,
+    MAP2_TEXTURE_COORD_2: 0x0DB4,
+    MAP2_TEXTURE_COORD_3: 0x0DB5,
+    MAP2_TEXTURE_COORD_4: 0x0DB6,
+    MAP2_VERTEX_3: 0x0DB7,
+    MAP2_VERTEX_4: 0x0DB8,
+    MINMAX: 0x802E,
+    MULTISAMPLE: 0x809D,
+    NORMALIZE: 0x0BA1,
+    POINT_SMOOTH: 0x0B10,
+    POINT_SPRITE: 0x8861,
+    POLYGON_OFFSET_LINE: 0x2A02,
+    POLYGON_OFFSET_POINT: 0x2A01,
+    POLYGON_SMOOTH: 0x0B41,
+    POLYGON_STIPPLE: 0x0B42,
+    POST_COLOR_MATRIX_COLOR_TABLE: 0x80D2,
+    POST_CONVOLUTION_COLOR_TABLE: 0x80D1,
+    RESCALE_NORMAL: 0x803A,
+    SAMPLE_ALPHA_TO_ONE: 0x809F,
+    TEXTURE_1D: 0x0DE0,
+    TEXTURE_2D: 0x0DE1,
+    TEXTURE_3D: 0x806F,
+    TEXTURE_CUBE_MAP: 0x8513,
+    TEXTURE_GEN_Q: 0x0C63,
+    TEXTURE_GEN_R: 0x0C62,
+    TEXTURE_GEN_S: 0x0C60,
+    TEXTURE_GEN_T: 0x0C61,
+    VERTEX_PROGRAM_POINT_SIZE: 0x8642,
+    VERTEX_PROGRAM_TWO_SIDE: 0x8643,
+  };
+
+  // ES 2.0 capability enums — all must be accepted, round-trip cleanly
+  // through enable/disable/isEnabled/getParameter, never set an error.
+  const validEnums = [
+    'BLEND',
+    'CULL_FACE',
+    'DEPTH_TEST',
+    'DITHER',
+    'POLYGON_OFFSET_FILL',
+    'SAMPLE_ALPHA_TO_COVERAGE',
+    'SAMPLE_COVERAGE',
+    'SCISSOR_TEST',
+    'STENCIL_TEST',
+  ];
+
+  try {
+    description('Test gl.enable / gl.disable enum acceptance');
+
+    const wtu = WebGLTestUtils;
+    const gl = wtu.create3DContext('example');
+    if (!gl) {
+      testFailed('WebGL context does not exist');
+    } else {
+      testPassed('WebGL context exists');
+
+      // Drain any stale chrome-state error.
+      gl.getError();
+
+      // --- Negative tests: invalid enums must return INVALID_ENUM ---
+      debug('');
+      debug('Negative tests: desktop-GL-only enums must INVALID_ENUM');
+      for (const name of Object.keys(desktopGL)) {
+        gl.enable(desktopGL[name]);
+        wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+          'gl.enable(GL_' + name + ') should generate INVALID_ENUM');
+      }
+
+      // --- Positive tests: ES 2.0 caps enable/disable + round-trip ---
+      // Upstream runs this 5 times with different context attributes
+      // (alpha/antialias/stencil/depth on/off). On nx.js the shared
+      // screen GL context is acquired once and getContext returns the
+      // SAME context regardless of attribute params, so we only run
+      // the positive suite once. The validation surface (the enum
+      // gate in gl.enable + the cap-to-flag mapping in gl.isEnabled /
+      // gl.getParameter) is config-independent anyway.
+      debug('');
+      debug('Positive tests: ES 2.0 caps');
+      for (const name of validEnums) {
+        const cap = gl[name];
+        assertMsg(cap !== undefined,
+          'gl.' + name + ' is defined (got ' + cap + ')');
+
+        gl.enable(cap);
+        wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+          'gl.enable(gl.' + name + ') should succeed');
+        assertMsg(gl.isEnabled(cap) === true,
+          'gl.isEnabled(gl.' + name + ') should be true after enable');
+        assertMsg(gl.getParameter(cap) === true,
+          'gl.getParameter(gl.' + name + ') should be true after enable');
+
+        gl.disable(cap);
+        wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+          'gl.disable(gl.' + name + ') should succeed');
+        assertMsg(gl.isEnabled(cap) === false,
+          'gl.isEnabled(gl.' + name + ') should be false after disable');
+        assertMsg(gl.getParameter(cap) === false,
+          'gl.getParameter(gl.' + name + ') should be false after disable');
+      }
+
+      wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'there should be no GL errors at end');
+    }
+
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-geometries/">back to Geometries demo</a></p>
+</body>
+</html>

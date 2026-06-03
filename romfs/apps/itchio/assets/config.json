@@ -1,0 +1,9 @@
+{
+  "_comment": "switch-web-browser itch.io app config. SD-editable at sdmc:/switch/brewser/apps/itchio/assets/config.json without rebuilding the .nro.",
+
+  "_feed_comment": "Initial feed shown at boot. Accepted: 'newest' or 'top'. Tap the sidebar pills to switch at runtime.",
+  "feed": "newest",
+
+  "_testGameUrl_comment": "Slice-3 hardcoded launch target. Tapping Play on ANY card navigates here for now (per-card extraction is a later slice). Defaults to Wave Dodger (Unity WebGL build) since Unity surfaces the most engine gaps; swap to a lighter title like a PICO-8 cart to test other runtimes.",
+  "testGameUrl": "https://html-classic.itch.zone/html/17770195/web/index.html?v=1780340301"
+}

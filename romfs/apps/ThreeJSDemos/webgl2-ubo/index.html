@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r184 &mdash; WebGL 2 Uniform Buffer Objects</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r184 &mdash; WebGL 2 Uniform Buffer Objects</h1>
+<p class="lead">1:1 port of <code>webgl_ubo.html</code> from
+<a href="https://threejs.org">three.js</a> latest (r184): 200
+alternating tetrahedrons + textured cubes, each with its own
+<code>RawShaderMaterial({glslVersion:GLSL3})</code> clone sharing
+<strong>two <code>UniformsGroup</code> buffers</strong>
+(<code>ViewData</code>: projection + view matrices;
+<code>LightingData</code>: Phong parameters). All 200 materials write
+through ONE UBO per group via <code>gl.bindBufferBase</code> &mdash;
+uploaded once per frame, sampled by every program.</p>
+
+<div class="stage">
+  <canvas id="ubo-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('ubo-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<!-- Shader sources mirrored 1:1 from three-latest/examples/webgl_ubo.html -->
+<script id="vertexShader1" type="x-shader/x-vertex">
+
+	uniform ViewData {
+		mat4 projectionMatrix;
+		mat4 viewMatrix;
+	};
+
+	uniform mat4 modelMatrix;
+	uniform mat3 normalMatrix;
+
+	in vec3 position;
+	in vec3 normal;
+
+	out vec3 vPositionEye;
+	out vec3 vNormalEye;
+
+	void main()	{
+
+		vec4 vertexPositionEye = viewMatrix * modelMatrix * vec4( position, 1.0 );
+
+		vPositionEye = vertexPositionEye.xyz;
+		vNormalEye = normalMatrix * normal;
+
+		gl_Position = projectionMatrix * vertexPositionEye;
+
+	}
+
+</script>
+
+<script id="fragmentShader1" type="x-shader/x-fragment">
+
+	precision highp float;
+
+	vec4 LinearTosRGB( in vec4 value ) {
+		return vec4( mix( pow( value.rgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), value.rgb * 12.92, vec3( lessThanEqual( value.rgb, vec3( 0.0031308 ) ) ) ), value.a );
+	}
+
+	uniform LightingData {
+		vec3 position;
+		vec3 ambientColor;
+		vec3 diffuseColor;
+		vec3 specularColor;
+		float shininess;
+	} Light;
+
+	uniform vec3 color;
+
+	in vec3 vPositionEye;
+	in vec3 vNormalEye;
+
+	out vec4 fragColor;
+
+	void main()	{
+
+		// a very basic lighting equation (Phong reflection model) for testing
+
+		vec3 l = normalize( Light.position - vPositionEye );
+		vec3 n = normalize( vNormalEye );
+		vec3 e = - normalize( vPositionEye );
+		vec3 r = normalize( reflect( - l, n ) );
+
+		float diffuseLightWeighting = max( dot( n, l ), 0.0 );
+		float specularLightWeighting = max( dot( r, e ), 0.0 );
+
+		specularLightWeighting = pow( specularLightWeighting, Light.shininess );
+
+		vec3 lightWeighting = Light.ambientColor +
+			Light.diffuseColor * diffuseLightWeighting +
+			Light.specularColor * specularLightWeighting;
+
+		fragColor = vec4( color.rgb * lightWeighting.rgb, 1.0 );
+
+		fragColor = LinearTosRGB( fragColor );
+
+	}
+
+</script>
+
+<script id="vertexShader2" type="x-shader/x-vertex">
+
+	layout(std140) uniform ViewData {
+		mat4 projectionMatrix;
+		mat4 viewMatrix;
+	};
+
+	uniform mat4 modelMatrix;
+	uniform mat3 normalMatrix;
+
+	in vec3 position;
+	in vec3 normal;
+	in vec2 uv;
+
+	out vec3 vPositionEye;
+	out vec3 vNormalEye;
+	out vec2 vUv;
+
+	void main()	{
+
+		vec4 vertexPositionEye = viewMatrix * modelMatrix * vec4( position, 1.0 );
+
+		vPositionEye = vertexPositionEye.xyz;
+		vNormalEye = normalMatrix * normal;
+		vUv = uv;
+		gl_Position = projectionMatrix * vertexPositionEye;
+
+	}
+
+</script>
+
+<script id="fragmentShader2" type="x-shader/x-fragment">
+
+	precision highp float;
+
+	vec4 LinearTosRGB( in vec4 value ) {
+		return vec4( mix( pow( value.rgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), value.rgb * 12.92, vec3( lessThanEqual( value.rgb, vec3( 0.0031308 ) ) ) ), value.a );
+	}
+
+	uniform sampler2D diffuseMap;
+
+	in vec2 vUv;
+	in vec3 vPositionEye;
+	in vec3 vNormalEye;
+	out vec4 fragColor;
+
+	uniform LightingData {
+		vec3 position;
+		vec3 ambientColor;
+		vec3 diffuseColor;
+		vec3 specularColor;
+		float shininess;
+	} Light;
+
+	void main()	{
+
+
+		// a very basic lighting equation (Phong reflection model) for testing
+
+		vec3 l = normalize( Light.position - vPositionEye );
+		vec3 n = normalize( vNormalEye );
+		vec3 e = - normalize( vPositionEye );
+		vec3 r = normalize( reflect( - l, n ) );
+
+		float diffuseLightWeighting = max( dot( n, l ), 0.0 );
+		float specularLightWeighting = max( dot( r, e ), 0.0 );
+
+		specularLightWeighting = pow( specularLightWeighting, Light.shininess );
+
+		vec3 lightWeighting = Light.ambientColor +
+			Light.diffuseColor * diffuseLightWeighting +
+			Light.specularColor * specularLightWeighting;
+
+		fragColor = vec4( texture( diffuseMap, vUv ).rgb * lightWeighting.rgb, 1.0 );
+
+		fragColor = LinearTosRGB( fragColor );
+
+	}
+
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/r184-nxjs-bridge.js"></script>
+<script src="brewser://apps/ThreeJSDemos/libs/three-latest.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="ubo-status" width="900" height="280"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('ubo-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 360, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 280);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R184_STAGED__ !== 'undefined';
+    row(14, 'THREE r184 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    row(36, 'WebGL2 context acquired:',
+        globalThis.__uboIsWebGL2 ? 'yes' : 'no',
+        !!globalThis.__uboIsWebGL2);
+    row(58, 'renderer.capabilities.isWebGL2:',
+        String(globalThis.__uboCapWebGL2),
+        globalThis.__uboCapWebGL2 === true);
+    row(80, 'texture loaded:',
+        globalThis.__uboTextureLoaded ? 'yes' : 'no',
+        !!globalThis.__uboTextureLoaded);
+    const gErr = globalThis.__uboError;
+    st.fillStyle = '#9bb1d6';
+    st.fillText('demo error:', 14, 102);
+    st.fillStyle = gErr ? '#ff8a6c' : '#7eda9f';
+    const errText = gErr ? String(gErr) : '(none)';
+    const maxPerLine = 80;
+    for (let i = 0, y = 102; i < errText.length && y < 200; i += maxPerLine, y += 16) {
+      st.fillText(errText.slice(i, i + maxPerLine), i === 0 ? 360 : 14, y);
+    }
+    row(180, 'MAX_UNIFORM_BUFFER_BINDINGS:',
+        String(globalThis.__uboMaxBindings || '?'),
+        +globalThis.__uboMaxBindings >= 2);
+    row(202, 'animate() called:',
+        globalThis.__uboAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__uboAnimateCalled);
+    const fps = +globalThis.__uboFps || 0;
+    row(224, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 5);
+    row(246, 'render count:',
+        String(globalThis.__uboRenderCount | 0), true);
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/buffers-uniform-buffer-objects.html"><code>buffers/uniform-buffer-objects</code></a>
+&mdash; hand-rolled, pins the bridge surface this milestone widens:
+<code>bindBuffer</code>/<code>bufferData</code>/<code>bufferSubData</code>
+accepting all 6 WebGL 2 buffer targets, full UBO round-trip via
+<code>bindBufferBase</code> + <code>uniformBlockBinding</code>, plus an
+end-to-end passthrough draw that samples a UBO and verifies via
+<code>readPixels</code> that the value reached the shader.</p>
+
+<p class="note">Three.js's <code>WebGLUniformsGroups</code> binds each
+<code>UniformsGroup</code> via <code>gl.bindBuffer(UNIFORM_BUFFER, buffer)</code>,
+<code>gl.bufferData(UNIFORM_BUFFER, size, DYNAMIC_DRAW)</code>,
+<code>gl.bindBufferBase(UNIFORM_BUFFER, slot, buffer)</code>, then
+per-frame writes via <code>gl.bufferSubData(UNIFORM_BUFFER, offset, data)</code>.
+This milestone widens the bridge's buffer-target acceptance to the full
+WebGL 2 set and threads UBO indexed bindings through the passthrough
+dispatch path.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to WebGL Experiments</a></p>
+</body>
+</html>

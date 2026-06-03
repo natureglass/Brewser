@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — WebGL Layers</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+  kbd { background-color: #1a2840; padding: 1px 6px; border-radius: 3px;
+        font-family: monospace; color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — WebGL Layers</h1>
+<p class="lead">Port of <code>three-r162/examples/webgl_layers.html</code>:
+300 randomly-positioned <code>BoxGeometry</code> meshes split across three
+camera layers (red/green/blue), lit by a single <code>PointLight</code>
+attached to the orbiting camera. First milestone to exercise the bridge's
+point-light path (<code>a_viewPosition</code> +
+<code>u_pointLightPosition</code>/<code>u_pointLightColor</code> in
+<code>bridge_color_program</code>) with per-fragment light direction calc.</p>
+
+<p class="lead">Toggle layers with:
+<kbd>B</kbd> red ·
+<kbd>A</kbd> green ·
+<kbd>Y</kbd> blue ·
+<kbd>X</kbd> enable all
+(lil-gui replacement).</p>
+
+<div class="stage">
+  <canvas id="layers-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('layers-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="layers-status" width="900" height="360"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('layers-status').getContext('2d');
+  st.fillStyle = '#14202d';
+  st.fillRect(0, 0, 900, 360);
+  st.font = '14px system-ui';
+  st.textBaseline = 'top';
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+  row(14, 'globalThis.__THREE_R162_STAGED__:', hasThree ? 'OK (THREE loaded)' : 'undefined', hasThree);
+  const lc = document.getElementById('layers-canvas');
+  row(36, '#layers-canvas exists:', lc ? 'yes' : 'no', !!lc);
+  const hasRAF = typeof globalThis.requestAnimationFrame === 'function';
+  row(58, 'requestAnimationFrame:', hasRAF ? 'function' : 'missing', hasRAF);
+  const lErr = globalThis.__layersError;
+  row(80, 'layers error:', lErr ? String(lErr).slice(0, 80) : '(none recorded)', !lErr);
+  row(102, 'main.js started:',
+      globalThis.__layersMainStarted ? 'yes' : 'no',
+      !!globalThis.__layersMainStarted);
+  row(124, 'boxes created:',
+      String(globalThis.__layersBoxCount | 0),
+      (globalThis.__layersBoxCount | 0) === 300);
+  row(146, 'animate() called:',
+      globalThis.__layersAnimateCalled ? 'yes' : 'no',
+      !!globalThis.__layersAnimateCalled);
+  const mask = globalThis.__layersMask | 0;
+  const maskBits = (mask & 1 ? 'R' : '-') + (mask & 2 ? 'G' : '-') + (mask & 4 ? 'B' : '-');
+  row(168, 'camera layer mask (RGB):', maskBits, true);
+
+  if (lc) {
+    const lcCtx = lc.getContext('2d');
+    if (lcCtx) {
+      const samples = [
+        ['(10, 10) top-left:', 10, 10],
+        ['(320, 180) center:', 320, 180],
+        ['(620, 340) bot-right:', 620, 340],
+      ];
+      let py = 200;
+      for (const [label, sx, sy] of samples) {
+        let txt = '?';
+        try {
+          const px = lcCtx.getImageData(sx, sy, 1, 1).data;
+          txt = '[' + px[0] + ',' + px[1] + ',' + px[2] + ',' + px[3] + ']';
+        } catch (e) {
+          txt = 'getImageData threw: ' + ((e && e.message) || String(e));
+        }
+        row(py, label, txt, true);
+        py += 22;
+      }
+      const errBefore = globalThis.__layersGlErrorBefore;
+      const errAfter = globalThis.__layersGlErrorAfter;
+      row(py, 'gl.getError before render:', '0x' + (errBefore | 0).toString(16), errBefore === 0);
+      py += 22;
+      row(py, 'gl.getError after render:', '0x' + (errAfter | 0).toString(16), errAfter === 0);
+    }
+  }
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/programs-program-infolog.html"><code>programs/program-infolog</code></a>
+&mdash; verifies <code>getProgramInfoLog</code> doesn't return a literal
+<code>"\0"</code>. Layered scenes link multiple programs per render so
+correct info-log reporting matters when something goes wrong.</p>
+
+<p class="note">300 cubes scattered randomly in a ±20 world cube, split
+evenly across three layers (red / green / blue). The camera orbits at
+radius 5 around origin — so the camera passes through the scattered
+cubes. Press B/A/Y to toggle each color layer's visibility; press X to
+restore all three. The current camera layer mask is shown in the
+diagnostic above (R/G/B columns).</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

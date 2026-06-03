@@ -1,25 +1,25 @@
 [
   {
     "title": "Google",
-    "logo": "../pages/assets/google_logo.png",
+    "logo": "assets/google_logo.png",
     "url": "https://www.google.com/",
     "query": "https://www.google.com/search?q="
   },
   {
     "title": "Bing",
-    "logo": "../pages/assets/bing_logo.png",
+    "logo": "assets/bing_logo.png",
     "url": "https://www.bing.com/",
     "query": "https://www.bing.com/search?q="
   },
   {
     "title": "Yahoo",
-    "logo": "../pages/assets/yahoo_logo.png",
+    "logo": "assets/yahoo_logo.png",
     "url": "https://search.yahoo.com/",
     "query": "https://search.yahoo.com/search?p="
   },
   {
     "title": "DuckDuckGo",
-    "logo": "../pages/assets/duckduckgo_logo.png",
+    "logo": "assets/duckduckgo_logo.png",
     "url": "https://html.duckduckgo.com/",
     "query": "https://html.duckduckgo.com/html/?q="
   }

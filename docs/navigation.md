@@ -23,7 +23,7 @@ This is a per-tab structure. Multi-tab support keeps one
 
 ## Status
 
-Live for `browser://` JS bundle pages, `browser://test-html/*` HTML
+Live for `brewser://` JS bundle pages, `brewser://test-html/*` HTML
 fixtures, and (on real hardware) live `http(s)` HTML.
 
 `BrowserNavigation.navigate(url)` records the URL on the controller, then
@@ -31,7 +31,7 @@ calls `webView.load({ url })`. The runtime fetches the URL through the
 registered loaders (`BrowserResourceLoader` first; `NativeFetchLoader`
 appended automatically) and dispatches by `Content-Type`:
 
-- `text/javascript` (`browser://new-tab/`, etc.) → `new AsyncFunction(body)`
+- `text/javascript` (`brewser://new-tab/`, etc.) → `new AsyncFunction(body)`
   executes the bundle inside the app session.
 - `text/html` / `application/xhtml+xml` → `WebViewDelegate.onHtmlResponse`
   fires, the browser shell runs the body through the HTML pipeline
@@ -39,7 +39,7 @@ appended automatically) and dispatches by `Content-Type`:
   repaints.
 
 If the load throws (network error, decode error, unhandled content
-type, etc.), the navigation falls back to `browser://error/` while
+type, etc.), the navigation falls back to `brewser://error/` while
 keeping the controller pointed at the originally requested URL (so
 back/forward and the address bar both still reflect the user's intent).
 The full error message + stack is stashed on `globalThis.__browserLastError`
@@ -120,7 +120,7 @@ BrowserShell.run loop (per input)
             |     +-> WebView.load({ url }) if URL is non-null
             |           +-> [JS body]    AsyncFunction eval
             |           +-> [HTML body]  onHtmlResponse → parse → layout → paint
-            |           +-> [error]      browser://error/ fallback with
+            |           +-> [error]      brewser://error/ fallback with
             |                            __browserLastError stash
             |
             | 'navigate' (link tap):

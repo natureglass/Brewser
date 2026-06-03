@@ -1,10 +1,10 @@
 import { storagePathForOrigin } from '@switch-web/runtime';
-import { DEFAULT_PROFILE_ROOT } from '../browser-config.js';
+import { BREWSER_APP_ROOT, DEFAULT_PROFILE_ROOT } from '../browser-config.js';
 
 /**
  * Per-user profile container. Owns the on-disk storage root for cookies,
  * local-storage, cache, history, bookmarks, and (since the move) the
- * built-in HTML pages the shell serves at `browser://` URLs.
+ * built-in HTML pages the shell serves at `brewser://` URLs.
  *
  * `ensure()` creates the profile directory tree if missing.
  * `seedBuiltinPages()` copies the romfs page defaults into the profile
@@ -12,181 +12,232 @@ import { DEFAULT_PROFILE_ROOT } from '../browser-config.js';
  */
 
 /** Page files seeded from `romfs:/pages/` into the profile on first
- * run. Each entry is a path relative to both the romfs source and the
- * profile's `pages/` subdir, so `'html-experiments/css.html'` maps
- * from `romfs:/pages/html-experiments/css.html` to
- * `<storageRoot>pages/html-experiments/css.html`. The on-disk
- * `pages/` grouping mirrors the romfs source layout and keeps the
- * profile root tidy alongside `config.json`, `history.jsonl`,
- * `assets/`, `Templates/`, etc. */
+ * run. Each entry is a path relative to the romfs source's `pages/`
+ * subdir, so `'home.html'` maps from `romfs:/pages/home.html` to
+ * `<storageRoot>home.html`. The romfs source keeps a `pages/`
+ * grouping (matches the historical layout), but the SDMC target sits
+ * flat at the profile root (`<storageRoot>` directly) after the
+ * 2026-06-02 hoist. Dev-only fixtures + the Khronos conformance
+ * corpus live separately under `BUILTIN_DEV_PAGES` (app-root `dev/`)
+ * after the 2026-06-02 dev-tree hoist. */
 const BUILTIN_PAGES: readonly string[] = [
-	'welcome.html',
+	'home.html',
 	'about.html',
 	'error.html',
 	'settings.html',
 	'apps.html',
-	'web-experiments.html',
-	'threejs-demos.html',
-	// Apps catalog (listed on apps.html from apps.json). Each app is a
-	// self-contained page folder under `pages/apps/<name>/`.
-	'apps/mediaplayer/index.html',
-	'apps/mediaplayer/audioplayer_logo.png',
-	'apps/mediaplayer/config.json',
-	// DOM tests — canonical scripted reference page that exercises
-	// the Phase 2 live-DOM surface end-to-end (cascade positioning +
-	// var() + flex layout + form widgets + event bubbling + scrollable).
-	'html-experiments/dom-tests/reference/index.html',
-	'html-experiments/dom-tests/reference/assets/main.js',
-	// Shared Three.js library + any addons (OrbitControls, OBJLoader, etc).
-	// All demos load this single copy via
-	// `browser://threejs-demos/libs/three.iife.js`. Saves ~1.2 MB per
-	// extra demo over the prior per-demo copy.
-	'threejs-demos/libs/three.iife.js',
-	'threejs-demos/libs/harness.js',
-	'threejs-demos/libs/orbit-controls.js',
-	'threejs-demos/libs/first-person-controls.js',
-	'threejs-demos/libs/obj-loader.js',
-	'threejs-demos/libs/effect-composer.js',
-	'threejs-demos/textured-rotating-cube/index.html',
-	'threejs-demos/textured-rotating-cube/assets/main.js',
-	'threejs-demos/textured-rotating-cube/assets/rendering-gl-drawelements.html',
-	'threejs-demos/geometry-cube/index.html',
-	'threejs-demos/geometry-cube/assets/main.js',
-	'threejs-demos/geometry-cube/assets/crate.png',
-	'threejs-demos/geometry-cube/assets/rendering-gl-drawelements.html',
-	'threejs-demos/webgl-lines-dashed/index.html',
-	'threejs-demos/webgl-lines-dashed/assets/main.js',
-	'threejs-demos/webgl-lines-dashed/assets/state-gl-initial-state.html',
-	'threejs-demos/webgl-lines-colors/index.html',
-	'threejs-demos/webgl-lines-colors/assets/main.js',
-	'threejs-demos/webgl-lines-colors/assets/attribs-gl-bindAttribLocation-aliasing.html',
-	'threejs-demos/webgl-geometry-colors/index.html',
-	'threejs-demos/webgl-geometry-colors/assets/main.js',
-	'threejs-demos/webgl-geometry-colors/assets/programs-gl-get-active-attribute.html',
-	'threejs-demos/webgl-layers/index.html',
-	'threejs-demos/webgl-layers/assets/main.js',
-	'threejs-demos/webgl-layers/assets/programs-program-infolog.html',
-	'threejs-demos/misc-controls-orbit/index.html',
-	'threejs-demos/misc-controls-orbit/assets/main.js',
-	'threejs-demos/misc-controls-orbit/assets/uniforms-gl-uniformmatrix4fv.html',
-	'threejs-demos/webgl-camera/index.html',
-	'threejs-demos/webgl-camera/assets/main.js',
-	'threejs-demos/webgl-camera/assets/rendering-gl-drawarrays.html',
-	'threejs-demos/webgl-geometry-shapes/index.html',
-	'threejs-demos/webgl-geometry-shapes/assets/main.js',
-	'threejs-demos/webgl-geometry-shapes/assets/uv_grid_opengl.jpg',
-	'threejs-demos/webgl-sprites/index.html',
-	'threejs-demos/webgl-sprites/assets/main.js',
-	'threejs-demos/webgl-sprites/assets/sprite0.png',
-	'threejs-demos/webgl-sprites/assets/sprite1.png',
-	'threejs-demos/webgl-sprites/assets/sprite2.png',
-	'threejs-demos/webgl-sprites/assets/rendering-gl-drawelements.html',
-	'threejs-demos/webgl-geometry-dynamic/index.html',
-	'threejs-demos/webgl-geometry-dynamic/assets/main.js',
-	'threejs-demos/webgl-geometry-dynamic/assets/water.jpg',
-	'threejs-demos/webgl-geometry-dynamic/assets/buffers-buffer-data-and-buffer-sub-data.html',
-	'threejs-demos/webgl-points-sprites/index.html',
-	'threejs-demos/webgl-points-sprites/assets/main.js',
-	'threejs-demos/webgl-points-sprites/assets/snowflake1.png',
-	'threejs-demos/webgl-points-sprites/assets/snowflake2.png',
-	'threejs-demos/webgl-points-sprites/assets/snowflake3.png',
-	'threejs-demos/webgl-points-sprites/assets/snowflake4.png',
-	'threejs-demos/webgl-points-sprites/assets/snowflake5.png',
-	'threejs-demos/webgl-points-sprites/assets/uniforms-null-uniform-location.html',
-	'threejs-demos/webgl-geometries/index.html',
-	'threejs-demos/webgl-geometries/assets/main.js',
-	'threejs-demos/webgl-geometries/assets/uv_grid_opengl.jpg',
-	'threejs-demos/webgl-geometries/assets/state-gl-enable-enum-test.html',
-	'threejs-demos/webgl-materials-blending/index.html',
-	'threejs-demos/webgl-materials-blending/assets/main.js',
-	'threejs-demos/webgl-materials-blending/assets/uv_grid_opengl.jpg',
-	'threejs-demos/webgl-materials-blending/assets/sprite0.jpg',
-	'threejs-demos/webgl-materials-blending/assets/sprite0.png',
-	'threejs-demos/webgl-materials-blending/assets/lensflare0.png',
-	'threejs-demos/webgl-materials-blending/assets/lensflare0_alpha.png',
-	'threejs-demos/webgl-materials-blending/assets/state-gl-blend-state.html',
-	'threejs-demos/webgl-interactive-cubes/index.html',
-	'threejs-demos/webgl-interactive-cubes/assets/main.js',
-	'threejs-demos/webgl-interactive-cubes/assets/uniforms-emissive-uniform.html',
-	'threejs-demos/webgl-materials-wireframe/index.html',
-	'threejs-demos/webgl-materials-wireframe/assets/main.js',
-	'threejs-demos/webgl-materials-wireframe/assets/WaltHeadLo_buffergeometry.json',
-	'threejs-demos/webgl-materials-wireframe/assets/rendering-triangle.html',
-	'threejs-demos/webgl-instancing-dynamic/index.html',
-	'threejs-demos/webgl-instancing-dynamic/assets/main.js',
-	'threejs-demos/webgl-instancing-dynamic/assets/suzanne_buffergeometry.json',
-	'threejs-demos/webgl-instancing-dynamic/assets/extensions-angle-instanced-arrays.html',
-	'threejs-demos/webgl-loader-obj/index.html',
-	'threejs-demos/webgl-loader-obj/assets/main.js',
-	'threejs-demos/webgl-loader-obj/assets/male02.obj',
-	'threejs-demos/webgl-loader-obj/assets/male02.mtl',
-	'threejs-demos/webgl-loader-obj/assets/01_-_Default1noCulling.JPG',
-	'threejs-demos/webgl-loader-obj/assets/male-02-1noCulling.JPG',
-	'threejs-demos/webgl-loader-obj/assets/orig_02_-_Defaul1noCulling.JPG',
-	'threejs-demos/webgl-loader-obj/assets/uv_grid_opengl.jpg',
-	'threejs-demos/webgl-loader-obj/assets/extensions-oes-standard-derivatives.html',
-	'threejs-demos/webgl-postprocessing/index.html',
-	'threejs-demos/webgl-postprocessing/assets/main.js',
-	'threejs-demos/webgl-postprocessing/assets/renderbuffers-framebuffer-object-attachment.html',
-	'threejs-demos/webgl-depth-texture/index.html',
-	'threejs-demos/webgl-depth-texture/assets/main.js',
-	'threejs-demos/webgl-depth-texture/assets/extensions-webgl-depth-texture.html',
-	'threejs-demos/webgl-shadowmap/index.html',
-	'threejs-demos/webgl-shadowmap/assets/main.js',
-	'threejs-demos/webgl-buffergeometry-indexed/index.html',
-	'threejs-demos/webgl-buffergeometry-indexed/assets/main.js',
-	'threejs-demos/webgl-custom-attributes/index.html',
-	'threejs-demos/webgl-custom-attributes/assets/main.js',
-	'threejs-demos/webgl-custom-attributes/assets/passthrough-cpu-data-texture-sample.html',
-	'threejs-demos/webgl-morphtargets-sphere/index.html',
-	'threejs-demos/webgl-morphtargets-sphere/assets/main.js',
-	'threejs-demos/webgl-morphtargets-sphere/assets/morph-sphere.bin',
-	'threejs-demos/webgl-morphtargets-sphere/assets/disc.png',
-	'threejs-demos/webgl-shader/index.html',
-	'threejs-demos/webgl-shader/assets/main.js',
-	'threejs-demos/webgl-materials-texture-filters/index.html',
-	'threejs-demos/webgl-materials-texture-filters/assets/main.js',
-	'threejs-demos/webgl-materials-texture-filters/assets/caravaggio.jpg',
-	'threejs-demos/webgl-materials-texture-filters/assets/textures-mipmap-filter-and-generate.html',
+	'bookmarks.html',
+];
+
+/** App pages — apps catalog entries listed on apps.html (the launcher).
+ * Each entry is a path under `romfs:/apps/<rest>` mirrored to
+ * `<appRoot>apps/<rest>`. Apps live at the **app root**, NOT under any
+ * per-profile dir, so they're shared across profiles. The apps.html
+ * launcher itself lives in BUILTIN_PAGES because it's a regular
+ * per-profile page that just RENDERS the catalog. */
+const BUILTIN_APP_PAGES: readonly string[] = [
+	'mediaplayer/index.html',
+	'mediaplayer/assets/audioplayer_logo.png',
+	'mediaplayer/config.json',
+	// ThreeJSDemos — the launcher page lives at index.html (was
+	// formerly threejs-demos.html at the per-profile root); each demo
+	// subdir holds its own index.html + assets. Shared three.js + addon
+	// libs live under libs/. Demos that exist in romfs but aren't seeded
+	// here are still reachable via the romfs:/ fallback in the resource
+	// loader; only the curated set below is mirrored to SDMC on first run.
+	'ThreeJSDemos/index.html',
+	'ThreeJSDemos/assets/threejsdemos_logo.png',
+	'ThreeJSDemos/libs/three.iife.js',
+	'ThreeJSDemos/libs/harness.js',
+	'ThreeJSDemos/libs/orbit-controls.js',
+	'ThreeJSDemos/libs/first-person-controls.js',
+	'ThreeJSDemos/libs/obj-loader.js',
+	'ThreeJSDemos/libs/effect-composer.js',
+	'ThreeJSDemos/textured-rotating-cube/index.html',
+	'ThreeJSDemos/textured-rotating-cube/assets/main.js',
+	'ThreeJSDemos/textured-rotating-cube/assets/rendering-gl-drawelements.html',
+	'ThreeJSDemos/geometry-cube/index.html',
+	'ThreeJSDemos/geometry-cube/assets/main.js',
+	'ThreeJSDemos/geometry-cube/assets/crate.png',
+	'ThreeJSDemos/geometry-cube/assets/rendering-gl-drawelements.html',
+	'ThreeJSDemos/webgl-lines-dashed/index.html',
+	'ThreeJSDemos/webgl-lines-dashed/assets/main.js',
+	'ThreeJSDemos/webgl-lines-dashed/assets/state-gl-initial-state.html',
+	'ThreeJSDemos/webgl-lines-colors/index.html',
+	'ThreeJSDemos/webgl-lines-colors/assets/main.js',
+	'ThreeJSDemos/webgl-lines-colors/assets/attribs-gl-bindAttribLocation-aliasing.html',
+	'ThreeJSDemos/webgl-geometry-colors/index.html',
+	'ThreeJSDemos/webgl-geometry-colors/assets/main.js',
+	'ThreeJSDemos/webgl-geometry-colors/assets/programs-gl-get-active-attribute.html',
+	'ThreeJSDemos/webgl-layers/index.html',
+	'ThreeJSDemos/webgl-layers/assets/main.js',
+	'ThreeJSDemos/webgl-layers/assets/programs-program-infolog.html',
+	'ThreeJSDemos/misc-controls-orbit/index.html',
+	'ThreeJSDemos/misc-controls-orbit/assets/main.js',
+	'ThreeJSDemos/misc-controls-orbit/assets/uniforms-gl-uniformmatrix4fv.html',
+	'ThreeJSDemos/webgl-camera/index.html',
+	'ThreeJSDemos/webgl-camera/assets/main.js',
+	'ThreeJSDemos/webgl-camera/assets/rendering-gl-drawarrays.html',
+	'ThreeJSDemos/webgl-geometry-shapes/index.html',
+	'ThreeJSDemos/webgl-geometry-shapes/assets/main.js',
+	'ThreeJSDemos/webgl-geometry-shapes/assets/uv_grid_opengl.jpg',
+	'ThreeJSDemos/webgl-sprites/index.html',
+	'ThreeJSDemos/webgl-sprites/assets/main.js',
+	'ThreeJSDemos/webgl-sprites/assets/sprite0.png',
+	'ThreeJSDemos/webgl-sprites/assets/sprite1.png',
+	'ThreeJSDemos/webgl-sprites/assets/sprite2.png',
+	'ThreeJSDemos/webgl-sprites/assets/rendering-gl-drawelements.html',
+	'ThreeJSDemos/webgl-geometry-dynamic/index.html',
+	'ThreeJSDemos/webgl-geometry-dynamic/assets/main.js',
+	'ThreeJSDemos/webgl-geometry-dynamic/assets/water.jpg',
+	'ThreeJSDemos/webgl-geometry-dynamic/assets/buffers-buffer-data-and-buffer-sub-data.html',
+	'ThreeJSDemos/webgl-points-sprites/index.html',
+	'ThreeJSDemos/webgl-points-sprites/assets/main.js',
+	'ThreeJSDemos/webgl-points-sprites/assets/snowflake1.png',
+	'ThreeJSDemos/webgl-points-sprites/assets/snowflake2.png',
+	'ThreeJSDemos/webgl-points-sprites/assets/snowflake3.png',
+	'ThreeJSDemos/webgl-points-sprites/assets/snowflake4.png',
+	'ThreeJSDemos/webgl-points-sprites/assets/snowflake5.png',
+	'ThreeJSDemos/webgl-points-sprites/assets/uniforms-null-uniform-location.html',
+	'ThreeJSDemos/webgl-geometries/index.html',
+	'ThreeJSDemos/webgl-geometries/assets/main.js',
+	'ThreeJSDemos/webgl-geometries/assets/uv_grid_opengl.jpg',
+	'ThreeJSDemos/webgl-geometries/assets/state-gl-enable-enum-test.html',
+	'ThreeJSDemos/webgl-materials-blending/index.html',
+	'ThreeJSDemos/webgl-materials-blending/assets/main.js',
+	'ThreeJSDemos/webgl-materials-blending/assets/uv_grid_opengl.jpg',
+	'ThreeJSDemos/webgl-materials-blending/assets/sprite0.jpg',
+	'ThreeJSDemos/webgl-materials-blending/assets/sprite0.png',
+	'ThreeJSDemos/webgl-materials-blending/assets/lensflare0.png',
+	'ThreeJSDemos/webgl-materials-blending/assets/lensflare0_alpha.png',
+	'ThreeJSDemos/webgl-materials-blending/assets/state-gl-blend-state.html',
+	'ThreeJSDemos/webgl-interactive-cubes/index.html',
+	'ThreeJSDemos/webgl-interactive-cubes/assets/main.js',
+	'ThreeJSDemos/webgl-interactive-cubes/assets/uniforms-emissive-uniform.html',
+	'ThreeJSDemos/webgl-materials-wireframe/index.html',
+	'ThreeJSDemos/webgl-materials-wireframe/assets/main.js',
+	'ThreeJSDemos/webgl-materials-wireframe/assets/WaltHeadLo_buffergeometry.json',
+	'ThreeJSDemos/webgl-materials-wireframe/assets/rendering-triangle.html',
+	'ThreeJSDemos/webgl-instancing-dynamic/index.html',
+	'ThreeJSDemos/webgl-instancing-dynamic/assets/main.js',
+	'ThreeJSDemos/webgl-instancing-dynamic/assets/suzanne_buffergeometry.json',
+	'ThreeJSDemos/webgl-instancing-dynamic/assets/extensions-angle-instanced-arrays.html',
+	'ThreeJSDemos/webgl-loader-obj/index.html',
+	'ThreeJSDemos/webgl-loader-obj/assets/main.js',
+	'ThreeJSDemos/webgl-loader-obj/assets/male02.obj',
+	'ThreeJSDemos/webgl-loader-obj/assets/male02.mtl',
+	'ThreeJSDemos/webgl-loader-obj/assets/01_-_Default1noCulling.JPG',
+	'ThreeJSDemos/webgl-loader-obj/assets/male-02-1noCulling.JPG',
+	'ThreeJSDemos/webgl-loader-obj/assets/orig_02_-_Defaul1noCulling.JPG',
+	'ThreeJSDemos/webgl-loader-obj/assets/uv_grid_opengl.jpg',
+	'ThreeJSDemos/webgl-loader-obj/assets/extensions-oes-standard-derivatives.html',
+	'ThreeJSDemos/webgl-postprocessing/index.html',
+	'ThreeJSDemos/webgl-postprocessing/assets/main.js',
+	'ThreeJSDemos/webgl-postprocessing/assets/renderbuffers-framebuffer-object-attachment.html',
+	'ThreeJSDemos/webgl-depth-texture/index.html',
+	'ThreeJSDemos/webgl-depth-texture/assets/main.js',
+	'ThreeJSDemos/webgl-depth-texture/assets/extensions-webgl-depth-texture.html',
+	'ThreeJSDemos/webgl-shadowmap/index.html',
+	'ThreeJSDemos/webgl-shadowmap/assets/main.js',
+	'ThreeJSDemos/webgl-buffergeometry-indexed/index.html',
+	'ThreeJSDemos/webgl-buffergeometry-indexed/assets/main.js',
+	'ThreeJSDemos/webgl-custom-attributes/index.html',
+	'ThreeJSDemos/webgl-custom-attributes/assets/main.js',
+	'ThreeJSDemos/webgl-custom-attributes/assets/passthrough-cpu-data-texture-sample.html',
+	'ThreeJSDemos/webgl-morphtargets-sphere/index.html',
+	'ThreeJSDemos/webgl-morphtargets-sphere/assets/main.js',
+	'ThreeJSDemos/webgl-morphtargets-sphere/assets/morph-sphere.bin',
+	'ThreeJSDemos/webgl-morphtargets-sphere/assets/disc.png',
+	'ThreeJSDemos/webgl-shader/index.html',
+	'ThreeJSDemos/webgl-shader/assets/main.js',
+	'ThreeJSDemos/webgl-materials-texture-filters/index.html',
+	'ThreeJSDemos/webgl-materials-texture-filters/assets/main.js',
+	'ThreeJSDemos/webgl-materials-texture-filters/assets/caravaggio.jpg',
+	'ThreeJSDemos/webgl-materials-texture-filters/assets/textures-mipmap-filter-and-generate.html',
+];
+
+/** Dev / test-fixture pages seeded from `romfs:/dev/` into the
+ * app-level `dev/` tree (shared across profiles). Each entry is a
+ * path relative to `romfs:/dev/` and mirrors to `<appRoot>dev/<rel>`.
+ * Moved here from BUILTIN_PAGES 2026-06-02 — the surface formerly
+ * lived under `webprofiles/default/html-experiments/`; the `html-
+ * experiments` segment was dropped during the hoist so URLs are
+ * `brewser://dev/<page>` instead of the older
+ * `brewser://html-experiments/<page>`. Same never-overwrite semantics
+ * as the other seeders. Khronos conformance test corpora live in
+ * romfs only (read on demand via `romfs:/dev/full-webgl{1,2}-
+ * conformance/...`), so the ~860 individual test files don't need
+ * seeding — only the runner shell + its assets do. */
+const BUILTIN_DEV_PAGES: readonly string[] = [
+	// Dev-fixtures launcher page (formerly `web-experiments.html` at
+	// the per-profile root; relocated 2026-06-02 so `brewser://dev/`
+	// lands on it). Lists every test fixture under dev/.
+	'index.html',
 	// Full WebGL 1 conformance runner page. The Khronos test corpus
 	// itself (sdk/tests/{conformance,js}/...) lives in romfs and is
-	// fetched at runtime via `romfs:/pages/full-webgl1-conformance/...`,
-	// so the ~860 individual test files don't need to be seeded into the
-	// profile dir. Only the runner shell + its assets do.
+	// fetched at runtime via `romfs:/dev/full-webgl1-conformance/...`,
+	// so the ~860 individual test files don't need to be seeded into
+	// the app dir. Only the runner shell + its assets do.
 	'full-webgl1-conformance/index.html',
 	'full-webgl1-conformance/assets/runner.js',
 	'full-webgl1-conformance/assets/tests.json',
 	'nxjs-webgl-demo/index.html',
 	'nxjs-webgl-demo/assets/main.js',
 	'nxjs-webgl-demo/assets/logo.png',
-	'html-experiments/two.html',
-	'html-experiments/images.html',
-	'html-experiments/pre.html',
-	'html-experiments/css.html',
-	'html-experiments/external-css.html',
-	'html-experiments/inherit.html',
-	'html-experiments/selectors.html',
-	'html-experiments/align.html',
-	'html-experiments/display-none.html',
-	'html-experiments/line-height.html',
-	'html-experiments/list-style.html',
-	'html-experiments/border.html',
-	'html-experiments/canvas.html',
-	'html-experiments/canvas-script.html',
-	'html-experiments/canvas-responsive.html',
-	'html-experiments/canvas-webgl.html',
-	'html-experiments/benchmark.html',
-	'html-experiments/widgets.html',
-	'html-experiments/tables.html',
-	'html-experiments/svg.html',
-	'html-experiments/rounded.html',
+	'two.html',
+	'images.html',
+	'pre.html',
+	'css.html',
+	'external-css.html',
+	'inherit.html',
+	'selectors.html',
+	'align.html',
+	'display-none.html',
+	'line-height.html',
+	'list-style.html',
+	'border.html',
+	'canvas.html',
+	'canvas-script.html',
+	'canvas-responsive.html',
+	'canvas-webgl.html',
+	'benchmark.html',
+	'widgets.html',
+	'tables.html',
+	'svg.html',
+	'rounded.html',
+	'perf-image-stress.html',
+	'perf-latency-probe.html',
+	'perf-img-dom-stress.html',
+	// API surface probe page + its TTF for the @font-face sub-test.
+	// The font is loaded via @font-face url(sdmc:/switch/brewser/dev/
+	// api-probe-font.ttf), so the file must be seeded next to the page.
+	'api-probe.html',
+	'api-probe-font.ttf',
+	// Web Audio Tier-1 verification — exercises the AudioContext +
+	// Oscillator + Gain + BufferSource + decodeAudioData wrappers shipped
+	// in nxjs-source/packages/runtime/src/web-audio.ts. Audible test
+	// page; reuses brewser://assets/click.wav for decodeAudioData.
+	'web-audio-tone.html',
+	// First "real game" smoke test — Breakout that exercises every Web
+	// API shipped this week (Canvas 2D, Web Audio multi-voice,
+	// localStorage high score, @keyframes title pulse, @font-face,
+	// requestAnimationFrame, tap input). Heavy diagnostic logging to
+	// logs/demo-breakout.log so any issue is debuggable from the trace.
+	'demo-breakout.html',
+	// Tier-0 Web Workers verification — spawns a real OS-thread worker,
+	// sends a few `postMessage` strings, expects echoes back. Validates
+	// the QuickJS-in-pthread foundation before committing to Tier-1.
+	// See [[project-swb-web-workers-milestone]].
+	'workers-tier0.html',
 ];
 
-/** Chrome-toolbar icons seeded from `romfs:/assets/` into
- * `<storageRoot>assets/`. Mirrors `BUILTIN_PAGES` exactly: copy on
- * first run, never overwrite, deleting restores the default next
- * launch. The browser loads them from sdmc so the user can swap a
- * PNG in place to re-skin the toolbar. */
+/** Chrome-toolbar icons + the unified per-profile-page stylesheet
+ * seeded from `romfs:/assets/` into `<storageRoot>assets/`. Mirrors
+ * `BUILTIN_PAGES` exactly: copy on first run, never overwrite,
+ * deleting restores the default next launch. The browser loads icons
+ * from sdmc so the user can swap a PNG in place to re-skin the
+ * toolbar; `main.css` is loaded by each built-in page via
+ * `<link rel="stylesheet" href="brewser://assets/main.css">`. */
 const BUILTIN_ASSETS: readonly string[] = [
 	'home.png',
 	'refresh.png',
@@ -197,6 +248,7 @@ const BUILTIN_ASSETS: readonly string[] = [
 	'bookmark_false.png',
 	'toolbar_back.png',
 	'keyboard_back.png',
+	'main.css',
 ];
 
 /** Design-config + template files seeded from `romfs:/` into the
@@ -210,6 +262,7 @@ const BUILTIN_TEMPLATE_FILES: readonly string[] = [
 	'templates.json',
 	'search_engines.json',
 	'apps.json',
+	'featured.json',
 	'Templates/default.json',
 	'Templates/light.json',
 	'Templates/bottom-bar.json',
@@ -218,21 +271,28 @@ const BUILTIN_TEMPLATE_FILES: readonly string[] = [
 
 export class BrowserProfile {
 	readonly name: string;
+	/** Per-profile storage: seeded pages (home.html etc.) sit flat
+	 * at the root, plus `assets/` and per-origin dirs. */
 	readonly storageRoot: string;
+	/** App-level storage shared across profiles: `config.json`, the
+	 * other top-level JSON config files, `Templates/`, `logs/`,
+	 * `screenshots/`, `history.jsonl`, `bookmarks.json`. */
+	readonly appRoot: string;
 
-	constructor(name = 'default', profileRoot = DEFAULT_PROFILE_ROOT) {
+	constructor(name = 'default', profileRoot = DEFAULT_PROFILE_ROOT, appRoot = BREWSER_APP_ROOT) {
 		this.name = name;
 		this.storageRoot = `${profileRoot}${name}/`;
+		this.appRoot = appRoot;
 	}
 
-	/** Returns the absolute file path for this profile's history journal. */
+	/** Returns the absolute file path for the (app-level) history journal. */
 	historyPath(): string {
-		return `${this.storageRoot}history.jsonl`;
+		return `${this.appRoot}history.jsonl`;
 	}
 
-	/** Returns the absolute file path for this profile's bookmarks file. */
+	/** Returns the absolute file path for the (app-level) bookmarks file. */
 	bookmarksPath(): string {
-		return `${this.storageRoot}bookmarks.json`;
+		return `${this.appRoot}bookmarks.json`;
 	}
 
 	/** Per-origin path inside this profile (used by future cookie/local-storage stores). */
@@ -253,82 +313,97 @@ export class BrowserProfile {
 		}
 		// Subdirectories the seeders will write into; create them now so
 		// writeFileSync below doesn't fail on missing parents.
-		try { Switch.mkdirSync(`${this.storageRoot}pages/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/apps/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/apps/mediaplayer/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/dom-tests/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/dom-tests/reference/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/html-experiments/dom-tests/reference/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/libs/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/textured-rotating-cube/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/textured-rotating-cube/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/geometry-cube/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/geometry-cube/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-lines-dashed/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-lines-dashed/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-lines-colors/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-lines-colors/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometry-colors/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometry-colors/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-layers/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-layers/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/misc-controls-orbit/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/misc-controls-orbit/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-camera/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-camera/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometry-shapes/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometry-shapes/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-sprites/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-sprites/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometry-dynamic/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometry-dynamic/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-points-sprites/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-points-sprites/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometries/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-geometries/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-materials-blending/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-materials-blending/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-interactive-cubes/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-interactive-cubes/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-materials-wireframe/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-materials-wireframe/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-instancing-dynamic/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-instancing-dynamic/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-loader-obj/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-loader-obj/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-postprocessing/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-postprocessing/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-depth-texture/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-depth-texture/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-shadowmap/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-shadowmap/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-buffergeometry-indexed/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-buffergeometry-indexed/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-custom-attributes/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-custom-attributes/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-morphtargets-sphere/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-morphtargets-sphere/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-shader/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-shader/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-materials-texture-filters/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/threejs-demos/webgl-materials-texture-filters/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/full-webgl1-conformance/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/full-webgl1-conformance/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/nxjs-webgl-demo/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}pages/nxjs-webgl-demo/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}khronos-logs/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.storageRoot}assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.storageRoot}Templates/`); } catch (_) { /* exists */ }
+		// App-level dirs shared across profiles.
+		try { Switch.mkdirSync(this.appRoot); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}Templates/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/mediaplayer/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/mediaplayer/assets/`); } catch (_) { /* exists */ }
+		// App-level dev surface: HTML/CSS/canvas/WebGL test fixtures +
+		// Khronos conformance corpora. Mirrors `BUILTIN_DEV_PAGES`.
+		try { Switch.mkdirSync(`${this.appRoot}dev/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}dev/nxjs-webgl-demo/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}dev/nxjs-webgl-demo/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/libs/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/textured-rotating-cube/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/textured-rotating-cube/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/geometry-cube/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/geometry-cube/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-dashed/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-dashed/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-colors/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-colors/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-colors/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-colors/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-layers/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-layers/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/misc-controls-orbit/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/misc-controls-orbit/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-camera/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-camera/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-shapes/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-shapes/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-sprites/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-sprites/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-dynamic/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-dynamic/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-points-sprites/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-points-sprites/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometries/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometries/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-blending/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-blending/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-interactive-cubes/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-interactive-cubes/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-wireframe/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-wireframe/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-instancing-dynamic/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-instancing-dynamic/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-loader-obj/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-loader-obj/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-postprocessing/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-postprocessing/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-depth-texture/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-depth-texture/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shadowmap/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shadowmap/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-buffergeometry-indexed/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-buffergeometry-indexed/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-custom-attributes/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-custom-attributes/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-morphtargets-sphere/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-morphtargets-sphere/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shader/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shader/assets/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-texture-filters/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-texture-filters/assets/`); } catch (_) { /* exists */ }
 	}
 
 	/** Absolute SD-card path to a seeded HTML page. The browser's
-	 * resource loader resolves `browser://X/Y/` to `pages/X/Y.html`
-	 * relative to `storageRoot`. Centralised so the on-disk layout
-	 * lives in one place. */
+	 * resource loader resolves `brewser://X/Y/` to `<storageRoot>X/Y.html`.
+	 * Centralised so the on-disk layout lives in one place. */
 	pagePath(filename: string): string {
-		return `${this.storageRoot}pages/${filename}`;
+		return `${this.storageRoot}${filename}`;
+	}
+
+	/** Absolute SD-card path to a seeded app page or asset. Apps live
+	 * at the (app-level) `apps/` dir — see BUILTIN_APP_PAGES. */
+	appPagePath(filename: string): string {
+		return `${this.appRoot}apps/${filename}`;
+	}
+
+	/** Absolute SD-card path to a seeded dev/test-fixture page or
+	 * asset. Dev pages live at the (app-level) `dev/` dir, shared
+	 * across profiles — see BUILTIN_DEV_PAGES. */
+	devPagePath(filename: string): string {
+		return `${this.appRoot}dev/${filename}`;
 	}
 
 	/** Absolute SD-card path to a seeded asset. Used by the chrome
@@ -337,21 +412,21 @@ export class BrowserProfile {
 		return `${this.storageRoot}assets/${filename}`;
 	}
 
-	/** Absolute SD-card path to this profile's `templates.json` — the
+	/** Absolute SD-card path to the (app-level) `templates.json` — the
 	 * registry of available design templates the shell reads at launch.
 	 * The active template lives at one of the paths the registry
 	 * references (typically `Templates/<name>.json`). */
 	templatesRegistryPath(): string {
-		return `${this.storageRoot}templates.json`;
+		return `${this.appRoot}templates.json`;
 	}
 
 	/** Copy the templates registry + every shipped template JSON
 	 * (`romfs:/templates.json`, `romfs:/Templates/<name>.json`) into the
-	 * profile dir if the targets are missing. Same never-overwrite
+	 * app-level dir if the targets are missing. Same never-overwrite
 	 * semantics as the page + asset seeders. */
 	async seedTemplates(): Promise<void> {
 		for (const rel of BUILTIN_TEMPLATE_FILES) {
-			const target = `${this.storageRoot}${rel}`;
+			const target = `${this.appRoot}${rel}`;
 			if (fileExists(target)) continue;
 			try {
 				const response = await fetch(`romfs:/${rel}`);
@@ -365,10 +440,12 @@ export class BrowserProfile {
 	}
 
 	/**
-	 * Copy each `romfs:/pages/<rel>` into `<storageRoot>pages/<rel>` if
-	 * the target file is missing. Never overwrites — once seeded, the
-	 * user's edits on disk are authoritative. Deleting a file restores
-	 * it next launch, which is intentional (lets the user "reset" a
+	 * Copy each `romfs:/pages/<rel>` into `<storageRoot><rel>` if the
+	 * target file is missing. The source tree keeps a `pages/` prefix
+	 * (the romfs layout is unchanged), but the SDMC target sits flat
+	 * at the profile root. Never overwrites — once seeded, the user's
+	 * edits on disk are authoritative. Deleting a file restores it
+	 * next launch, which is intentional (lets the user "reset" a
 	 * page). Reads bytes so binary page assets (e.g. textures bundled
 	 * with a Three.js demo) survive the round-trip; text files are
 	 * preserved bit-exact since we never re-encode them.
@@ -384,6 +461,44 @@ export class BrowserProfile {
 				Switch.writeFileSync(target, bytes);
 			} catch (error) {
 				console.debug(`[switch-web-browser] seed ${rel} failed: ${error}`);
+			}
+		}
+	}
+
+	/** Copy each `romfs:/apps/<rel>` into `<appRoot>apps/<rel>` if the
+	 * target file is missing. App pages live at the app-level root,
+	 * shared across profiles; seeding semantics otherwise match
+	 * `seedBuiltinPages`. */
+	async seedBuiltinAppPages(): Promise<void> {
+		for (const rel of BUILTIN_APP_PAGES) {
+			const target = this.appPagePath(rel);
+			if (fileExists(target)) continue;
+			try {
+				const response = await fetch(`romfs:/apps/${rel}`);
+				if (!response.ok) continue;
+				const bytes = new Uint8Array(await response.arrayBuffer());
+				Switch.writeFileSync(target, bytes);
+			} catch (error) {
+				console.debug(`[switch-web-browser] seed app ${rel} failed: ${error}`);
+			}
+		}
+	}
+
+	/** Copy each `romfs:/dev/<rel>` into `<appRoot>dev/<rel>` if the
+	 * target file is missing. Dev/test pages live at the app-level
+	 * root, shared across profiles; seeding semantics otherwise match
+	 * `seedBuiltinPages`. */
+	async seedBuiltinDevPages(): Promise<void> {
+		for (const rel of BUILTIN_DEV_PAGES) {
+			const target = this.devPagePath(rel);
+			if (fileExists(target)) continue;
+			try {
+				const response = await fetch(`romfs:/dev/${rel}`);
+				if (!response.ok) continue;
+				const bytes = new Uint8Array(await response.arrayBuffer());
+				Switch.writeFileSync(target, bytes);
+			} catch (error) {
+				console.debug(`[switch-web-browser] seed dev ${rel} failed: ${error}`);
 			}
 		}
 	}

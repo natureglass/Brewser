@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Dashed Lines</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Dashed Lines</h1>
+<p class="lead">Port of <code>three-r162/examples/webgl_lines_dashed.html</code>:
+a Hilbert-curve Catmull-Rom spline and a wireframe box, both rendered with
+<code>LineDashedMaterial</code> and rotated each frame. Scene has linear
+<code>Fog</code> from z=150 to z=200, exercising the bridge's
+<code>a_fogDepth</code> + <code>u_fogColor</code>/<code>u_fogNear</code>/
+<code>u_fogFar</code> uniforms in <code>bridge_line_program</code>.</p>
+
+<div class="stage">
+  <canvas id="lines-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  // Pre-flight marker so we can tell parse+2D both work even if the
+  // external scripts never run. Same pattern as the sibling demos.
+  const pre = document.getElementById('lines-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="lines-status" width="900" height="360"></canvas>
+</div>
+
+<script>
+  // Post-flight diagnostic. Same pattern as the sibling cube demos.
+  const st = document.getElementById('lines-status').getContext('2d');
+  st.fillStyle = '#14202d';
+  st.fillRect(0, 0, 900, 360);
+  st.font = '14px system-ui';
+  st.textBaseline = 'top';
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 280, y);
+  }
+  const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+  row(14, 'globalThis.__THREE_R162_STAGED__:', hasThree ? 'OK (THREE loaded)' : 'undefined', hasThree);
+  const lines = document.getElementById('lines-canvas');
+  row(36, '#lines-canvas exists:', lines ? 'yes' : 'no', !!lines);
+  const hasRAF = typeof globalThis.requestAnimationFrame === 'function';
+  row(58, 'requestAnimationFrame:', hasRAF ? 'function' : 'missing', hasRAF);
+  const linesErr = globalThis.__linesError;
+  row(80, 'lines error:', linesErr ? String(linesErr).slice(0, 80) : '(none recorded)', !linesErr);
+  row(102, 'main.js started:',
+      globalThis.__linesMainStarted ? 'yes' : 'no',
+      !!globalThis.__linesMainStarted);
+  row(124, 'objects in scene:',
+      String(globalThis.__linesObjectCount | 0),
+      (globalThis.__linesObjectCount | 0) === 2);
+  row(146, 'animate() called:',
+      globalThis.__linesAnimateCalled ? 'yes' : 'no',
+      !!globalThis.__linesAnimateCalled);
+
+  if (lines) {
+    const linesCtx = lines.getContext('2d');
+    if (linesCtx) {
+      const samples = [
+        ['(10, 10) top-left:', 10, 10],
+        ['(320, 180) center:', 320, 180],
+        ['(620, 340) bot-right:', 620, 340],
+      ];
+      let py = 180;
+      for (const [label, sx, sy] of samples) {
+        let txt = '?';
+        try {
+          const px = linesCtx.getImageData(sx, sy, 1, 1).data;
+          txt = '[' + px[0] + ',' + px[1] + ',' + px[2] + ',' + px[3] + ']';
+        } catch (e) {
+          txt = 'getImageData threw: ' + ((e && e.message) || String(e));
+        }
+        row(py, label, txt, true);
+        py += 22;
+      }
+      const errBefore = globalThis.__linesGlErrorBefore;
+      const errAfter = globalThis.__linesGlErrorAfter;
+      row(py, 'gl.getError before render:', '0x' + (errBefore | 0).toString(16), errBefore === 0);
+      py += 22;
+      row(py, 'gl.getError after render:', '0x' + (errAfter | 0).toString(16), errAfter === 0);
+    }
+  }
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/state-gl-initial-state.html"><code>state/gl-initial-state</code></a>
+&mdash; verifies the spec-mandated initial blend-state values
+(<code>BLEND_SRC_RGB = ONE</code>, <code>BLEND_DST_RGB = ZERO</code>,
+etc.) the demo's fog mix relies on.</p>
+
+<p class="note">If the lines canvas is the dark grey
+PRE-WEBGL marker, the external scripts didn't run — check the status
+canvas below for which step failed. Note: nx.js's bridge line shader
+applies linear fog when <code>scene.fog</code> is set; lines fade toward
+the background color as they recede past <code>fogNear</code>.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

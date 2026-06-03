@@ -6,6 +6,7 @@
 
 import { type HtmlElement, type HtmlNode, parseHtml } from '../html/html-parser.js';
 import { bumpLiveTreeVersion, getLiveRoot, LiveElement } from './live-dom.js';
+import { resetLiveOverlayCache } from './live-overlay.js';
 import { requestFullRepaint } from './live-paint-control.js';
 
 /** Tags dropped during conversion. <script> is also dropped — page-
@@ -167,6 +168,15 @@ export async function loadHeadLinkStylesheets(
 		styleEl.style.display = 'none';
 		liveRoot.appendChild(styleEl);
 		styleEl.textContent = cssText; // triggers registerStyleSheet
+		// An external sheet changes the global cascade — every element's
+		// computed style is now potentially different. The default
+		// repaint path (patchLiveDirtyRegions) would try a targeted
+		// patch pinned to the cached pre-CSS body box, truncating the
+		// new (usually taller) layout and leaving stale pre-CSS pixels
+		// outside the old clip rect. Nuke the overlay cache so the next
+		// paint takes the full-rebuild branch with the new cascade.
+		resetLiveOverlayCache();
+		requestFullRepaint();
 	}));
 }
 

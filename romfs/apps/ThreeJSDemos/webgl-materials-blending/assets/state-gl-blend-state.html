@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: state/gl-blend-state</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>state/gl-blend-state</code></h1>
+<p class="lead">Drawn from the blend-state assertions in
+<code>WebGL/sdk/tests/conformance/state/gl-get-calls.html</code> plus
+targeted <code>blendFunc</code> / <code>blendFuncSeparate</code> /
+<code>blendEquation</code> round-trip checks. Milestone&nbsp;#12 surface:
+the materials-blending demo issues 5 different blending modes per frame
+(<code>NormalBlending</code>, <code>AdditiveBlending</code>,
+<code>SubtractiveBlending</code>, <code>MultiplyBlending</code>,
+<code>NoBlending</code>) over a scrolling textured background, where
+Three.js calls <code>gl.blendFuncSeparate(srcRGB, dstRGB, srcA, dstA)</code>
+and the bridge MUST honor the separate alpha factors. This test pins
+the state-storage + getParameter round-trip for all four factors plus
+both equation channels.</p>
+
+<canvas id="example" width="50" height="50"></canvas>
+
+<canvas id="khronos-status" width="900" height="700"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'state-gl-blend-state';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+
+  description('Tests gl.blendFunc / gl.blendFuncSeparate / gl.blendEquation state plumbing.');
+
+  const wtu = WebGLTestUtils;
+  const gl = wtu.create3DContext('example');
+
+  try {
+    if (!gl) {
+      testFailed('context not created');
+      throw new Error('no gl');
+    }
+    testPassed('context exists');
+
+    debug('');
+    debug('Default state values (ES 2.0 spec; WebGL 1.0 §5.14.3):');
+    // BLEND defaults to false (the cap).
+    assertMsg(gl.getParameter(gl.BLEND) === false,
+      'gl.getParameter(BLEND) default should be false');
+    // BLEND_SRC_RGB/SRC_ALPHA default to ONE.
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === gl.ONE,
+      'gl.getParameter(BLEND_SRC_RGB) default should be ONE (0x0001)');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_ALPHA) === gl.ONE,
+      'gl.getParameter(BLEND_SRC_ALPHA) default should be ONE (0x0001)');
+    // BLEND_DST_RGB/DST_ALPHA default to ZERO.
+    assertMsg(gl.getParameter(gl.BLEND_DST_RGB) === gl.ZERO,
+      'gl.getParameter(BLEND_DST_RGB) default should be ZERO (0x0000)');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === gl.ZERO,
+      'gl.getParameter(BLEND_DST_ALPHA) default should be ZERO (0x0000)');
+    // BLEND_EQUATION_RGB/ALPHA default to FUNC_ADD.
+    assertMsg(gl.getParameter(gl.BLEND_EQUATION_RGB) === gl.FUNC_ADD,
+      'gl.getParameter(BLEND_EQUATION_RGB) default should be FUNC_ADD (0x8006)');
+    assertMsg(gl.getParameter(gl.BLEND_EQUATION_ALPHA) === gl.FUNC_ADD,
+      'gl.getParameter(BLEND_EQUATION_ALPHA) default should be FUNC_ADD (0x8006)');
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'no error after default-state queries');
+
+    debug('');
+    debug('blendFunc(src, dst) sets all 4 factors to (src, dst, src, dst):');
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === gl.SRC_ALPHA,
+      'BLEND_SRC_RGB should be SRC_ALPHA');
+    assertMsg(gl.getParameter(gl.BLEND_DST_RGB) === gl.ONE_MINUS_SRC_ALPHA,
+      'BLEND_DST_RGB should be ONE_MINUS_SRC_ALPHA');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_ALPHA) === gl.SRC_ALPHA,
+      'BLEND_SRC_ALPHA should also be SRC_ALPHA (blendFunc applies to both)');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === gl.ONE_MINUS_SRC_ALPHA,
+      'BLEND_DST_ALPHA should also be ONE_MINUS_SRC_ALPHA (blendFunc applies to both)');
+
+    debug('');
+    debug('blendFuncSeparate(sR, dR, sA, dA) sets each factor independently:');
+    gl.blendFuncSeparate(gl.ZERO, gl.ONE_MINUS_SRC_COLOR, gl.ZERO, gl.ONE);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'blendFuncSeparate(ZERO, ONE_MINUS_SRC_COLOR, ZERO, ONE) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === gl.ZERO,
+      'BLEND_SRC_RGB should be ZERO');
+    assertMsg(gl.getParameter(gl.BLEND_DST_RGB) === gl.ONE_MINUS_SRC_COLOR,
+      'BLEND_DST_RGB should be ONE_MINUS_SRC_COLOR');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_ALPHA) === gl.ZERO,
+      'BLEND_SRC_ALPHA should be ZERO (independent of RGB)');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === gl.ONE,
+      'BLEND_DST_ALPHA should be ONE (independent of RGB)');
+
+    debug('');
+    debug('Three.js premultiplied Subtractive: blendFuncSeparate(0, 1-SRC_COLOR, 0, 1):');
+    // Identical to above; this is what milestone #12's Subtractive cells call.
+    // The bug pre-fix was that the bridge emitted glBlendFunc instead of
+    // glBlendFuncSeparate, collapsing alpha factor to ONE_MINUS_SRC_COLOR
+    // (= 1 - src.a when used as an alpha factor) and zeroing FBO alpha at
+    // opaque-src pixels. The post-fix dispatch correctly uses Separate.
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === gl.ONE,
+      'Subtractive alpha factor must be ONE (not ONE_MINUS_SRC_COLOR) to preserve FBO alpha');
+
+    debug('');
+    debug('Three.js non-premultiplied Additive: blendFuncSeparate(SRC_ALPHA, ONE, SRC_ALPHA, ONE):');
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.SRC_ALPHA, gl.ONE);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'blendFuncSeparate(SRC_ALPHA, ONE, SRC_ALPHA, ONE) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === gl.SRC_ALPHA,
+      'BLEND_SRC_RGB should be SRC_ALPHA');
+    assertMsg(gl.getParameter(gl.BLEND_DST_RGB) === gl.ONE,
+      'BLEND_DST_RGB should be ONE');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_ALPHA) === gl.SRC_ALPHA,
+      'BLEND_SRC_ALPHA should be SRC_ALPHA');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === gl.ONE,
+      'BLEND_DST_ALPHA should be ONE');
+
+    debug('');
+    debug('Three.js non-premultiplied Multiply: blendFunc(ZERO, SRC_COLOR):');
+    gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'blendFunc(ZERO, SRC_COLOR) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === gl.ZERO,
+      'BLEND_SRC_RGB should be ZERO');
+    assertMsg(gl.getParameter(gl.BLEND_DST_RGB) === gl.SRC_COLOR,
+      'BLEND_DST_RGB should be SRC_COLOR');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_ALPHA) === gl.ZERO,
+      'BLEND_SRC_ALPHA should mirror SRC_RGB via blendFunc');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === gl.SRC_COLOR,
+      'BLEND_DST_ALPHA should mirror DST_RGB via blendFunc');
+
+    debug('');
+    debug('Invalid blendFunc factor: state must not change:');
+    // Stash a known-good state to verify it doesn't mutate on error.
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    const beforeSrcRGB = gl.getParameter(gl.BLEND_SRC_RGB);
+    const beforeDstAlpha = gl.getParameter(gl.BLEND_DST_ALPHA);
+    gl.blendFunc(0x9999, gl.ONE);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'blendFunc with invalid factor must return INVALID_ENUM');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === beforeSrcRGB,
+      'BLEND_SRC_RGB must not change after invalid blendFunc');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === beforeDstAlpha,
+      'BLEND_DST_ALPHA must not change after invalid blendFunc');
+
+    debug('');
+    debug('Invalid blendFuncSeparate alpha-channel factor: state must not change:');
+    gl.blendFuncSeparate(gl.ONE, gl.ZERO, 0x9999, gl.ONE);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'blendFuncSeparate with invalid src_alpha must return INVALID_ENUM');
+    assertMsg(gl.getParameter(gl.BLEND_SRC_RGB) === beforeSrcRGB,
+      'BLEND_SRC_RGB must not change after invalid blendFuncSeparate');
+    assertMsg(gl.getParameter(gl.BLEND_DST_ALPHA) === beforeDstAlpha,
+      'BLEND_DST_ALPHA must not change after invalid blendFuncSeparate');
+
+    debug('');
+    debug('blendEquation(equation) sets both RGB and ALPHA equations:');
+    gl.blendEquation(gl.FUNC_ADD);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR,
+      'blendEquation(FUNC_ADD) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND_EQUATION_RGB) === gl.FUNC_ADD,
+      'BLEND_EQUATION_RGB should be FUNC_ADD');
+    assertMsg(gl.getParameter(gl.BLEND_EQUATION_ALPHA) === gl.FUNC_ADD,
+      'BLEND_EQUATION_ALPHA should be FUNC_ADD');
+
+    debug('');
+    debug('Invalid blendEquation: state must not change:');
+    gl.blendEquation(0x9999);
+    wtu.glErrorShouldBe(gl, gl.INVALID_ENUM,
+      'blendEquation with invalid enum must return INVALID_ENUM');
+    assertMsg(gl.getParameter(gl.BLEND_EQUATION_RGB) === gl.FUNC_ADD,
+      'BLEND_EQUATION_RGB must not change after invalid blendEquation');
+
+    debug('');
+    debug('Enable + disable BLEND cap:');
+    gl.enable(gl.BLEND);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'enable(BLEND) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND) === true,
+      'getParameter(BLEND) should be true after enable');
+    assertMsg(gl.isEnabled(gl.BLEND) === true,
+      'isEnabled(BLEND) should be true after enable');
+    gl.disable(gl.BLEND);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'disable(BLEND) should succeed');
+    assertMsg(gl.getParameter(gl.BLEND) === false,
+      'getParameter(BLEND) should be false after disable');
+    assertMsg(gl.isEnabled(gl.BLEND) === false,
+      'isEnabled(BLEND) should be false after disable');
+
+    debug('');
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'no GL errors at end of test');
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-materials-blending/">back to Materials Blending demo</a></p>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>nx.js WebGL Demo &mdash; Ocean Cube</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  .status { margin: 16px 0; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>nx.js WebGL Demo &mdash; Ocean Cube</h1>
+<p class="lead">Raw WebGL 1 rendered through the nx.js bridge &mdash;
+no Three.js. Procedural night sky with stars + planes, a billboard
+moon, a 220&times;220-quad animated ocean with caustic foam, and a
+chrome cube wearing the nx.js logo that rides the waves. All four
+shader programs run on native GLES via <code>#pragma raw_passthrough</code>.
+Right stick orbits the camera; left stick (push up/down) zooms in/out.
+Touch the screen and drag to orbit as well.</p>
+
+<div class="stage">
+  <canvas id="nx-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('nx-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#0a0a0f';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="nx-status" width="900" height="220"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('nx-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 220);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const gErr = globalThis.__nxDemoError;
+    row(14, 'demo error:', gErr ? String(gErr).slice(0, 80) : '(none)', !gErr);
+    const texOk = !!globalThis.__nxDemoTextureReady;
+    row(36, 'logo texture loaded:', texOk ? 'yes' : '(loading...)', texOk);
+    const fps = +globalThis.__nxDemoFps || 0;
+    row(58, 'FPS (3s window):', fps > 0 ? String(fps) : '(sampling...)', fps >= 5);
+    row(80, 'frames rendered:', String(globalThis.__nxDemoFrameCount | 0), true);
+    row(102, 'GL setup error:',
+        String(globalThis.__nxDemoSetupErr || '?'),
+        globalThis.__nxDemoSetupErr === '(none)');
+    const tStart = globalThis.__nxDemoTouchStart | 0;
+    const tMove = globalThis.__nxDemoTouchMove | 0;
+    const tEnd = globalThis.__nxDemoTouchEnd | 0;
+    row(124, 'touch events (start/move/end):',
+        tStart + ' / ' + tMove + ' / ' + tEnd,
+        (tStart + tMove + tEnd) > 0);
+    let exts = '';
+    try {
+      const canvas2 = document.getElementById('nx-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getSupportedExtensions === 'function') {
+        exts = (ctx2.getSupportedExtensions() || []).join(', ');
+      }
+    } catch (e) {}
+    st.fillStyle = '#9bb1d6';
+    st.fillText('last touch:', 14, 146);
+    st.fillStyle = '#ffd35e';
+    st.fillText(String(globalThis.__nxDemoLastTouch || '(none)'), 14, 164);
+    st.fillStyle = '#9bb1d6';
+    st.fillText('extensions:', 14, 184);
+    st.fillStyle = '#ffd35e';
+    st.fillText(exts.slice(0, 105), 14, 202);
+  }
+  renderStatus();
+  // Refresh every second so touch counters update live as the user
+  // interacts with the demo.
+  setInterval(renderStatus, 1000);
+</script>
+
+<p class="note">This demo exercises raw WebGL 1 with four custom shader
+programs (background sky, billboard moon, animated water grid, and a
+textured chrome cube). All shaders are opt-ed into the bridge's
+raw-shader passthrough path (<code>#pragma raw_passthrough</code>) so
+the user GLSL runs end-to-end on native GLES. Right stick orbits the
+camera; push the left stick up/down to zoom in/out. Single-finger
+touch + drag also orbits the camera. The cube wears the nx.js logo
+PNG.</p>
+
+<p class="footer"><a href="brewser://home/">back to welcome</a></p>
+</body>
+</html>

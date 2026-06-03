@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const src = join(root, 'romfs', 'assets', 'SwitchSurf_logo.png');
+const src = join(root, 'romfs', 'assets', 'Brewser_logo.png');
 const dst = join(root, 'icon.jpg');
 
 if (!existsSync(src)) {

@@ -9,14 +9,14 @@ before any privileged action.
 
 | Origin family                | Examples                                 | Trust level                          |
 | ---------------------------- | ---------------------------------------- | ------------------------------------ |
-| `browser://`                 | `browser://new-tab/`, `browser://error/` | Built-in. Bundled, signed by us.     |
+| `brewser://`                 | `brewser://new-tab/`, `brewser://error/` | Built-in. Bundled, signed by us.     |
 | `nx-internal://`             | `nx-internal://error/`                   | Reserved for future runtime pages.   |
 | `http://`                    | `http://example.test/`                   | Untrusted. Insecure transport.       |
 | `https://`                   | `https://example.com/`                   | Untrusted. Secure transport.         |
 
 ## Permission matrix
 
-| Capability                         | `browser://` / `nx-internal://` | `http(s)://` |
+| Capability                         | `brewser://` / `nx-internal://` | `http(s)://` |
 | ---------------------------------- | ------------------------------- | ------------ |
 | `allowLocalFile(path)`             | bundled assets only             | denied       |
 | `allowNetworkURL(url)`             | n/a                             | allowed by default (opt-out via `allowNetwork: false` — see below) |
@@ -38,7 +38,7 @@ reaches a remote host. On real hardware the path works end-to-end.
 
 Setting `allowNetwork: false` in the policy turns the gate back off —
 `NativeFetchLoader` short-circuits to 403 before the native fetch is
-called, and `BrowserNavigation` falls back to `browser://error/`.
+called, and `BrowserNavigation` falls back to `brewser://error/`.
 
 Currently `BrowserPermissionPolicy` is uniform across origins because the
 shell has no notion of "which origin is currently active" yet. Once the
@@ -90,7 +90,7 @@ These are explicit non-goals for the minimal scaffold and are tracked in
 
 ## Status
 
-The shell loads `browser://` JS bundle pages, in-process HTML fixtures
+The shell loads `brewser://` JS bundle pages, in-process HTML fixtures
 served as `text/html`, and (on real hardware) live `http(s)` HTML. The
 HTML pipeline does not run any JS from rendered pages (`<script>` is
 stripped at parse time), so the practical security surface for HTML

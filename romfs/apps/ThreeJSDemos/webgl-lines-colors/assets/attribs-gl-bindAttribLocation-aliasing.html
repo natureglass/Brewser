@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: gl-bindAttribLocation-aliasing</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>attribs/gl-bindAttribLocation-aliasing</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/attribs/gl-bindAttribLocation-aliasing.html</code>.
+Verifies that binding two active attributes to the same location via
+<code>bindAttribLocation</code> causes <code>linkProgram</code> to fail
+for every (type1, type2) combination of <code>float</code> /
+<code>vec2</code> / <code>vec3</code> / <code>vec4</code> attributes, at
+every valid attribute location. Milestone&nbsp;#2 (webgl-lines-colors)
+regression test — exercises <code>bindAttribLocation</code>, which the
+per-vertex-color demo relies on for binding <code>a_color</code> to
+location 1.</p>
+
+<canvas id="canvas" width="8" height="8"></canvas>
+
+<script id="vertexShader" type="text/something-not-javascript">
+precision mediump float;
+attribute $(type_1) a_1;
+attribute $(type_2) a_2;
+void main() {
+  gl_Position = $(gl_Position_1) + $(gl_Position_2);
+}
+</script>
+
+<canvas id="khronos-status" width="900" height="720"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'attribs-gl-bindAttribLocation-aliasing';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+  try {
+    description('This test verifies combinations of valid, active attribute types cannot be bound to the same location with bindAttribLocation.');
+
+    const wtu = WebGLTestUtils;
+    const canvas = document.getElementById('canvas');
+    const gl = wtu.create3DContext(canvas, { antialias: false });
+
+    const glFragmentShader = wtu.loadShader(gl,
+      wtu.simpleColorFragmentShader, gl.FRAGMENT_SHADER);
+    const vertexShaderTemplate = wtu.getScript('vertexShader');
+
+    const typeInfo = [
+      { type: 'float', asVec4: 'vec4(0.0, $(var), 0.0, 1.0)' },
+      { type: 'vec2',  asVec4: 'vec4($(var), 0.0, 1.0)' },
+      { type: 'vec3',  asVec4: 'vec4($(var), 1.0)' },
+      { type: 'vec4',  asVec4: '$(var)' },
+    ];
+
+    const maxAttributes = gl.getParameter(gl.MAX_VERTEX_ATTRIBS);
+    debug('MAX_VERTEX_ATTRIBS = ' + maxAttributes);
+
+    typeInfo.forEach(function (typeInfo1) {
+      typeInfo.forEach(function (typeInfo2) {
+        debug('attribute_1: ' + typeInfo1.type + ' attribute_2: ' + typeInfo2.type);
+        const replaceParams = {
+          type_1: typeInfo1.type,
+          type_2: typeInfo2.type,
+          gl_Position_1: wtu.replaceParams(typeInfo1.asVec4, { var: 'a_1' }),
+          gl_Position_2: wtu.replaceParams(typeInfo2.asVec4, { var: 'a_2' }),
+        };
+        const strVertexShader = wtu.replaceParams(vertexShaderTemplate, replaceParams);
+        const glVertexShader = wtu.loadShader(gl, strVertexShader, gl.VERTEX_SHADER);
+        assertMsg(glVertexShader != null, 'Vertex shader compiled successfully.');
+        if (!glVertexShader) return;
+
+        for (let l = 0; l < maxAttributes; l++) {
+          const glProgram = gl.createProgram();
+          gl.bindAttribLocation(glProgram, l, 'a_1');
+          gl.bindAttribLocation(glProgram, l, 'a_2');
+          gl.attachShader(glProgram, glVertexShader);
+          gl.attachShader(glProgram, glFragmentShader);
+          gl.linkProgram(glProgram);
+          const linkStatus = gl.getProgramParameter(glProgram, gl.LINK_STATUS);
+          assertMsg(!linkStatus,
+            'Link should fail when both attributes are aliased to location ' + l);
+        }
+      });
+    });
+
+    debug('');
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-lines-colors/">back to Lines Colors demo</a></p>
+</body>
+</html>

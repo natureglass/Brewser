@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<title>Test fixture: list-style</title>
+<style>
+  body { background-color: #14202d; color: #e0e8f4; }
+  .circle { list-style-type: circle; }
+  .square { list-style-type: square; }
+  .none-list { list-style-type: none; }
+  /* Shorthand */
+  ol.alpha { list-style: lower-alpha; }
+  ol.ALPHA { list-style: upper-alpha; }
+  ol.roman { list-style: lower-roman; }
+  ol.ROMAN { list-style: upper-roman; }
+  /* Inheritance: a ul without its own list-style picks it up from
+     the parent. */
+  .square-inherits ul { background-color: #1c2c3d; padding: 4px 12px; }
+</style>
+</head>
+<body>
+<h1>list-style</h1>
+
+<h2>Bullets</h2>
+<p>Disc (default), circle, square, none:</p>
+<ul><li>disc</li><li>disc</li><li>disc</li></ul>
+<ul class="circle"><li>circle</li><li>circle</li><li>circle</li></ul>
+<ul class="square"><li>square</li><li>square</li><li>square</li></ul>
+<ul class="none-list"><li>(no marker)</li><li>(no marker)</li></ul>
+
+<h2>Numbered</h2>
+<p>Decimal (default), lower-alpha, upper-alpha, lower-roman, upper-roman:</p>
+<ol><li>decimal</li><li>decimal</li><li>decimal</li></ol>
+<ol class="alpha"><li>lower-alpha</li><li>lower-alpha</li><li>lower-alpha</li></ol>
+<ol class="ALPHA"><li>upper-alpha</li><li>upper-alpha</li><li>upper-alpha</li></ol>
+<ol class="roman"><li>lower-roman</li><li>lower-roman</li><li>lower-roman</li><li>lower-roman</li><li>lower-roman</li></ol>
+<ol class="ROMAN"><li>upper-roman</li><li>upper-roman</li><li>upper-roman</li><li>upper-roman</li><li>upper-roman</li></ol>
+
+<h2>Inheritance</h2>
+<div class="square-inherits" style="list-style-type: square">
+<ul><li>Inherited square from the wrapper div.</li><li>Inherited square.</li></ul>
+</div>
+
+<p><a href="brewser://dev/">back to hello</a></p>
+</body>
+</html>

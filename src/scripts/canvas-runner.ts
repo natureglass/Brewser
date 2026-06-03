@@ -1,7 +1,9 @@
 import { nxScreen } from '@switch-web/runtime';
 import type { HtmlElement, HtmlNode } from '../html/html-parser.js';
+import { installPointerLockOnDocumentShim } from '../polyfills/pointer-lock.js';
 import {
 	getLiveRoot, getLiveWindow, getLiveWindowProxy, LiveElement, resetLiveRoot, setOwnerDocument,
+	wrapCanvasCtx2dForRepaint,
 } from './live-dom.js';
 
 /**
@@ -41,7 +43,7 @@ export interface PageScriptContext {
  * Run every inline `<script>` body found in the parsed tree, with a
  * minimal `document` shim that lets a script reach the page's
  * `<canvas>` elements by id. Each script body is wrapped in an
- * `AsyncFunction` so it can `await fetch('browser://history/')` and
+ * `AsyncFunction` so it can `await fetch('brewser://history/')` and
  * other promises at the top level. Scripts run sequentially in
  * document order — early scripts can set globals later ones depend
  * on. There's still no event loop: `requestAnimationFrame`,
@@ -268,7 +270,7 @@ export interface RunPageScriptsOptions {
 	 * no collection, no execution. `<canvas>` elements are still
 	 * registered so the painter can still draw their (empty) placeholders.
 	 *
-	 * The shell gates this on the page URL — only `browser://` pages
+	 * The shell gates this on the page URL — only `brewser://` pages
 	 * are trusted to run inline scripts. Fetched external pages can ship
 	 * arbitrary JavaScript that calls DOM APIs we don't implement
 	 * (e.g. `document.createElement`, `addEventListener`); if such a
@@ -282,7 +284,7 @@ export interface RunPageScriptsOptions {
 	/**
 	 * Page URL of the document being parsed. Used to resolve relative
 	 * `<script src="...">` URLs (e.g. `assets/main.js` →
-	 * `browser://X/Y/assets/main.js`). When omitted, external scripts
+	 * `brewser://X/Y/assets/main.js`). When omitted, external scripts
 	 * with relative srcs are skipped with a debug log.
 	 */
 	pageUrl?: string;
@@ -642,7 +644,7 @@ function readbackWebGLEntries(entries: CanvasEntry[]): void {
 /**
  * Resolve a `<script src="...">` value against the page URL.
  *
- *   - Absolute URLs with a scheme (`https://`, `browser://`, `romfs:`,
+ *   - Absolute URLs with a scheme (`https://`, `brewser://`, `romfs:`,
  *     `sdmc:`, etc.) pass through unchanged.
  *   - Root-relative paths (`/foo/bar.js`) attach to the page URL's
  *     scheme + authority.
@@ -959,7 +961,20 @@ function createCanvasEntry(el: HtmlElement): CanvasEntry {
 			return { x: 0, y: 0, top: 0, left: 0, right: w, bottom: h, width: w, height: h };
 		},
 		getContext(kind, _options) {
-			if (kind === '2d') return offscreen.getContext('2d');
+			if (kind === '2d') {
+				// Page scripts reach the canvas through this shim, NOT
+				// through LiveElement.getContext — so the live-dom wrap
+				// must be applied here too. Without it, ctx.fillRect etc.
+				// write to the offscreen with no signal to the engine
+				// and the canvas freezes at its first paint (the
+				// shell's per-frame `overlayLiveAnimatedCanvases` walk
+				// also stays gated off because `hasPageCanvas2dActivity`
+				// is set inside the wrap). Idempotent — re-getContext
+				// returns the same wrapped instance.
+				const ctx = offscreen.getContext('2d');
+				if (ctx) wrapCanvasCtx2dForRepaint(ctx);
+				return ctx;
+			}
 			if (kind === 'webgl' || kind === 'experimental-webgl') {
 				// Per WebGL spec, a canvas hosts one context kind. If
 				// the script already pinned 'webgl2' on this inline
@@ -1207,6 +1222,10 @@ function buildDocumentShim(
 		},
 	};
 	setOwnerDocument(shim);
+	// Pointer Lock — adds exitPointerLock + pointerLockElement to this
+	// per-page document shim. See src/polyfills/pointer-lock.ts for the
+	// two-surface install (Element prototype + per-page document).
+	installPointerLockOnDocumentShim(shim as unknown as Record<string, unknown>);
 	return shim;
 }
 
@@ -1218,7 +1237,7 @@ function buildConsoleShim() {
 	// see feedback_console_error_switches_render_mode.md). `assert` was
 	// previously MISSING: a page calling `console.assert(...)` (common in
 	// self-test blocks) threw "console.assert is not a function", aborting
-	// the whole script — e.g. the SwitchSurf audio player's `init()` ran
+	// the whole script — e.g. the Brewser audio player's `init()` ran
 	// `runSelfTests()` before `buildLibrary()`, so its playlist never
 	// rendered. `assert` logs only on a failed condition and never throws.
 	return {

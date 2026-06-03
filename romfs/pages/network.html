@@ -2,14 +2,11 @@
 <html lang="en">
 <head>
 <title>Network diagnostic</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
 <style>
-  body { background-color: #0b1220; color: #e0e8f4; font-size: 18px; }
-  h1 { color: #ffd35e; }
-  h2 { color: #7aa2ff; margin-top: 22px; font-size: 20px; }
-  p.lead { color: #9bb1d6; }
+  body { padding: 28px 48px; }
+  h2 { margin-top: 22px; font-size: 20px; }
   p.hint { color: #9bb1d6; font-size: 15px; }
-  code { color: #c2e0ff; }
-  a { color: #7eda9f; }
 </style>
 </head>
 <body>
@@ -157,6 +154,6 @@ If even this fails, the runtime fetch wrapper itself is broken.</p>
   await globalThis.__diagRunTest('romfs:/main.js', 'romfs (ctrl)', ctx, 5000);
 </script>
 
-<p><a href="browser://welcome/">back to welcome</a></p>
+<p><a href="brewser://home/">back to home</a></p>
 </body>
 </html>

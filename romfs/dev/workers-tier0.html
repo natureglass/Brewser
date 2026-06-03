@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Workers Tier-0 — Switch Web Platform</title>
+<link rel="stylesheet" href="brewser://assets/main.css" />
+<style>
+  body { padding: 16px; font-family: sans-serif; color: #e0e8f4; background: #0b1220; }
+  h1 { color: #ffd35e; margin: 0 0 8px 0; }
+  .row { display: flex; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+  button {
+    background: #1f2c40; color: #ffd35e; border: 1px solid #2a4060;
+    border-radius: 6px; padding: 10px 14px; font-size: 16px;
+  }
+  pre {
+    background: #14202d; border: 1px solid #2a4060; border-radius: 6px;
+    padding: 10px; white-space: pre-wrap; word-break: break-all;
+    max-height: 380px; overflow: auto;
+    font-size: 12px; color: #c2e0ff;
+  }
+  .ok { color: #7eda9f; }
+  .fail { color: #ff6b6b; }
+</style>
+</head>
+<body>
+  <h1>Workers Tier-0</h1>
+  <p>Hardening pass: spawn/kill cycle leaks, 4-worker real parallelism, error
+  propagation, navigation cleanup. Log mirror:
+  <code>sdmc:/switch/brewser/logs/workers-tier0.log</code> +
+  <code>sdmc:/switch/brewser/logs/worker-N.log</code>.</p>
+  <div class="row">
+    <button id="run">Run all tests</button>
+    <button id="kill">Terminate worker</button>
+  </div>
+  <pre id="log"></pre>
+<script>
+(function () {
+  const LOG_PATH = 'sdmc:/switch/brewser/logs/workers-tier0.log';
+  const t0 = performance.now();
+  const logEl = document.getElementById('log');
+  const lines = [];
+  function log(s) {
+    const t = Math.round(performance.now() - t0);
+    const line = '+' + t + 'ms ' + s;
+    lines.push(line);
+    if (lines.length > 80) lines.shift();
+    if (logEl) logEl.textContent = lines.join('\n');
+    try { Switch.appendFileSync(LOG_PATH, line + '\n'); } catch (_) {}
+  }
+
+  log('');
+  log('=== RUN at ' + new Date().toISOString() + ' ===');
+  log('typeof Worker = ' + typeof Worker);
+  if (typeof Worker !== 'function') {
+    log('FAIL :: Worker not defined');
+    return;
+  }
+
+  // Reusable worker source.
+  const workerSrc = '\n'
+    + 'console.log("[worker] boot");\n'
+    + 'self.onmessage = function (e) {\n'
+    + '  var d = e.data;\n'
+    + '  if (d === "ping") {\n'
+    + '    self.postMessage("pong");\n'
+    + '  } else if (d.indexOf("compute:") === 0) {\n'
+    + '    var n = parseInt(d.substring(8), 10) || 0;\n'
+    + '    var sum = 0;\n'
+    + '    for (var i = 1; i <= n; i++) sum += i;\n'
+    + '    self.postMessage("sum:" + sum);\n'
+    + '  } else if (d === "throw") {\n'
+    + '    throw new Error("intentional throw from worker");\n'
+    + '  } else if (d === "close") {\n'
+    + '    self.postMessage("closing");\n'
+    + '    close();\n'
+    + '  } else {\n'
+    + '    self.postMessage("echo:" + d);\n'
+    + '  }\n'
+    + '};\n'
+    + 'self.postMessage("ready");\n';
+
+  function withWorker(fn) {
+    return new Promise(function (resolve, reject) {
+      var w = null;
+      var pending = [];
+      var errs = [];
+      try {
+        w = new Worker(workerSrc);
+        w.onmessage = function (e) {
+          for (var i = 0; i < pending.length; i++) {
+            if (pending[i].pred(e.data)) {
+              clearTimeout(pending[i].timer);
+              var entry = pending[i];
+              pending.splice(i, 1);
+              entry.resolve(e.data);
+              return;
+            }
+          }
+        };
+        w.onerror = function (e) { errs.push(e); };
+      } catch (err) { reject(err); return; }
+      function expect(pred, timeoutMs, label) {
+        return new Promise(function (res, rej) {
+          var timer = setTimeout(function () {
+            for (var i = 0; i < pending.length; i++) {
+              if (pending[i].timer === timer) { pending.splice(i, 1); break; }
+            }
+            rej(new Error('timeout: ' + label));
+          }, timeoutMs);
+          pending.push({ pred: pred, resolve: res, timer: timer });
+        });
+      }
+      Promise.resolve()
+        .then(function () { return fn({ worker: w, expect: expect, errors: errs }); })
+        .then(function (v) {
+          try { w.terminate(); } catch (_) {}
+          resolve(v);
+        }, function (e) {
+          try { w.terminate(); } catch (_) {}
+          reject(e);
+        });
+    });
+  }
+
+  function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function testSpawnKillCycle() {
+    log('--- spawn/kill cycle stress (20 iterations) ---');
+    var t0 = performance.now();
+    for (var i = 0; i < 20; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await withWorker(async function (ctx) {
+        await ctx.expect(function (d) { return d === 'ready'; }, 2000, 'ready#' + i);
+        ctx.worker.postMessage('ping');
+        await ctx.expect(function (d) { return d === 'pong'; }, 2000, 'pong#' + i);
+        return true;
+      });
+    }
+    var dt = Math.round(performance.now() - t0);
+    log('PASS :: 20 spawn/kill cycles in ' + dt + 'ms (~' + Math.round(dt / 20) + 'ms each)');
+  }
+
+  async function testSingleWorkerCompute() {
+    log('--- baseline: single worker, compute:5000000 ---');
+    return await withWorker(async function (ctx) {
+      await ctx.expect(function (d) { return d === 'ready'; }, 2000, 'ready');
+      var t0 = performance.now();
+      ctx.worker.postMessage('compute:5000000');
+      var r = await ctx.expect(function (d) { return d.indexOf('sum:') === 0; }, 10000, 'sum');
+      var dt = Math.round(performance.now() - t0);
+      var expected = 5000000 * 5000001 / 2;
+      var ok = r === 'sum:' + expected;
+      log((ok ? 'PASS' : 'FAIL') + ' :: single worker compute:5000000 in ' + dt + 'ms (result=' + r + ')');
+      return dt;
+    });
+  }
+
+  async function testParallel4Workers() {
+    log('--- 4 workers parallel, each compute:5000000 ---');
+    var workers = [];
+    var pendingByHandle = {};
+    function makeOne(id) {
+      return new Promise(function (resolve, reject) {
+        var w = new Worker(workerSrc);
+        w.__id = id;
+        w.__pending = [];
+        w.onmessage = function (e) {
+          for (var i = 0; i < w.__pending.length; i++) {
+            if (w.__pending[i].pred(e.data)) {
+              clearTimeout(w.__pending[i].timer);
+              var entry = w.__pending[i];
+              w.__pending.splice(i, 1);
+              entry.resolve(e.data);
+              return;
+            }
+          }
+        };
+        w.__expect = function (pred, timeoutMs, label) {
+          return new Promise(function (res, rej) {
+            var timer = setTimeout(function () { rej(new Error('timeout: ' + label)); }, timeoutMs);
+            w.__pending.push({ pred: pred, resolve: res, timer: timer });
+          });
+        };
+        w.__expect(function (d) { return d === 'ready'; }, 3000, 'ready#' + id)
+          .then(function () { resolve(w); }, reject);
+      });
+    }
+    try {
+      for (var i = 0; i < 4; i++) workers.push(makeOne(i));
+      workers = await Promise.all(workers);
+      log('4 workers ready');
+      var t0 = performance.now();
+      var jobs = workers.map(function (w) {
+        w.postMessage('compute:5000000');
+        return w.__expect(function (d) { return d.indexOf('sum:') === 0; }, 15000, 'sum#' + w.__id);
+      });
+      var results = await Promise.all(jobs);
+      var dt = Math.round(performance.now() - t0);
+      var expected = 5000000 * 5000001 / 2;
+      var allOk = results.every(function (r) { return r === 'sum:' + expected; });
+      log((allOk ? 'PASS' : 'FAIL') + ' :: 4 workers parallel compute in ' + dt + 'ms total');
+      return dt;
+    } finally {
+      for (var i = 0; i < workers.length; i++) {
+        try { (workers[i].terminate && workers[i].terminate()); } catch (_) {}
+      }
+    }
+  }
+
+  async function testThrowPropagation() {
+    log('--- worker throw → main onerror ---');
+    return await withWorker(async function (ctx) {
+      await ctx.expect(function (d) { return d === 'ready'; }, 2000, 'ready');
+      var sawError = false;
+      ctx.worker.onerror = function (e) {
+        sawError = true;
+        log('onerror fired: ' + (e && e.message));
+      };
+      ctx.worker.postMessage('throw');
+      // No outbound message expected; just wait for the error to propagate.
+      await delay(500);
+      // Worker should still be functional after a caught throw.
+      ctx.worker.postMessage('ping');
+      var pong = await ctx.expect(function (d) { return d === 'pong'; }, 2000, 'post-throw pong');
+      log((sawError ? 'PASS' : 'FAIL') + ' :: throw routed to onerror (sawError=' + sawError + ', post-pong=' + pong + ')');
+    });
+  }
+
+  async function runAll() {
+    log('--- runAll start ---');
+    try {
+      await testSpawnKillCycle();
+      var single = await testSingleWorkerCompute();
+      var four = await testParallel4Workers();
+      // Parallelism heuristic: 4 workers should take significantly LESS
+      // than 4 × single. If they're serial it would be ~4×; if truly
+      // parallel ~1×. Threshold at 2× single to give Switch's scheduler
+      // some slack.
+      var ratio = four / Math.max(single, 1);
+      log('parallel ratio = ' + ratio.toFixed(2) + 'x (single ' + single + 'ms, four ' + four + 'ms)');
+      log(ratio < 2.5
+        ? 'PASS :: real CPU parallelism (ratio < 2.5×)'
+        : 'FAIL :: ratio >= 2.5× suggests serial execution');
+      await testThrowPropagation();
+      log('--- runAll DONE ---');
+    } catch (e) {
+      log('FAIL :: ' + (e && e.message || e));
+    }
+  }
+
+  document.getElementById('run').addEventListener('click', function () { runAll(); });
+  // No persistent worker for the "kill" button now — handled inside tests.
+  document.getElementById('kill').addEventListener('click', function () { log('kill: no persistent worker in hardening fixture'); });
+})();
+</script>
+</body>
+</html>

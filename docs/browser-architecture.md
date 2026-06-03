@@ -27,13 +27,13 @@ The shell currently:
    (`https://1.1.1.1/`, `http://1.1.1.1/`, `romfs:/main.js`), and stashes
    the result for the new-tab page to display.
 5. Constructs a `BrowserNavigation` wrapping the runtime
-   `NavigationController`. Failed loads fall back to `browser://error/`
+   `NavigationController`. Failed loads fall back to `brewser://error/`
    with the actual error message + stack stashed on
    `globalThis.__browserLastError` so the error page can show it.
-6. Navigates to `browser://welcome/` (the default home page,
+6. Navigates to `brewser://home/` (the default home page,
    served as HTML from the seeded profile). The user can switch to
-   `browser://new-tab/` — the only remaining JS bundle, since it
-   uses top-level `await fetch('browser://history/')` to populate
+   `brewser://new-tab/` — the only remaining JS bundle, since it
+   uses top-level `await fetch('brewser://history/')` to populate
    the "Recent" list.
 7. Draws the address-bar chrome strip (back/forward glyphs + URL +
    controller hint) over the top 56 pixels.
@@ -76,13 +76,15 @@ described below and stores the resulting layout for scroll repaints.
 |   webView.load() + HistoryStore + error-page fallback           |
 +-----------------------------------------------------------------+
 | Resource loaders                                                |
-|   - BrowserHistoryLoader   (browser://history/  → JSON)         |
-|   - BrowserResourceLoader  (browser://*  → JS bundles + HTML    |
+|   - BrowserHistoryLoader   (brewser://history/  → JSON)         |
+|   - BrowserResourceLoader  (brewser://*  → JS bundles + HTML    |
 |                              fixtures)                          |
 |   - NativeFetchLoader      (http/https, supplied by runtime)    |
 +-----------------------------------------------------------------+
 | BrowserProfile         (src/profile/browser-profile.ts)         |
-|   ensures sdmc:/switch/webprofiles/default/; owns history path  |
+|   ensures sdmc:/switch/brewser/ (appRoot) +                     |
+|   sdmc:/switch/brewser/webprofiles/default/ (storageRoot);      |
+|   owns history + bookmarks paths                                |
 +-----------------------------------------------------------------+
 | BrowserPermissionPolicy (src/permissions/...)                   |
 +-----------------------------------------------------------------+
@@ -366,51 +368,51 @@ stylesheet rules so the source-order tiebreak works.
 ### CSS-aware fixtures
 
 Beyond the basic HTML fixtures, there are dedicated CSS exercises:
-- `browser://test-html/css/` — box-model and cascade exercises:
+- `brewser://test-html/css/` — box-model and cascade exercises:
   colors, fonts, weight, style, decoration, backgrounds, margin,
   padding, specificity, inline-style overrides.
-- `browser://test-html/external-css/` — uses
+- `brewser://test-html/external-css/` — uses
   `<link rel="stylesheet" href="romfs:/test-css/external.css">`
   and an additional inline `<style>` block to demonstrate the
   source-order tiebreak between external and inline sheets.
-- `browser://test-html/inherit/` — exercises the inherited-vs-direct
+- `brewser://test-html/inherit/` — exercises the inherited-vs-direct
   split: `body { font-size: 14px }` leaves block defaults intact
   (h1=34px, h2=26px, p=18px) while still inheriting color, and a
   direct `.tiny-heading { font-size: 14px }` rule on an h1 wins.
-- `browser://test-html/selectors/` — exercises the structural
+- `brewser://test-html/selectors/` — exercises the structural
   pseudo-classes (`:first-child`, `:last-child`, `:nth-child(odd)`,
   `:first-of-type`, `:last-of-type`), sibling combinators (`+`, `~`),
   and attribute selectors (`[data-flag]`, `[data-flag="hot"]`,
   `a[href^="https://"]`, `span[class~="hl"]`, `span[lang|="en"]`).
-- `browser://test-html/align/` — exercises `text-align`: a centered
+- `brewser://test-html/align/` — exercises `text-align`: a centered
   h1, right/center/justify paragraphs (with the last-line exception
   for justify), and inheritance through a `.center-block` div with
   one `.opt-out` paragraph that directly overrides back to `left`.
-- `browser://test-html/display-none/` — exercises `display: none`:
+- `brewser://test-html/display-none/` — exercises `display: none`:
   a class-targeted hidden paragraph, an inline span hidden mid-
   sentence, an inline-style hidden paragraph, and a hidden `<div>`
   whose descendant rules (red bg + 20px padding) must never render.
-- `browser://test-html/line-height/` — exercises `line-height`:
+- `brewser://test-html/line-height/` — exercises `line-height`:
   unitless multipliers (`1.0` / `2.0`), absolute `Npx`, and `N%`,
   all inherited from a wrapper.
-- `browser://test-html/list-style/` — exercises `list-style-type`:
+- `brewser://test-html/list-style/` — exercises `list-style-type`:
   disc / circle / square / none bullets; decimal / lower-alpha /
   upper-alpha / lower-roman / upper-roman ordered markers;
   inheritance from a wrapper `<div>`.
-- `browser://test-html/border/` — exercises `border`: solid /
+- `brewser://test-html/border/` — exercises `border`: solid /
   dashed / dotted / double shorthand, per-edge longhands, mixed
   per-edge styles + colours, border-with-background alignment, and
   the CSS-correct "width without style stays invisible" rule.
-- `browser://test-html/canvas/` — exercises `<canvas>` placeholder
+- `brewser://test-html/canvas/` — exercises `<canvas>` placeholder
   treatment: explicit dimensions, HTML 300×150 defaults, spec-defined
   fallback children (ignored, not double-rendered), and an oversized
   canvas scaled down to the content width.
-- `browser://test-html/canvas-script/` — exercises the inline-script
+- `brewser://test-html/canvas-script/` — exercises the inline-script
   canvas-drawing experiment: solid fills, lines + path, text on
   canvas, linear gradient, a script that throws (other canvases
   still render), and a no-script canvas that falls back to the
   placeholder.
-- `browser://test-html/canvas-responsive/` — exercises fullscreen
+- `brewser://test-html/canvas-responsive/` — exercises fullscreen
   mode: a single responsive canvas whose script reads `canvas.width`
   / `canvas.height` and redraws to fit, plus two HTML
   `<button data-action="...">` toggles (page fullscreen + canvas
@@ -455,20 +457,20 @@ fundamental constraint that shaped C2–C5 development.
 Workaround: develop and validate the entire HTML + CSS pipeline
 against on-disk fixtures served by `BrowserResourceLoader` with
 `Content-Type: text/html`. Fixtures live as real HTML files under
-`sdmc:/switch/webprofiles/default/pages/` (seeded from
+`sdmc:/switch/brewser/webprofiles/default/` (seeded from
 `romfs:/pages/` on first launch by `BrowserProfile.seedBuiltinPages`);
-the loader maps `browser://X/Y/.../` to `<profile>/pages/X/Y/....html`.
+the loader maps `brewser://X/Y/.../` to `<storageRoot>pages/X/Y/....html`.
 Available pages:
 
-- `browser://test-html/` — hello / index page; links into the others.
-- `browser://test-html/two/` — second page for testing back/forward
+- `brewser://test-html/` — hello / index page; links into the others.
+- `brewser://test-html/two/` — second page for testing back/forward
   navigation.
-- `browser://test-html/images/` — block + inline `<img>` cases.
-- `browser://test-html/pre/` — `<pre>` whitespace preservation + inline
+- `brewser://test-html/images/` — block + inline `<img>` cases.
+- `brewser://test-html/pre/` — `<pre>` whitespace preservation + inline
   `<code>`.
-- `browser://test-html/css/` — CSS cascade, specificity, inline styles,
+- `brewser://test-html/css/` — CSS cascade, specificity, inline styles,
   margin/padding, backgrounds.
-- `browser://test-html/external-css/` — `<link rel="stylesheet">` from
+- `brewser://test-html/external-css/` — `<link rel="stylesheet">` from
   `romfs:/test-css/external.css`, plus an inline `<style>` block.
 
 The runtime fetch wrapper routes them through the loader chain and the
@@ -519,7 +521,7 @@ HTML and stylesheets require real Switch hardware to fully validate.
 
 The runtime's `WebView` now prepends caller-supplied `resourceLoaders`
 before the auto-built `LocalResourceLoader` / `NativeFetchLoader`. So
-`BrowserResourceLoader` claims `browser://` URLs before `NativeFetchLoader`
+`BrowserResourceLoader` claims `brewser://` URLs before `NativeFetchLoader`
 sees them, but `http(s)://` URLs still fall through to the auto-built
 `NativeFetchLoader` without the browser having to re-register it. See
 `switch-web-runtime/docs/resource-loading.md` for the full ordering rules.

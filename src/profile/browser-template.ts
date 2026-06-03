@@ -210,7 +210,7 @@ export interface SearchEngine {
 
 const DEFAULT_SEARCH_ENGINE: SearchEngine = {
 	title: 'DuckDuckGo',
-	logo: '../pages/assets/duckduckgo_logo.png',
+	logo: 'assets/duckduckgo_logo.png',
 	url: 'https://duckduckgo.com/',
 	query: 'https://duckduckgo.com/?q=',
 };
@@ -220,10 +220,10 @@ const decoder = new TextDecoder();
 /** Read `<profile>/config.json`. Missing / malformed / wrong-typed
  * fields fall back to `DEFAULT_CONFIG` field-by-field, so a partial
  * config is fine (the user only needs to set what they want to change). */
-export function loadConfig(profileRoot: string): BrowserConfig {
+export function loadConfig(appRoot: string): BrowserConfig {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${profileRoot}config.json`);
+		raw = Switch.readFileSync(`${appRoot}config.json`);
 	} catch (_) {
 		return DEFAULT_CONFIG;
 	}
@@ -254,10 +254,10 @@ export function loadConfig(profileRoot: string): BrowserConfig {
 }
 
 /** One entry in `apps.json`. `logo` + `url` are paths relative to the
- * profile root's `pages/` dir (e.g. `../pages/apps/foo/logo.png`),
+ * profile root's `pages/` dir (e.g. `sdmc:/switch/brewser/apps/foo/assets/logo.png` for app logos),
  * authored the same way the welcome page's relative asset paths are.
  * `logo` is used verbatim as an `<img src>`; `url` is rewritten to an
- * absolute `browser://` URL for the card link (see `renderAppCards`). */
+ * absolute `brewser://` URL for the card link (see `renderAppCards`). */
 export interface AppEntry {
 	title: string;
 	description: string;
@@ -270,10 +270,23 @@ export interface AppEntry {
  * malformed, or non-array files yield an empty list (the page then
  * shows its empty-state). Each entry must carry all four string
  * fields; partial entries are dropped. */
-export function loadApps(profileRoot: string): AppEntry[] {
+export function loadApps(appRoot: string): AppEntry[] {
+	return loadAppEntryFile(appRoot, 'apps.json');
+}
+
+/** Read + validate `<profile>/featured.json` — the curated subset
+ * the welcome page lists as cards under "Featured Apps". Same schema
+ * as `apps.json` (`AppEntry`); same lenient parsing semantics. The
+ * two files are separate so the welcome page can spotlight a smaller
+ * set without disturbing the full catalog on the Apps page. */
+export function loadFeatured(appRoot: string): AppEntry[] {
+	return loadAppEntryFile(appRoot, 'featured.json');
+}
+
+function loadAppEntryFile(appRoot: string, filename: string): AppEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${profileRoot}apps.json`);
+		raw = Switch.readFileSync(`${appRoot}${filename}`);
 	} catch (_) {
 		return [];
 	}
@@ -286,7 +299,7 @@ export function loadApps(profileRoot: string): AppEntry[] {
 			&& typeof e.logo === 'string' && typeof e.url === 'string',
 		);
 	} catch (error) {
-		console.debug(`[switch-web-browser] apps.json parse failed: ${error}`);
+		console.debug(`[switch-web-browser] ${filename} parse failed: ${error}`);
 		return [];
 	}
 }
@@ -294,10 +307,10 @@ export function loadApps(profileRoot: string): AppEntry[] {
 /** Read + validate `<profile>/search_engines.json`. Returns the
  * built-in DuckDuckGo entry as a single-element list if the file is
  * missing / malformed, so search always has a usable engine. */
-export function loadSearchEngines(profileRoot: string): SearchEngine[] {
+export function loadSearchEngines(appRoot: string): SearchEngine[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${profileRoot}search_engines.json`);
+		raw = Switch.readFileSync(`${appRoot}search_engines.json`);
 	} catch (_) {
 		return [DEFAULT_SEARCH_ENGINE];
 	}
@@ -319,18 +332,18 @@ export function loadSearchEngines(profileRoot: string): SearchEngine[] {
 /** Resolve the active search engine: the entry whose `title` matches
  * `config.json`'s `searchEngine`, else the first listed engine, else
  * the built-in default. */
-export function resolveSearchEngine(profileRoot: string): SearchEngine {
-	const engines = loadSearchEngines(profileRoot);
-	const selected = loadConfig(profileRoot).searchEngine;
+export function resolveSearchEngine(appRoot: string): SearchEngine {
+	const engines = loadSearchEngines(appRoot);
+	const selected = loadConfig(appRoot).searchEngine;
 	return engines.find((e) => e.title === selected) ?? engines[0] ?? DEFAULT_SEARCH_ENGINE;
 }
 
 /** Read `<profile>/templates.json` and return the validated entries
  * in source order. Missing or malformed file → empty array. */
-export function loadTemplateRegistry(profileRoot: string): TemplateEntry[] {
+export function loadTemplateRegistry(appRoot: string): TemplateEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${profileRoot}templates.json`);
+		raw = Switch.readFileSync(`${appRoot}templates.json`);
 	} catch (_) {
 		return [];
 	}
@@ -349,12 +362,12 @@ export function loadTemplateRegistry(profileRoot: string): TemplateEntry[] {
 
 /** Resolve a template-entry path against the profile root unless it
  * already carries an absolute scheme. */
-function resolveTemplatePath(profileRoot: string, rel: string): string {
+function resolveTemplatePath(appRoot: string, rel: string): string {
 	if (/^(?:sdmc:|romfs:)\/\//.test(rel)) return rel;
-	return `${profileRoot}${rel}`;
+	return `${appRoot}${rel}`;
 }
 
-export function loadTemplate(profileRoot: string): BrowserTemplate {
+export function loadTemplate(appRoot: string): BrowserTemplate {
 	// Resolution order:
 	//   1. config.json's `template` field — the user-chosen active template.
 	//   2. First entry in templates.json — sensible fallback if config is
@@ -362,14 +375,14 @@ export function loadTemplate(profileRoot: string): BrowserTemplate {
 	// Each candidate is tried in turn; the first one that reads + parses
 	// successfully wins. If all fall through, `DEFAULT_TEMPLATE` keeps
 	// the browser usable.
-	const config = loadConfig(profileRoot);
+	const config = loadConfig(appRoot);
 	const candidates: string[] = [config.template];
-	const registry = loadTemplateRegistry(profileRoot);
+	const registry = loadTemplateRegistry(appRoot);
 	if (registry[0] && registry[0].path !== config.template) {
 		candidates.push(registry[0].path);
 	}
 	for (const rel of candidates) {
-		const path = resolveTemplatePath(profileRoot, rel);
+		const path = resolveTemplatePath(appRoot, rel);
 		let raw: ArrayBuffer | null;
 		try {
 			raw = Switch.readFileSync(path);

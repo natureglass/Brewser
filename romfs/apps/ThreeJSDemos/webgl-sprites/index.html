@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Three.js r162 — Sprites</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px; }
+  h1 { color: #ffd35e; text-align: center; }
+  p.lead { color: #9bb1d6; font-size: 15px; text-align: center; }
+  a { color: #7eda9f; }
+  /* Canvas + Toggle Fullscreen button: the only block that's centered. */
+  .stage { text-align: center; margin: 16px 0; }
+  .stage button { background-color: #1d2c43; color: #e0e8f4;
+                  border: 1px solid #3a4d6e; border-radius: 6px;
+                  padding: 8px 16px; font-size: 15px; }
+  /* Everything below the button stays left-aligned (default flow). */
+  .status { margin: 16px 0; }
+  .conformance { margin-top: 16px; }
+  .note { background-color: #14202d; padding: 10px 14px; margin-top: 12px;
+          border-left: 3px solid #7aa2ff; color: #c2dafc; }
+  .footer { margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Three.js r162 — Sprites</h1>
+<p class="lead">Port of <code>three-r162/examples/webgl_sprites.html</code>:
+200 <code>THREE.Sprite</code> particles orbiting on a sphere (lit by linear
+<code>Fog</code>) plus 5 HUD sprites pinned to the screen corners + center
+rendered with an <code>OrthographicCamera</code> in a second pass
+(<code>autoClear = false</code> + <code>clearDepth()</code>). First milestone
+to exercise nxjs-source's new <strong>sprite math path</strong>:
+<code>nx_webgl_draw_elements</code> -&gt; <code>draw_sprite_bridge</code>
+detects <code>center</code> + <code>rotation</code> uniforms (only
+<code>SpriteMaterial</code> uploads both), extracts world scale from
+<code>modelMatrix</code> columns, computes screen-aligned quad vertices
+in view space, then routes through the existing textured-triangle bridge.</p>
+
+<div class="stage">
+  <canvas id="sprites-canvas" width="640" height="360"></canvas>
+  <br>
+  <button data-action="fullscreen-canvas">Toggle Fullscreen</button>
+</div>
+
+<script>
+  const pre = document.getElementById('sprites-canvas').getContext('2d');
+  if (pre) {
+    pre.fillStyle = '#2c3e50';
+    pre.fillRect(0, 0, 640, 360);
+    pre.fillStyle = '#fff';
+    pre.font = '28px system-ui';
+    pre.textBaseline = 'top';
+    pre.fillText('PRE-WEBGL marker - scripts not yet run', 16, 16);
+  }
+</script>
+
+<script src="brewser://apps/ThreeJSDemos/libs/three.iife.js"></script>
+<script src="assets/main.js"></script>
+
+<div class="status">
+  <canvas id="sprites-status" width="900" height="320"></canvas>
+</div>
+
+<script>
+  const st = document.getElementById('sprites-status').getContext('2d');
+  function row(y, label, value, ok) {
+    st.fillStyle = '#9bb1d6';
+    st.fillText(label, 14, y);
+    st.fillStyle = ok ? '#7eda9f' : '#ff8a6c';
+    st.fillText(value, 320, y);
+  }
+  function renderStatus() {
+    st.fillStyle = '#14202d';
+    st.fillRect(0, 0, 900, 320);
+    st.font = '14px system-ui';
+    st.textBaseline = 'top';
+    const hasThree = typeof globalThis.__THREE_R162_STAGED__ !== 'undefined';
+    row(14, 'THREE r162 loaded:', hasThree ? 'yes' : 'no', hasThree);
+    const sErr = globalThis.__spritesError;
+    row(36, 'sprites error:', sErr ? String(sErr).slice(0, 80) : '(none)', !sErr);
+    row(58, 'textures loaded:',
+        String(globalThis.__spritesTexturesLoaded | 0) + ' / 3',
+        (globalThis.__spritesTexturesLoaded | 0) === 3);
+    row(80, 'orbit sprite count:',
+        String(globalThis.__spritesOrbitCount | 0),
+        (globalThis.__spritesOrbitCount | 0) === 200);
+    row(102, 'HUD sprite count:',
+        String(globalThis.__spritesHudCount | 0),
+        (globalThis.__spritesHudCount | 0) === 5);
+    row(124, 'animate() called:',
+        globalThis.__spritesAnimateCalled ? 'yes' : 'no',
+        !!globalThis.__spritesAnimateCalled);
+    const fps = +globalThis.__spritesFps || 0;
+    row(146, 'FPS (3s window):',
+        fps > 0 ? String(fps) : '(sampling...)',
+        fps >= 15);
+    row(168, 'frames rendered:', String(globalThis.__spritesFrameCount | 0), true);
+    // Bridge dispatch debug from draw_sprite_bridge (or other bridge paths)
+    let bridgeDbg = '';
+    try {
+      const canvas2 = document.getElementById('sprites-canvas');
+      const ctx2 = canvas2 && canvas2.getContext('webgl');
+      if (ctx2 && typeof ctx2.getBackendInfo === 'function') {
+        const info = ctx2.getBackendInfo();
+        bridgeDbg = (info && info.debugDispatchState) ? String(info.debugDispatchState) : '(empty)';
+      } else {
+        bridgeDbg = '(no getBackendInfo)';
+      }
+    } catch (e) { bridgeDbg = 'err: ' + String(e); }
+    st.fillStyle = '#9bb1d6';
+    st.fillText('bridge dbg:', 14, 200);
+    st.fillStyle = '#ffd35e';
+    // Wrap long bridge dbg string
+    const maxW = 880 - 14;
+    const lines = [];
+    let cursor = 0;
+    while (cursor < bridgeDbg.length) {
+      const remaining = bridgeDbg.length - cursor;
+      const sliceLen = Math.min(110, remaining);
+      lines.push(bridgeDbg.slice(cursor, cursor + sliceLen));
+      cursor += sliceLen;
+    }
+    for (let li = 0; li < Math.min(lines.length, 4); li++) {
+      st.fillText(lines[li], 14, 222 + li * 20);
+    }
+  }
+  renderStatus();
+  setTimeout(renderStatus, 3500);
+  setTimeout(renderStatus, 7000);
+</script>
+
+<p class="conformance"><b>Conformance:</b>
+<a href="assets/rendering-gl-drawelements.html"><code>rendering/gl-drawelements</code></a>
+&mdash; pins the JS-side validation gates in front of
+<code>gl.drawElements</code>. Three.js's <code>Sprite</code> uses an
+indexed quad geometry, so every sprite draw flows through this path.</p>
+
+<p class="note">200 sprites orbit on a sphere of radius 500 around the origin,
+with per-sprite rotation + scale animation. The orbit is rotated continuously
+on all three axes. Five HUD sprites are pinned to the canvas corners + center
+via a second-pass orthographic render. The scene's linear <code>Fog</code>
+fades distant sprites to black. <strong>Known caveats for this initial port:</strong>
+material color tint (<code>material.color.setHSL</code>) won't apply because
+the bridge's textured fragment shader doesn't currently multiply by
+<code>u_color</code>; per-sprite <code>opacity</code> animation likewise
+isn't routed. Sprites will render at full texture color without tinting or
+opacity fades.</p>
+
+<p class="footer"><a href="brewser://apps/ThreeJSDemos/">back to ThreeJS r162 Demos</a></p>
+</body>
+</html>

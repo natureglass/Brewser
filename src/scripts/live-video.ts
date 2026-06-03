@@ -23,9 +23,9 @@
 //     protocols. The TLS backend is libnx (Switch system SSL service);
 //     enabled in the switch-ffmpeg port via tls.patch + the configure
 //     line `--enable-protocol=...,https,tls,...`. Required for the
-//     TikTok demo at romfs/pages/html-experiments/tiktok/, which feeds
+//     TikTok demo at romfs/dev/tiktok.html, which feeds
 //     a CDN MP4 URL directly to the <video src>.
-//   - browser://, page-relative paths: resolved by resolveLiveResourceUrl
+//   - brewser://, page-relative paths: resolved by resolveLiveResourceUrl
 //     before they reach the protocol check below.
 
 import { resolveLiveResourceUrl, type LiveElement } from './live-dom.js';
@@ -293,7 +293,7 @@ function resolveSourceForDecoder(el: LiveElement): string | null {
 	}
 	for (const c of candidates) {
 		// Resolve page-relative srcs (`./song.mp3`, `../media/x.mp3`,
-		// `browser://...`) the same way `<img>` does, then accept the native
+		// `brewser://...`) the same way `<img>` does, then accept the native
 		// paths the FFmpeg + libnx fopen can open.
 		const r = resolveLiveResourceUrl(c);
 		if (

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Khronos: uniforms/null-uniform-location</title>
+<style>
+  body { background-color: #0b1220; color: #e0e8f4; font-size: 16px;
+         text-align: center; }
+  h1 { color: #ffd35e; font-size: 20px; }
+  p.lead { color: #9bb1d6; font-size: 14px;
+           max-width: 720px; margin-left: auto; margin-right: auto; }
+  a { color: #7eda9f; }
+  code { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>Khronos conformance: <code>uniforms/null-uniform-location</code></h1>
+<p class="lead">Ported from
+<code>WebGL/sdk/tests/conformance/uniforms/null-uniform-location.html</code>.
+Validates that passing a <code>null</code> location to any uniform
+setter (<code>uniform1f</code> / <code>uniform1fv</code> / <code>uniform1i</code> /
+... / <code>uniformMatrix4fv</code>) is a silent no-op generating
+<code>NO_ERROR</code>. Milestone&nbsp;#10 surface: Three.js
+materials upload uniforms by name, and when a name isn't in the active
+program (e.g. <code>size</code> on a non-PointsMaterial program,
+<code>diffuse</code> in a custom shader),
+<code>getUniformLocation</code> returns null and Three.js fires the
+setter anyway. The bridge must accept null cleanly so material code
+doesn't crash on programs that don't declare the uniform.</p>
+
+<canvas id="example" width="50" height="50"></canvas>
+
+<canvas id="khronos-status" width="900" height="540"></canvas>
+
+<script>
+  globalThis.__khronosTestName = 'uniforms-null-uniform-location';
+</script>
+<script src="brewser://apps/ThreeJSDemos/libs/harness.js"></script>
+<script>
+  'use strict';
+
+  // Test each uniform setter with null location. Per the WebGL spec, the
+  // call must be a silent no-op + generate NO_ERROR. We sidestep the
+  // upstream's `wtu.loadStandardProgram` + `eval('callUniformFunction(...)')`
+  // pattern (latter trips our AsyncFunction-scoped eval — see
+  // [[khronos-conformance-harness]]). Direct calls + assertMsg work.
+
+  function testNullSetter(label, fn) {
+    let threw = false, threwMsg = '';
+    try {
+      fn();
+    } catch (e) {
+      threw = true;
+      threwMsg = (e && e.message) || String(e);
+    }
+    assertMsg(!threw, label + ' should not throw' + (threw ? ' (threw: ' + threwMsg + ')' : ''));
+  }
+
+  try {
+    description('Test calling uniform[Matrix]* with a null uniform location');
+
+    const wtu = WebGLTestUtils;
+    const gl = wtu.create3DContext('example');
+
+    // Drain any stale error from prior chrome state (same pattern as
+    // milestone-9 conformance — shared screen GL context may carry state).
+    gl.getError();
+
+    // Scalar setters: f, fv, i, iv pairs.
+    testNullSetter('uniform1f(null, 0)', () => gl.uniform1f(null, 0));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform1f(null)');
+
+    testNullSetter('uniform1fv(null, [0])', () => gl.uniform1fv(null, new Float32Array([0])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform1fv(null)');
+
+    testNullSetter('uniform1i(null, 0)', () => gl.uniform1i(null, 0));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform1i(null)');
+
+    testNullSetter('uniform1iv(null, [0])', () => gl.uniform1iv(null, new Int32Array([0])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform1iv(null)');
+
+    testNullSetter('uniform2f(null, 0, 1)', () => gl.uniform2f(null, 0, 1));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform2f(null)');
+
+    testNullSetter('uniform2fv(null, [0,1])', () => gl.uniform2fv(null, new Float32Array([0, 1])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform2fv(null)');
+
+    testNullSetter('uniform2i(null, 0, 1)', () => gl.uniform2i(null, 0, 1));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform2i(null)');
+
+    testNullSetter('uniform2iv(null, [0,1])', () => gl.uniform2iv(null, new Int32Array([0, 1])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform2iv(null)');
+
+    testNullSetter('uniform3f(null, 0, 1, 2)', () => gl.uniform3f(null, 0, 1, 2));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform3f(null)');
+
+    testNullSetter('uniform3fv(null, [0,1,2])', () => gl.uniform3fv(null, new Float32Array([0, 1, 2])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform3fv(null)');
+
+    testNullSetter('uniform3i(null, 0, 1, 2)', () => gl.uniform3i(null, 0, 1, 2));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform3i(null)');
+
+    testNullSetter('uniform3iv(null, [0,1,2])', () => gl.uniform3iv(null, new Int32Array([0, 1, 2])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform3iv(null)');
+
+    testNullSetter('uniform4f(null, 0, 1, 2, 3)', () => gl.uniform4f(null, 0, 1, 2, 3));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform4f(null)');
+
+    testNullSetter('uniform4fv(null, [0,1,2,3])', () => gl.uniform4fv(null, new Float32Array([0, 1, 2, 3])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform4fv(null)');
+
+    testNullSetter('uniform4i(null, 0, 1, 2, 3)', () => gl.uniform4i(null, 0, 1, 2, 3));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform4i(null)');
+
+    testNullSetter('uniform4iv(null, [0,1,2,3])', () => gl.uniform4iv(null, new Int32Array([0, 1, 2, 3])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniform4iv(null)');
+
+    testNullSetter('uniformMatrix2fv(null, false, [...4])',
+      () => gl.uniformMatrix2fv(null, false, new Float32Array([1, 0, 0, 1])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniformMatrix2fv(null)');
+
+    testNullSetter('uniformMatrix3fv(null, false, [...9])',
+      () => gl.uniformMatrix3fv(null, false, new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniformMatrix3fv(null)');
+
+    testNullSetter('uniformMatrix4fv(null, false, [...16])',
+      () => gl.uniformMatrix4fv(null, false, new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])));
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, 'after uniformMatrix4fv(null)');
+
+  } catch (e) {
+    testFailed('uncaught exception: ' + ((e && e.message) || String(e)));
+  }
+  finishTest();
+</script>
+
+<p><a href="brewser://apps/ThreeJSDemos/webgl-points-sprites/">back to Points Sprites demo</a></p>
+</body>
+</html>

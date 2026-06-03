@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<title>Test fixture: external CSS</title>
+<link rel="stylesheet" href="romfs:/test-css/external.css">
+<style>
+  /* Inline style block — later in source than the <link>, so for rules
+     of equal specificity these win. */
+  h2 { color: #ff8a8a; font-style: normal; }
+  .from-inline { color: #ffd35e; }
+</style>
+</head>
+<body>
+<h1>External CSS fixture</h1>
+<p>The body's navy-blue background and light grey text come from the
+external stylesheet at <span class="tag">romfs:/test-css/external.css</span>.
+That same sheet styles the h1 above with a slate-blue backdrop.</p>
+<h2>Cascade with inline &lt;style&gt;</h2>
+<p>The h2 above uses the external rule for italic but the inline-style
+block overrides its color to coral and turns off italic. Source order
+within equal specificity: later wins.</p>
+<p class="notice">Notice paragraph: green background from external sheet.</p>
+<p>Inline <code>style</code> attribute beats both:
+<span style="color: #d77ee0; font-weight: bold">pink bold span</span>.</p>
+<p>A <a href="brewser://dev/">link back</a> (amber from the
+external sheet's <code>a</code> rule).</p>
+<p class="from-inline">Inline-block rule applies: amber paragraph.</p>
+</body>
+</html>
