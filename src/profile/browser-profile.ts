@@ -229,6 +229,22 @@ const BUILTIN_DEV_PAGES: readonly string[] = [
 	// the QuickJS-in-pthread foundation before committing to Tier-1.
 	// See [[project-swb-web-workers-milestone]].
 	'workers-tier0.html',
+	// Helper script loaded by workers-tier0.html via importScripts() to
+	// verify Tier-1 Pass C. Defines `self.__importedAdd` + sentinel.
+	'workers-helper.js',
+	// Self-running worker script loaded by `new Worker(url)` in the
+	// Pass D test. Validates that sdmc:/ and brewser:// URL constructor
+	// paths work, and that messages posted before the async fetch
+	// resolves get buffered + delivered in order.
+	'workers-pass-d.js',
+	// Worker source for the Pass E (fetch proxy) test. Handles 'fetch',
+	// 'parallel', 'mixed', and 'echo' commands; reports results via
+	// kind-tagged postMessage payloads.
+	'workers-pass-e.js',
+	// Worker source for the Pass F (ArrayBuffer transfer) test. Handles
+	// 'inspect', 'inspectMixed', 'echoTransfer', 'multi' commands; the
+	// fixture verifies sender-side detach + receiver-side bytes intact.
+	'workers-pass-f.js',
 ];
 
 /** Chrome-toolbar icons + the unified per-profile-page stylesheet
