@@ -405,6 +405,59 @@ function rulesUsePseudo(rules: ParsedRule[], kind: 'active' | 'focus' | 'checked
 	return false;
 }
 
+function chainUsesPseudo(chain: SelectorChain, kind: 'active' | 'focus' | 'checked'): boolean {
+	for (const compound of chain.compounds) {
+		for (const pseudo of compound.pseudos) {
+			if (pseudo.kind === kind) return true;
+			if (pseudo.kind === 'not' && pseudo.inner.pseudos.some((p) => p.kind === kind)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * Per-element guard for `setPseudoActive` invalidation. Iterates only
+ * the rules that mention `:active` in their selector; for each, asks
+ * "does this rule's match status differ between (this element is
+ * :active) and (this element is NOT :active)?" — i.e., does the
+ * cascade FOR THIS element actually depend on its :active state?
+ *
+ * The "two-run differ" check (with vs. without virtualActiveOn)
+ * handles both positive selectors (`.btn:active`) and negated ones
+ * (`.btn:not(:active)`) correctly: in either case the rule changes
+ * its match result when :active flips, and we return true to
+ * trigger invalidation. Rules whose match doesn't depend on
+ * el's :active (e.g. `.other:active` on an unrelated div tap) skip
+ * the invalidation entirely — fixing the "tap anywhere causes a
+ * full repaint" symptom on pages whose author CSS has a few
+ * `:active` rules targeting specific classes.
+ */
+function someActiveRuleAffectsElement(el: LiveElement): boolean {
+	for (const rules of styleSheets.values()) {
+		for (const rule of rules) {
+			if (!chainUsesPseudo(rule.chain, 'active')) continue;
+			const withActive = matchChain(rule.chain, el, { activeOn: el });
+			const without = matchChain(rule.chain, el);
+			if (withActive !== without) return true;
+		}
+	}
+	return false;
+}
+
+function someFocusRuleAffectsElement(el: LiveElement): boolean {
+	for (const rules of styleSheets.values()) {
+		for (const rule of rules) {
+			if (!chainUsesPseudo(rule.chain, 'focus')) continue;
+			const withFocus = matchChain(rule.chain, el, { focusOn: el });
+			const without = matchChain(rule.chain, el);
+			if (withFocus !== without) return true;
+		}
+	}
+	return false;
+}
+
 /** Reset all M2.2 state. Called by `resetLiveRoot` on navigation so
  * a leaving page's rules + caches don't bleed into the next. */
 export function resetLiveCss(): void {
@@ -497,12 +550,17 @@ export function setPseudoActive(el: LiveElement | null, on: boolean): void {
 	if (!el) return;
 	if (on) activeElements.add(el);
 	else activeElements.delete(el);
-	// Phase 2.5.1 perf fix: only invalidate cascade if some stylesheet
-	// actually has a `:active` rule. Without this, every tap pair
-	// (touchstart sets :active, touchend clears it) caused a full
-	// live-overlay rebuild even when no rule reacted — costing seconds
-	// on 150-element pages.
-	if (stylesheetsWithActive.size > 0) {
+	// Per-element gate (2026-06-09): the previous gate was page-wide
+	// — "ANY stylesheet has ANY :active rule" — which fired
+	// invalidation on every tap once a page (e.g. the welcome page's
+	// main.css) had any :active rules at all, even when the tapped
+	// element couldn't possibly match one of them. The per-element
+	// check below asks the strict question — "would toggling el's
+	// :active state actually change SOME rule's match result against
+	// el?" — and skips invalidation when the answer is no. Result:
+	// taps on body / text / non-interactive divs no longer trigger
+	// a cascade rebuild + full repaint.
+	if (stylesheetsWithActive.size > 0 && someActiveRuleAffectsElement(el)) {
 		invalidateLiveStyle(el);
 	}
 }
@@ -510,7 +568,7 @@ export function setPseudoFocus(el: LiveElement | null, on: boolean): void {
 	if (!el) return;
 	if (on) focusElements.add(el);
 	else focusElements.delete(el);
-	if (stylesheetsWithFocus.size > 0) {
+	if (stylesheetsWithFocus.size > 0 && someFocusRuleAffectsElement(el)) {
 		invalidateLiveStyle(el);
 	}
 }
@@ -1062,8 +1120,22 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 		if (computed.cursor === undefined && parentComputed.cursor !== undefined) computed.cursor = parentComputed.cursor;
 	}
 
-	// 5. (customProps already merged in Pass A above — parent.customProps
-	// then own --decls in cascade order. Nothing more to do here.)
+	// 5. Inline `--foo` custom properties (highest cascade priority —
+	// inline overrides stylesheet rules per spec). Merged AFTER the
+	// cascade-rule sweep so `el.style.setProperty('--foo', …)` wins
+	// over `<style>#el { --foo: … }`. Late re-resolution below
+	// catches inline regular-prop string fields (background, color)
+	// that came in verbatim from parseCssText with `var()` refs not
+	// yet evaluated by applyDeclToComputed.
+	if (inline.customProps) {
+		Object.assign(customProps, inline.customProps);
+	}
+	if (computed.background && computed.background.indexOf('var(') >= 0) {
+		computed.background = resolveVarRefs(computed.background, el, parentComputed, customProps);
+	}
+	if (computed.color && computed.color.indexOf('var(') >= 0) {
+		computed.color = resolveVarRefs(computed.color, el, parentComputed, customProps);
+	}
 	if (Object.keys(customProps).length > 0) computed.customProps = customProps;
 	if (beforeContent !== undefined) computed.before = beforeContent;
 	if (afterContent !== undefined) computed.after = afterContent;
@@ -1866,10 +1938,40 @@ function fetchFontBytesSync(url: string): ArrayBuffer | null {
 		} catch (_) { /* fall through */ }
 		return null;
 	}
-	// http(s) / brewser:// would need an async path — Tier-1 punts.
-	// A future enhancement: kick off fetch() and registerFontFace
-	// when bytes arrive, then requestFullRepaint.
+	// blob: / http(s) / brewser:// — async fetch path. Returns null so the
+	// caller falls through to fetchFontBytesAsync.
 	return null;
+}
+
+/** Async fetch fallback for @font-face URLs that aren't synchronously
+ * readable (blob:, brewser://, http(s)). Cocos Creator's runtime font
+ * loader appends `<style>@font-face { src: url("blob:UUID") }</style>`
+ * with TTF bytes from URL.createObjectURL on an assetManager-loaded TTF
+ * Blob; without this path the family never registers, `fonts.load()` never
+ * resolves, and Cocos's Label render pipeline gates forever (no fillText).
+ *
+ * Resolves to the font bytes on success, throws on network / non-2xx /
+ * unparseable. Called fire-and-forget from registerFontFace — once bytes
+ * arrive we construct + add a FontFace into globalThis.fonts and Cocos's
+ * 100ms-interval `fonts.load()` poll picks it up on the next iteration.
+ */
+async function fetchFontBytesAsync(url: string): Promise<ArrayBuffer> {
+	const resp = await fetch(url);
+	if (!resp.ok) throw new Error('http ' + resp.status + ' for ' + url);
+	return await resp.arrayBuffer();
+}
+
+function addFontFaceToSet(family: string, bytes: ArrayBuffer | Uint8Array, source: string): void {
+	try {
+		const FontFaceCtor = (globalThis as unknown as { FontFace?: FontFaceCtor }).FontFace;
+		const fonts = (globalThis as unknown as { fonts?: FontFaceSetLike }).fonts;
+		if (!FontFaceCtor || !fonts) return;
+		const face = new FontFaceCtor(family, bytes);
+		fonts.add(face);
+		console.debug('[font-face] registered family=' + family + ' bytes=' + (bytes as ArrayBuffer).byteLength + ' source=' + source);
+	} catch (err) {
+		console.debug('[font-face] FontFace ctor threw for family=' + family + ': ' + ((err as { message?: string })?.message || err));
+	}
 }
 
 function extractFirstUrl(src: string): string | undefined {
@@ -1899,17 +2001,25 @@ function registerFontFace(blockNode: CssNode): void {
 	const url = extractFirstUrl(src);
 	if (!url) return;
 	const key = family.toLowerCase();
-	if (registeredFontFamilies.has(key)) return; // already registered
+	if (registeredFontFamilies.has(key)) return; // already registered (or fetch already in flight)
+	registeredFontFamilies.add(key); // mark NOW to dedupe concurrent re-registrations from style re-parses
+	const familyResolved = family;
 	const bytes = fetchFontBytesSync(url);
-	if (!bytes) return;
-	try {
-		const FontFaceCtor = (globalThis as unknown as { FontFace?: FontFaceCtor }).FontFace;
-		const fonts = (globalThis as unknown as { fonts?: FontFaceSetLike }).fonts;
-		if (!FontFaceCtor || !fonts) return;
-		const face = new FontFaceCtor(family, bytes);
-		fonts.add(face);
-		registeredFontFamilies.add(key);
-	} catch (_) { /* swallow — bad bytes / runtime mismatch */ }
+	if (bytes) {
+		addFontFaceToSet(familyResolved, bytes, 'sync:' + url);
+		return;
+	}
+	// blob: / brewser:// / http(s): async path. Cocos's font loader polls
+	// `fonts.load(family)` every 100ms with a JP-ms timeout, so we register
+	// fire-and-forget — the next poll iteration after bytes arrive picks
+	// up the freshly-added FontFace.
+	fetchFontBytesAsync(url).then(
+		(b) => addFontFaceToSet(familyResolved, b, 'async:' + url),
+		(err) => {
+			console.debug('[font-face] async fetch failed family=' + familyResolved + ' url=' + url + ': ' + ((err as { message?: string })?.message || err));
+			registeredFontFamilies.delete(key); // allow caller to retry
+		},
+	);
 }
 
 function registerKeyframes(name: string, blockNode: CssNode): void {
@@ -3024,9 +3134,22 @@ function computeChainSpecificity(chain: SelectorChain): readonly [number, number
 // Selector matcher
 // =========================================================================
 
-function matchChain(chain: SelectorChain, el: LiveElement): boolean {
+/** Optional virtual pseudo-class state for "what-if" matcher runs.
+ * Used by `someActiveRuleAffectsElement` / `someFocusRuleAffectsElement`
+ * to test whether toggling :active / :focus on a specific element would
+ * change the cascade for that element — without actually mutating the
+ * element's pseudo state. `null` (the default) means "use the real
+ * activeElements / focusElements sets." A non-null value pretends the
+ * named element is :active / :focus in addition to whatever the real
+ * sets contain. */
+interface VirtualPseudoOverride {
+	activeOn?: LiveElement | null;
+	focusOn?: LiveElement | null;
+}
+
+function matchChain(chain: SelectorChain, el: LiveElement, vp?: VirtualPseudoOverride): boolean {
 	const { compounds, combinators } = chain;
-	if (!matchCompound(compounds[compounds.length - 1], el)) return false;
+	if (!matchCompound(compounds[compounds.length - 1], el, vp)) return false;
 
 	let current: LiveElement | null = el;
 	for (let i = compounds.length - 2; i >= 0; i--) {
@@ -3034,14 +3157,14 @@ function matchChain(chain: SelectorChain, el: LiveElement): boolean {
 		const left = compounds[i];
 		if (combinator === '>') {
 			const p: LiveElement | null = current?.parent ?? null;
-			if (!p || !matchCompound(left, p)) return false;
+			if (!p || !matchCompound(left, p, vp)) return false;
 			current = p;
 		} else {
 			// descendant
 			let a: LiveElement | null = current?.parent ?? null;
 			let matched = false;
 			while (a) {
-				if (matchCompound(left, a)) {
+				if (matchCompound(left, a, vp)) {
 					matched = true;
 					current = a;
 					break;
@@ -3054,7 +3177,7 @@ function matchChain(chain: SelectorChain, el: LiveElement): boolean {
 	return true;
 }
 
-function matchCompound(compound: Compound, el: LiveElement): boolean {
+function matchCompound(compound: Compound, el: LiveElement, vp?: VirtualPseudoOverride): boolean {
 	if (compound.tag && compound.tag !== el.tagName.toLowerCase()) return false;
 	if (compound.id && el.attrs.id !== compound.id) return false;
 	for (const cls of compound.classes) {
@@ -3064,7 +3187,7 @@ function matchCompound(compound: Compound, el: LiveElement): boolean {
 		if (!matchAttr(attr, el)) return false;
 	}
 	for (const pseudo of compound.pseudos) {
-		if (!matchPseudo(pseudo, el)) return false;
+		if (!matchPseudo(pseudo, el, vp)) return false;
 	}
 	return true;
 }
@@ -3083,10 +3206,14 @@ function matchAttr(attr: AttrPredicate, el: LiveElement): boolean {
 	}
 }
 
-function matchPseudo(pseudo: SimplePseudo, el: LiveElement): boolean {
+function matchPseudo(pseudo: SimplePseudo, el: LiveElement, vp?: VirtualPseudoOverride): boolean {
 	switch (pseudo.kind) {
-		case 'active':   return activeElements.has(el);
-		case 'focus':    return focusElements.has(el);
+		case 'active':
+			if (vp && vp.activeOn === el) return true;
+			return activeElements.has(el);
+		case 'focus':
+			if (vp && vp.focusOn === el) return true;
+			return focusElements.has(el);
 		case 'hover':    return false; // touch device
 		case 'disabled': return el.hasAttribute('disabled');
 		case 'checked': {
@@ -3097,7 +3224,7 @@ function matchPseudo(pseudo: SimplePseudo, el: LiveElement): boolean {
 			return el.hasAttribute('checked');
 		}
 		case 'empty':    return el.children.length === 0 && !el.textContent;
-		case 'not':      return !matchCompound(pseudo.inner, el);
+		case 'not':      return !matchCompound(pseudo.inner, el, vp);
 		case 'nth': {
 			// Compute 1-based index among element siblings (text nodes
 			// excluded — per CSS spec :nth-* counts ELEMENT children).

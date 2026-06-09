@@ -2,7 +2,10 @@
  * Tier-1 IndexedDB polyfill for switch-web-browser.
  *
  * Pure-JS, file-backed (one JSON file per database) at
- * `sdmc:/switch/brewser/indexedDB/<dbName>.json`.
+ * `sdmc:/switch/brewser/indexedDB/<dbName>.json` for production pages,
+ * `sdmc:/switch/brewser/dev/indexedDB/<dbName>.json` when the active
+ * page is under `brewser://dev/` (keeps test artifacts out of real
+ * user storage).
  *
  * Covers the subset that the api-probe test + typical itch.io games
  * exercise: open with versioning, createObjectStore, put/add/get/delete/
@@ -28,14 +31,37 @@ declare const Switch: {
 	mkdirSync(path: string): void;
 };
 
-const DB_DIR = 'sdmc:/switch/brewser/indexedDB/';
+/** Storage namespaces. `default` is the production root used by real
+ * pages; `dev` quarantines test-fixture writes under a `dev/` subdir so
+ * the brewser root path stays clean. Selected at access time from the
+ * current page URL — pages under `brewser://dev/` get `dev`. Mirrors
+ * the same dispatcher in `local-storage.ts`. */
+type Namespace = 'default' | 'dev';
+
+const ROOT = 'sdmc:/switch/brewser/';
+const DB_DIRS: Record<Namespace, string> = {
+	default: ROOT + 'indexedDB/',
+	dev: ROOT + 'dev/indexedDB/',
+};
+
+/** Source of the current page URL, set at install time. Returns '' when
+ * no shell wired it up (test harness, early boot) — falls through to
+ * `default` so production state is the safe default. */
+let getCurrentPageUrl: () => string = () => '';
+
+function pickNamespace(): Namespace {
+	const url = getCurrentPageUrl();
+	return url.startsWith('brewser://dev/') ? 'dev' : 'default';
+}
+
+function dbDir(): string { return DB_DIRS[pickNamespace()]; }
 function dbPath(name: string): string {
 	const safe = name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-	return DB_DIR + safe + '.json';
+	return dbDir() + safe + '.json';
 }
 
 function ensureDbDir(): void {
-	try { Switch.mkdirSync(DB_DIR); } catch { /* exists */ }
+	try { Switch.mkdirSync(dbDir()); } catch { /* exists */ }
 }
 
 type StoreSchema = { keyPath: string | null };
@@ -483,11 +509,16 @@ let installed = false;
 /**
  * Define `globalThis.indexedDB` as an IDBFactory instance. Call once at
  * app startup BEFORE any page script reads `indexedDB`. Per-app singleton;
- * all databases stored under `sdmc:/switch/brewser/indexedDB/`.
+ * databases stored under `sdmc:/switch/brewser/indexedDB/` for production
+ * pages and `sdmc:/switch/brewser/dev/indexedDB/` for pages served from
+ * `brewser://dev/`. Pass `getCurrentUrl` so the namespace dispatcher can
+ * read the active URL on each file resolution; without it everything
+ * lands in `default`.
  */
-export function installIndexedDB(): void {
+export function installIndexedDB(getCurrentUrl?: () => string): void {
 	if (installed) return;
 	installed = true;
+	if (getCurrentUrl) getCurrentPageUrl = getCurrentUrl;
 	const factory = new IDBFactory();
 	Object.defineProperty(globalThis, 'indexedDB', {
 		value: factory,

@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  />
+
+  <title>About Brewser</title>
+
+  <!-- Brewser built-in stylesheet -->
+  <link rel="stylesheet" href="brewser://assets/main.css">
+
+  <style>
+    body {
+      padding: 28px 48px;
+    }
+
+    h1 { margin-bottom: 4px; line-height: 1.12; }
+
+    /* Featured Apps heading — bumped to feel like a real section title
+      instead of a sub-heading. Tracking + weight match the rest of the
+      page; the colour stays in the blue accent family (inherited from
+      main.css). */
+    h2 {
+      margin-top: 26px;
+      margin-bottom: 20px;
+      font-size: 2em;
+      letter-spacing: 0.005em;
+    }
+
+    .featured-section { margin-top: 0; margin-bottom: 16px; }
+
+    /* The featured-header row sits on top of the grid: section title on
+      the left, secondary nav (Bookmarks, History) flush right. Reuses
+      the same flex shape the old top-bar had. */
+    .featured-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+
+    .featured-header h2 {
+      /* Override the page-level h2 vertical margins — the section's own
+        layout handles spacing now. */
+      margin: 0;
+    }
+
+    .top-links {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .about-hero {
+      margin-bottom: 28px;
+    }
+
+    .about-badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0 0;
+    }
+
+    .about-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 12px;
+      color: #c2e0ff;
+      background-color: #14202d;
+      border: 1px solid rgba(122, 162, 255, 0.34);
+      border-radius: 999px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .about-section {
+      margin-top: 30px;
+    }
+
+    .about-card {
+      background:
+        radial-gradient(circle at top left, rgba(122, 162, 255, 0.18), transparent 38%),
+        linear-gradient(135deg, #14202d, #10192a 72%);
+      border: 1px solid rgba(122, 162, 255, 0.34);
+      border-radius: 16px;
+      padding: 20px 18px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .about-card h2,
+    .about-card h3 {
+      margin-top: 0;
+    }
+
+    .about-card p {
+      color: #9bb1d6;
+      line-height: 1.45;
+    }
+
+    .about-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .about-meta article {
+      background-color: #14202d;
+      padding: 14px 16px;
+      border-left: 3px solid #7aa2ff;
+      border-radius: 6px;
+    }
+
+    .about-meta strong {
+      display: block;
+      color: #ffd35e;
+      margin-bottom: 6px;
+    }
+
+    .about-meta span {
+      display: block;
+      color: #9bb1d6;
+      line-height: 1.35;
+    }
+
+    .about-footer-note {
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(122, 162, 255, 0.24);
+      color: #6a7c95;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+  </style>
+</head>
+
+<body>
+  <main class="page-shell">
+
+    <section class="featured-section" aria-label="Featured Apps">
+      <header class="featured-header">
+        <h2>About Brewser</h2>
+        <!-- Bookmarks + History on the same line as the section title,
+            pushed right by .featured-header's space-between. -->
+        <nav class="top-links" aria-label="Browser navigation">
+          <a class="munch-link" href="brewser://home/">Home</a>
+        </nav>
+      </header>
+
+    </section>
+
+    <section class="about-hero about-card">
+      <p>
+        Brewser is a Nintendo Switch homebrew application that lets users
+        discover, download, and run web-powered apps built with familiar
+        technologies such as HTML, CSS, JavaScript, WebGL, and WASM.
+      </p>
+
+      <p>
+        The goal of Brewser is to make homebrew experimentation more
+        approachable by giving developers a lighter way to build apps,
+        tools, demos, and games using web technologies.
+      </p>
+
+      <div class="about-badge-row" aria-label="Brewser technology highlights">
+        <span class="about-badge">Nintendo Switch homebrew</span>
+        <span class="about-badge">HTML</span>
+        <span class="about-badge">CSS</span>
+        <span class="about-badge">JavaScript</span>
+        <span class="about-badge">WebGL</span>
+        <span class="about-badge">WASM</span>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <div class="app-grid">
+        <article class="app-card">
+          <strong>What Brewser does</strong>
+          <span>
+            Brewser acts as a browser-style runtime and app hub for
+            web-powered homebrew experiences on Nintendo Switch.
+          </span>
+        </article>
+
+        <article class="app-card">
+          <strong>For users</strong>
+          <span>
+            Users can explore Featured, Community, and Experimental apps
+            from inside Brewser, with permission prompts shown when needed.
+          </span>
+        </article>
+
+        <article class="app-card">
+          <strong>For developers</strong>
+          <span>
+            Developers can build apps using web technologies, test them
+            locally, and submit them for possible inclusion in the Brewser
+            app catalog.
+          </span>
+        </article>
+
+        <article class="app-card">
+          <strong>App permissions</strong>
+          <span>
+            Apps that request special access, such as storage or network
+            usage, may ask the user to opt in before the app starts.
+          </span>
+        </article>
+      </div>
+    </section>
+
+    <section class="about-section about-card">
+      <h2>Libraries and frameworks</h2>
+
+      <p>
+        Brewser is built using homebrew and web runtime technologies.
+        The project may use or integrate libraries and frameworks such as:
+      </p>
+
+      <ul class="settings-list">
+        <li>
+          <strong>libnx</strong>
+          <span class="desc">
+            Nintendo Switch homebrew development library.
+          </span>
+        </li>
+
+        <li>
+          <strong>SDL2</strong>
+          <span class="desc">
+            Cross-platform media/input layer used by many homebrew projects.
+          </span>
+        </li>
+
+        <li>
+          <strong>nx.js</strong>
+          <span class="desc">
+            JavaScript/runtime integration for Switch-focused web app behavior.
+          </span>
+        </li>
+
+        <li>
+          <strong>HTML, CSS, JavaScript, WebGL, and WASM</strong>
+          <span class="desc">
+            Web technologies used by Brewser apps and experiments.
+          </span>
+        </li>
+      </ul>
+    </section>
+
+    <section class="about-section about-card">
+      <h2>Support Brewser</h2>
+
+      <p>
+        If you enjoy using Brewser or want to support future development,
+        donations are appreciated.
+      </p>
+
+      <p>
+        PayPal:
+        <a href="https://www.paypal.com/">
+          alexdaskalakis@hotmail.com
+        </a>
+      </p>
+    </section>
+
+    <section class="about-section about-card">
+      <h2>Privacy note</h2>
+
+      <p>
+        Brewser may use network access to load websites, fetch app catalog
+        information, or download app files when the user chooses to use those
+        features.
+      </p>
+
+      <p>
+        Brewser itself does not intentionally collect personal information
+        through this About page. Apps, websites, or third-party services opened
+        through Brewser may have their own privacy practices, terms, cookies,
+        analytics, or network behavior.
+      </p>
+
+      <p>
+        Users should review permission prompts carefully, especially for apps
+        that request network access, storage access, WebGL, WASM, or other
+        special capabilities.
+      </p>
+    </section>
+
+    <section class="about-section about-card">
+      <h2>Disclaimer</h2>
+
+      <p>
+        Brewser is an unofficial homebrew application and is not affiliated
+        with, endorsed by, sponsored by, licensed by, or approved by Nintendo.
+      </p>
+
+      <p>
+        Brewser does not include, distribute, or provide Nintendo software,
+        firmware, games, ROMs, encryption keys, copyrighted assets, exploits,
+        or tools/instructions for bypassing technological protection measures.
+      </p>
+    </section>
+
+    <footer class="about-footer-note">
+      <p>
+        Thanks for using Brewser.
+      </p>
+
+      <p>
+        Created by Alex Daskalakis, also known as Natureglass.
+      </p>
+    </footer>
+  </main>
+</body>
+</html>

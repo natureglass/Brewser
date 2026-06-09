@@ -576,15 +576,19 @@ let lastBodyViewportH = -1;
 // between any two atoms — giving uniform ~16 ms chunks regardless of
 // element size.
 //
-// Overridable from `config.json`'s `renderChunkMs` (the shell calls
-// `setLiveBuildChunkMs` at startup): higher = pages snap in with fewer
+// Overridable from `config.json`'s `wwwRenderChunkMs` (the shell calls
+// `setLiveBuildChunkMs` per-navigation): higher = pages snap in with fewer
 // visible build steps but choppier scroll/animation during that initial
 // paint; lower = smoother but more drawn-out fill-in. 12 is the default.
+// `brewser://` internal pages bypass this entirely — the shell pushes a
+// "one-shot" sentinel budget (~1e9 ms) on internal navigation so internal
+// UIs always snap in at once.
 let buildChunkMs = 12;
 /** Set the idle/continuation build budget (ms per chunk). Wired to
- * `config.json`'s `renderChunkMs`. Guarded so a non-positive / non-finite
- * value can't stall or busy-loop the build (it would just keep the
- * default). The caller (loadConfig) already clamps the upper bound. */
+ * `config.json`'s `wwwRenderChunkMs` (for external pages) or the internal
+ * one-shot sentinel (for `brewser://`). Guarded so a non-positive /
+ * non-finite value can't stall or busy-loop the build (it would just keep
+ * the default). The caller already clamps WWW values to [1, 1000]. */
 export function setLiveBuildChunkMs(ms: number): void {
 	if (Number.isFinite(ms) && ms > 0) buildChunkMs = ms;
 }
@@ -1223,6 +1227,13 @@ export function paintLiveOverlay(
 	}
 }
 
+// 2026-06-07 pvzge investigation: counter + log throttle for
+// `overlayLiveAnimatedCanvases`. Lets the per-walk diagnostic log fire
+// for the first few walks (to confirm canvas dispatch decisions) and
+// then once every ~600 walks afterward.
+let overlayCanvasWalkCount = 0;
+const OVERLAY_CANVAS_LOG_EVERY = 600;
+
 /** Per-frame walk of the live tree to overlay animated `<canvas>`
  * content on top of the cached body paint.
  *
@@ -1254,12 +1265,25 @@ export function overlayLiveAnimatedCanvases(
 		ctx.beginPath();
 		ctx.rect(viewport.x, viewport.y, viewport.width, viewport.height);
 		ctx.clip();
+		// 2026-06-07 pvzge investigation: per-walk diagnostic so the
+		// canvas-side decisions (isWebGLBacked, viewport visibility, box
+		// dims, path chosen) are observable from nxjs-debug.log without
+		// any page-script instrumentation. Throttled the same way as the
+		// bridge-side log: first calls + every Nth.
+		const overlayTick = ++overlayCanvasWalkCount;
+		const overlayVerbose = (globalThis as { __brewserOverlayDebug?: boolean })
+			.__brewserOverlayDebug === true;
+		const overlayShouldLog = overlayVerbose || overlayTick === 1
+			|| overlayTick === 2 || overlayTick === 10 || overlayTick === 60
+			|| (overlayTick % OVERLAY_CANVAS_LOG_EVERY) === 0;
+		let canvasIndex = 0;
 		const visit = (el: LiveElement, inFixed: boolean) => {
 			const cs = getComputedLiveStyle(el);
 			if (cs.display === 'none') return;
 			const pos = cs.position ?? el.style.position;
 			const nowFixed = inFixed || pos === 'fixed';
 			if (el.tagName === 'CANVAS' && !nowFixed) {
+				const cIdx = canvasIndex++;
 				const box = getLayoutBox(el);
 				if (box && box.w > 0 && box.h > 0) {
 					const screenX = box.x + viewport.x;
@@ -1267,8 +1291,21 @@ export function overlayLiveAnimatedCanvases(
 					// Visibility cull against viewport.
 					const vTop = viewport.y;
 					const vBot = viewport.y + viewport.height;
-					if (screenY + box.h >= vTop && screenY <= vBot) {
-						if (el.isWebGLBacked()) {
+					const visible = screenY + box.h >= vTop && screenY <= vBot;
+					const webglBacked = el.isWebGLBacked();
+					if (overlayShouldLog) {
+						console.debug('[overlay] walk=' + overlayTick
+							+ ' canvas#' + cIdx
+							+ ' webgl=' + webglBacked
+							+ ' visible=' + visible
+							+ ' box=' + box.w + 'x' + box.h + '@' + box.x + ',' + box.y
+							+ ' screen=' + screenX + ',' + screenY
+							+ ' vp=' + viewport.width + 'x' + viewport.height
+							+ '@' + viewport.x + ',' + viewport.y
+							+ ' scrollY=' + scrollY);
+					}
+					if (visible) {
+						if (webglBacked) {
 							copyBridgeToScreen(
 								0, 0, box.w, box.h,
 								screenX, screenY,
@@ -1285,6 +1322,10 @@ export function overlayLiveAnimatedCanvases(
 							}
 						}
 					}
+				} else if (overlayShouldLog) {
+					console.debug('[overlay] walk=' + overlayTick
+						+ ' canvas#' + cIdx
+						+ ' SKIP no-box box=' + (box ? (box.w + 'x' + box.h) : 'null'));
 				}
 			}
 			// Slice 2a: VIDEO frames overlay on top of the cached

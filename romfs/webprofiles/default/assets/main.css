@@ -1,0 +1,378 @@
+/* Unified Brewser per-profile page stylesheet. Linked from each page
+   under webprofiles/default/ via
+   <link rel="stylesheet" href="brewser://assets/main.css">. Resource
+   loader resolves that to <storageRoot>assets/main.css (assets/ does
+   not match the apps/ or dev/ routing prefixes). Seeded from
+   romfs:/webprofiles/default/assets/main.css by seedBuiltinAssets on
+   first run; user-edits on disk persist (missing-only seeder).
+
+   Pages intentionally own their own body padding here (per-page
+   convention: 28px 48px for text-heavy pages, 32px 28px for home,
+   28px for the top-bar pages). error.html does NOT link this sheet —
+   its palette is unrelated. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(122, 162, 255, 0.12), transparent 32%),
+    #0b1220;
+  color: #e0e8f4;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 18px;
+}
+
+h1 { color: #ffd35e; }
+h2 { color: #7aa2ff; }
+a  { color: #7eda9f; }
+
+.lead {
+  color: #9bb1d6;
+  margin-top: 0;
+  margin-bottom: 24px;
+}
+
+.empty { color: #6a7c95; font-style: italic; }
+
+/* Card-grid empty-state — used when <browser-apps> / <browser-featured>
+   render no entries. Same <p class="empty"> markup as the list pages,
+   but inside .app-grid it gets the card-style backdrop. */
+.app-grid .empty {
+  background-color: #14202d;
+  padding: 14px 16px;
+  border-left: 3px solid #7aa2ff;
+  color: #9bb1d6;
+  border-radius: 6px;
+  font-style: normal;
+}
+
+code, kbd { color: #c2e0ff; }
+
+.page-shell {
+  width: min(1280px, 100%);
+  margin: 0 auto;
+}
+
+/* Header row: page title left, single action button right. Used by
+   history.html + bookmarks.html. */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.top-bar h1 {
+  margin: 0 0 4px;
+  line-height: 1.12;
+}
+
+/* Pill nav links — used by home top-links + bottom-bar CTAs. */
+.munch-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  min-height: 46px;
+  padding: 11px 20px;
+  overflow: hidden;
+  color: #eaf2ff;
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background:
+    radial-gradient(circle at top left, rgba(122, 162, 255, 0.28), transparent 36%),
+    linear-gradient(135deg, #14202d, #10192a 72%);
+  border: 1px solid rgba(122, 162, 255, 0.4);
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.munch-link:focus-visible {
+  outline: 2px solid rgba(126, 218, 159, 0.72);
+  outline-offset: 3px;
+}
+
+/* Destructive pill — red/orange accents reading as "careful, this
+   clears data". Used by history.html (Clear History) and bookmarks.html
+   (Clear Bookmarks); shell intercepts data-action="clear-history"
+   / "clear-bookmarks". */
+.clear-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132px;
+  min-height: 46px;
+  padding: 11px 22px;
+  color: #ffb8b8;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  background:
+    radial-gradient(circle at top left, rgba(255, 60, 65, 0.22), transparent 36%),
+    linear-gradient(135deg, #2a151a, #1a1018 72%);
+  border: 1px solid rgba(255, 60, 65, 0.55);
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Internet search bar — emitted by <browser-search> (loader). */
+.search-section {
+  display: flex;
+  justify-content: center;
+  margin: 0 auto 32px;
+}
+
+.search-form {
+  display: flex;
+  align-items: center;
+  width: min(760px, 100%);
+  min-height: 66px;
+  padding: 8px;
+  background:
+    radial-gradient(circle at top left, rgba(122, 162, 255, 0.24), transparent 34%),
+    linear-gradient(135deg, #14202d, #10192a 72%);
+  border: 1px solid rgba(122, 162, 255, 0.42);
+  border-radius: 999px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.search-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #eaf2ff;
+  font: inherit;
+  padding: 12px 8px;
+}
+
+.search-input::placeholder {
+  color: #9bb1d6;
+  opacity: 1;
+}
+
+.search-button {
+  flex: 0 0 auto;
+  border: none;
+  cursor: pointer;
+  color: #0b1220;
+  background: linear-gradient(135deg, #ffd35e, #7eda9f);
+  font: inherit;
+  font-weight: 800;
+  padding: 13px 22px;
+  border-radius: 999px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.search-button:hover,
+.search-button:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
+  outline: none;
+}
+
+/* App / Featured grid — 4-column responsive grid of .app-card anchors
+   (logo + title + description). Same markup the resource loader
+   emits for <browser-apps> and <browser-featured>. */
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.app-card {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 20px 18px 18px;
+  min-height: 156px;
+  text-align: center;
+  color: #eaf2ff;
+  text-decoration: none;
+  background:
+    radial-gradient(circle at top left, rgba(122, 162, 255, 0.28), transparent 36%),
+    linear-gradient(135deg, #14202d, #10192a 72%);
+  border: 1px solid rgba(122, 162, 255, 0.34);
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.app-logo {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  margin-bottom: 14px;
+}
+
+.app-card strong {
+  display: block;
+  color: #ffd35e;
+  font-size: 1.15em;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.app-card span {
+  display: block;
+  color: #9bb1d6;
+  line-height: 1.35;
+  text-align: left;
+}
+
+/* Settings-list rows — used by settings.html (Developer section),
+   history.html (recent visits), bookmarks.html (saved pages). The
+   loader emits <ul class="settings-list"><li>…</li></ul>. */
+ul.settings-list { list-style-type: none; padding: 0; }
+ul.settings-list li {
+  background-color: #14202d;
+  padding: 8px 14px;
+  margin-top: 4px;
+  border-left: 3px solid #1f2c4d;
+}
+/* Anchors inside list rows render in the muted blue-grey so they
+   blend with the .url / .desc spans below them — louder green would
+   fight the row's own muted treatment. `display: block` so the
+   anchor's bounding box spans the full row — the inner inline label
+   + url span still flow as text, and `.desc` already forces its own
+   line, so resting layout is unchanged. Needed so the :active press
+   background (see "Press indication" below) covers the whole row. */
+ul.settings-list a { color: #9bb1d6; text-decoration: none; display: block; }
+ul.settings-list .url { color: #6a7c95; }
+ul.settings-list .desc {
+  display: block;
+  color: #6a7c95;
+  font-size: 15px;
+  margin-top: 2px;
+}
+
+/* Template rows — settings.html "Templates" radio-style buttons.
+   The loader emits <button class="template-row"><span
+   class="radio-indicator"><span class="radio-dot"></span></span>
+   <span class="template-label">…</span></button>; the .active row
+   (currently-selected per config.json) has the inner dot filled and
+   no data-action so taps are no-ops. Inactive rows carry
+   data-action="select-template:<path>". */
+button.template-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background-color: #1f2c4d;
+  color: #e0e8f4;
+  margin-top: 6px;
+  padding: 12px 16px;
+  border: 1px solid #2a3a66;
+  border-radius: 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button.template-row.active {
+  background-color: #14202d;
+  border-color: #7aa2ff;
+  cursor: default;
+}
+button.template-row .template-label { flex: 1; }
+button.template-row .path { color: #9bb1d6; }
+button.template-row .radio-indicator {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #7aa2ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+}
+button.template-row .radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: transparent;
+}
+button.template-row.active .radio-dot {
+  background-color: #7aa2ff;
+}
+
+/* Press indication — visible "depressed" state on tap. Pure colour
+   delta (darker background + brighter accent border) so the engine
+   paints the state statically without needing transitions/animations.
+   The live-css :active wiring (controller-shortcuts.ts setPseudoActive
+   on touchstart/touchend) drives the state flip; stylesheetsWithActive
+   is gated so adding these rules costs a per-tap cascade invalidation.
+
+   For button.template-row the [data-action] attribute selector scopes
+   the press style to inactive rows — the currently-selected row
+   (rendered without data-action by the loader) won't flash on tap. */
+.munch-link:active {
+  background: #0a1220;
+  border-color: rgba(122, 162, 255, 0.9);
+}
+.clear-btn:active {
+  background: #170a10;
+  border-color: rgba(255, 80, 85, 0.95);
+}
+.app-card:active {
+  background: #0a1220;
+  border-color: rgba(122, 162, 255, 0.8);
+}
+.search-button:active {
+  background: linear-gradient(135deg, #b89238, #4ea670);
+}
+button.template-row[data-action]:active {
+  background-color: #0e1830;
+  border-color: #7eda9f;
+}
+ul.settings-list a:active {
+  background-color: #0e1830;
+}
+
+@media (max-width: 900px) {
+  .app-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .munch-link {
+    min-width: 96px;
+    padding-inline: 16px;
+  }
+
+  .app-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .search-form {
+    border-radius: 28px;
+    align-items: stretch;
+    flex-wrap: wrap;
+    padding: 10px;
+  }
+  .search-logo { margin-top: 4px; }
+  .search-input { flex: 1 1 calc(100% - 78px); }
+  .search-button { width: 100%; margin-top: 8px; }
+}

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MutationObserver Probe — Switch Web Platform</title>
+<link rel="stylesheet" href="brewser://assets/main.css" />
+<style>
+  body { padding: 16px; font-family: sans-serif; color: #e0e8f4; background: #0b1220; }
+  h1 { color: #ffd35e; margin: 0 0 8px 0; }
+  p { color: #c2e0ff; margin: 4px 0; }
+  .row { display: flex; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+  button {
+    background: #1f2c40; color: #ffd35e; border: 1px solid #2a4060;
+    border-radius: 6px; padding: 10px 14px; font-size: 16px;
+  }
+  pre {
+    background: #14202d; border: 1px solid #2a4060; border-radius: 6px;
+    padding: 10px; white-space: pre-wrap; word-break: break-all;
+    max-height: 520px; overflow: auto;
+    font-size: 12px; color: #c2e0ff;
+  }
+  #scratch { padding: 8px; border: 1px dashed #2a4060; }
+</style>
+</head>
+<body>
+  <h1>MutationObserver Probe (itch.io compat A2)</h1>
+  <p>Verifies <code>MutationObserver</code> works end-to-end against typical
+  use patterns. Modern JS frameworks (React/Vue/Lit/Svelte hydration),
+  jQuery's modern attachments, and most Construct 3 / Phaser plugins
+  depend on this — pages SILENTLY misbehave without it (animations
+  stall, lifecycle hooks don't fire). Each slice covers one observer
+  use case. Log: <code>sdmc:/switch/brewser/logs/mutation-observer-probe.log</code>.</p>
+  <div class="row">
+    <button id="run">Run all slices</button>
+  </div>
+  <pre id="log"></pre>
+  <!-- Mutation playground. Slices append/remove/edit children here. -->
+  <div id="scratch"></div>
+<script>
+(function () {
+  var LOG_PATH = 'sdmc:/switch/brewser/logs/mutation-observer-probe.log';
+  var t0 = performance.now();
+  var logEl = document.getElementById('log');
+  var lines = [];
+  function log(s) {
+    var t = Math.round(performance.now() - t0);
+    var line = '+' + t + 'ms ' + s;
+    lines.push(line);
+    if (lines.length > 200) lines.shift();
+    if (logEl) logEl.textContent = lines.join('\n');
+    try { Switch.appendFileSync(LOG_PATH, line + '\n'); } catch (_) {}
+  }
+
+  // Wait for the observer to fire, with timeout. Returns the records.
+  function awaitRecords(observer, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var t = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        reject(new Error('timeout: observer did not fire within ' + timeoutMs + 'ms'));
+      }, timeoutMs);
+      observer._testCallback = function (records) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(t);
+        resolve(records);
+      };
+    });
+  }
+
+  // Helper: install an observer whose callback both routes records to
+  // any awaitRecords promise AND records them for inspection.
+  function mkObserver() {
+    var obs = new MutationObserver(function (records, observer) {
+      if (typeof obs._testCallback === 'function') {
+        var cb = obs._testCallback; obs._testCallback = null;
+        cb(records);
+      }
+    });
+    return obs;
+  }
+
+  // === Slice 1: MutationObserver globals ===
+  function checkGlobals() {
+    log('--- Slice 1: MutationObserver globals ---');
+    var has = typeof MutationObserver !== 'undefined';
+    log((has ? 'PASS' : 'FAIL') + ' :: typeof MutationObserver = ' + typeof MutationObserver);
+    if (!has) return false;
+    var canConstruct = false;
+    try { new MutationObserver(function () {}); canConstruct = true; }
+    catch (e) { log('FAIL :: new MutationObserver threw: ' + (e && e.message)); }
+    log((canConstruct ? 'PASS' : 'FAIL') + ' :: new MutationObserver(fn) constructs');
+    // MutationRecord constructor isn't required by spec — users get records
+    // from the observer callback. Skip its existence check.
+    return canConstruct;
+  }
+
+  // Get a fresh scratch container per slice — keeps mutations isolated.
+  function freshScratch() {
+    var s = document.getElementById('scratch');
+    while (s.firstChild) s.removeChild(s.firstChild);
+    return s;
+  }
+
+  // === Slice 2: childList — appendChild fires record ===
+  async function sliceChildListAppend() {
+    log('--- Slice 2: childList: appendChild record ---');
+    var scratch = freshScratch();
+    var obs = mkObserver();
+    obs.observe(scratch, { childList: true });
+    var span = document.createElement('span');
+    span.textContent = 'hello';
+    var pending = awaitRecords(obs, 2000);
+    scratch.appendChild(span);
+    try {
+      var records = await pending;
+      obs.disconnect();
+      var ok = Array.isArray(records) && records.length === 1
+        && records[0].type === 'childList'
+        && records[0].addedNodes && records[0].addedNodes.length === 1
+        && records[0].addedNodes[0] === span
+        && records[0].removedNodes && records[0].removedNodes.length === 0
+        && records[0].target === scratch;
+      log((ok ? 'PASS' : 'FAIL') + ' :: appendChild record (records=' + records.length
+          + ', type=' + records[0].type
+          + ', added=' + records[0].addedNodes.length
+          + ', removed=' + records[0].removedNodes.length + ')');
+    } catch (e) { obs.disconnect(); log('FAIL :: ' + e.message); }
+  }
+
+  // === Slice 3: childList — removeChild fires record ===
+  async function sliceChildListRemove() {
+    log('--- Slice 3: childList: removeChild record ---');
+    var scratch = freshScratch();
+    var span = document.createElement('span');
+    span.textContent = 'gone';
+    scratch.appendChild(span);
+    var obs = mkObserver();
+    obs.observe(scratch, { childList: true });
+    var pending = awaitRecords(obs, 2000);
+    scratch.removeChild(span);
+    try {
+      var records = await pending;
+      obs.disconnect();
+      var ok = records.length === 1
+        && records[0].type === 'childList'
+        && records[0].addedNodes.length === 0
+        && records[0].removedNodes.length === 1
+        && records[0].removedNodes[0] === span;
+      log((ok ? 'PASS' : 'FAIL') + ' :: removeChild record (added=' + records[0].addedNodes.length
+          + ', removed=' + records[0].removedNodes.length + ')');
+    } catch (e) { obs.disconnect(); log('FAIL :: ' + e.message); }
+  }
+
+  // === Slice 4: attributes — setAttribute fires record ===
+  async function sliceAttributes() {
+    log('--- Slice 4: attributes: setAttribute record ---');
+    var scratch = freshScratch();
+    var target = document.createElement('div');
+    target.setAttribute('class', 'orig');
+    scratch.appendChild(target);
+    var obs = mkObserver();
+    obs.observe(target, { attributes: true, attributeOldValue: true });
+    var pending = awaitRecords(obs, 2000);
+    target.setAttribute('class', 'changed');
+    try {
+      var records = await pending;
+      obs.disconnect();
+      var r = records[0];
+      var ok = records.length === 1
+        && r.type === 'attributes'
+        && r.attributeName === 'class'
+        && r.target === target
+        && r.oldValue === 'orig';
+      log((ok ? 'PASS' : 'FAIL') + ' :: attribute change (attr=' + r.attributeName
+          + ', oldValue=' + r.oldValue + ', type=' + r.type + ')');
+    } catch (e) { obs.disconnect(); log('FAIL :: ' + e.message); }
+  }
+
+  // === Slice 5: attributes — attributeFilter ===
+  async function sliceAttributeFilter() {
+    log('--- Slice 5: attributes: attributeFilter ---');
+    var scratch = freshScratch();
+    var target = document.createElement('div');
+    scratch.appendChild(target);
+    var obs = mkObserver();
+    obs.observe(target, { attributes: true, attributeFilter: ['data-watch'] });
+    // First: change a NON-filtered attribute — observer should NOT fire.
+    target.setAttribute('data-ignored', '1');
+    // Yield microtask boundary so any errant fire would have landed.
+    await new Promise(function (r) { setTimeout(r, 50); });
+    var firedOnIgnored = obs._testCallback === null; // _testCallback was nulled if it fired
+    // Actually we never armed a pending awaitRecords for the ignored
+    // attribute, so we need a different way to check. Use a side-channel:
+    var firedRecords = [];
+    obs._testCallback = function (r) { firedRecords.push.apply(firedRecords, r); };
+    target.setAttribute('data-ignored', '2');
+    await new Promise(function (r) { setTimeout(r, 50); });
+    var ignoredCount = firedRecords.length;
+    log((ignoredCount === 0 ? 'PASS' : 'FAIL') + ' :: filter excludes non-listed attr (records=' + ignoredCount + ')');
+    // Now change the FILTERED attribute — should fire.
+    var pending = awaitRecords(obs, 2000);
+    target.setAttribute('data-watch', 'fired');
+    try {
+      var records = await pending;
+      obs.disconnect();
+      var ok = records.length === 1 && records[0].attributeName === 'data-watch';
+      log((ok ? 'PASS' : 'FAIL') + ' :: filter includes listed attr (records=' + records.length
+          + ', name=' + records[0].attributeName + ')');
+    } catch (e) { obs.disconnect(); log('FAIL :: ' + e.message); }
+  }
+
+  // === Slice 6: characterData — textContent change on Text node ===
+  async function sliceCharacterData() {
+    log('--- Slice 6: characterData: text node nodeValue change ---');
+    var scratch = freshScratch();
+    var textNode = document.createTextNode('original');
+    scratch.appendChild(textNode);
+    var obs = mkObserver();
+    obs.observe(textNode, { characterData: true, characterDataOldValue: true });
+    var pending = awaitRecords(obs, 2000);
+    textNode.nodeValue = 'modified';
+    try {
+      var records = await pending;
+      obs.disconnect();
+      var r = records[0];
+      var ok = records.length === 1
+        && r.type === 'characterData'
+        && r.target === textNode
+        && r.oldValue === 'original';
+      log((ok ? 'PASS' : 'FAIL') + ' :: text node mutation (type=' + r.type
+          + ', oldValue=' + r.oldValue + ')');
+    } catch (e) { obs.disconnect(); log('FAIL :: ' + e.message); }
+  }
+
+  // === Slice 7: subtree — observer on parent sees grandchild changes ===
+  async function sliceSubtree() {
+    log('--- Slice 7: subtree:true observes descendant mutations ---');
+    var scratch = freshScratch();
+    var parent = document.createElement('div');
+    var child = document.createElement('div');
+    var grandchild = document.createElement('span');
+    parent.appendChild(child);
+    child.appendChild(grandchild);
+    scratch.appendChild(parent);
+    var obs = mkObserver();
+    obs.observe(parent, { childList: true, subtree: true });
+    var pending = awaitRecords(obs, 2000);
+    var newLeaf = document.createElement('em');
+    grandchild.appendChild(newLeaf);
+    try {
+      var records = await pending;
+      obs.disconnect();
+      var ok = records.length >= 1
+        && records[0].type === 'childList'
+        && records[0].target === grandchild  // mutation reports against the actual mutated node
+        && records[0].addedNodes[0] === newLeaf;
+      log((ok ? 'PASS' : 'FAIL') + ' :: subtree observer fired against grandchild (records=' + records.length
+          + ', targetIsGrandchild=' + (records[0].target === grandchild) + ')');
+    } catch (e) { obs.disconnect(); log('FAIL :: ' + e.message); }
+  }
+
+  // === Slice 8: disconnect() prevents callbacks ===
+  async function sliceDisconnect() {
+    log('--- Slice 8: disconnect() suppresses subsequent records ---');
+    var scratch = freshScratch();
+    var target = document.createElement('div');
+    scratch.appendChild(target);
+    var fired = 0;
+    var obs = new MutationObserver(function () { fired++; });
+    obs.observe(target, { attributes: true });
+    obs.disconnect();
+    target.setAttribute('data-x', '1');
+    target.setAttribute('data-y', '2');
+    // Yield one macrotask so any errant async fire would have landed.
+    await new Promise(function (r) { setTimeout(r, 100); });
+    log((fired === 0 ? 'PASS' : 'FAIL') + ' :: callback did NOT fire after disconnect (fired=' + fired + ')');
+  }
+
+  // === Slice 9: takeRecords() returns pending + clears queue ===
+  async function sliceTakeRecords() {
+    log('--- Slice 9: takeRecords() returns pending + clears ---');
+    var scratch = freshScratch();
+    var target = document.createElement('div');
+    scratch.appendChild(target);
+    var fired = 0;
+    var obs = new MutationObserver(function () { fired++; });
+    obs.observe(target, { attributes: true });
+    // Synchronous mutations — records queue but callback hasn't fired yet
+    target.setAttribute('a', '1');
+    target.setAttribute('b', '2');
+    target.setAttribute('c', '3');
+    var taken = obs.takeRecords();
+    var tookCount = Array.isArray(taken) ? taken.length : -1;
+    log((tookCount === 3 ? 'PASS' : 'FAIL') + ' :: takeRecords returned ' + tookCount + ' (expected 3)');
+    // Yield microtask + macrotask — callback should NOT fire because
+    // takeRecords drained the queue.
+    await new Promise(function (r) { setTimeout(r, 100); });
+    log((fired === 0 ? 'PASS' : 'FAIL') + ' :: callback did NOT fire after takeRecords drained queue (fired=' + fired + ')');
+    obs.disconnect();
+  }
+
+  // === Slice 10: async delivery — callback fires after sync code ===
+  async function sliceAsyncDelivery() {
+    log('--- Slice 10: callback fires async (microtask), not sync ---');
+    var scratch = freshScratch();
+    var target = document.createElement('div');
+    scratch.appendChild(target);
+    var firedBefore = false, firedAfter = false;
+    var seenFlag;
+    var afterSyncFlag = false;
+    var obs = new MutationObserver(function () {
+      seenFlag = afterSyncFlag; // should be true if delivery is async
+    });
+    obs.observe(target, { attributes: true });
+    target.setAttribute('x', '1');
+    firedBefore = (seenFlag !== undefined);
+    afterSyncFlag = true;
+    // Wait for microtask
+    await Promise.resolve();
+    await Promise.resolve();
+    firedAfter = (seenFlag !== undefined);
+    obs.disconnect();
+    log((!firedBefore ? 'PASS' : 'FAIL') + ' :: callback did NOT fire synchronously inside setAttribute (firedSync=' + firedBefore + ')');
+    log((firedAfter && seenFlag === true ? 'PASS' : 'FAIL')
+        + ' :: callback fired after sync code completed (firedAfter=' + firedAfter
+        + ', sawPostSyncFlag=' + seenFlag + ')');
+  }
+
+  async function runAll() {
+    log('');
+    log('=== RUN at ' + new Date().toISOString() + ' ===');
+    var has = checkGlobals();
+    if (!has) { log('--- ABORT: MutationObserver missing entirely ---'); return; }
+    await sliceChildListAppend();
+    await sliceChildListRemove();
+    await sliceAttributes();
+    await sliceAttributeFilter();
+    await sliceCharacterData();
+    await sliceSubtree();
+    await sliceDisconnect();
+    await sliceTakeRecords();
+    await sliceAsyncDelivery();
+    log('--- runAll DONE ---');
+  }
+
+  document.getElementById('run').addEventListener('click', function () { runAll(); });
+})();
+</script>
+</body>
+</html>

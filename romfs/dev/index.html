@@ -169,6 +169,18 @@ the rendering pipeline.</p>
   <strong><a href="brewser://dev/workers-tier0/">workers-tier0</a></strong>
   <br><span class="desc">Tier-0 Web Workers foundation test. Spawns a real OS-thread <code>Worker</code> with its own <code>JSRuntime</code>+<code>JSContext</code>, exchanges bidirectional <code>postMessage(string)</code>, runs a 100-round-trip stress loop, validates a parallel <code>compute:N</code> result. No structured clone yet (Tier-1). Pass &equals; foundation viable for full Worker support; failure &equals; reconsider the milestone. Logs to <code>logs/workers-tier0.log</code> + per-worker <code>logs/worker-N.log</code>.</span>
 </li>
+<li>
+  <strong><a href="brewser://dev/wasm-probe/">wasm-probe</a></strong>
+  <br><span class="desc">WebAssembly end-to-end probe (itch.io compat roadmap A1). 9 slices against the MDN <code>simple.wasm</code> fixture: globals inventory, fetch + magic-byte sanity, <code>validate()</code>, sync <code>new Module(bytes)</code> + <code>imports/exports</code> reflection, <code>instantiate(module|bytes, importObj)</code> with import-callback round-trip (arg=42), <code>compileStreaming</code>, <code>instantiateStreaming</code> (the Unity/Godot/Emscripten path &mdash; ~40-60% of itch.io content), <code>WebAssembly.Memory</code>+<code>Table</code> constructors. Logs to <code>logs/wasm-probe.log</code>.</span>
+</li>
+<li>
+  <strong><a href="brewser://dev/mutation-observer-probe/">mutation-observer-probe</a></strong>
+  <br><span class="desc">MutationObserver end-to-end probe (itch.io compat roadmap A2). 10 slices: <code>typeof</code> + ctor sanity, <code>childList</code> (appendChild + removeChild), <code>attributes</code> (with <code>oldValue</code>), <code>attributeFilter</code> (positive + negative), <code>characterData</code> (with <code>oldValue</code>), <code>subtree:true</code> against grandchildren, <code>disconnect()</code> suppresses, <code>takeRecords()</code> drains + returns pending, async microtask delivery semantics. Modern JS frameworks (React/Vue/Lit/Svelte) + jQuery + Construct 3 plugins silently misbehave without this. Logs to <code>logs/mutation-observer-probe.log</code>.</span>
+</li>
+<li>
+  <strong><a href="brewser://dev/css-vars-probe/">css-vars-probe</a></strong>
+  <br><span class="desc">CSS variables + <code>calc()</code> probe (itch.io compat roadmap A3 &mdash; last Tier-A item). 10 slices verifying <code>:root</code> cascade, <code>var(--foo)</code> resolution + fallback, parent&rarr;child inheritance, <code>calc()</code> arithmetic, <code>calc(var(--w) * 2)</code>, inline-style <code>var()</code>, <code>el.style.setProperty('--foo', …)</code> + <code>getPropertyValue</code> round-trip, <code>getComputedStyle(el).getPropertyValue</code>. Includes a visual playground (colored boxes you can eyeball below the log). Modern web UIs + every Construct 3 / Phaser plugin with theming depend on these. Logs to <code>logs/css-vars-probe.log</code>.</span>
+</li>
 </ul>
 
 <h2>Networking &amp; async</h2>

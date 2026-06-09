@@ -11,15 +11,15 @@ import { BREWSER_APP_ROOT, DEFAULT_PROFILE_ROOT } from '../browser-config.js';
  * directory on first run, but never overwrites — user edits persist.
  */
 
-/** Page files seeded from `romfs:/pages/` into the profile on first
- * run. Each entry is a path relative to the romfs source's `pages/`
- * subdir, so `'home.html'` maps from `romfs:/pages/home.html` to
- * `<storageRoot>home.html`. The romfs source keeps a `pages/`
- * grouping (matches the historical layout), but the SDMC target sits
- * flat at the profile root (`<storageRoot>` directly) after the
- * 2026-06-02 hoist. Dev-only fixtures + the Khronos conformance
- * corpus live separately under `BUILTIN_DEV_PAGES` (app-root `dev/`)
- * after the 2026-06-02 dev-tree hoist. */
+/** Page files seeded from `romfs:/webprofiles/default/` into the
+ * profile on first run. Each entry is a path under the romfs source's
+ * per-profile template dir, so `'home.html'` maps from
+ * `romfs:/webprofiles/default/home.html` to `<storageRoot>home.html`.
+ * After the 2026-06-04 mirror refactor the romfs source layout now
+ * mirrors the SD-card runtime layout 1:1 — every romfs path maps to
+ * the same relative path under `brewser/` at runtime. Dev-only
+ * fixtures + the Khronos conformance corpus live separately under
+ * `BUILTIN_DEV_PAGES` (app-root `dev/`). */
 const BUILTIN_PAGES: readonly string[] = [
 	'home.html',
 	'about.html',
@@ -245,10 +245,29 @@ const BUILTIN_DEV_PAGES: readonly string[] = [
 	// 'inspect', 'inspectMixed', 'echoTransfer', 'multi' commands; the
 	// fixture verifies sender-side detach + receiver-side bytes intact.
 	'workers-pass-f.js',
+	// WebAssembly probe (itch.io compat roadmap A1). 9 slices verifying
+	// instantiate / instantiateStreaming / Memory / Table / imports +
+	// exports reflection against the MDN simple.wasm fixture below.
+	'wasm-probe.html',
+	// MutationObserver probe (itch.io compat roadmap A2). 10 slices
+	// verifying childList / attributes / characterData / subtree /
+	// attributeFilter / disconnect / takeRecords / async delivery.
+	'mutation-observer-probe.html',
+	// CSS variables + calc() probe (itch.io compat roadmap A3). 10
+	// slices verifying :root cascade, var() resolution + fallback,
+	// inheritance, calc() arithmetic, calc(var()), inline-style var(),
+	// el.style.setProperty/getPropertyValue for --foo, getComputedStyle.
+	'css-vars-probe.html',
+	// Binary WASM fixture — 78 bytes, exports `exported_func()` which
+	// calls imported `imports.imported_func(42)`. Copy of nx.js's
+	// apps/wasm/src/simple.wasm; corresponds to the .wat at
+	// https://github.com/mdn/webassembly-examples/blob/main/js-api-examples/simple.wat
+	'wasm-probe.wasm',
 ];
 
 /** Chrome-toolbar icons + the unified per-profile-page stylesheet
- * seeded from `romfs:/assets/` into `<storageRoot>assets/`. Mirrors
+ * seeded from `romfs:/webprofiles/default/assets/` into
+ * `<storageRoot>assets/`. Mirrors
  * `BUILTIN_PAGES` exactly: copy on first run, never overwrite,
  * deleting restores the default next launch. The browser loads icons
  * from sdmc so the user can swap a PNG in place to re-skin the
@@ -265,24 +284,30 @@ const BUILTIN_ASSETS: readonly string[] = [
 	'toolbar_back.png',
 	'keyboard_back.png',
 	'main.css',
+	// Audio feedback for link/button presses. Played by the shell's
+	// click-sound module when `config.json clickSounds` is true.
+	'click.wav',
 ];
 
 /** Design-config + template files seeded from `romfs:/` into the
  * profile root. `config.json` names the active template; `templates.json`
- * is the catalog the Settings page lists; each `Templates/<name>.json`
+ * is the catalog the Settings page lists; each `templates/<name>.json`
  * is one named theme. Users add their own by dropping a new JSON in
- * `Templates/`, listing it in `templates.json`, and pointing
- * `config.json`'s `template` field at it. */
+ * `templates/`, listing it in `templates.json`, and pointing
+ * `config.json`'s `template` field at it. (Lowercase `templates/`
+ * since the 2026-06-03 rename — existing installs with the old
+ * `Templates/` dir auto-migrate via `loadConfig` normalization; the
+ * legacy folder can be deleted manually.) */
 const BUILTIN_TEMPLATE_FILES: readonly string[] = [
 	'config.json',
 	'templates.json',
 	'search_engines.json',
 	'apps.json',
 	'featured.json',
-	'Templates/default.json',
-	'Templates/light.json',
-	'Templates/bottom-bar.json',
-	'Templates/amber.json',
+	'templates/default.json',
+	'templates/light.json',
+	'templates/bottom-bar.json',
+	'templates/amber.json',
 ];
 
 export class BrowserProfile {
@@ -291,7 +316,7 @@ export class BrowserProfile {
 	 * at the root, plus `assets/` and per-origin dirs. */
 	readonly storageRoot: string;
 	/** App-level storage shared across profiles: `config.json`, the
-	 * other top-level JSON config files, `Templates/`, `logs/`,
+	 * other top-level JSON config files, `templates/`, `logs/`,
 	 * `screenshots/`, `history.jsonl`, `bookmarks.json`. */
 	readonly appRoot: string;
 
@@ -333,7 +358,7 @@ export class BrowserProfile {
 		// App-level dirs shared across profiles.
 		try { Switch.mkdirSync(this.appRoot); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}Templates/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}templates/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}apps/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}apps/mediaplayer/`); } catch (_) { /* exists */ }
@@ -431,13 +456,13 @@ export class BrowserProfile {
 	/** Absolute SD-card path to the (app-level) `templates.json` — the
 	 * registry of available design templates the shell reads at launch.
 	 * The active template lives at one of the paths the registry
-	 * references (typically `Templates/<name>.json`). */
+	 * references (typically `templates/<name>.json`). */
 	templatesRegistryPath(): string {
 		return `${this.appRoot}templates.json`;
 	}
 
 	/** Copy the templates registry + every shipped template JSON
-	 * (`romfs:/templates.json`, `romfs:/Templates/<name>.json`) into the
+	 * (`romfs:/templates.json`, `romfs:/templates/<name>.json`) into the
 	 * app-level dir if the targets are missing. Same never-overwrite
 	 * semantics as the page + asset seeders. */
 	async seedTemplates(): Promise<void> {
@@ -456,22 +481,22 @@ export class BrowserProfile {
 	}
 
 	/**
-	 * Copy each `romfs:/pages/<rel>` into `<storageRoot><rel>` if the
-	 * target file is missing. The source tree keeps a `pages/` prefix
-	 * (the romfs layout is unchanged), but the SDMC target sits flat
-	 * at the profile root. Never overwrites — once seeded, the user's
-	 * edits on disk are authoritative. Deleting a file restores it
-	 * next launch, which is intentional (lets the user "reset" a
-	 * page). Reads bytes so binary page assets (e.g. textures bundled
-	 * with a Three.js demo) survive the round-trip; text files are
-	 * preserved bit-exact since we never re-encode them.
+	 * Copy each `romfs:/webprofiles/default/<rel>` into
+	 * `<storageRoot><rel>` if the target file is missing. After the
+	 * 2026-06-04 mirror refactor the romfs source layout matches the
+	 * SD-card runtime 1:1: pages live in romfs at the same relative
+	 * path they'll occupy on the SD card. Never overwrites — once
+	 * seeded, the user's edits on disk are authoritative. Deleting a
+	 * file restores it next launch (lets the user "reset" a page).
+	 * Reads bytes so binary page assets survive the round-trip; text
+	 * files are preserved bit-exact since we never re-encode them.
 	 */
 	async seedBuiltinPages(): Promise<void> {
 		for (const rel of BUILTIN_PAGES) {
 			const target = this.pagePath(rel);
 			if (fileExists(target)) continue;
 			try {
-				const response = await fetch(`romfs:/pages/${rel}`);
+				const response = await fetch(`romfs:/webprofiles/default/${rel}`);
 				if (!response.ok) continue;
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				Switch.writeFileSync(target, bytes);
@@ -519,16 +544,17 @@ export class BrowserProfile {
 		}
 	}
 
-	/** Copy each `romfs:/assets/<rel>` into `<storageRoot>assets/<rel>`
-	 * if the target file is missing. Same never-overwrite semantics as
-	 * the page seeder. PNG bodies are binary, so we read as
-	 * `ArrayBuffer` and write the bytes back directly. */
+	/** Copy each `romfs:/webprofiles/default/assets/<rel>` into
+	 * `<storageRoot>assets/<rel>` if the target file is missing. Same
+	 * never-overwrite semantics as the page seeder. PNG bodies are
+	 * binary, so we read as `ArrayBuffer` and write the bytes back
+	 * directly. */
 	async seedBuiltinAssets(): Promise<void> {
 		for (const rel of BUILTIN_ASSETS) {
 			const target = this.assetPath(rel);
 			if (fileExists(target)) continue;
 			try {
-				const response = await fetch(`romfs:/assets/${rel}`);
+				const response = await fetch(`romfs:/webprofiles/default/assets/${rel}`);
 				if (!response.ok) continue;
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				Switch.writeFileSync(target, bytes);

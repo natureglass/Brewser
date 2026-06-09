@@ -1,8 +1,9 @@
 // Regenerate icon.jpg (the file `@nx.js/nro` reads at the project root for
 // the homebrew launcher icon) from the canonical PNG logo under
-// romfs/assets/. Switch NRO icons are 256×256 JPEG; we resize and re-
-// encode with System.Drawing via PowerShell so no extra npm dep is
-// needed. Re-runs only when the source PNG is newer than the JPEG.
+// romfs/webprofiles/default/assets/. Switch NRO icons are 256×256 JPEG;
+// we resize and re-encode with System.Drawing via PowerShell so no extra
+// npm dep is needed. Re-runs only when the source PNG is newer than the
+// JPEG.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
@@ -10,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const src = join(root, 'romfs', 'assets', 'Brewser_logo.png');
+const src = join(root, 'romfs', 'webprofiles', 'default', 'assets', 'Brewser_logo.png');
 const dst = join(root, 'icon.jpg');
 
 if (!existsSync(src)) {

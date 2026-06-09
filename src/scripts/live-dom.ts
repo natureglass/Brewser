@@ -25,6 +25,14 @@ import { type HtmlElement, parseHtml } from '../html/html-parser.js';
 import { applyDecl, parseCssText, parseLength, serializeStyle, type CssLength, type InlineStyle } from './inline-css.js';
 import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
 
+// Probe counters (2026-06-07 pvzge text+touch investigation). Rate-limited
+// loggers so the device console doesn't explode under 60fps repaints.
+let _diagBboxCanvas = 0;
+let _diagGetContextCanvas = 0;
+let _diagGetContextNonCanvas = 0;
+let _diagCanvasDispatchEntry = 0;
+let _diagCanvasDispatchThrow = 0;
+
 /** Coerce a value written to `style.{width,height,...}` into a
  * `CssLength | undefined`. Accepts numbers (raw px), CssLength objects,
  * percent/px strings, and undefined. Anything unparseable lands as
@@ -62,8 +70,68 @@ import {
 	scrollElementIntoView, syncLiveCacheVersion,
 } from './live-overlay.js';
 import { markLiveDirty, markPageHasCanvas2dActivity, requestFullRepaint } from './live-paint-control.js';
+import {
+	notifyAttribute, notifyCharacterData, notifyChildList,
+} from '../polyfills/mutation-observer.js';
 
 const LIVE_ELEMENT_BRAND = Symbol('LiveElement');
+
+// =========================================================================
+// `<script src=...>` runtime injection (appendChild side-effect)
+// =========================================================================
+// A real browser, when a <script> element with a `src` attribute is inserted
+// into the DOM, fetches that URL, evaluates the script, then dispatches a
+// `load` event on the element (or `error` on failure). Cocos Creator's
+// bundle loader (`ES` function in cocos-js/cc.js) relies on this exact flow
+// to load each bundle's `index.js` — without it, the `load` event never
+// fires and `loadBundle`'s natural callback hangs forever (today the
+// pvzge force-stub fires after 5s per bundle to work around this). The
+// natural flow ALSO removes the need for pvzge's `System.instantiate`
+// shim, since SystemJS itself injects `<script src>` when no instantiate
+// override is registered.
+//
+// Tracked on the element via a private flag so re-attaching the same node
+// doesn't double-load. Errors fire `error`; loads fire `load`. Both
+// dispatch as bubble:false (script-load events don't bubble in HTML spec).
+function maybeLoadScriptElement(el: LiveElement): void {
+	if (el.tagName !== 'SCRIPT') return;
+	const raw = (el as unknown as { src?: unknown }).src;
+	if (typeof raw !== 'string' || !raw) return;
+	const marked = el as unknown as { __scriptLoadStarted?: boolean };
+	if (marked.__scriptLoadStarted) return;
+	marked.__scriptLoadStarted = true;
+	const g = globalThis as unknown as {
+		fetch?: (u: string) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+		eval?: (s: string) => unknown;
+		document?: { baseURI?: string };
+	};
+	if (typeof g.fetch !== 'function' || typeof g.eval !== 'function') return;
+	// Real-browser semantics: `<script src="foo.js">` resolves the
+	// relative URL against document.baseURI. Cocos's bundle loader (ES
+	// function in cc.js) sets `n.src = "assets/internal/index.js"`
+	// (relative) and expects the engine to honor that. Without
+	// resolution, the fetch hits a bare relative path that page-fetch
+	// can't handle and 404s.
+	let resolved = raw;
+	const base = g.document?.baseURI;
+	if (base) {
+		try { resolved = new URL(raw, base).href; }
+		catch { /* fall through to raw */ }
+	}
+	const indirectEval = g.eval;
+	g.fetch(resolved).then((r) => {
+		if (!r.ok) throw new Error('<script src> fetch ' + resolved + ' returned ' + r.status);
+		return r.text();
+	}).then((scriptText) => {
+		// Indirect eval — runs in global scope so System.register etc. land
+		// on the page-global System, not the swb-runtime closure.
+		(0, indirectEval)(scriptText + '\n//# sourceURL=' + resolved);
+		el.dispatchEvent({ type: 'load', bubbles: false });
+	}).catch((err: unknown) => {
+		console.debug('[swb] <script src> load failed:', resolved, String(err));
+		el.dispatchEvent({ type: 'error', bubbles: false, message: String(err) });
+	});
+}
 
 // =========================================================================
 // `<img>` src resolution
@@ -587,6 +655,17 @@ export function resolveLiveResourceUrl(src: string): string {
 let liveTreeVersion = 0;
 export function bumpLiveTreeVersion(): void { liveTreeVersion++; }
 export function getLiveTreeVersion(): number { return liveTreeVersion; }
+
+/** Runtime predicate that answers "is this offscreen currently
+ * WebGL-backed?" by consulting the canvas-runner's `webGLBackedCanvases`
+ * set at call time. Installed once by `canvas-runner` at module-init.
+ * Lets `LiveElement.isWebGLBacked()` reflect lazy `getContext('webgl2')`
+ * calls that happen AFTER `attachOffscreen` committed `_webglBacked =
+ * false`. See `isWebGLBacked()` for the full rationale. */
+let webGLBackedPredicate: ((off: OffscreenCanvas) => boolean) | null = null;
+export function setWebGLBackedPredicate(fn: (off: OffscreenCanvas) => boolean): void {
+	webGLBackedPredicate = fn;
+}
 function resetLiveTreeVersion(): void { liveTreeVersion = 0; }
 
 /**
@@ -725,6 +804,18 @@ export function wrapCanvasCtx2dForRepaint(ctx: OffscreenCanvasRenderingContext2D
 	}
 }
 
+/** Handler the shell registers to translate `<input>.focus()` calls
+ * from page scripts into a KeyboardOverlay open + write-back cycle.
+ * Cocos Creator's EditBox: `document.createElement('input')` →
+ * `container.appendChild(input)` → `input.focus()`. Without this hook
+ * focus() is a no-op and the engine never gets a keyboard. The shell
+ * sets this from browser-shell.ts at boot. */
+type InputFocusHandler = (el: LiveElement) => void;
+let inputFocusHandler: InputFocusHandler | null = null;
+export function setInputFocusHandler(fn: InputFocusHandler | null): void {
+	inputFocusHandler = fn;
+}
+
 export class LiveElement {
 	readonly [LIVE_ELEMENT_BRAND] = true as const;
 	readonly tagName: string;
@@ -814,8 +905,20 @@ export class LiveElement {
 	get data(): string { return this.tagName === '#text' ? this._text : ''; }
 	set data(v: string) {
 		if (this.tagName !== '#text') return;
+		const oldValue = this._text;
 		this._text = v == null ? '' : String(v);
 		invalidateLiveStyle(this);
+		notifyCharacterData(this, oldValue);
+	}
+	/** Spec alias for `data` on text nodes. Modern code uses
+	 * `node.nodeValue` interchangeably. Same MutationObserver fire. */
+	get nodeValue(): string { return this.tagName === '#text' ? this._text : ''; }
+	set nodeValue(v: string) {
+		if (this.tagName !== '#text') return;
+		const oldValue = this._text;
+		this._text = v == null ? '' : String(v);
+		invalidateLiveStyle(this);
+		notifyCharacterData(this, oldValue);
 	}
 	/** DOM-spec `parentElement` getter. Real DOM distinguishes it from
 	 * `parentNode` (returns `null` for non-element parents); here our
@@ -846,6 +949,14 @@ export class LiveElement {
 	 * sync. lil-gui's stylesheet selectors lean on this. */
 	get className(): string { return this.classList.value; }
 	set className(v: string) { this.classList.value = v; }
+
+	/** Spec `id` accessor — round-trips via `setAttribute('id', …)` so
+	 * the cascade matcher (which reads `el.attrs.id`) sees the change.
+	 * Without this, `box.id = 'slice1'` was setting a plain JS property
+	 * that the matcher never consulted — ID-selector rules silently
+	 * skipped freshly-created elements. */
+	get id(): string { return this.attrs.id ?? ''; }
+	set id(v: string) { this.setAttribute('id', v == null ? '' : String(v)); }
 
 	/** `textContent` — concatenates all child text plus this node's own
 	 * text. lil-gui never uses this for reading; setter is what matters.
@@ -1042,6 +1153,9 @@ export class LiveElement {
 	 * `class` mirrors into `classList` for future CSS-cascade lookups. */
 	setAttribute(name: string, value: string): void {
 		const lower = name.toLowerCase();
+		const oldValue = Object.prototype.hasOwnProperty.call(this.attrs, lower)
+			? this.attrs[lower]
+			: null;
 		this.attrs[lower] = value;
 		if (lower === 'style') this.style.cssText = value;
 		else if (lower === 'class') this.classList.value = value;
@@ -1080,6 +1194,7 @@ export class LiveElement {
 		}
 		// M2.2: any attr change can affect CSS cascade ([type=text] etc.).
 		invalidateLiveStyle(this);
+		notifyAttribute(this, lower, oldValue);
 	}
 
 	/** Async-load an image from `src` and cache it on this element so
@@ -1262,9 +1377,13 @@ export class LiveElement {
 	}
 	removeAttribute(name: string): void {
 		const lower = name.toLowerCase();
+		const oldValue = Object.prototype.hasOwnProperty.call(this.attrs, lower)
+			? this.attrs[lower]
+			: null;
 		delete this.attrs[lower];
 		if (lower === 'class') this.classList.value = '';
 		invalidateLiveStyle(this);
+		if (oldValue !== null) notifyAttribute(this, lower, oldValue);
 	}
 	/** lil-gui calls `el.toggleAttribute('disabled', state)` to enable
 	 * / disable inputs. We treat presence as truthy and store the empty
@@ -1284,6 +1403,10 @@ export class LiveElement {
 	appendChild(child: LiveElement): LiveElement {
 		if (!isLiveElement(child)) return child;
 		if (child.parent) child.parent.removeChild(child);
+		// previousSibling for the MutationRecord is the LAST current
+		// child (before push). nextSibling stays null since we append
+		// at the end.
+		const prev = this.children.length ? this.children[this.children.length - 1] : null;
 		child.parent = this;
 		this.children.push(child);
 		propagateAttached(child, this.attached);
@@ -1296,11 +1419,16 @@ export class LiveElement {
 		// matches what bg-image onload does (memory:
 		// feedback-swb-bg-image-repaint).
 		requestFullRepaint();
+		notifyChildList(this, [child], [], prev, null);
+		maybeLoadScriptElement(child);
 		return child;
 	}
 	removeChild(child: LiveElement): LiveElement {
 		const idx = this.children.indexOf(child);
 		if (idx >= 0) {
+			// Capture siblings BEFORE splice for the MutationRecord.
+			const prev = idx > 0 ? this.children[idx - 1] : null;
+			const next = idx + 1 < this.children.length ? this.children[idx + 1] : null;
 			this.children.splice(idx, 1);
 			child.parent = null;
 			propagateAttached(child, false);
@@ -1308,6 +1436,7 @@ export class LiveElement {
 			markLiveDirty(this);
 			bumpLiveTreeVersion();
 			requestFullRepaint();
+			notifyChildList(this, [], [child], prev, next);
 		}
 		return child;
 	}
@@ -1321,12 +1450,15 @@ export class LiveElement {
 		const idx = this.children.indexOf(reference);
 		if (idx < 0) return this.appendChild(child);
 		if (child.parent) child.parent.removeChild(child);
+		const prev = idx > 0 ? this.children[idx - 1] : null;
 		child.parent = this;
 		this.children.splice(idx, 0, child);
 		propagateAttached(child, this.attached);
 		markLiveDirty(this);
 		bumpLiveTreeVersion();
 		requestFullRepaint();
+		notifyChildList(this, [child], [], prev, reference);
+		maybeLoadScriptElement(child);
 		return child;
 	}
 	replaceChild(newChild: LiveElement, oldChild: LiveElement): LiveElement {
@@ -1334,6 +1466,8 @@ export class LiveElement {
 		const idx = this.children.indexOf(oldChild);
 		if (idx < 0) return oldChild;
 		if (newChild.parent) newChild.parent.removeChild(newChild);
+		const prev = idx > 0 ? this.children[idx - 1] : null;
+		const next = idx + 1 < this.children.length ? this.children[idx + 1] : null;
 		oldChild.parent = null;
 		propagateAttached(oldChild, false);
 		newChild.parent = this;
@@ -1342,6 +1476,7 @@ export class LiveElement {
 		markLiveDirty(this);
 		bumpLiveTreeVersion();
 		requestFullRepaint();
+		notifyChildList(this, [newChild], [oldChild], prev, next);
 		return oldChild;
 	}
 	/** Detach from parent. lil-gui's `destroy()` removes its panel via
@@ -1394,13 +1529,57 @@ export class LiveElement {
 				}
 			};
 		}
+		const isCanvasTouch =
+			this.tagName === 'CANVAS' && lower.startsWith('touch');
 		let target: LiveElement | null = this;
+		let listenerIdx = 0;
 		while (target) {
 			const set = target.listeners?.get(lower);
 			if (set) {
-				for (const fn of set) {
-					try { fn(event); } catch (_) { /* swallow */ }
-					if (ev._bubbleCancelled) break;
+				if (isCanvasTouch && target === this) {
+					_diagCanvasDispatchEntry++;
+					if (_diagCanvasDispatchEntry <= 20 || _diagCanvasDispatchEntry % 50 === 0) {
+						console.debug(
+							'[probe:canvas-dispatch] n=' + _diagCanvasDispatchEntry +
+							' type=' + lower +
+							' listeners=' + set.size,
+						);
+					}
+				}
+				// Set `globalThis.event` to the current event for IE-compat
+				// code paths. Cocos Creator's UI Button `dealClickEvents`
+				// (in `_virtual_cc-*.js`) does `fp.emitEvents(this.clickEvents,
+				// event)` — bare `event` identifier resolved from the global
+				// scope. Without this set, every UI button touchend throws
+				// ReferenceError mid-dispatch and the onClick emission never
+				// runs (visible "pressed" state but no popup). Push/pop so
+				// nested dispatches restore the outer event correctly.
+				const gthis = globalThis as Record<string, unknown>;
+				const prevEvent = gthis.event;
+				gthis.event = event;
+				try {
+					for (const fn of set) {
+						listenerIdx++;
+						try {
+							fn(event);
+						} catch (err) {
+							if (isCanvasTouch) {
+								_diagCanvasDispatchThrow++;
+								if (_diagCanvasDispatchThrow <= 20) {
+									const msg = (err && (err as { message?: string }).message) || String(err);
+									console.debug(
+										'[probe:canvas-dispatch] EXC n=' + _diagCanvasDispatchThrow +
+										' type=' + lower +
+										' listenerIdx=' + listenerIdx +
+										' msg=' + msg,
+									);
+								}
+							}
+						}
+						if (ev._bubbleCancelled) break;
+					}
+				} finally {
+					gthis.event = prevEvent;
 				}
 			}
 			if (!bubbles || ev._bubbleCancelled) break;
@@ -1410,7 +1589,28 @@ export class LiveElement {
 	}
 
 	getContext(kind: string): unknown {
-		if (this.tagName !== 'CANVAS') return null;
+		if (this.tagName !== 'CANVAS') {
+			_diagGetContextNonCanvas++;
+			if (_diagGetContextNonCanvas <= 5 || _diagGetContextNonCanvas % 50 === 0) {
+				console.debug(
+					'[probe:getContext] n=' + _diagGetContextNonCanvas +
+					' nonCanvas tagName=' + this.tagName +
+					' kind=' + kind,
+				);
+			}
+			return null;
+		}
+		_diagGetContextCanvas++;
+		const offscreenJustCreated = !this.offscreen;
+		if (_diagGetContextCanvas <= 10 || _diagGetContextCanvas % 50 === 0) {
+			console.debug(
+				'[probe:getContext] n=' + _diagGetContextCanvas +
+				' canvas kind=' + kind +
+				' w=' + this._width + ' h=' + this._height +
+				' offscreenJustCreated=' + offscreenJustCreated +
+				' has2d=' + (this.canvasCtx2d ? 'cached' : 'new'),
+			);
+		}
 		if (kind !== '2d') return null; // WebGL on dynamic canvases not supported
 		if (!this.offscreen) {
 			this.offscreen = new OffscreenCanvas(this._width, this._height);
@@ -1420,6 +1620,62 @@ export class LiveElement {
 			if (this.canvasCtx2d) wrapCanvasCtx2dForRepaint(this.canvasCtx2d);
 		}
 		return this.canvasCtx2d;
+	}
+
+	/** `el.focus()` — engines (Cocos Creator's EditBox in particular)
+	 * create an `<input>` via `document.createElement('input')`, append
+	 * it under their game container, then call `.focus()` on it to
+	 * request text input. We funnel INPUT / TEXTAREA focus through the
+	 * registered input-focus handler so the shell's KeyboardOverlay
+	 * opens with the input's current value and writes the result back
+	 * + fires `input` / `change` / `blur` events. Non-form elements
+	 * (canvas `.focus()` calls — Cocos does that on every MOUSE_DOWN to
+	 * make sure subsequent keydown events arrive) are a silent no-op so
+	 * existing engines that rely on `.focus()` not throwing keep
+	 * working. */
+	focus(): void {
+		if (this.tagName !== 'INPUT' && this.tagName !== 'TEXTAREA') return;
+		if (inputFocusHandler) {
+			try { inputFocusHandler(this); } catch (_) { /* swallow */ }
+		}
+	}
+	/** `el.blur()` — paired no-op + blur event for spec compliance. */
+	blur(): void {
+		if (this.tagName !== 'INPUT' && this.tagName !== 'TEXTAREA') return;
+		this.dispatchEvent({ type: 'blur', target: this, currentTarget: this, bubbles: false });
+	}
+
+	/** Spec-aligned with OffscreenCanvas.convertToBlob — encode this
+	 * canvas's pixels into a Blob (default PNG). Forwards to the backing
+	 * OffscreenCanvas. Resolves to a Blob; rejects for non-canvas tags.
+	 *
+	 * Lets WHATWG API surfaces that accept HTMLCanvasElement / OffscreenCanvas
+	 * sources (notably `createImageBitmap(canvas)`) round-trip through a
+	 * Blob without callers needing to know we wrap an OffscreenCanvas
+	 * internally. Caught by Cocos Creator engine init at pvzge boot when
+	 * it called `createImageBitmap(liveCanvasElement)`. */
+	async convertToBlob(options?: { type?: string; quality?: number }): Promise<Blob> {
+		if (this.tagName !== 'CANVAS') {
+			throw new Error('convertToBlob is only valid on <canvas> elements');
+		}
+		if (!this.offscreen) {
+			// Force lazy-init via the same path getContext uses, so the
+			// offscreen exists even if no 2D context was ever requested.
+			this.offscreen = new OffscreenCanvas(this._width, this._height);
+		}
+		return this.offscreen.convertToBlob(options);
+	}
+
+	/** Spec-aligned with HTMLCanvasElement.toBlob — callback-based
+	 * convenience for code that uses the older sync-style API. Wraps
+	 * `convertToBlob` and invokes the callback with the Blob (or null
+	 * if encoding rejected). */
+	toBlob(callback: (blob: Blob | null) => void, type?: string, quality?: number): void {
+		if (typeof callback !== 'function') return;
+		this.convertToBlob({ type, quality }).then(
+			(blob) => callback(blob),
+			() => callback(null),
+		);
 	}
 
 	/**
@@ -1451,6 +1707,16 @@ export class LiveElement {
 		// padding-aware content boxes.
 		const lb = getLayoutBox(this);
 		if (lb) {
+			if (this.tagName === 'CANVAS') {
+				_diagBboxCanvas++;
+				if (_diagBboxCanvas <= 10 || _diagBboxCanvas % 100 === 0) {
+					console.debug(
+						'[probe:bbox] n=' + _diagBboxCanvas +
+						' source=layout x=' + lb.x + ' y=' + lb.y +
+						' w=' + lb.w + ' h=' + lb.h,
+					);
+				}
+			}
 			return {
 				x: lb.x, y: lb.y, width: lb.w, height: lb.h,
 				top: lb.y, left: lb.x,
@@ -1492,11 +1758,23 @@ export class LiveElement {
 			walk(this);
 			w = cw; h = ch;
 		}
-		return {
+		const result = {
 			x: originX, y: originY, width: w, height: h,
 			top: originY, left: originX,
 			right: originX + w, bottom: originY + h,
 		};
+		if (this.tagName === 'CANVAS') {
+			_diagBboxCanvas++;
+			if (_diagBboxCanvas <= 10 || _diagBboxCanvas % 100 === 0) {
+				console.debug(
+					'[probe:bbox] n=' + _diagBboxCanvas +
+					' source=fallback x=' + originX + ' y=' + originY +
+					' w=' + w + ' h=' + h +
+					' _w=' + this._width + ' _h=' + this._height,
+				);
+			}
+		}
+		return result;
 	}
 
 	/** Read-only access to the OffscreenCanvas backing a `<canvas>`
@@ -1534,12 +1812,27 @@ export class LiveElement {
 		this._height = off.height;
 	}
 
-	/** Phase 3b: true iff `attachOffscreen` was called with
-	 * `isWebGL = true`. The live painter skips drawImage for these so
-	 * the shell's per-frame `overlayLiveAnimatedCanvases` can do the
-	 * bridge → screen direct copy with fresh pixels. */
+	/** Phase 3b: true iff the attached offscreen is currently routed
+	 * through the shared screen GL bridge. The live painter skips
+	 * drawImage for these so the shell's per-frame
+	 * `overlayLiveAnimatedCanvases` can do the bridge → screen direct
+	 * copy with fresh pixels.
+	 *
+	 * Why we don't just trust `_webglBacked`: pages that call
+	 * `getContext('webgl2')` LAZILY (after the sync boot returns —
+	 * Cocos Creator, some Three.js init paths) get their offscreen
+	 * flagged in `canvas-runner`'s `webGLBackedCanvases` set AFTER
+	 * `attachOffscreen` already committed `_webglBacked = false` on
+	 * this LiveElement. The cached flag would never flip true and the
+	 * painter would forever do drawImage on a stale offscreen → gray
+	 * screen. Consult the live predicate so the canvas joins the bridge
+	 * copy path as soon as the page actually pins WebGL on it. */
 	isWebGLBacked(): boolean {
-		return this._webglBacked;
+		if (this._webglBacked) return true;
+		if (this.offscreen && webGLBackedPredicate) {
+			return webGLBackedPredicate(this.offscreen);
+		}
+		return false;
 	}
 
 	/** Stats reads `canvas.style.cssText = 'width:80px;height:48px'`
@@ -1684,16 +1977,38 @@ class LiveStyle implements InlineStyle {
 		this.minWidth = undefined; this.maxWidth = undefined;
 		this.minHeight = undefined; this.maxHeight = undefined;
 		this.overflowX = undefined; this.overflowY = undefined;
+		this.customProps = undefined;
 		const parsed = parseCssText(v);
 		Object.assign(this, parsed);
 	}
 
+	/** Inline `--foo` custom properties set via `setProperty` or
+	 * `style="--foo: …"`. Merged into the element's computed-style
+	 * `customProps` bag in live-css so var() refs resolve against them. */
+	customProps?: Record<string, string>;
+
 	/** Object-style write for unknown / camelCased property access.
 	 * Stats uses dot access (`style.display = 'none'`) which TypeScript
 	 * sees as the typed fields; this is a fallback for tools that go
-	 * through `Object.assign`. */
+	 * through `Object.assign`. Custom properties (`--foo`) land in
+	 * `customProps` via the same applyDecl path. */
 	setProperty(name: string, value: string): void {
 		applyDecl(this, name, value);
+	}
+
+	/** Spec-shaped `getPropertyValue(name)`. For `--foo` returns the
+	 * stored custom-prop value (empty string if unset). For regular
+	 * properties returns a best-effort serialization — most code that
+	 * cares about resolved values uses `getComputedStyle(el)` instead. */
+	getPropertyValue(name: string): string {
+		if (name.startsWith('--')) {
+			return this.customProps?.[name] ?? '';
+		}
+		// Best-effort: kebab-case → camelCase field lookup, stringified.
+		const camel = name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+		const v = (this as unknown as Record<string, unknown>)[camel];
+		if (v === undefined || v === null) return '';
+		return String(v);
 	}
 }
 
@@ -1754,15 +2069,21 @@ export class LiveWindow {
 	private listeners: Map<string, Set<Function>> = new Map();
 	addEventListener(type: string, listener: Function, _opts?: unknown): void {
 		if (typeof listener !== 'function') return;
+		if (typeof type !== 'string') return; // Cocos engine init iterates
+		// over feature-gated event-name lists and may pass `undefined` for
+		// optional events (pointerdown, gestureend, etc.); silent no-op
+		// instead of throwing keeps the engine init loop alive.
 		const lower = type.toLowerCase();
 		let set = this.listeners.get(lower);
 		if (!set) { set = new Set(); this.listeners.set(lower, set); }
 		set.add(listener);
 	}
 	removeEventListener(type: string, listener: Function, _opts?: unknown): void {
+		if (typeof type !== 'string') return;
 		this.listeners.get(type.toLowerCase())?.delete(listener);
 	}
 	dispatchEvent(event: { type: string; [key: string]: unknown }): boolean {
+		if (!event || typeof event.type !== 'string') return true;
 		const set = this.listeners.get(event.type.toLowerCase());
 		if (!set) return true;
 		for (const fn of set) {
@@ -1771,6 +2092,7 @@ export class LiveWindow {
 		return true;
 	}
 	hasListeners(type: string): boolean {
+		if (typeof type !== 'string') return false;
 		return (this.listeners.get(type.toLowerCase())?.size ?? 0) > 0;
 	}
 }
@@ -1835,17 +2157,41 @@ export function pageHasListenerFor(type: string): boolean {
 export function getLiveWindowProxy(): unknown {
 	const win = liveWindow;
 	const global = globalThis as unknown as Record<string, unknown>;
+	// Touch-event feature-detect properties that engines (Cocos Creator's
+	// input system in particular) probe via `'ontouchstart' in window`
+	// before attaching touch listeners. Listing them in the `has` trap
+	// makes the `in` check return true; the `get` trap returns null so
+	// the property looks like an unassigned event handler. See pvzge
+	// 2026-06-07 touch wiring (documentShim has the matching
+	// `ontouchstart: null` pair for `document.ontouchstart` probes).
+	const TOUCH_FEATURE_PROPS = new Set([
+		'ontouchstart', 'ontouchmove', 'ontouchend', 'ontouchcancel',
+		// Mouse + pointer event feature flags. Same pattern as the touch
+		// flags: engines (Cocos Creator's input system in particular)
+		// probe `'onmousedown' in window` before binding listeners; we
+		// expose them as null so the `in` check passes and the engine
+		// takes the mouse branch. Required for the software-cursor
+		// driver in `page-mouse-forwarder.ts` to be visible to the
+		// page's input system. See pvzge 2026-06-09 mouse wiring.
+		'onmousedown', 'onmousemove', 'onmouseup', 'onclick',
+		'oncontextmenu',
+		'onpointerdown', 'onpointermove', 'onpointerup',
+		'onpointerover', 'onpointerout', 'onpointerenter', 'onpointerleave',
+		'onmouseover', 'onmouseout', 'onmouseenter', 'onmouseleave',
+	]);
 	const handler: ProxyHandler<object> = {
 		get(_target, prop) {
 			if (prop === 'addEventListener') return win.addEventListener.bind(win);
 			if (prop === 'removeEventListener') return win.removeEventListener.bind(win);
 			if (prop === 'dispatchEvent') return win.dispatchEvent.bind(win);
+			if (typeof prop === 'string' && TOUCH_FEATURE_PROPS.has(prop)) return null;
 			// Fall through to globalThis for everything else.
 			const v = global[prop as string];
 			return typeof v === 'function' ? v.bind(globalThis) : v;
 		},
 		has(_target, prop) {
 			if (prop === 'addEventListener' || prop === 'removeEventListener' || prop === 'dispatchEvent') return true;
+			if (typeof prop === 'string' && TOUCH_FEATURE_PROPS.has(prop)) return true;
 			return prop in global;
 		},
 		set(_target, prop, value) {

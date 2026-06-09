@@ -372,7 +372,7 @@ Beyond the basic HTML fixtures, there are dedicated CSS exercises:
   colors, fonts, weight, style, decoration, backgrounds, margin,
   padding, specificity, inline-style overrides.
 - `brewser://test-html/external-css/` — uses
-  `<link rel="stylesheet" href="romfs:/test-css/external.css">`
+  `<link rel="stylesheet" href="romfs:/dev/external.css">`
   and an additional inline `<style>` block to demonstrate the
   source-order tiebreak between external and inline sheets.
 - `brewser://test-html/inherit/` — exercises the inherited-vs-direct
@@ -458,7 +458,7 @@ Workaround: develop and validate the entire HTML + CSS pipeline
 against on-disk fixtures served by `BrowserResourceLoader` with
 `Content-Type: text/html`. Fixtures live as real HTML files under
 `sdmc:/switch/brewser/webprofiles/default/` (seeded from
-`romfs:/pages/` on first launch by `BrowserProfile.seedBuiltinPages`);
+`romfs:/webprofiles/default/` on first launch by `BrowserProfile.seedBuiltinPages`);
 the loader maps `brewser://X/Y/.../` to `<storageRoot>pages/X/Y/....html`.
 Available pages:
 
@@ -471,14 +471,13 @@ Available pages:
 - `brewser://test-html/css/` — CSS cascade, specificity, inline styles,
   margin/padding, backgrounds.
 - `brewser://test-html/external-css/` — `<link rel="stylesheet">` from
-  `romfs:/test-css/external.css`, plus an inline `<style>` block.
+  `romfs:/dev/external.css`, plus an inline `<style>` block.
 
 The runtime fetch wrapper routes them through the loader chain and the
 WebView dispatches them to `onHtmlResponse` exactly like a real HTTP
 response. Image assets and external CSS that need to be real binary or
-text files go in `romfs/` (under `test-images/` and `test-css/`);
-the build packs them into the NRO and the fixture HTML references them
-as `romfs:/test-images/...` and `romfs:/test-css/...`.
+text files go in `romfs/dev/`; the build packs them into the NRO and
+the fixture HTML references them as `romfs:/dev/...`.
 
 This means the parser, CSS apply pass, layout, painter, link handling,
 image rendering, scrolling, AND external stylesheet loading are all

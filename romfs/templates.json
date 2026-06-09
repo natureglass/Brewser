@@ -1,6 +1,6 @@
 [
-  { "title": "Default", "path": "Templates/default.json" },
-  { "title": "Light", "path": "Templates/light.json" },
-  { "title": "Bottom Bar", "path": "Templates/bottom-bar.json" },
-  { "title": "Amber", "path": "Templates/amber.json" }
+  { "title": "Default", "path": "templates/default.json" },
+  { "title": "Light", "path": "templates/light.json" },
+  { "title": "Bottom Bar", "path": "templates/bottom-bar.json" },
+  { "title": "Amber", "path": "templates/amber.json" }
 ]

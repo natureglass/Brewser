@@ -35,10 +35,10 @@ import {
 	tickAnimationFrames,
 	type PageScriptContext,
 } from './scripts/canvas-runner.js';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, pageHasListenerFor, resetLiveRoot, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
 import { setMediaColorScheme } from './scripts/live-css.js';
 import { setCssViewport } from './scripts/inline-css.js';
-import { setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
+import { openKeyboardAndApply, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
@@ -85,6 +85,17 @@ import {
 	type BrowserMode,
 } from './input/controller-shortcuts.js';
 import { KeyboardOverlay } from './input/keyboard-overlay.js';
+import { installPageTouchForwarder } from './input/page-touch-forwarder.js';
+import {
+	installPageMouseForwarder,
+	setCursorIdleMs,
+} from './input/page-mouse-forwarder.js';
+import { setButtonMapping } from './input/button-router.js';
+import {
+	preloadClickSound,
+	setClickSoundEnabled,
+	setClickSoundPath,
+} from './audio/click-sound.js';
 import { BookmarksStore } from './navigation/bookmarks-store.js';
 import { BrowserNavigation } from './navigation/browser-navigation.js';
 import { HistoryStore } from './navigation/history-store.js';
@@ -120,6 +131,18 @@ export class BrowserShell {
 	private currentScrollY = 0;
 	private scriptCtx: PageScriptContext | null = null;
 	private currentPageUrl: string = '';
+	/** Live-DOM cache-build budget for external (http(s)) pages. Stored
+	 * here so `onPageStarted` can re-apply it on each WWW navigation
+	 * (internal `brewser://` pages get a separate "build everything in
+	 * one shot" budget instead). Set from `config.json`'s
+	 * `wwwRenderChunkMs` in `run()`. */
+	private wwwRenderChunkMs: number = 12;
+
+	/** Public read-only accessor for the current page URL. Used by
+	 * storage modules (local-storage, indexed-db) to route writes to a
+	 * `dev/` sub-namespace when the active page is under `brewser://dev/`,
+	 * keeping dev test artifacts out of the real user storage roots. */
+	getCurrentPageUrl(): string { return this.currentPageUrl; }
 	private mode: BrowserMode = 'normal';
 	private template: BrowserTemplate = DEFAULT_TEMPLATE;
 	/** Wall-clock duration (ms) of the most recent content present.
@@ -199,6 +222,23 @@ export class BrowserShell {
 		// on first run before seedTemplates has copied the romfs default in;
 		// either way maxHistory ends up at the same value).
 		const startupConfig = loadConfig(this.profile.appRoot);
+		// Wire the user-editable joycon button mapping. Empty values in
+		// `config.json buttonMapping` fall through to engine defaults
+		// (A=leftClick, B=rightClick, X=forward, Y=reload,
+		// ZR=middleClick, MINUS=screenshot, UP/DOWN=scroll). Used by
+		// both `page-mouse-forwarder.ts` (which polls the indices the
+		// router assigns to leftClick/rightClick/middleClick) and
+		// `controller-shortcuts.ts` (which fires shell actions for
+		// labels assigned back/forward/reload/etc.).
+		setButtonMapping(startupConfig.buttonMapping);
+		// Click-sound subsystem. `clickSounds` in config.json gates the
+		// feature; the path comes from the active profile's seeded
+		// asset slot (`<storageRoot>assets/click.wav`). Preload kicks
+		// off the fetch + decodeAudioData so the first user press
+		// after boot has a buffer ready.
+		setClickSoundEnabled(startupConfig.clickSounds);
+		setClickSoundPath(this.profile.assetPath('click.wav'));
+		void preloadClickSound();
 		this.colorScheme = startupConfig.theme;
 		// Push the colour-scheme preference into the CSS cascade up front so
 		// the first stylesheet parse evaluates `@media (prefers-color-scheme:
@@ -213,7 +253,20 @@ export class BrowserShell {
 		});
 		this.bookmarksStore = new BookmarksStore({ path: this.profile.bookmarksPath() });
 		const delegate: WebViewDelegate = {
-			onPageStarted: () => {
+			onPageStarted: (url: string) => {
+				// Per-page render budget: internal `brewser://` pages always
+				// render in one shot (their size is bounded — apps grid,
+				// settings list, dev probes etc. — and the visible "line-by-
+				// line" build animation reads as sluggishness on a UI that
+				// users expect to snap in). External http(s) pages use the
+				// configured `wwwRenderChunkMs` budget so large web pages
+				// don't freeze input during their build.
+				//
+				// 1e9 ms is the "one-shot" sentinel — the chunk loop in
+				// live-overlay checks `Date.now() - chunkStart >= budget`
+				// and we'll never hit that within a single page build.
+				const isInternal = url.startsWith('brewser://');
+				setLiveBuildChunkMs(isInternal ? 1e9 : this.wwwRenderChunkMs);
 				// `beforeunload` is dispatched from WebView.endSession
 				// (in @switch-web/runtime) BEFORE the browser-shim's
 				// per-session listener cleanup runs. That's the only
@@ -336,11 +389,35 @@ export class BrowserShell {
 		setKeyboardOpener((initial) => this.keyboard.open(initial, {
 			onScroll: (delta) => this.handleScroll(delta),
 		}));
+		// Wire `<input>.focus()` calls from page scripts (Cocos Creator's
+		// EditBox does `document.createElement('input')` + appendChild +
+		// focus()) into the same KeyboardOverlay path that live-DOM form
+		// taps already use. openKeyboardAndApply reads the input's current
+		// value, opens the keyboard, and on submit writes the result back
+		// + fires input/change/blur. Without this, Cocos's text input is
+		// dead (its focus() call is a no-op without a registered handler).
+		setInputFocusHandler((el) => { void openKeyboardAndApply(el); });
 		// Let live-DOM `<img>` resolve profile-pages-relative srcs
 		// (`../pages/<rest>`) to the absolute SD-card profile path, so page
 		// images load the editable profile copy instead of nx.js's romfs
 		// base (which needs a .nro rebuild + redeploy to update).
 		setLiveProfileRoot(this.profile.storageRoot);
+		// 2026-06-08 ROUND 46: expose a page-script-callable function so
+		// `canvas.requestFullscreen()` (Web Fullscreen API) can trigger
+		// the same fullscreen-canvas flow as the gamepad B-button
+		// shortcut. The CanvasShim's `requestFullscreen` method (see
+		// canvas-runner.ts) awaits this. Returns a Promise resolved when
+		// the mode has flipped + the page has been re-laid-out.
+		(globalThis as { __swbRequestFullscreenCanvas?: () => Promise<void> })
+			.__swbRequestFullscreenCanvas = async () => {
+			if (this.mode === 'fullscreen-canvas') return;
+			await this.toggleFullscreenCanvas();
+		};
+		(globalThis as { __swbExitFullscreen?: () => Promise<void> })
+			.__swbExitFullscreen = async () => {
+			if (this.mode === 'normal') return;
+			await this.exitFullscreen();
+		};
 	}
 
 	async run(): Promise<void> {
@@ -349,6 +426,22 @@ export class BrowserShell {
 		// the canvas; it stays installed for the whole shell lifetime. It
 		// handles both chrome strip taps and content-area link taps.
 		installCanvasTouch();
+		// Page-script touch forwarder: dispatches each screen TouchEvent
+		// to the page's primary `<canvas>` LiveElement + LiveWindow as
+		// both TouchEvent and PointerEvent. Inline-canvas page games
+		// (Cocos Creator, hand-rolled WebGL) register `touchstart` on
+		// canvas / window without going through swb's live-DOM layout
+		// pass, so the chrome handler's `hitTestLive` walk misses them.
+		// Runs in parallel with the chrome handler; the two dispatch to
+		// different targets so duplicate handlers aren't a concern.
+		installPageTouchForwarder();
+		// Page-script mouse forwarder: the left joycon stick drives a
+		// software cursor; A press = left click, B = right click (when
+		// the page has a mouse listener — falls through to shell-back
+		// otherwise), ZR = middle click (falls through to address-bar
+		// otherwise). The cursor sprite is painted as the last step of
+		// each repaint mode below. See `page-mouse-forwarder.ts`.
+		installPageMouseForwarder();
 		// Wire swipe-to-scroll: the touch handler opens a page-scroll
 		// session on body-content swipes and dispatches `dy` deltas
 		// through this callback. Same handler as right-stick / D-pad
@@ -371,8 +464,14 @@ export class BrowserShell {
 		// reads videoTryHwAccel via openDecoder).
 		const shellConfig = loadConfig(this.profile.appRoot);
 		setVideoTryHwAccel(shellConfig.videoNVTEGRA);
-		setLiveBuildChunkMs(shellConfig.renderChunkMs);
+		// Stash the WWW budget for onPageStarted to re-apply on each external
+		// navigation. The initial setLiveBuildChunkMs below is overridden the
+		// moment the first navigation starts, but we keep it as a sane default
+		// for any cache-build that fires before the first onPageStarted.
+		this.wwwRenderChunkMs = shellConfig.wwwRenderChunkMs;
+		setLiveBuildChunkMs(shellConfig.wwwRenderChunkMs);
 		setLiveScrollChunkMs(shellConfig.scrollChunkMs);
+		setCursorIdleMs(shellConfig.mouseIdleMs);
 		// Load the design template + push it into the UI, keyboard,
 		// and touch dispatcher so the very first chrome paint already
 		// reflects the user's customisations.
@@ -432,6 +531,13 @@ export class BrowserShell {
 					// the chrome strip gets clobbered by the bridge's
 					// clearColor outside the cube viewport.
 					onTick: (info) => {
+						// Software-cursor driver. `tickMouseInput` ran in
+						// `waitForControllerInput` before the shell's
+						// rising-edge checks so B/ZR could be claimed by
+						// the page mouse layer; we just consume the
+						// result here to schedule a same-tick repaint
+						// when the cursor moved or a click fired.
+						const mouseTick = info.mouseTick;
 						// Evaluate animation + video ticks separately so we
 						// can tell the two cases apart at chrome-redraw
 						// decision time. Animation/WebGL ticks clobber the
@@ -547,6 +653,18 @@ export class BrowserShell {
 						// present.
 						if (this.mode === 'normal' && modeChanged) {
 							this.renderChrome();
+							return true;
+						}
+						// Cursor moved or button edge fired. The cursor
+						// is composited at C-side present time
+						// (`composite_cursor_overlay` in main.c) using
+						// the bitmap + (x, y) `tickMouseInput` just
+						// pushed via `setCursorOverlayPosition`. No JS
+						// paint or full repaint is needed here —
+						// keeping the loop active is the only reason
+						// we still return `true`, so the next vsync
+						// memcpy picks up the new position.
+						if (mouseTick.cursorChanged) {
 							return true;
 						}
 						return false;
@@ -730,6 +848,10 @@ export class BrowserShell {
 		// renderChrome calls.
 		this.lastChromeReachable = reachable;
 		this.lastChromeOperationMode = mode;
+		// No cursor work needed here — the engine composites the cursor
+		// onto `display_buffer` every present, independent of what we
+		// paint into canvas->data. See `composite_cursor_overlay` in
+		// nxjs-source/source/main.c.
 	}
 
 	/**
@@ -1139,6 +1261,18 @@ export class BrowserShell {
 		if (isKeyboardOpen() && !opts.behindKeyboard) return;
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
+		this.repaintContentInner(ctx, canvas, opts);
+		// No cursor work needed — the engine composites the overlay onto
+		// `display_buffer` at present time, so what we just painted into
+		// canvas->data is exactly what the user sees underneath the
+		// cursor.
+	}
+
+	private repaintContentInner(
+		ctx: CanvasRenderingContext2D,
+		canvas: ReturnType<typeof nxScreen>,
+		opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean },
+	): void {
 		if (opts.behindKeyboard) {
 			this.repaintBehindKeyboard(ctx, canvas.width, canvas.height);
 			return;
@@ -1817,8 +1951,8 @@ export class BrowserShell {
 
 	/** Resolve each `template.icons.X` path against the profile root
 	 * unless the user supplied an absolute scheme. Lets a custom
-	 * template point at icons elsewhere (e.g. `romfs:/assets/...`,
-	 * `sdmc:/themes/.../home.png`). */
+	 * template point at icons elsewhere (e.g.
+	 * `romfs:/webprofiles/default/assets/...`, `sdmc:/themes/.../home.png`). */
 	private resolveIconPaths() {
 		const root = this.profile.storageRoot;
 		const resolve = (rel: string) => /^(?:https?:|sdmc:|romfs:)\/\//.test(rel) ? rel : `${root}${rel}`;
@@ -1861,7 +1995,7 @@ export class BrowserShell {
 		const ctx = canvas.getContext('2d');
 		ctx.fillStyle = '#00010a';
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		const logo = await loadOptionalImage('romfs:/assets/Brewser_logo.png');
+		const logo = await loadOptionalImage('romfs:/webprofiles/default/assets/Brewser_logo.png');
 		const li = logo as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
 		const lw = li ? (li.naturalWidth || li.width || 0) : 0;
 		const lh = li ? (li.naturalHeight || li.height || 0) : 0;

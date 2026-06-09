@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WebAssembly Probe — Switch Web Platform</title>
+<link rel="stylesheet" href="brewser://assets/main.css" />
+<style>
+  body { padding: 16px; font-family: sans-serif; color: #e0e8f4; background: #0b1220; }
+  h1 { color: #ffd35e; margin: 0 0 8px 0; }
+  p { color: #c2e0ff; margin: 4px 0; }
+  .row { display: flex; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+  button {
+    background: #1f2c40; color: #ffd35e; border: 1px solid #2a4060;
+    border-radius: 6px; padding: 10px 14px; font-size: 16px;
+  }
+  pre {
+    background: #14202d; border: 1px solid #2a4060; border-radius: 6px;
+    padding: 10px; white-space: pre-wrap; word-break: break-all;
+    max-height: 480px; overflow: auto;
+    font-size: 12px; color: #c2e0ff;
+  }
+</style>
+</head>
+<body>
+  <h1>WebAssembly Probe (itch.io compat A1)</h1>
+  <p>Verifies WebAssembly works end-to-end against the MDN simple.wasm fixture.
+  Module exports <code>exported_func()</code> which invokes the imported
+  <code>imports.imported_func(42)</code>. Each slice tests one API path
+  typical itch.io games exercise (Unity/Godot/Emscripten typically use
+  <code>instantiateStreaming</code>; older games fall back to
+  <code>new Module(bytes)</code> + <code>instantiate</code>).
+  Log: <code>sdmc:/switch/brewser/logs/wasm-probe.log</code>.</p>
+  <div class="row">
+    <button id="run">Run all slices</button>
+  </div>
+  <pre id="log"></pre>
+<script>
+(function () {
+  var LOG_PATH = 'sdmc:/switch/brewser/logs/wasm-probe.log';
+  var WASM_URL = 'brewser://dev/wasm-probe.wasm';
+  var t0 = performance.now();
+  var logEl = document.getElementById('log');
+  var lines = [];
+  function log(s) {
+    var t = Math.round(performance.now() - t0);
+    var line = '+' + t + 'ms ' + s;
+    lines.push(line);
+    if (lines.length > 200) lines.shift();
+    if (logEl) logEl.textContent = lines.join('\n');
+    try { Switch.appendFileSync(LOG_PATH, line + '\n'); } catch (_) {}
+  }
+
+  // === Slice 1: WebAssembly globals present ===
+  // If `typeof WebAssembly === 'undefined'` the whole class is missing
+  // and every other slice will fail. Useful diagnostic floor.
+  function checkGlobals() {
+    log('--- Slice 1: WebAssembly globals ---');
+    var has = typeof WebAssembly !== 'undefined';
+    log((has ? 'PASS' : 'FAIL') + ' :: typeof WebAssembly = ' + typeof WebAssembly);
+    if (!has) return false;
+    var members = ['Module', 'Instance', 'Memory', 'Table', 'CompileError',
+                   'LinkError', 'RuntimeError', 'compile', 'instantiate',
+                   'validate', 'compileStreaming', 'instantiateStreaming'];
+    var missing = [];
+    for (var i = 0; i < members.length; i++) {
+      if (typeof WebAssembly[members[i]] === 'undefined') missing.push(members[i]);
+    }
+    log((missing.length === 0 ? 'PASS' : 'PARTIAL')
+        + ' :: WebAssembly members present ('
+        + (missing.length ? 'missing: ' + missing.join(',') : 'all 11')
+        + ')');
+    return true;
+  }
+
+  // === Slice 2: fetch the .wasm bytes ===
+  // Most games use instantiateStreaming(fetch(...)) — but the bytes
+  // path is the universal fallback that has to work. Verify the URL
+  // resolves + Response.arrayBuffer() returns the 78-byte module.
+  async function fetchBytes() {
+    log('--- Slice 2: fetch(' + WASM_URL + ') ---');
+    var r;
+    try { r = await fetch(WASM_URL); }
+    catch (e) { log('FAIL :: fetch threw: ' + (e && e.message || e)); return null; }
+    if (!r.ok) { log('FAIL :: fetch ok=false status=' + r.status); return null; }
+    var ab;
+    try { ab = await r.arrayBuffer(); }
+    catch (e) { log('FAIL :: arrayBuffer threw: ' + (e && e.message || e)); return null; }
+    log('PASS :: fetched ' + ab.byteLength + ' bytes (expected 78), ct=' + r.headers.get('content-type'));
+    // Sanity-check the WASM magic bytes: 0x00 0x61 0x73 0x6D ('\0asm')
+    var u = new Uint8Array(ab);
+    var magicOk = u[0] === 0x00 && u[1] === 0x61 && u[2] === 0x73 && u[3] === 0x6D;
+    log((magicOk ? 'PASS' : 'FAIL') + ' :: WASM magic bytes ok ('
+        + u[0].toString(16) + ',' + u[1].toString(16) + ',' + u[2].toString(16) + ',' + u[3].toString(16) + ')');
+    return ab;
+  }
+
+  // === Slice 3: WebAssembly.validate ===
+  function validate(ab) {
+    log('--- Slice 3: WebAssembly.validate ---');
+    if (typeof WebAssembly.validate !== 'function') {
+      log('FAIL :: WebAssembly.validate not a function');
+      return false;
+    }
+    var ok;
+    try { ok = WebAssembly.validate(ab); }
+    catch (e) { log('FAIL :: validate threw: ' + (e && e.message || e)); return false; }
+    log((ok === true ? 'PASS' : 'FAIL') + ' :: validate(simple.wasm) returned ' + ok);
+    // Negative case: trash bytes should validate to false (not throw).
+    var trash = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]).buffer;
+    var trashOk;
+    try { trashOk = WebAssembly.validate(trash); }
+    catch (e) { log('FAIL :: validate(trash) threw: ' + (e && e.message || e)); return ok === true; }
+    log((trashOk === false ? 'PASS' : 'FAIL') + ' :: validate(8 trash bytes) returned ' + trashOk + ' (expected false)');
+    return ok === true;
+  }
+
+  // === Slice 4: new WebAssembly.Module(bytes) + reflection ===
+  // Some game loaders construct Module synchronously then instantiate
+  // asynchronously. Tier-1 nx.js QuickJS WASM should support both.
+  function makeModuleSync(ab) {
+    log('--- Slice 4: new WebAssembly.Module(bytes) + Module.imports/exports ---');
+    var mod;
+    try { mod = new WebAssembly.Module(ab); }
+    catch (e) { log('FAIL :: new Module threw: ' + (e && e.message || e)); return null; }
+    log('PASS :: new WebAssembly.Module constructed sync');
+    var imp, exp;
+    try {
+      imp = WebAssembly.Module.imports(mod);
+      exp = WebAssembly.Module.exports(mod);
+    } catch (e) { log('FAIL :: imports/exports threw: ' + (e && e.message || e)); return mod; }
+    var impStr = JSON.stringify(imp);
+    var expStr = JSON.stringify(exp);
+    log('imports: ' + impStr);
+    log('exports: ' + expStr);
+    // Expected per simple.wasm:
+    //   imports = [{ module: 'imports', name: 'imported_func', kind: 'function' }]
+    //   exports = [{ name: 'exported_func', kind: 'function' }]
+    var impOk = Array.isArray(imp) && imp.length === 1
+      && imp[0].module === 'imports' && imp[0].name === 'imported_func' && imp[0].kind === 'function';
+    var expOk = Array.isArray(exp) && exp.length === 1
+      && exp[0].name === 'exported_func' && exp[0].kind === 'function';
+    log((impOk ? 'PASS' : 'FAIL') + ' :: imports shape matches simple.wasm');
+    log((expOk ? 'PASS' : 'FAIL') + ' :: exports shape matches simple.wasm');
+    return mod;
+  }
+
+  // === Slice 5: WebAssembly.instantiate(module, importObject) + call ===
+  // Heart of the test — proves JS↔WASM bridge works: imported callback
+  // fires with arg=42 when exported_func() is invoked.
+  async function instantiateAndCall(mod) {
+    log('--- Slice 5: instantiate(module) + exported_func() roundtrip ---');
+    var gotArg = null;
+    var importsObj = {
+      imports: {
+        imported_func: function (arg) { gotArg = arg; },
+      },
+    };
+    var instance;
+    try { instance = await WebAssembly.instantiate(mod, importsObj); }
+    catch (e) { log('FAIL :: instantiate(module) threw: ' + (e && e.message || e)); return false; }
+    log('PASS :: instantiate(module) resolved');
+    var fn = instance.exports && instance.exports.exported_func;
+    if (typeof fn !== 'function') {
+      log('FAIL :: exports.exported_func not a function (got ' + typeof fn + ')');
+      return false;
+    }
+    try { fn(); }
+    catch (e) { log('FAIL :: exported_func() threw: ' + (e && e.message || e)); return false; }
+    log((gotArg === 42 ? 'PASS' : 'FAIL') + ' :: imported_func fired with arg=' + gotArg + ' (expected 42)');
+    return gotArg === 42;
+  }
+
+  // === Slice 6: WebAssembly.instantiate(bytes, importObject) ===
+  // Returns { module, instance } shape — the all-in-one async path
+  // older code commonly uses (pre-Streaming).
+  async function instantiateFromBytes(ab) {
+    log('--- Slice 6: instantiate(bytes) returns {module,instance} ---');
+    var gotArg = null;
+    var importsObj = { imports: { imported_func: function (a) { gotArg = a; } } };
+    var result;
+    try { result = await WebAssembly.instantiate(ab, importsObj); }
+    catch (e) { log('FAIL :: instantiate(bytes) threw: ' + (e && e.message || e)); return false; }
+    var hasMod = result && typeof result.module === 'object';
+    var hasInst = result && typeof result.instance === 'object';
+    log((hasMod && hasInst ? 'PASS' : 'FAIL')
+        + ' :: instantiate(bytes) resolved with {module,instance} (hasMod=' + hasMod + ', hasInst=' + hasInst + ')');
+    if (!hasInst) return false;
+    try { result.instance.exports.exported_func(); }
+    catch (e) { log('FAIL :: exported_func threw: ' + (e && e.message || e)); return false; }
+    log((gotArg === 42 ? 'PASS' : 'FAIL') + ' :: instantiate(bytes) call roundtrip arg=' + gotArg);
+    return gotArg === 42;
+  }
+
+  // === Slice 7: WebAssembly.compileStreaming ===
+  // Compile from a Response stream without instantiating — used by
+  // some code that compiles once + instantiates multiple copies.
+  async function compileStreaming() {
+    log('--- Slice 7: compileStreaming(fetch(...)) ---');
+    if (typeof WebAssembly.compileStreaming !== 'function') {
+      log('SKIP :: WebAssembly.compileStreaming not present (older runtime)');
+      return null;
+    }
+    var mod;
+    try { mod = await WebAssembly.compileStreaming(fetch(WASM_URL)); }
+    catch (e) { log('FAIL :: compileStreaming threw: ' + (e && e.message || e)); return null; }
+    log('PASS :: compileStreaming resolved to Module');
+    return mod;
+  }
+
+  // === Slice 8: WebAssembly.instantiateStreaming ===
+  // THE path Unity / Godot / Emscripten exports use by default. If
+  // this works, the heaviest itch.io content class is unblocked.
+  async function instantiateStreaming() {
+    log('--- Slice 8: instantiateStreaming(fetch(...)) — Unity/Godot path ---');
+    if (typeof WebAssembly.instantiateStreaming !== 'function') {
+      log('SKIP :: WebAssembly.instantiateStreaming not present (older runtime)');
+      return false;
+    }
+    var gotArg = null;
+    var importsObj = { imports: { imported_func: function (a) { gotArg = a; } } };
+    var result;
+    try { result = await WebAssembly.instantiateStreaming(fetch(WASM_URL), importsObj); }
+    catch (e) {
+      // Some runtimes reject instantiateStreaming when content-type
+      // isn't application/wasm. Report distinctly so it's a diagnosed
+      // gap rather than "WASM broken".
+      log('FAIL :: instantiateStreaming threw: ' + (e && e.message || e));
+      log('    (NOTE: spec requires Response content-type === "application/wasm"; if loader serves a different ct, this fails even when raw WASM works)');
+      return false;
+    }
+    var hasInst = result && typeof result.instance === 'object';
+    log((hasInst ? 'PASS' : 'FAIL') + ' :: instantiateStreaming resolved');
+    if (!hasInst) return false;
+    try { result.instance.exports.exported_func(); }
+    catch (e) { log('FAIL :: exported_func threw: ' + (e && e.message || e)); return false; }
+    log((gotArg === 42 ? 'PASS' : 'FAIL') + ' :: instantiateStreaming call roundtrip arg=' + gotArg);
+    return gotArg === 42;
+  }
+
+  // === Slice 9: Memory + Table constructors ===
+  // Unity / Godot exports construct Memory + Table objects to pass
+  // into the import object. If these constructors throw, those games
+  // can't even reach the instantiate call.
+  function memoryAndTable() {
+    log('--- Slice 9: WebAssembly.Memory + Table constructors ---');
+    var mem;
+    try { mem = new WebAssembly.Memory({ initial: 1, maximum: 4 }); }
+    catch (e) { log('FAIL :: new Memory threw: ' + (e && e.message || e)); return false; }
+    var memOk = mem && mem.buffer instanceof ArrayBuffer && mem.buffer.byteLength === 65536;
+    log((memOk ? 'PASS' : 'FAIL') + ' :: Memory({initial:1}) → buffer.byteLength=' + (mem && mem.buffer && mem.buffer.byteLength) + ' (expected 65536)');
+    var tbl;
+    try { tbl = new WebAssembly.Table({ initial: 2, element: 'anyfunc' }); }
+    catch (e) { log('FAIL :: new Table threw: ' + (e && e.message || e)); return memOk; }
+    var tblOk = tbl && tbl.length === 2;
+    log((tblOk ? 'PASS' : 'FAIL') + ' :: Table({initial:2}) → length=' + (tbl && tbl.length) + ' (expected 2)');
+    return memOk && tblOk;
+  }
+
+  async function runAll() {
+    log('');
+    log('=== RUN at ' + new Date().toISOString() + ' ===');
+    var hasWasm = checkGlobals();
+    if (!hasWasm) {
+      log('--- ABORT: WebAssembly missing entirely ---');
+      return;
+    }
+    var ab = await fetchBytes();
+    if (!ab) { log('--- ABORT: could not fetch wasm bytes ---'); return; }
+    validate(ab);
+    var mod = makeModuleSync(ab);
+    if (mod) await instantiateAndCall(mod);
+    await instantiateFromBytes(ab);
+    await compileStreaming();
+    await instantiateStreaming();
+    memoryAndTable();
+    log('--- runAll DONE ---');
+  }
+
+  document.getElementById('run').addEventListener('click', function () { runAll(); });
+})();
+</script>
+</body>
+</html>

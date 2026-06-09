@@ -45,13 +45,29 @@ import { type AppEntry, loadApps, loadConfig, loadFeatured, loadTemplateRegistry
 
 const decoder = new TextDecoder();
 // Directory + path segments allow letters, digits, hyphen, and
-// underscore (e.g. an app folder named `my_app`). The dot
-// stays restricted to the static-asset filename position (FILE_SEGMENT)
-// so a `..` can never appear as a directory segment and escape the
-// profile dir.
-const DIR_SEGMENT = /^[a-z][a-z0-9_-]*$/i;
-const FILE_SEGMENT = /^[a-z][a-z0-9._-]*$/i;
-const PATH_PATTERN = /^[a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)*$/i;
+// underscore — including AS THE FIRST CHARACTER for all three:
+//   - letters: ordinary names (`apps`, `assets`)
+//   - underscore: Cocos Creator output (`_virtual_cc-<hash>.js`) and
+//     many bundlers' "internal" file conventions
+//   - digits: Cocos Creator's UUID-based asset layout
+//     (`assets/<bundle>/import/<2hex>/<uuid>.json`, where both the
+//     `<2hex>` directory and the `<uuid>.json` filename can start with
+//     0-9; pvzge hit a 404 on `import/05/05bb483a0.json`
+//     until digits were added to the leading-char class here)
+// FILE_SEGMENT additionally allows `@` interior characters because
+// Cocos Creator's native asset files encode atlas/variant identifiers
+// inline (`<uuid>@<atlas_chunk>@<frame_hash>.png` for sprite atlases —
+// pvzge's resources bundle has files like
+// `6f01cf7f-81bf-...@b47c0@e9a6d.png`). DIR_SEGMENT/PATH_PATTERN do not
+// need `@` since directories never use it in Cocos's layout.
+// The dot stays restricted to the static-asset filename position
+// (FILE_SEGMENT) so a `..` can never appear as a directory segment and
+// escape the profile dir. The leading-underscore/digit allowance
+// doesn't weaken the `..` defense because `..` starts with `.`, which
+// is still not in the first-character class for any regex.
+const DIR_SEGMENT = /^[a-z0-9_][a-z0-9_-]*$/i;
+const FILE_SEGMENT = /^[a-z0-9_][a-z0-9.@_-]*$/i;
+const PATH_PATTERN = /^[a-z0-9_][a-z0-9_-]*(?:\/[a-z0-9_][a-z0-9_-]*)*$/i;
 
 /** Recognised static-asset MIME types keyed by extension (lowercase). */
 const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
@@ -75,6 +91,35 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	glb: { mime: 'model/gltf-binary', binary: true },
 	hdr: { mime: 'image/vnd.radiance', binary: true },
 	nrrd: { mime: 'application/octet-stream', binary: true },
+	// WebAssembly binary. Content-type MUST be `application/wasm`
+	// (spec requirement) so `WebAssembly.instantiateStreaming(fetch(...))`
+	// doesn't reject with "incorrect response MIME type". Slice 8 of
+	// `dev/wasm-probe.html` is exactly this code path; without this
+	// entry, the streaming-instantiate path that Unity/Godot/Emscripten
+	// exports default to silently breaks even when raw WASM works.
+	wasm: { mime: 'application/wasm', binary: true },
+	mp3: { mime: 'audio/mpeg', binary: true },
+	ogg: { mime: 'audio/ogg', binary: true },
+	wav: { mime: 'audio/wav', binary: true },
+	m4a: { mime: 'audio/mp4', binary: true },
+	flac: { mime: 'audio/flac', binary: true },
+	mp4: { mime: 'video/mp4', binary: true },
+	webm: { mime: 'video/webm', binary: true },
+	ttf: { mime: 'font/ttf', binary: true },
+	otf: { mime: 'font/otf', binary: true },
+	woff: { mime: 'font/woff', binary: true },
+	woff2: { mime: 'font/woff2', binary: true },
+	// Cocos Creator binary asset payloads. `.cconb` is the
+	// "cocos creator object binary" serialized scene/prefab/component
+	// format; pvzge's scene streamer fetches one each time the player
+	// transitions into a level (PLAY button → freeze on 404 without this).
+	// Pvzge also ships ASTC / PKM (ETC1/ETC2) / PVR compressed texture
+	// payloads alongside its PNGs; adding them preemptively avoids the next
+	// resource-loading freeze if Cocos opts into a compressed path.
+	cconb: { mime: 'application/octet-stream', binary: true },
+	astc: { mime: 'image/x-astc', binary: true },
+	pkm: { mime: 'image/x-pkm', binary: true },
+	pvr: { mime: 'application/octet-stream', binary: true },
 };
 
 export interface BrowserResourceLoaderOptions {
@@ -231,7 +276,9 @@ export class BrowserResourceLoader implements ResourceLoader {
 	private renderSearch(): string {
 		const engine = resolveSearchEngine(this.appRoot);
 		// `logo` is a ready-to-use relative path (e.g.
-		// `../pages/assets/google_logo.png`) — used verbatim as the img src.
+		// `assets/google_logo.png`) — used verbatim as the img src,
+		// resolved against the page that embeds the search widget
+		// (typically `home.html` at `<storageRoot>`).
 		const logo = htmlEscape(engine.logo);
 		const alt = htmlEscape(`${engine.title} logo`);
 		return (

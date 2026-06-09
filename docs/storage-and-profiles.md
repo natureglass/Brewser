@@ -36,7 +36,7 @@ sdmc:/switch/brewser/                        ← appRoot
   search_engines.json
   bookmarks.json
   history.jsonl
-  Templates/
+  templates/
     default.json
     ...
   logs/

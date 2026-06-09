@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Welcome to Brewser!</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
+<style>
+  /* Extra top padding so the page buttons sit well below the browser
+     chrome / toolbar (URL bar) and don't visually crowd it. */
+  body { padding: 32px 28px; }
+
+  h1 { margin-bottom: 4px; line-height: 1.12; }
+
+  /* Featured Apps heading — bumped to feel like a real section title
+     instead of a sub-heading. Tracking + weight match the rest of the
+     page; the colour stays in the blue accent family (inherited from
+     main.css). */
+  h2 {
+    margin-top: 26px;
+    margin-bottom: 20px;
+    font-size: 2em;
+    letter-spacing: 0.005em;
+  }
+
+  .featured-section { margin-top: 0; }
+
+  /* The featured-header row sits on top of the grid: section title on
+     the left, secondary nav (Bookmarks, History) flush right. Reuses
+     the same flex shape the old top-bar had. */
+  .featured-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+
+  .featured-header h2 {
+    /* Override the page-level h2 vertical margins — the section's own
+       layout handles spacing now. */
+    margin: 0;
+  }
+
+  .top-links {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* Bottom row holds the Community Apps CTA centred under the grid.
+     The CTA text is a full sentence so the pill grows wide instead of
+     staying at the standard .munch-link min-width. */
+  .bottom-bar {
+    display: flex;
+    justify-content: center;
+    margin-top: 32px;
+  }
+
+  @media (max-width: 720px) {
+    .featured-header {
+      align-items: flex-start;
+      flex-direction: column;
+      margin-bottom: 18px;
+    }
+
+    .top-links {
+      justify-content: flex-start;
+    }
+  }
+
+  @media (max-width: 620px) {
+    body {
+      padding: 20px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="page-shell">
+  <section class="featured-section" aria-label="Featured Apps">
+    <header class="featured-header">
+      <h2>Featured Apps</h2>
+      <!-- Bookmarks + History on the same line as the section title,
+           pushed right by .featured-header's space-between. -->
+      <nav class="top-links" aria-label="Browser navigation">
+        <a class="munch-link" href="brewser://bookmarks/">Bookmarks</a>
+        <a class="munch-link" href="brewser://history/">History</a>
+        <a class="munch-link" href="brewser://about/">About</a>
+      </nav>
+    </header>
+    <div class="app-grid">
+      <!-- Cards injected from featured.json by the resource loader.
+           Same schema + rendering as <browser-apps>: each entry becomes
+           an .app-card (logo + title + description) whose href is the
+           entry's `url`. Edit featured.json to change what shows here. -->
+      <browser-featured></browser-featured>
+    </div>
+  </section>
+
+  <!-- CTA pill below the grid, flush right. Long label acts as both
+       button + invitation copy; the link still targets brewser://apps/
+       (the full apps catalog). -->
+  <footer class="bottom-bar">
+    <a class="munch-link" href="brewser://apps/">Click here to discover more apps developed by the Brewser community</a>
+  </footer>
+</div>
+</body>
+</html>

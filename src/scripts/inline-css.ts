@@ -116,6 +116,11 @@ export interface InlineStyle {
 	borderBottomColor?: string;
 	borderLeftColor?: string;
 	borderRadius?: { px: number } | { percent: number };
+	/** Custom properties (`--foo`) declared on this element via inline
+	 * style. Stored as the raw value string (no resolution). Merged into
+	 * the element's computed-style `customProps` bag by `live-css.ts` so
+	 * `var(--foo)` references in this element OR descendants resolve. */
+	customProps?: Record<string, string>;
 }
 
 const NUM_PROPS = new Set([
@@ -184,6 +189,15 @@ export function parseCssText(text: string): InlineStyle {
  * setters on `LiveElement.style` (e.g. `style.position = 'fixed'`) can
  * funnel through the same coercion path as cssText. */
 export function applyDecl(style: InlineStyle, propRaw: string, valueRaw: string): void {
+	// Custom properties (`--foo`) — keep the original case (CSS spec
+	// says custom property names are CASE-SENSITIVE, unlike regular
+	// property names). Store the raw value string; var() resolution
+	// happens later when the computed style is read.
+	if (propRaw.startsWith('--')) {
+		const bag = style.customProps ?? (style.customProps = {});
+		bag[propRaw] = valueRaw.trim();
+		return;
+	}
 	const prop = propRaw.toLowerCase();
 	const value = valueRaw.trim();
 	// Border longhand/shorthand helpers — applied before the LENGTH/NUM

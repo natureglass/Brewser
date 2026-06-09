@@ -19,8 +19,9 @@
 <body>
 <h1>The video element</h1>
 <p class="lead">Coverage matrix for the &lt;video&gt; element's
-container + codec paths. Each block points at a different file at
-<code>sdmc:/</code>. Tap the play / pause / stop buttons on a video's
+container + codec paths. Each block points at a different file under
+<code>sdmc:/switch/brewser/dev/assets/</code>. Tap the play / pause /
+stop buttons on a video's
 controls bar to interact with it; tap the video frame itself (above
 the bar) to enter fullscreen mode &mdash; gamepad B button exits
 fullscreen.</p>
@@ -35,25 +36,25 @@ the beginning.</p>
 <p class="codec">Container: <code>ISO BMFF (mp4)</code> &middot;
 Video: <code>H.264</code> &middot; Audio: <code>AAC</code> &middot;
 Baseline (was the slice-2b reference fixture).</p>
-<video src="sdmc:/test.mp4" width="320" height="240" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.mp4" width="320" height="240" controls></video>
 
 <h2>2. mov &mdash; H.264 + AAC (QuickTime container)</h2>
 <p class="codec">Container: <code>QuickTime (mov)</code> &middot;
 Video: <code>H.264</code> &middot; Audio: <code>AAC</code> &middot;
 Exercises the QuickTime demuxer with the same codecs as mp4.</p>
-<video src="sdmc:/test.mov" width="320" height="240" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.mov" width="320" height="240" controls></video>
 
 <h2>3. mkv &mdash; H.264 + Vorbis (Matroska container)</h2>
 <p class="codec">Container: <code>Matroska (mkv)</code> &middot;
 Video: <code>H.264</code> &middot; Audio: <code>Vorbis</code> &middot;
 First Vorbis audio decoder + first mkv demuxer in the coverage set.</p>
-<video src="sdmc:/test.mkv" width="320" height="240" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.mkv" width="320" height="240" controls></video>
 
 <h2>4. webm &mdash; VP8 + Vorbis</h2>
 <p class="codec">Container: <code>WebM (Matroska)</code> &middot;
 Video: <code>VP8</code> &middot; Audio: <code>Vorbis</code> &middot;
 First VP8 video decoder (software-only, Tegra NVDEC is H.264-only).</p>
-<video src="sdmc:/test.webm" width="320" height="240" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.webm" width="320" height="240" controls></video>
 
 <h2>5. m4a &mdash; AAC audio only</h2>
 <p class="codec">Container: <code>ISO BMFF (M4A)</code> &middot;
@@ -61,38 +62,38 @@ Video: <em>none</em> &middot; Audio: <code>AAC</code> &middot;
 Audio-only file in a &lt;video&gt; element &mdash; uses the
 <code>usedVideo=false</code> path; placeholder stays visible while
 audio plays.</p>
-<video src="sdmc:/test.m4a" width="320" height="80" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.m4a" width="320" height="80" controls></video>
 
 <h2>6. mp3 &mdash; MP3 audio only</h2>
 <p class="codec">Container: <code>MP3 with ID3v2 tag</code> &middot;
 Video: <em>none</em> &middot; Audio: <code>MP3</code> &middot;
 First MP3 demuxer + first MP3 decoder in the coverage set.</p>
-<video src="sdmc:/test.mp3" width="320" height="80" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.mp3" width="320" height="80" controls></video>
 
 <h2>7. wav &mdash; PCM 16-bit stereo 48 kHz audio only</h2>
 <p class="codec">Container: <code>RIFF/WAVE</code> &middot;
 Video: <em>none</em> &middot; Audio: <code>PCM s16le</code> &middot;
 Uncompressed audio through the swresample stage.</p>
-<video src="sdmc:/test.wav" width="320" height="80" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.wav" width="320" height="80" controls></video>
 
 <h2>8. flac &mdash; FLAC audio only</h2>
 <p class="codec">Container: <code>native FLAC</code> &middot;
 Video: <em>none</em> &middot; Audio: <code>FLAC</code> &middot;
 First FLAC demuxer + FLAC decoder in the coverage set.</p>
-<video src="sdmc:/test.flac" width="320" height="80" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.flac" width="320" height="80" controls></video>
 
 <h2>9. opus &mdash; Opus audio only</h2>
 <p class="codec">Container: <code>Ogg</code> &middot;
 Video: <em>none</em> &middot; Audio: <code>Opus</code> &middot;
 First Opus decoder + Ogg demuxer in the coverage set.</p>
-<video src="sdmc:/test.opus" width="320" height="80" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.opus" width="320" height="80" controls></video>
 
 <h2>10. ogg &mdash; Vorbis audio only (Ogg container)</h2>
 <p class="codec">Container: <code>Ogg</code> &middot;
 Video: <em>none</em> &middot; Audio: <code>Vorbis</code> &middot;
 Vorbis through Ogg vs. Vorbis through Matroska (block 3) &mdash;
 isolates demuxer effects from codec effects.</p>
-<video src="sdmc:/test.ogg" width="320" height="80" controls></video>
+<video src="sdmc:/switch/brewser/dev/assets/test.ogg" width="320" height="80" controls></video>
 
 <p><a href="brewser://dev/">back to web experiments</a></p>
 </body>

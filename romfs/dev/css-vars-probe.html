@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CSS Variables + calc() Probe — Switch Web Platform</title>
+<link rel="stylesheet" href="brewser://assets/main.css" />
+<style>
+  body { padding: 16px; font-family: sans-serif; color: #e0e8f4; background: #0b1220; }
+  h1 { color: #ffd35e; margin: 0 0 8px 0; }
+  p { color: #c2e0ff; margin: 4px 0; }
+  .row { display: flex; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+  button {
+    background: #1f2c40; color: #ffd35e; border: 1px solid #2a4060;
+    border-radius: 6px; padding: 10px 14px; font-size: 16px;
+  }
+  pre {
+    background: #14202d; border: 1px solid #2a4060; border-radius: 6px;
+    padding: 10px; white-space: pre-wrap; word-break: break-all;
+    max-height: 480px; overflow: auto;
+    font-size: 12px; color: #c2e0ff;
+  }
+  /* Visual playground — each slice adds a labelled box here. Plain
+   * inline-block wrap; avoids the [[feedback-swb-flex-column-min-content]]
+   * trap (flex-column align-center sizes children to min-content = 0). */
+  #playground { padding: 8px; border: 1px dashed #2a4060; }
+  .label { font-size: 11px; color: #aac3e4; padding: 2px 4px; text-align: center; }
+  .box-wrap { display: inline-block; margin: 4px; vertical-align: top; }
+  /* Test-specific CSS uses --vars so the live-css cascade is exercised. */
+  :root { --probe-red: rgb(220, 60, 60); --probe-green: rgb(60, 200, 100); }
+  #slice1 { background: var(--probe-red); width: 64px; height: 32px; }
+  #slice2 { background: var(--probe-missing, rgb(80, 140, 220)); width: 64px; height: 32px; }
+  .slice3-parent { --slice3-color: rgb(220, 180, 60); padding: 4px; }
+  .slice3-parent .slice3-child { background: var(--slice3-color); width: 56px; height: 32px; }
+  #slice4 { width: calc(100px + 50px); height: 32px; background: rgb(60, 100, 200); }
+  #slice5 { width: calc(var(--probe-w, 80px) * 2); height: 32px; background: rgb(180, 80, 180); }
+  /* slice7-9 styled at runtime via setProperty + dynamic <style>. */
+</style>
+</head>
+<body>
+  <h1>CSS Variables + calc() Probe (itch.io compat A3)</h1>
+  <p>Last item in Tier A. Verifies <code>--foo: value</code> cascade,
+  <code>var(--foo)</code> resolution + fallback, <code>:root</code> +
+  inherited custom props, <code>calc()</code> arithmetic, inline-style
+  <code>var()</code>, <code>el.style.setProperty('--foo', …)</code> +
+  <code>getPropertyValue</code>, <code>getComputedStyle(el)</code>
+  reading the resolved value. Modern web UIs (every Construct 3 /
+  Phaser plugin with theming) depend on these. Log:
+  <code>sdmc:/switch/brewser/logs/css-vars-probe.log</code>.</p>
+  <div class="row">
+    <button id="run">Run all slices</button>
+  </div>
+  <pre id="log"></pre>
+  <div id="playground"></div>
+<script>
+(function () {
+  var LOG_PATH = 'sdmc:/switch/brewser/logs/css-vars-probe.log';
+  var t0 = performance.now();
+  var logEl = document.getElementById('log');
+  var lines = [];
+  function log(s) {
+    var t = Math.round(performance.now() - t0);
+    var line = '+' + t + 'ms ' + s;
+    lines.push(line);
+    if (lines.length > 200) lines.shift();
+    if (logEl) logEl.textContent = lines.join('\n');
+    try { Switch.appendFileSync(LOG_PATH, line + '\n'); } catch (_) {}
+  }
+
+  // Wait a few rAF/paint cycles so the live-css cascade + layout settles.
+  function waitFrames(ms) { return new Promise(function (r) { setTimeout(r, ms || 80); }); }
+
+  function readComputed(el, prop) {
+    try {
+      if (typeof getComputedStyle === 'function') {
+        var cs = getComputedStyle(el);
+        if (cs && typeof cs.getPropertyValue === 'function') return cs.getPropertyValue(prop);
+        if (cs) return cs[prop];
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function labeledBox(label, el) {
+    var wrap = document.createElement('div');
+    wrap.className = 'box-wrap';
+    var lbl = document.createElement('div');
+    lbl.className = 'label';
+    lbl.textContent = label;
+    wrap.appendChild(el);
+    wrap.appendChild(lbl);
+    document.getElementById('playground').appendChild(wrap);
+  }
+
+  // === Slice 1: typeof checks (existence floor) ===
+  function sliceGlobals() {
+    log('--- Slice 1: Globals + DOM API existence ---');
+    var hasGCS = typeof getComputedStyle === 'function';
+    log((hasGCS ? 'PASS' : 'FAIL') + ' :: typeof getComputedStyle = ' + typeof getComputedStyle);
+    var el = document.createElement('div');
+    var hasSet = typeof el.style.setProperty === 'function';
+    var hasGet = typeof el.style.getPropertyValue === 'function';
+    log((hasSet ? 'PASS' : 'FAIL') + ' :: typeof el.style.setProperty = ' + typeof el.style.setProperty);
+    log((hasGet ? 'PASS' : 'FAIL') + ' :: typeof el.style.getPropertyValue = ' + typeof el.style.getPropertyValue);
+    return hasGCS && hasSet && hasGet;
+  }
+
+  // === Slice 2: stylesheet :root + var() applies ===
+  async function sliceRootCascade() {
+    log('--- Slice 2: :root --probe-red + var() in stylesheet rule ---');
+    var box = document.createElement('div');
+    box.id = 'slice1';
+    labeledBox('S2 :root', box);
+    await waitFrames();
+    var bg = readComputed(box, 'background-color') || readComputed(box, 'background');
+    var ok = bg && (bg.indexOf('rgb(220') >= 0 || bg.indexOf('220, 60, 60') >= 0 || bg.indexOf('#dc3c3c') >= 0);
+    log((ok ? 'PASS' : 'FAIL') + ' :: :root --probe-red resolves to rgb(220,60,60) in #slice1 (bg=' + bg + ')');
+  }
+
+  // === Slice 3: var() with fallback ===
+  async function sliceFallback() {
+    log('--- Slice 3: var(--missing, fallback) ---');
+    var box = document.createElement('div');
+    box.id = 'slice2';
+    labeledBox('S3 fallback', box);
+    await waitFrames();
+    var bg = readComputed(box, 'background-color') || readComputed(box, 'background');
+    var ok = bg && (bg.indexOf('rgb(80') >= 0 || bg.indexOf('80, 140, 220') >= 0);
+    log((ok ? 'PASS' : 'FAIL') + ' :: var(--missing, rgb(80,140,220)) → fallback applied (bg=' + bg + ')');
+  }
+
+  // === Slice 4: inheritance — child reads parent's custom prop ===
+  async function sliceInherit() {
+    log('--- Slice 4: parent --slice3-color → child var() ---');
+    var p = document.createElement('div');
+    p.className = 'slice3-parent';
+    var c = document.createElement('div');
+    c.className = 'slice3-child';
+    p.appendChild(c);
+    labeledBox('S4 inherit', p);
+    await waitFrames();
+    var bg = readComputed(c, 'background-color') || readComputed(c, 'background');
+    var ok = bg && (bg.indexOf('rgb(220') >= 0 || bg.indexOf('220, 180, 60') >= 0);
+    log((ok ? 'PASS' : 'FAIL') + ' :: child inherits --slice3-color from parent (bg=' + bg + ')');
+  }
+
+  // === Slice 5: calc() arithmetic ===
+  // Read via getComputedStyle('width') rather than getBoundingClientRect
+  // so the test verifies the CASCADE resolution (calc → '150px' → 150)
+  // independently of whether layout has run for the dynamically-added
+  // element. Layout-time behaviour is a separate concern.
+  async function sliceCalc() {
+    log('--- Slice 5: calc(100px + 50px) = 150px ---');
+    var box = document.createElement('div');
+    box.id = 'slice4';
+    labeledBox('S5 calc add', box);
+    await waitFrames();
+    var wStr = readComputed(box, 'width');
+    var w = wStr ? parseFloat(wStr) : -1;
+    var ok = !Number.isNaN(w) && Math.abs(w - 150) <= 1;
+    log((ok ? 'PASS' : 'FAIL') + ' :: calc(100px + 50px) width=' + wStr + ' (expected 150px)');
+  }
+
+  // === Slice 6: calc(var(--w) * 2) — calc with var ===
+  async function sliceCalcVar() {
+    log('--- Slice 6: calc(var(--probe-w) * 2) where --probe-w=80px ---');
+    var box = document.createElement('div');
+    box.id = 'slice5';
+    labeledBox('S6 calc*var', box);
+    await waitFrames();
+    var wStr = readComputed(box, 'width');
+    var w = wStr ? parseFloat(wStr) : -1;
+    var ok = !Number.isNaN(w) && Math.abs(w - 160) <= 1;
+    log((ok ? 'PASS' : 'FAIL') + ' :: calc(var(--probe-w, 80px) * 2) width=' + wStr + ' (expected 160px)');
+  }
+
+  // === Slice 7: inline style="background: var(--bg)" reads from cascade ===
+  async function sliceInlineVar() {
+    log('--- Slice 7: inline style="background: var(--probe-green)" ---');
+    var box = document.createElement('div');
+    box.setAttribute('style', 'background: var(--probe-green); width: 64px; height: 32px;');
+    labeledBox('S7 inline', box);
+    await waitFrames();
+    var bg = readComputed(box, 'background-color') || readComputed(box, 'background');
+    var ok = bg && (bg.indexOf('rgb(60') >= 0 || bg.indexOf('60, 200, 100') >= 0);
+    log((ok ? 'PASS' : 'FAIL') + ' :: inline style var() resolves cascaded --probe-green (bg=' + bg + ')');
+  }
+
+  // === Slice 8: el.style.setProperty('--foo', '...') visible to var() ===
+  async function sliceSetProperty() {
+    log('--- Slice 8: el.style.setProperty(\'--probe-set\', \'rgb(240, 200, 80)\') ---');
+    var box = document.createElement('div');
+    // Use setProperty for ALL declarations — setting the style attribute
+    // via setAttribute would replace the whole cssText and wipe any
+    // previously setProperty\'d custom props on the same element.
+    box.style.setProperty('--probe-set', 'rgb(240, 200, 80)');
+    box.style.setProperty('background', 'var(--probe-set)');
+    box.style.setProperty('width', '64px');
+    box.style.setProperty('height', '32px');
+    labeledBox('S8 setProp', box);
+    await waitFrames();
+    var bg = readComputed(box, 'background-color') || readComputed(box, 'background');
+    var ok = bg && (bg.indexOf('rgb(240') >= 0 || bg.indexOf('240, 200, 80') >= 0);
+    log((ok ? 'PASS' : 'FAIL') + ' :: setProperty(\'--probe-set\') visible to var() in same element (bg=' + bg + ')');
+  }
+
+  // === Slice 9: el.style.getPropertyValue('--foo') after setProperty ===
+  function sliceGetProperty() {
+    log('--- Slice 9: el.style.getPropertyValue(\'--probe-get\') ---');
+    var box = document.createElement('div');
+    if (typeof box.style.setProperty !== 'function' || typeof box.style.getPropertyValue !== 'function') {
+      log('FAIL :: setProperty/getPropertyValue missing — skipping');
+      return;
+    }
+    box.style.setProperty('--probe-get', 'banana');
+    var got = box.style.getPropertyValue('--probe-get');
+    var ok = got === 'banana';
+    log((ok ? 'PASS' : 'FAIL') + ' :: setProperty then getPropertyValue round-trip (got="' + got + '")');
+  }
+
+  // === Slice 10: getComputedStyle(el).getPropertyValue ===
+  async function sliceComputedStyle() {
+    log('--- Slice 10: getComputedStyle(el).getPropertyValue(\'background-color\') ---');
+    var box = document.createElement('div');
+    box.id = 'slice1';  // re-use the :root --probe-red style
+    labeledBox('S10 GCS', box);
+    await waitFrames();
+    if (typeof getComputedStyle !== 'function') {
+      log('FAIL :: getComputedStyle not present — skipping');
+      return;
+    }
+    var cs = getComputedStyle(box);
+    var bg = cs ? cs.getPropertyValue('background-color') : null;
+    var ok = bg && (bg.indexOf('rgb(220') >= 0 || bg.indexOf('220, 60, 60') >= 0);
+    log((ok ? 'PASS' : 'FAIL') + ' :: getComputedStyle reads resolved background-color (got="' + bg + '")');
+    // Bonus: read the custom prop itself.
+    var custom = cs ? cs.getPropertyValue('--probe-red') : null;
+    var customOk = custom && (custom.indexOf('rgb(220') >= 0 || custom.indexOf('220, 60, 60') >= 0);
+    log((customOk ? 'PASS' : 'PARTIAL') + ' :: getComputedStyle reads --probe-red custom prop (got="' + custom + '")');
+  }
+
+  async function runAll() {
+    log('');
+    log('=== RUN at ' + new Date().toISOString() + ' ===');
+    sliceGlobals();
+    await sliceRootCascade();
+    await sliceFallback();
+    await sliceInherit();
+    await sliceCalc();
+    await sliceCalcVar();
+    await sliceInlineVar();
+    await sliceSetProperty();
+    sliceGetProperty();
+    await sliceComputedStyle();
+    log('--- runAll DONE ---');
+  }
+
+  document.getElementById('run').addEventListener('click', function () { runAll(); });
+})();
+</script>
+</body>
+</html>

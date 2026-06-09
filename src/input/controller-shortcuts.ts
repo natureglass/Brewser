@@ -2,7 +2,6 @@ import { nxScreen } from '@switch-web/runtime';
 import {
 	CHROME_LAYOUT,
 	COMBO_BUTTONS,
-	EXIT_COMBO_HOLD_MS,
 } from '../browser-config.js';
 import {
 	dispatchPageKeyEvent,
@@ -13,6 +12,14 @@ import {
 } from '../scripts/live-dom.js';
 import { getComputedLiveStyle, setPseudoActive } from '../scripts/live-css.js';
 import { handleFormTap, isFormWidget } from '../scripts/live-form.js';
+import {
+	setMouseChromeMode,
+	setMouseChromeRegion,
+	tickMouseInput,
+	type MouseTickResult,
+} from './page-mouse-forwarder.js';
+import { listMappedButtons, type ButtonAction } from './button-router.js';
+import { playClick } from '../audio/click-sound.js';
 import { getLayoutBox } from '../scripts/live-layout.js';
 import { findTapIntent, patchLiveDirtyRegions } from '../scripts/live-overlay.js';
 import { isKeyboardOpen } from '../scripts/live-paint-control.js';
@@ -166,6 +173,10 @@ export type BrowserMode = 'normal' | 'fullscreen-page' | 'fullscreen-canvas' | '
 let browserMode: BrowserMode = 'normal';
 export function setBrowserMode(mode: BrowserMode): void {
 	browserMode = mode;
+	// Mirror into the mouse forwarder so its B/ZR fall-through gate
+	// knows whether the chrome strip is currently drawn (only `normal`
+	// mode renders it).
+	setMouseChromeMode(mode);
 }
 export function getBrowserMode(): BrowserMode {
 	return browserMode;
@@ -188,6 +199,9 @@ let chromeY1 = 56;
 export function setChromeRegion(y0: number, y1: number): void {
 	chromeY0 = y0;
 	chromeY1 = y1;
+	// Mirror into the mouse forwarder so it can fall-through B/ZR
+	// when the cursor is in the chrome strip on normal-mode pages.
+	setMouseChromeRegion(y0, y1);
 }
 
 /** Whether the star (bookmark) button is currently shown + tappable.
@@ -638,6 +652,13 @@ export function installCanvasTouch(): void {
 		if (browserMode !== 'normal') return;
 
 		if (y >= chromeY0 && y < chromeY1) {
+			// Every tap in the chrome y-strip lands on one of the
+			// toolbar buttons (back / forward / refresh / home / star
+			// / settings) or falls through to the URL bar — all are
+			// interactive, so play the click feedback unconditionally
+			// here. Gated by `config.json clickSounds` inside
+			// `playClick`.
+			playClick();
 			const backEnd = CHROME_LAYOUT.backX + CHROME_LAYOUT.backWidth;
 			const forwardEnd = CHROME_LAYOUT.forwardX + CHROME_LAYOUT.forwardWidth;
 			const refreshEnd = CHROME_LAYOUT.refreshX + CHROME_LAYOUT.refreshWidth;
@@ -835,24 +856,46 @@ export function installCanvasTouch(): void {
 				// Pass the tap's screen-x so range sliders can compute
 				// the new value from the position; other widgets ignore it.
 				_touchDiag('  → route: handleFormTap <' + target.tagName + '>');
+				// Audible feedback for form-widget taps (buttons, inputs,
+				// summary, labels). Fires once per touchend — the
+				// equivalent call from the touchmove range-drag path
+				// stays silent, otherwise every slider drag tick would
+				// chirp.
+				playClick();
 				// `true`: we already dispatched `click` on `target` above, so
 				// handleFormTap must NOT re-fire it (avoids double-firing a
 				// <button>'s handler — which made Stop instantly re-Play).
 				void handleFormTap(target, x, true);
-			} else if (!widgetHasAction) {
+			} else if (!widgetHasAction && isKeyboardOpen()) {
 				_touchDiag('  → route: generic-click patchLiveDirtyRegions <' + target.tagName + '>');
-				// Generic click target (e.g. a <button> tapped on its <svg>/
-				// <span> child, so `target` isn't the form widget itself — the
-				// click bubbled to the button's handler above). Repaint just
-				// the regions the handler mutated instead of rebuilding the
-				// whole page cache; patchLiveDirtyRegions falls back to the
-				// full rebuild (and still schedules the repaint) when it can't
-				// safely patch.
+				// Generic click target while the on-canvas keyboard is
+				// open — tapping outside a form widget should also
+				// close/redraw the keyboard region. In every OTHER
+				// case we skip this explicit patch call: clicks that
+				// actually mutate state already bump the live-tree
+				// version via `setPseudoActive` etc., which the
+				// onTick `treeVersionNow !== this.lastTickTreeVersion`
+				// branch picks up on the next tick and repaints
+				// then. The earlier "always patch on every tap"
+				// behaviour caused a visible FPS drop on every tap
+				// at body / div / text — the patch was either a
+				// no-op (slow) or escalated to a full rebuild for
+				// a tap that had mutated nothing.
 				patchLiveDirtyRegions();
 			}
 			_touchDiag('  → touchend on <' + target.tagName + '> intent=' +
 				(intent ? intent.kind : 'none'));
 			if (intent) {
+				// Audible feedback for every interactive activation —
+				// link navigation, button-action, summary toggle, video
+				// controls. Skipped for `dbltap-action` because the
+				// FIRST tap of a double-tap shouldn't fire a sound (it
+				// would chirp on every single tap even when the user
+				// intended a double-tap); the second tap path goes
+				// through `handleDoubleTapAction` which already gates
+				// on the timing window. Gated globally by the
+				// `clickSounds` config inside `playClick`.
+				if (intent.kind !== 'dbltap-action') playClick();
 				if (intent.kind === 'navigate') {
 					_touchDiag('    → pushInput(navigate ' + intent.href + ')');
 					pushInput({ kind: 'navigate', url: intent.href });
@@ -931,8 +974,13 @@ export interface ControllerInputOptions {
 	 * a chunked cache build — scroll input already triggered a repaint,
 	 * so the build-continuation flag waits until the next idle tick to
 	 * advance. Keeps scroll responsive during build.
+	 *
+	 * `info.mouseTick` carries the result of the per-iteration software-
+	 * cursor poll (see `page-mouse-forwarder.tickMouseInput`). The shell
+	 * uses `cursorChanged` to schedule a repaint when the cursor moved
+	 * or a button edge fired on an idle page.
 	 */
-	onTick?: (info: { scrolledThisTick: boolean }) => boolean;
+	onTick?: (info: { scrolledThisTick: boolean; mouseTick: MouseTickResult }) => boolean;
 }
 
 /**
@@ -1006,9 +1054,76 @@ function publishDpadDebug(snap: ShellButtonSnapshot, nowMs: number): void {
 	(globalThis as { __dpadDebug?: DpadHoldDebug }).__dpadDebug = dbg;
 }
 
+/**
+ * Per-gamepad-index rising-edge tracker. The legacy snapshot-based
+ * approach only sampled a handful of named buttons (zr/b/x/y/l/r/…);
+ * with `button-router` we need to detect rising edges on ARBITRARY
+ * gamepad indices (any of 0-15) because the user can map any Switch
+ * label to a shell action. Updated each poll iteration before
+ * dispatching.
+ */
+// 22 to cover the extended layout nxjs exposes: 0-15 standard
+// Web Gamepad, 16-19 sideways/single-joycon SL/SR, 20 Capture,
+// 21 HOME (reserved). See `src/input/button-router.ts
+// BUTTON_INDEX_MAP` for the per-label mapping.
+const GAMEPAD_BUTTON_COUNT = 22;
+let prevPressedByIdx: boolean[] = new Array(GAMEPAD_BUTTON_COUNT).fill(false);
+let nowPressedByIdx: boolean[] = new Array(GAMEPAD_BUTTON_COUNT).fill(false);
+
+function samplePressedByIdx(pad: Gamepad | null, out: boolean[]): void {
+	for (let i = 0; i < GAMEPAD_BUTTON_COUNT; i++) {
+		out[i] = pad?.buttons[i]?.pressed ?? false;
+	}
+}
+
+/**
+ * Walk the router's mapping table once and emit the first shell
+ * action whose Switch label just rose. Mouse-class actions are
+ * skipped (the mouse forwarder already handled them in
+ * `tickMouseInput`). Returns null when no shell-class rising edge
+ * fired this tick.
+ */
+function checkShellRisingEdge(
+	_pad: Gamepad | null,
+	prev: boolean[],
+	now: boolean[],
+): ControllerInput | null {
+	for (const m of listMappedButtons()) {
+		if (m.idx < 0 || m.idx >= GAMEPAD_BUTTON_COUNT) continue;
+		const rose = now[m.idx] && !prev[m.idx];
+		if (!rose) continue;
+		const input = shellActionToControllerInput(m.action);
+		if (input) return input;
+	}
+	return null;
+}
+
+function shellActionToControllerInput(action: ButtonAction): ControllerInput | null {
+	switch (action) {
+		case 'back': return { kind: 'back' };
+		case 'forward': return { kind: 'forward' };
+		case 'reload': return { kind: 'reload' };
+		case 'home': return { kind: 'home' };
+		case 'addressBar': return { kind: 'address-bar' };
+		case 'settings': return { kind: 'settings' };
+		case 'bookmark': return { kind: 'star' };
+		case 'screenshot': return { kind: 'screenshot' };
+		case 'exit': return { kind: 'exit' };
+		// Mouse-class actions are handled by `page-mouse-forwarder
+		// tickMouseInput`. Skip here so the shell doesn't double-fire.
+		case 'leftClick': case 'rightClick': case 'middleClick': return null;
+		// Scroll actions are driven by held-state polling, not rising
+		// edges (so D-pad up auto-repeats while held); the existing
+		// dpadUp/dpadDown branches below handle them directly.
+		case 'scrollUp': case 'scrollDown':
+		case 'scrollLeft': case 'scrollRight': return null;
+		case '': return null;
+	}
+}
+
 export async function waitForControllerInput(options: ControllerInputOptions = {}): Promise<ControllerInput> {
-	let exitHeldSince = 0;
 	let prev = snapshot();
+	samplePressedByIdx(activePad(), prevPressedByIdx);
 
 	while (true) {
 		if (pendingInput) {
@@ -1022,22 +1137,38 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 		const r = isPressed(pad, COMBO_BUTTONS.r);
 		const minus = isPressed(pad, COMBO_BUTTONS.minus);
 
-		if (l && r && minus) {
-			exitHeldSince ||= performance.now();
-			if (performance.now() - exitHeldSince >= EXIT_COMBO_HOLD_MS) {
-				return { kind: 'exit' };
-			}
-			prev = snapshot();
-			await delay(IDLE_POLL_INTERVAL_MS);
-			continue;
-		}
-		exitHeldSince = 0;
+		// L+R+MINUS held-to-exit combo removed 2026-06-09 — HBMenu's
+		// "+" (Plus / HOME) already exits the app, so this in-shell
+		// combo was a duplicate path. The `exit` action is still
+		// available via `config.json buttonMapping` if the user wants
+		// to wire a single-button exit ("exit": "PLUS" etc.).
+		// To restore the original combo, re-add:
+		//   let exitHeldSince = 0;
+		//   if (l && r && minus) { exitHeldSince ||= performance.now(); … }
+		//   exitHeldSince = 0;  // in the else branch
+		// `l`, `r`, `minus` stay live — they're still read below for
+		// the L+R lr-combo check (exit fullscreen).
 
 		const next = snapshot();
+		samplePressedByIdx(pad, nowPressedByIdx);
 
-		// Rising edge of L+R (without Minus) — used to exit fullscreen.
-		// The shell ignores this in normal mode, so pressing L+R there is
-		// a no-op. Adding Minus continues the exit-shell combo path above.
+		// Software-cursor poll. Reads the left stick + button indices
+		// the router has assigned to leftClick/rightClick/middleClick
+		// and dispatches mouse events on the LiveElement under the
+		// cursor (see `page-mouse-forwarder.tickMouseInput`). Runs
+		// BEFORE the shell rising-edge checks below so any button
+		// bound to a mouse action is consumed by the mouse layer
+		// first; the router's action-class split (mouse vs shell)
+		// then keeps the shell from double-firing on the same press.
+		const mouseTick = tickMouseInput();
+
+		// Rising edge of L+R — used to exit fullscreen modes (video /
+		// canvas / page). The shell ignores this in normal mode, so
+		// pressing L+R there is a no-op. The original `!minus`
+		// qualifier disambiguated from the L+R+Minus exit-shell
+		// combo, which is now removed; it's retained here so a
+		// held Minus during the L+R press still doesn't accidentally
+		// flip out of fullscreen (preserves the prior UX shape).
 		const lrNow = next.l && next.r;
 		const lrPrev = prev.l && prev.r;
 		if (lrNow && !lrPrev && !minus) {
@@ -1045,15 +1176,18 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 			return { kind: 'lr-combo' };
 		}
 
-		if (rising(prev, next, 'zr')) return { kind: 'address-bar' };
-		if (rising(prev, next, 'b')) return { kind: 'back' };
-		if (rising(prev, next, 'x')) return { kind: 'forward' };
-		if (rising(prev, next, 'y')) return { kind: 'reload' };
-		// Minus alone (no L/R) → screenshot. The L+R+Minus exit combo is
-		// caught above and continues without falling through to the
-		// rising-edge checks, so a held Minus en route to the exit combo
-		// never reaches this branch.
-		if (rising(prev, next, 'minus')) return { kind: 'screenshot' };
+		// Router-driven rising-edge dispatch. The button-router holds
+		// the single source of truth: each Switch label has exactly
+		// one assigned action (mouse-class or shell-class). Mouse-class
+		// actions (leftClick/rightClick/middleClick) are handled in
+		// `tickMouseInput` above and skipped here; shell-class actions
+		// (back/forward/reload/addressBar/screenshot/etc.) fire here.
+		// Both layers reading the same mapping eliminates the
+		// double-fire bug where the shell's "B = back" raced the
+		// mouse layer's "leftClick on A" — they're the same gamepad
+		// index (1) but resolve to different action classes now.
+		const shellInput = checkShellRisingEdge(pad, prevPressedByIdx, nowPressedByIdx);
+		if (shellInput) return shellInput;
 
 		let scrolledThisTick = false;
 		if (options.onScroll) {
@@ -1179,9 +1313,15 @@ export async function waitForControllerInput(options: ControllerInputOptions = {
 		// cadence. When the tick reports it did real work we drop to
 		// the active-poll interval so the next frame fires at vsync
 		// rather than after the full idle delay.
-		const tickedThisIter = options.onTick ? options.onTick({ scrolledThisTick }) : false;
+		const tickedThisIter = options.onTick ? options.onTick({ scrolledThisTick, mouseTick }) : false;
 
 		prev = next;
+		// Swap rather than reallocate: nowPressedByIdx becomes prev
+		// for the next iteration, prev's old buffer becomes the
+		// scratch we overwrite in samplePressedByIdx at top of loop.
+		const swap = prevPressedByIdx;
+		prevPressedByIdx = nowPressedByIdx;
+		nowPressedByIdx = swap;
 
 		// Drop the poll delay to ~0 while the user is actively
 		// scrolling OR a page animation is in flight so we run on every

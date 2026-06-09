@@ -9,7 +9,11 @@
  *
  * This module redefines `globalThis.localStorage` BEFORE any page
  * script runs, backed by a single JSON file at
- * `sdmc:/switch/brewser/localStorage/default.json`.
+ * `sdmc:/switch/brewser/localStorage/default.json` for production pages,
+ * `sdmc:/switch/brewser/dev/localStorage/default.json` when the active
+ * page is under `brewser://dev/` (keeps test artifacts out of real
+ * user storage). Reloads on namespace change so reads always see the
+ * file for the active page's namespace.
  *
  * Tier-1 limitation: ALL pages share one namespace. itch.io games can
  * collide with each other's save data. Tier-2 work would partition by
@@ -25,16 +29,39 @@ declare const Switch: {
 	statSync?(path: string): { size: number } | null;
 };
 
-const STORAGE_DIR = 'sdmc:/switch/brewser/localStorage/';
-const STORAGE_FILE = STORAGE_DIR + 'default.json';
+/** Storage namespaces. `default` is the production root used by real
+ * pages; `dev` quarantines test-fixture writes under a `dev/` subdir so
+ * the brewser root path stays clean. Selected at access time from the
+ * current page URL — pages under `brewser://dev/` get `dev`, everything
+ * else gets `default`. Adding a new namespace is just a new branch
+ * here + in `pickNamespace`. */
+type Namespace = 'default' | 'dev';
 
-function ensureStorageDir(): void {
-	try { Switch.mkdirSync(STORAGE_DIR); } catch { /* exists */ }
+const ROOT = 'sdmc:/switch/brewser/';
+const STORAGE_DIRS: Record<Namespace, string> = {
+	default: ROOT + 'localStorage/',
+	dev: ROOT + 'dev/localStorage/',
+};
+
+/** Source of the current page URL, set at install time. Returns '' when
+ * no shell wired it up (e.g. test harness) — falls through to `default`. */
+let getCurrentPageUrl: () => string = () => '';
+
+function pickNamespace(): Namespace {
+	const url = getCurrentPageUrl();
+	return url.startsWith('brewser://dev/') ? 'dev' : 'default';
 }
 
-function loadFromDisk(): Record<string, string> {
+function storageDir(ns: Namespace): string { return STORAGE_DIRS[ns]; }
+function storageFile(ns: Namespace): string { return storageDir(ns) + 'default.json'; }
+
+function ensureStorageDir(ns: Namespace): void {
+	try { Switch.mkdirSync(storageDir(ns)); } catch { /* exists */ }
+}
+
+function loadFromDisk(ns: Namespace): Record<string, string> {
 	try {
-		const ab = Switch.readFileSync(STORAGE_FILE);
+		const ab = Switch.readFileSync(storageFile(ns));
 		if (!ab) return {};
 		const text = new TextDecoder().decode(ab);
 		if (!text) return {};
@@ -50,11 +77,11 @@ function loadFromDisk(): Record<string, string> {
 	}
 }
 
-function writeToDisk(map: Record<string, string>): void {
+function writeToDisk(ns: Namespace, map: Record<string, string>): void {
 	try {
-		ensureStorageDir();
+		ensureStorageDir(ns);
 		const text = JSON.stringify(map);
-		Switch.writeFileSync(STORAGE_FILE, text);
+		Switch.writeFileSync(storageFile(ns), text);
 	} catch {
 		// Disk write failed — keep in-memory state consistent so the
 		// session continues, but the data won't survive a reload. A
@@ -65,49 +92,69 @@ function writeToDisk(map: Record<string, string>): void {
 
 class WebStorage {
 	#data: Record<string, string>;
+	#loadedNs: Namespace;
 
 	constructor() {
-		this.#data = loadFromDisk();
+		this.#loadedNs = pickNamespace();
+		this.#data = loadFromDisk(this.#loadedNs);
+	}
+
+	/** Before each access, check whether the active namespace changed
+	 * since we last loaded (i.e. the user navigated to/from a dev page).
+	 * If so, drop the in-memory cache and reload from the new namespace's
+	 * file so reads return its data, not the prior namespace's. */
+	#syncNs(): void {
+		const ns = pickNamespace();
+		if (ns === this.#loadedNs) return;
+		this.#loadedNs = ns;
+		this.#data = loadFromDisk(ns);
 	}
 
 	get length(): number {
+		this.#syncNs();
 		return Object.keys(this.#data).length;
 	}
 
 	key(index: number): string | null {
+		this.#syncNs();
 		if (!Number.isInteger(index) || index < 0) return null;
 		const keys = Object.keys(this.#data);
 		return keys[index] ?? null;
 	}
 
 	getItem(key: string): string | null {
+		this.#syncNs();
 		const k = String(key);
 		return Object.prototype.hasOwnProperty.call(this.#data, k) ? this.#data[k] : null;
 	}
 
 	setItem(key: string, value: string): void {
+		this.#syncNs();
 		const k = String(key);
 		const v = String(value);
 		if (this.#data[k] === v) return; // no-op write, skip disk
 		this.#data[k] = v;
-		writeToDisk(this.#data);
+		writeToDisk(this.#loadedNs, this.#data);
 	}
 
 	removeItem(key: string): void {
+		this.#syncNs();
 		const k = String(key);
 		if (!Object.prototype.hasOwnProperty.call(this.#data, k)) return;
 		delete this.#data[k];
-		writeToDisk(this.#data);
+		writeToDisk(this.#loadedNs, this.#data);
 	}
 
 	clear(): void {
+		this.#syncNs();
 		if (Object.keys(this.#data).length === 0) return;
 		this.#data = {};
-		writeToDisk(this.#data);
+		writeToDisk(this.#loadedNs, this.#data);
 	}
 
 	/** Used by the Proxy's `ownKeys` / `has` / `getOwnPropertyDescriptor`. */
 	_keys(): string[] {
+		this.#syncNs();
 		return Object.keys(this.#data);
 	}
 }
@@ -168,10 +215,17 @@ let installed = false;
  * Storage. Call once at app startup BEFORE any page script reads
  * `localStorage`. The runtime's own lazy getter is `configurable:true`,
  * so this override replaces it cleanly.
+ *
+ * `getCurrentUrl` (optional) lets the storage namespace switch between
+ * `default` and `dev` based on the active page URL — see the namespace
+ * dispatcher above. Pass `BrowserShell.getCurrentPageUrl.bind(shell)`
+ * (or an arrow wrapping it) so the closure reads the up-to-date URL on
+ * each storage access. Without it, all writes go to `default`.
  */
-export function installLocalStorage(): void {
+export function installLocalStorage(getCurrentUrl?: () => string): void {
 	if (installed) return;
 	installed = true;
+	if (getCurrentUrl) getCurrentPageUrl = getCurrentUrl;
 	const storage = wrapWithProxy(new WebStorage());
 	Object.defineProperty(globalThis, 'localStorage', {
 		value: storage,

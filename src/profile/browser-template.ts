@@ -1,5 +1,5 @@
 /**
- * Design-time configuration loaded from `<profile>/Templates/…json` —
+ * Design-time configuration loaded from `<profile>/templates/…json` —
  * colours, icon paths, toolbar position + height, page padding, hint
  * text. Everything that used to live as inline constants in
  * `browser-ui`, `browser-config`, and the painter is here so a user
@@ -166,11 +166,14 @@ export interface BrowserConfig {
 	 * Higher = pages snap in with fewer visible build steps but choppier
 	 * scroll/animation during that initial paint; lower = smoother but more
 	 * drawn-out fill-in. Clamped to [1, 1000]; default 12. Pushed into
-	 * live-overlay via `setLiveBuildChunkMs`. */
-	renderChunkMs: number;
+	 * live-overlay via `setLiveBuildChunkMs`. **Applies ONLY to external
+	 * http(s)/www navigation** — `brewser://` internal pages have
+	 * predictable size and always render in a single shot regardless of
+	 * this value (BrowserShell.onPageStarted overrides the budget). */
+	wwwRenderChunkMs: number;
 	/** Per-frame paint budget (ms) used while the user is SCROLLING a page
 	 * whose cache is still building — deliberately smaller than
-	 * `renderChunkMs` so each scroll tick stays cheap and scrolling stays
+	 * `wwwRenderChunkMs` so each scroll tick stays cheap and scrolling stays
 	 * near 60 FPS while content fills in. Clamped to [1, 1000]; default 4.
 	 * Pushed into live-overlay via `setLiveScrollChunkMs`. */
 	scrollChunkMs: number;
@@ -186,17 +189,56 @@ export interface BrowserConfig {
 	 * (prefers-color-scheme:…)` cascade. Defaults to `light` to match
 	 * the wider web's expected default. */
 	theme: 'light' | 'dark';
+	/** Play a short `click.wav` when the user activates a link,
+	 * button, or chrome-strip control. Audio feedback only — the
+	 * shell still works identically with sounds off. File is seeded
+	 * from `romfs:/webprofiles/default/assets/click.wav` into
+	 * `<storageRoot>assets/click.wav` on first run. */
+	clickSounds: boolean;
+	/** Milliseconds of stick-idle (no left-stick motion past the
+	 * cursor deadzone, no A-press) before the software cursor hides
+	 * itself. Reappears on the next motion or A-press. Set to a very
+	 * large value (or `Infinity`-ish via JSON `null` etc.) to
+	 * effectively keep the cursor always on; values <= 0 hide
+	 * immediately after motion stops. Default 3000 ms. */
+	mouseIdleMs: number;
+	/** Joycon button → engine action override map. Keys are Switch
+	 * face / shoulder labels (A, B, X, Y, L, R, ZL, ZR, MINUS, PLUS,
+	 * L_STICK, R_STICK, UP, DOWN, LEFT, RIGHT, HOME, CAPTURE,
+	 * LEFT_SL, LEFT_SR, RIGHT_SL, RIGHT_SR). Values are action strings
+	 * recognised by `src/input/button-router.ts ButtonAction` (e.g.
+	 * `"leftClick"`, `"back"`, `"forward"`, `"reload"`,
+	 * `"addressBar"`, `"screenshot"`, …). Empty strings (or missing
+	 * keys) fall through to the engine defaults in `DEFAULT_ACTIONS`,
+	 * which preserve the previously-hardcoded behaviour (A=leftClick,
+	 * B=rightClick, X=forward, Y=reload, ZR=middleClick,
+	 * MINUS=screenshot, UP/DOWN=scroll). */
+	buttonMapping: Record<string, string>;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
-	template: 'Templates/default.json',
+	template: 'templates/default.json',
 	videoNVTEGRA: true,
 	searchEngine: 'DuckDuckGo',
-	renderChunkMs: 12,
+	wwwRenderChunkMs: 12,
 	scrollChunkMs: 4,
 	maxHistory: 30,
 	theme: 'light',
+	clickSounds: true,
+	mouseIdleMs: 3000,
+	buttonMapping: {},
 };
+
+/** Migrate legacy `Templates/<name>.json` (capital T, pre 2026-06-03)
+ * to the renamed lowercase `templates/<name>.json` on the fly. Existing
+ * user `config.json` files persist the old path; this shim rewrites
+ * them in-memory so the active template resolves against the newly-
+ * seeded lowercase folder. The on-disk file gets refreshed the next
+ * time anything writes to it (e.g. user changes a Settings page
+ * option). Returns the input unchanged if no migration applies. */
+function migrateLegacyTemplatePath(p: string): string {
+	return p.startsWith('Templates/') ? 'templates/' + p.slice('Templates/'.length) : p;
+}
 
 /** One entry in `search_engines.json`. `query` is the search-URL
  * prefix the encoded query string is appended to (e.g.
@@ -231,12 +273,12 @@ export function loadConfig(appRoot: string): BrowserConfig {
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
 		return {
-			template: typeof parsed?.template === 'string' ? parsed.template : DEFAULT_CONFIG.template,
+			template: typeof parsed?.template === 'string' ? migrateLegacyTemplatePath(parsed.template) : DEFAULT_CONFIG.template,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
-			renderChunkMs: typeof parsed?.renderChunkMs === 'number' && Number.isFinite(parsed.renderChunkMs)
-				? Math.max(1, Math.min(1000, parsed.renderChunkMs))
-				: DEFAULT_CONFIG.renderChunkMs,
+			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)
+				? Math.max(1, Math.min(1000, parsed.wwwRenderChunkMs))
+				: DEFAULT_CONFIG.wwwRenderChunkMs,
 			scrollChunkMs: typeof parsed?.scrollChunkMs === 'number' && Number.isFinite(parsed.scrollChunkMs)
 				? Math.max(1, Math.min(1000, parsed.scrollChunkMs))
 				: DEFAULT_CONFIG.scrollChunkMs,
@@ -246,6 +288,19 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			theme: parsed?.theme === 'dark' || parsed?.theme === 'light'
 				? parsed.theme
 				: DEFAULT_CONFIG.theme,
+			clickSounds: typeof parsed?.clickSounds === 'boolean'
+				? parsed.clickSounds
+				: DEFAULT_CONFIG.clickSounds,
+			mouseIdleMs: typeof parsed?.mouseIdleMs === 'number' && Number.isFinite(parsed.mouseIdleMs)
+				? Math.max(0, Math.min(3_600_000, parsed.mouseIdleMs))
+				: DEFAULT_CONFIG.mouseIdleMs,
+			// `buttonMapping` is a permissive bag — the button-router
+			// validates each key/value at apply time. Just pass it
+			// through as-is when the JSON has an object there;
+			// otherwise empty object.
+			buttonMapping: parsed?.buttonMapping && typeof parsed.buttonMapping === 'object' && !Array.isArray(parsed.buttonMapping)
+				? parsed.buttonMapping as Record<string, string>
+				: {},
 		};
 	} catch (error) {
 		console.debug(`[switch-web-browser] config.json parse failed: ${error}`);

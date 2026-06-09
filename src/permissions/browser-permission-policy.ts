@@ -62,6 +62,18 @@ export class BrowserPermissionPolicy implements PermissionPolicy {
 		// log noise) appears to have broken mediaplayer audio + video
 		// playback by changing which loader claims sdmc:/ URLs. The cost
 		// (silent regression) is dramatically worse than the log noise.
+		//
+		// blob:/data: are always allowed regardless of the `network`
+		// toggle — they don't touch the network. blob: references an
+		// in-memory Blob created by URL.createObjectURL; data: is an
+		// inline data URI. Both are safe to resolve. Pvzge needs blob:
+		// because our Image.src brewser:// translation hooks at
+		// pvzge/index.html mint blob: URLs and Cocos's createImageBitmap
+		// shim re-fetches via page-script fetch — without this branch,
+		// Cocos's texture pipeline returns 403 on every loaded image.
+		if (url.startsWith('blob:') || url.startsWith('data:')) {
+			return true;
+		}
 		if (!this.network) {
 			return false;
 		}

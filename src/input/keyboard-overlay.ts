@@ -7,6 +7,12 @@ import {
 } from '../browser-config.js';
 import { DEFAULT_TEMPLATE, type BrowserTemplate } from '../profile/browser-template.js';
 import { setKeyboardOpen } from '../scripts/live-paint-control.js';
+import { playClick } from '../audio/click-sound.js';
+import {
+	getCursorPos,
+	tickCursorMovementOnly,
+} from './page-mouse-forwarder.js';
+import { getButtonIndexForAction } from './button-router.js';
 
 /** Callbacks the shell passes to `KeyboardOverlay.open()` so the page
  * behind the keyboard can be scrolled while it's up. Right-stick Y is
@@ -352,17 +358,25 @@ function activePad(): Gamepad | null {
 function readButtons(): ButtonSnapshot {
 	const pad = activePad();
 	const button = (i: number): boolean => Boolean(pad?.buttons[i]?.pressed);
-	const axis = (i: number): number => pad?.axes[i] ?? 0;
 
+	// Keyboard interaction is mouse + touch ONLY. Both `a` (activate
+	// hovered key) and `b` (cancel) come from `config.json buttonMapping`
+	// via the button-router so the user's remaps stay consistent across
+	// the whole shell. Previously `b` was hardcoded to `COMBO_BUTTONS.b`,
+	// which collided with `leftClick="A"` (both resolve to the same
+	// gamepad index in this codebase's mapping) — pressing one physical
+	// button fired BOTH activation AND cancel. `+` (Plus) still submits.
+	const leftClickIdx = getButtonIndexForAction('leftClick');
+	const rightClickIdx = getButtonIndexForAction('rightClick');
 	return {
-		a: button(COMBO_BUTTONS.a),
-		b: button(COMBO_BUTTONS.b),
-		y: button(COMBO_BUTTONS.y),
+		a: leftClickIdx >= 0 ? button(leftClickIdx) : false,
+		b: rightClickIdx >= 0 ? button(rightClickIdx) : false,
+		y: false,
 		plus: button(COMBO_BUTTONS.plus),
-		left: button(COMBO_BUTTONS.dpadLeft) || axis(0) < -0.55,
-		right: button(COMBO_BUTTONS.dpadRight) || axis(0) > 0.55,
-		up: button(COMBO_BUTTONS.dpadUp) || axis(1) < -0.55,
-		down: button(COMBO_BUTTONS.dpadDown) || axis(1) > 0.55,
+		left: false,
+		right: false,
+		up: false,
+		down: false,
 	};
 }
 
@@ -456,6 +470,11 @@ class KeyboardSession {
 	}
 
 	private activate(rect: KeyRect): void {
+		// Audible feedback for every virtual-keyboard key activation —
+		// covers touch (`touchStartHandler`) and mouse (`pollLoop` A on
+		// hovered rect) alike, since both routes call `activate()`. Gated
+		// globally by the `clickSounds` flag inside `playClick`.
+		playClick();
 		const action = rect.key.action;
 		if (action === 'submit') {
 			this.finish(this.state.value);
@@ -498,22 +517,9 @@ class KeyboardSession {
 		this.touchStartHandler = (event: TouchEvent) => {
 			const touch = event.touches[0] ?? event.changedTouches[0];
 			if (!touch) return;
-			for (let r = 0; r < this.rects.length; r++) {
-				for (let c = 0; c < this.rects[r].length; c++) {
-					const rect = this.rects[r][c];
-					if (
-						touch.clientX >= rect.x &&
-						touch.clientX <= rect.x + rect.width &&
-						touch.clientY >= rect.y &&
-						touch.clientY <= rect.y + rect.height
-					) {
-						this.state.focusRow = r;
-						this.state.focusCol = c;
-						this.activate(rect);
-						return;
-					}
-				}
-			}
+			// Activate the hit key (shared mouse/touch path — see
+			// `activateAt`). If the tap landed on a key, we're done.
+			if (this.activateAt(touch.clientX, touch.clientY)) return;
 			// Touch outside the keyboard panel. Open a swipe session: the
 			// touchend handler will cancel the keyboard if the gesture
 			// stayed a tap, but a swipe past PAGE_SWIPE_MOVE_THRESHOLD
@@ -567,34 +573,28 @@ class KeyboardSession {
 	}
 
 	private async pollLoop(): Promise<void> {
-		// 16 ms (~60 Hz) so right-stick page-scroll feels as smooth as the
-		// shell's main scroll loop. Key inputs still use rising-edge so a
-		// brief tap = exactly one step regardless of poll rate. Holding a
-		// D-pad direction no longer auto-repeats (it did at the previous
-		// 70 ms cadence with no rising-edge gate change), but the keyboard
-		// is small enough (5 rows × 10 cols) that tap-to-step is fine.
+		// Interaction model while the keyboard is up: MOUSE + TOUCH ONLY.
+		// D-pad navigation, A-on-focused-key, and Y-backspace are
+		// intentionally absent — `readButtons` returns `false` for those
+		// inputs. `a` here is the user's leftClick button (router-resolved)
+		// and only activates the keyboard key the cursor is hovering over;
+		// presses with the cursor outside any rect are ignored.
+		//
+		// Delay tracks the shell's `waitForControllerInput` cadence:
+		// `0` while the stick is moving the cursor so it doesn't visibly
+		// drag, `16` ms otherwise.
 		let prev = readButtons();
 		while (this.running) {
-			await delay(16);
 			if (!this.running) return;
 			const next = readButtons();
 
-			if (rising(prev, next, 'left')) this.moveFocus(0, -1);
-			if (rising(prev, next, 'right')) this.moveFocus(0, 1);
-			if (rising(prev, next, 'up')) this.moveFocus(-1, 0);
-			if (rising(prev, next, 'down')) this.moveFocus(1, 0);
-
 			if (rising(prev, next, 'a')) {
-				const rect = this.rects[this.state.focusRow]?.[this.state.focusCol];
-				if (rect) this.activate(rect);
+				const { x, y } = getCursorPos();
+				this.activateAt(x, y);
 			}
 			if (rising(prev, next, 'b')) {
 				this.finish(null);
 				return;
-			}
-			if (rising(prev, next, 'y')) {
-				const backspace = this.flatRects.find((r) => r.key.action === 'backspace');
-				if (backspace) this.activate(backspace);
 			}
 			if (rising(prev, next, 'plus')) {
 				this.finish(this.state.value);
@@ -611,7 +611,40 @@ class KeyboardSession {
 				if (stickDelta !== 0) this.callbacks.onScroll(stickDelta);
 			}
 
+			// Keep the software cursor alive while the keyboard owns the
+			// loop. Movement-only variant — A is hit-tested here against
+			// the keyboard rects above, so the cursor module must NOT
+			// dispatch A as a regular page mousedown/click. Return value
+			// drives the active-poll cadence below.
+			const cursorMoved = tickCursorMovementOnly();
+
 			prev = next;
+			await delay(cursorMoved ? 0 : 16);
 		}
+	}
+
+	/** Hit-test (x, y) against the keyboard rects; if the point lands on
+	 * a key, set focus to that row/col (drives the "pressed" visual via
+	 * the `focused` check in `render`) and call `activate`. Returns the
+	 * activated rect, or null if (x, y) missed the panel. Shared by the
+	 * mouse path (`pollLoop` A-rising with cursor coords) and the touch
+	 * path (`touchStartHandler`), so both routes produce the same visible
+	 * key-press flash + audible click. */
+	private activateAt(x: number, y: number): KeyRect | null {
+		for (let r = 0; r < this.rects.length; r++) {
+			for (let c = 0; c < this.rects[r].length; c++) {
+				const rect = this.rects[r][c];
+				if (
+					x >= rect.x && x <= rect.x + rect.width &&
+					y >= rect.y && y <= rect.y + rect.height
+				) {
+					this.state.focusRow = r;
+					this.state.focusCol = c;
+					this.activate(rect);
+					return rect;
+				}
+			}
+		}
+		return null;
 	}
 }

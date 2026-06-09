@@ -1,9 +1,51 @@
 [
     {
-        "title":"Media Player",
-        "description": "Enjoy music directly on your console with this media player.",
-        "logo": "sdmc:/switch/brewser/apps/mediaplayer/assets/audioplayer_logo.png",
-        "url": "brewser://apps/mediaplayer/index.html"
+        "title":"SpectraPlay",
+        "description": "Enjoy Audio & Video directly on your console.",
+        "logo": "sdmc:/switch/brewser/apps/SpectraPlay/assets/audioplayer_logo.png",
+        "url": "brewser://apps/SpectraPlay/index.html"
+    },
+    {
+        "title":"LumaClips",
+        "description": "Scroll through TikTok videos directly on your console.",
+        "logo": "sdmc:/switch/brewser/apps/LumaClips/assets/tiktok_logo.png",
+        "url": "brewser://apps/LumaClips/index.html"
+    },
+    {
+        "title":"StreamCast",
+        "description": "Scroll through Twitch videos directly on your console.",
+        "logo": "sdmc:/switch/brewser/apps/StreamCast/assets/twitch_logo.png",
+        "url": "brewser://apps/StreamCast/index.html"
+    },
+    {
+        "title":"PlayDock",
+        "description": "Play community games developed on Unity Engine.",
+        "logo": "sdmc:/switch/brewser/apps/PlayDock/assets/unity_logo.png",
+        "url": "brewser://apps/PlayDock/index.html"
+    },    
+    {
+        "title":"ThreeJS Demos",
+        "description": "Khronos WebGL conformance suites and Three.js demos via the GPU bridge.",
+        "logo": "sdmc:/switch/brewser/apps/ThreeJSDemos/assets/threejsdemos_logo.png",
+        "url": "brewser://apps/ThreeJSDemos/index.html"
+    },
+    {
+        "title":"PvZ GE",
+        "description": "PvZ Gardendless by Gzh0821 (GPL-3.0). Cocos-engine web build.",
+        "logo": "sdmc:/switch/brewser/apps/pvzge/assets/pvzge_logo.png",
+        "url": "brewser://apps/pvzge/index.html"
+    },
+    {
+        "title":"itch.io",
+        "description": "Browse newest browser-playable games from itch.io.",
+        "logo": "sdmc:/switch/brewser/apps/itchio/assets/itchio_logo.png",
+        "url": "brewser://apps/itchio/index.html"
+    },
+    {
+        "title":"MindYourStep 3D",
+        "description": "Cocos Creator 3.8.x minimal web export. Engine-boot diagnostic vehicle.",
+        "logo": "sdmc:/switch/brewser/apps/mindyourstep3d/assets/mys3d_logo.png",
+        "url": "brewser://apps/mindyourstep3d/index.html"
     },
     {
         "title":"Sensors",
@@ -16,29 +58,5 @@
         "description": "Test your internet speed directly on your console.",
         "logo": "sdmc:/switch/brewser/apps/speedtest/assets/speedtest_logo.png",
         "url": "brewser://apps/speedtest/index.html"
-    },
-    {
-        "title":"TikTok",
-        "description": "Scroll through TikTok videos directly on your console.",
-        "logo": "sdmc:/switch/brewser/apps/TikTok/assets/tiktok_logo.png",
-        "url": "brewser://apps/TikTok/index.html"
-    },
-    {
-        "title":"Twitch",
-        "description": "Scroll through Twitch videos directly on your console.",
-        "logo": "sdmc:/switch/brewser/apps/twitch/assets/twitch_logo.png",
-        "url": "brewser://apps/twitch/index.html"
-    },
-    {
-        "title":"itch.io",
-        "description": "Browse newest browser-playable games from itch.io.",
-        "logo": "sdmc:/switch/brewser/apps/itchio/assets/itchio_logo.png",
-        "url": "brewser://apps/itchio/index.html"
-    },
-    {
-        "title":"ThreeJS Demos",
-        "description": "Khronos WebGL conformance suites and Three.js demos via the GPU bridge.",
-        "logo": "sdmc:/switch/brewser/apps/ThreeJSDemos/assets/threejsdemos_logo.png",
-        "url": "brewser://apps/ThreeJSDemos/index.html"
     }
 ]

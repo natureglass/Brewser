@@ -169,8 +169,8 @@
   //
   //   1. Web Audio (AudioContext + Oscillator) — verified working in
   //      api-probe + web-audio-tone tests; allegedly broken here.
-  //   2. HTMLAudioElement playing romfs:/pages/assets/click.wav — same
-  //      path the mediaplayer uses; known-good.
+  //   2. HTMLAudioElement playing romfs:/webprofiles/default/assets/click.wav
+  //      — same asset the mediaplayer uses; known-good.
   //
   // On first user input both fire. Log records audio.state + voice
   // allocation + setTimeout-callback firing so we can see exactly which
@@ -233,7 +233,7 @@
   function ensureHtmlAudio() {
     if (htmlAudio) return;
     try {
-      htmlAudio = new Audio('romfs:/pages/assets/click.wav');
+      htmlAudio = new Audio('romfs:/webprofiles/default/assets/click.wav');
       htmlAudio.volume = 1.0;
       log('HTMLAudio ctor OK volume=' + htmlAudio.volume + ' src=' + htmlAudio.src);
       htmlAudio.addEventListener('canplaythrough', function () { log('HTMLAudio canplaythrough'); });

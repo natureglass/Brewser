@@ -1,9 +1,10 @@
 import { nxScreen } from '@switch-web/runtime';
 import type { HtmlElement, HtmlNode } from '../html/html-parser.js';
 import { installPointerLockOnDocumentShim } from '../polyfills/pointer-lock.js';
+import { setCursorFromCss } from '../input/page-mouse-forwarder.js';
 import {
 	getLiveRoot, getLiveWindow, getLiveWindowProxy, LiveElement, resetLiveRoot, setOwnerDocument,
-	wrapCanvasCtx2dForRepaint,
+	setWebGLBackedPredicate, wrapCanvasCtx2dForRepaint,
 } from './live-dom.js';
 
 /**
@@ -80,12 +81,46 @@ interface CanvasShim {
 	// Three.js's init from throwing "undefined is not a function".
 	addEventListener(type: string, listener: unknown, options?: unknown): void;
 	removeEventListener(type: string, listener: unknown, options?: unknown): void;
+	// Cocos Creator's touchstart callback unconditionally calls
+	// `this._canvas.focus()` (touchend/touchmove do not). Switch has no
+	// focus model for a render canvas — a no-op is correct behaviour, but
+	// the method has to exist or every touchstart throws `TypeError: focus
+	// is not a function` and the engine never reaches `_eventTarget.emit`.
+	focus(): void;
+	/** Web Fullscreen API. Cocos / pvzge and many engines call
+	 * `canvas.requestFullscreen()` to enter fullscreen-canvas mode
+	 * (so the canvas fills the screen and the chrome strip disappears).
+	 * The shell exposes `globalThis.__swbRequestFullscreenCanvas`; this
+	 * method awaits it. Resolves immediately if already fullscreen. */
+	requestFullscreen(options?: unknown): Promise<void>;
 	/** Pages that size a canvas to its CSS box read
 	 * `canvas.getBoundingClientRect()` (e.g. an audio visualizer's
 	 * `resizeCanvas`). Returns the wired live element's layout box once
 	 * layout has run; falls back to the offscreen's pixel dims before
 	 * then. */
 	getBoundingClientRect(): { x: number; y: number; width: number; height: number; top: number; left: number; right: number; bottom: number };
+	/** Some engines (Cocos Creator's index.js) read
+	 * `canvas.parentElement.getBoundingClientRect()` to size the canvas
+	 * to its container. The CanvasShim is a flat wrapper that doesn't
+	 * track DOM parentage, so we return a synthesized parent reporting
+	 * the available screen box. */
+	readonly parentElement: {
+		readonly tagName: string;
+		readonly clientWidth: number;
+		readonly clientHeight: number;
+		readonly offsetWidth: number;
+		readonly offsetHeight: number;
+		getBoundingClientRect(): { x: number; y: number; width: number; height: number; top: number; left: number; right: number; bottom: number };
+		appendChild(child: unknown): unknown;
+		removeChild(child: unknown): unknown;
+		insertBefore(child: unknown): unknown;
+	};
+	readonly parentNode: CanvasShim['parentElement'];
+	/** Cocos Creator (and other engines) set `canvas.style.cursor =
+	 * "url(...) , auto"` after loading a cursor sprite. Switch has no
+	 * cursor, but the assignment still has to succeed — a permissive
+	 * bag accepts any CSS property write without affecting layout. */
+	readonly style: Record<string, unknown>;
 }
 
 /** Thin shim returned by `document.getElementById(...)` for inline
@@ -94,11 +129,19 @@ interface CanvasShim {
  * read it back via `el.text` / `el.textContent`. Our HTML parser keeps
  * the text-node children, so we just need to forward them through. */
 interface ScriptShim {
-	readonly id: string;
-	readonly type: string;
-	readonly text: string;
-	readonly textContent: string;
+	id: string;
+	type: string;
+	/** Resolved-against-pageUrl URL for `<script src="...">`. Empty
+	 * string for inline scripts. SystemJS's `prepareImport` reads `.src`
+	 * (the IDL form, which auto-resolves) and passes it to `fetch`. */
+	src: string;
+	integrity: string;
+	text: string;
+	textContent: string;
 	getAttribute(name: string): string | null;
+	// SystemJS sets `.sp = true` on each script after scanning. The shim
+	// must allow arbitrary mutable property assignment.
+	[key: string]: unknown;
 }
 
 interface CanvasEntry {
@@ -324,6 +367,14 @@ export async function runPageScripts(
 	pageReadbackHook = () => readbackWebGLEntries(ordered);
 
 	const scriptShimsById = new Map<string, ScriptShim>();
+	// Document-order list of EVERY script tag — needed for
+	// `document.querySelectorAll('script')` / `'script[src]'`. SystemJS's
+	// `prepareImport` iterates these to find `type="systemjs-importmap"` /
+	// `type="systemjs-module"` tags and dispatch their loaders. Previously
+	// only id-tagged scripts were tracked (for `getElementById` access to
+	// shader source blocks etc.), which made the importmap tag invisible
+	// and forced pages to register the import map programmatically.
+	const scriptShimsAll: ScriptShim[] = [];
 	visit(root, (el) => {
 		if (el.tag === 'canvas') {
 			const entry = createCanvasEntry(el);
@@ -331,40 +382,62 @@ export async function runPageScripts(
 			ordered.push(entry);
 			if (el.attrs.id) byId.set(el.attrs.id, entry);
 		} else if (el.tag === 'script') {
-			const id = el.attrs.id;
+			const id = el.attrs.id ?? '';
 			const type = el.attrs.type ?? '';
+			const rawSrc = el.attrs.src ?? '';
+			const integrity = el.attrs.integrity ?? '';
 			const isJsType = type === '' || /^(text|application)\/(java|ecma)script$/i.test(type);
-			// Register script tags with an id (typically x-shader/x-vertex,
-			// x-shader/x-fragment, application/json) so test pages can read
-			// them back via document.getElementById().text / .textContent.
-			if (id) {
-				const text = collectText(el);
-				scriptShimsById.set(id, {
-					id, type, text, textContent: text,
-					getAttribute(name) {
-						if (name === 'id') return id;
-						if (name === 'type') return type || null;
-						const v = el.attrs[name];
-						return v === undefined ? null : v;
-					},
-				});
+			const text = collectText(el);
+			// Resolve `src` against pageUrl so SystemJS's `fetch(n.src, ...)`
+			// gets a fully-qualified URL regardless of where the page lives.
+			// Matches the HTML IDL behavior where `script.src` is absolute.
+			let resolvedSrc = '';
+			if (rawSrc) {
+				if (pageUrl) {
+					try { resolvedSrc = new URL(rawSrc, pageUrl).href; }
+					catch { resolvedSrc = rawSrc; }
+				} else {
+					resolvedSrc = rawSrc;
+				}
 			}
+			const shim: ScriptShim = {
+				id, type, src: resolvedSrc, integrity, text, textContent: text,
+				getAttribute(name) {
+					if (name === 'id') return id || null;
+					if (name === 'type') return type || null;
+					if (name === 'src') return rawSrc || null;
+					if (name === 'integrity') return integrity || null;
+					const v = el.attrs[name];
+					return v === undefined ? null : v;
+				},
+			};
+			scriptShimsAll.push(shim);
+			// id-keyed entry is the lookup path for getElementById (e.g.
+			// `<script id="vshader" type="x-shader/x-vertex">` blocks read
+			// back via their id by Khronos test pages).
+			if (id) scriptShimsById.set(id, shim);
 			// Only queue for execution if it's a JS-typed (or untyped)
 			// script. Khronos shader script tags would fail to parse as
 			// AsyncFunction bodies; skipping them avoids wasted work.
 			if (allowScripts && isJsType) {
-				if (el.attrs.src) {
-					scripts.push({ kind: 'src', value: el.attrs.src });
-				} else {
-					const text = collectText(el);
-					if (text.trim()) scripts.push({ kind: 'inline', value: text });
+				if (rawSrc) {
+					scripts.push({ kind: 'src', value: rawSrc });
+				} else if (text.trim()) {
+					scripts.push({ kind: 'inline', value: text });
 				}
 			}
 		}
 	});
 
-	const documentShim = buildDocumentShim(byId, ordered, scriptShimsById, preserveLiveRoot);
+	const documentShim = buildDocumentShim(byId, ordered, scriptShimsById, scriptShimsAll, preserveLiveRoot, pageUrl);
 	const consoleShim = buildConsoleShim();
+
+	// Install per-page globals so SystemJS / indirect-eval'd module bodies
+	// (which run in global scope, not the per-script `document` param) see
+	// the right `document`, `location`, and `navigator`. Done ONCE per page
+	// nav before any script runs; persists for the page's lifetime.
+	// Per-page nav into a new page overwrites these.
+	installPageGlobals(documentShim, pageUrl);
 
 	const execAll = async () => {
 		for (const script of scripts) {
@@ -412,19 +485,11 @@ export async function runPageScripts(
 			}
 			try {
 				// `AsyncFunction` evaluates with full access to the
-				// runtime's globals (`fetch`, `Switch`, etc.) — a
-				// deliberate trade-off for this minimal experiment;
-				// sandboxing would be a much larger pivot. Top-level
-				// `await` works because the body is the function body
-				// of an async function.
-				// `window` is shadowed by a per-page Proxy
-				// (`getLiveWindowProxy`) so `window.addEventListener` for
-				// mouse/touch events lands in this page's LiveWindow
-				// registry (lil-gui slider drag pattern), while every
-				// other window prop (`devicePixelRatio`,
-				// `requestAnimationFrame`, `innerWidth`, etc.) falls
-				// through to globalThis so existing demos that probe
-				// those don't regress. M2.0.
+				// runtime's globals (`fetch`, `Switch`, etc.). `window` is
+				// shadowed by a per-page Proxy (`getLiveWindowProxy`) so
+				// `window.addEventListener` for mouse/touch lands in this
+				// page's LiveWindow registry; other window props fall
+				// through to globalThis.
 				const fn = new AsyncFunctionCtor('document', 'console', 'window', body);
 				await fn(documentShim, consoleShim, getLiveWindowProxy());
 			} catch (err) {
@@ -510,6 +575,12 @@ const webGLBackedCanvases = new WeakSet<OffscreenCanvas>();
 export function isWebGLBackedCanvas(c: OffscreenCanvas): boolean {
 	return webGLBackedCanvases.has(c);
 }
+// Let LiveElement.isWebGLBacked() consult this set at call time so a
+// late `getContext('webgl2')` (Cocos Creator, lazy Three.js init) still
+// flips the painter onto the bridge→screen copy path. See the
+// commentary on `isWebGLBacked()` in live-dom.ts for why the cached
+// `_webglBacked` flag isn't enough on its own.
+setWebGLBackedPredicate(isWebGLBackedCanvas);
 
 /**
  * Copy a sub-rect of the shared screen WebGL bridge FBO directly into
@@ -541,6 +612,14 @@ function getAnySharedScreenGL(): WebGLRenderingContext | null {
 	return activePageGL ?? sharedScreenGL ?? sharedScreenGL2;
 }
 
+// 2026-06-07 pvzge investigation: diagnostic counter for copyBridgeToScreen.
+// Always logs the FIRST call (proves identity of the gl + screen at first use)
+// and then every Nth call so the bridge-to-screen path is observable across
+// the run without spamming the log. Toggle `__brewserBridgeDebug = true` from
+// the page or shell to switch to per-call verbose mode.
+let copyBridgeCallCount = 0;
+const COPY_BRIDGE_LOG_EVERY = 600;
+
 export function copyBridgeToScreen(
 	srcX: number,
 	srcY: number,
@@ -549,7 +628,8 @@ export function copyBridgeToScreen(
 	dstX: number,
 	dstY: number,
 ): boolean {
-	const gl = getAnySharedScreenGL() as unknown as {
+	const rawGl = getAnySharedScreenGL();
+	const gl = rawGl as unknown as {
 		copyBridgeToCanvas?: (
 			sx: number,
 			sy: number,
@@ -560,7 +640,25 @@ export function copyBridgeToScreen(
 			dy: number,
 		) => boolean;
 	} | null;
-	if (!gl || typeof gl.copyBridgeToCanvas !== 'function') return false;
+	const verbose = (globalThis as { __brewserBridgeDebug?: boolean })
+		.__brewserBridgeDebug === true;
+	const tick = ++copyBridgeCallCount;
+	const shouldLog = verbose || tick === 1 || tick === 2 || tick === 10
+		|| tick === 60 || (tick % COPY_BRIDGE_LOG_EVERY) === 0;
+	if (!gl || typeof gl.copyBridgeToCanvas !== 'function') {
+		if (shouldLog) {
+			const which = rawGl === activePageGL
+				? 'activePageGL'
+				: rawGl === sharedScreenGL
+					? 'sharedScreenGL'
+					: rawGl === sharedScreenGL2 ? 'sharedScreenGL2' : 'null';
+			console.debug('[bridge] tick=' + tick
+				+ ' NO-OP src=' + which
+				+ ' glTruthy=' + !!gl
+				+ ' copyFnType=' + (gl ? typeof gl.copyBridgeToCanvas : 'n/a'));
+		}
+		return false;
+	}
 	// Pass the canvas (Screen), NOT its 2D context. `installBrowserShim`
 	// wraps the 2D context in a Proxy so its JS class id no longer
 	// matches the canvas-context class id the C side looks for. The
@@ -569,9 +667,25 @@ export function copyBridgeToScreen(
 	// directly.
 	const screen = nxScreen();
 	try {
-		return gl.copyBridgeToCanvas(srcX, srcY, srcW, srcH, screen, dstX, dstY);
+		const ok = gl.copyBridgeToCanvas(srcX, srcY, srcW, srcH, screen, dstX, dstY);
+		if (shouldLog) {
+			const which = rawGl === activePageGL
+				? 'activePageGL'
+				: rawGl === sharedScreenGL
+					? 'sharedScreenGL'
+					: rawGl === sharedScreenGL2 ? 'sharedScreenGL2' : 'unknown';
+			const screenCtor = (screen && (screen as { constructor?: { name?: string } }).constructor?.name) || 'n/a';
+			console.debug('[bridge] tick=' + tick
+				+ ' src=' + which
+				+ ' args=[' + srcX + ',' + srcY + ',' + srcW + ',' + srcH
+				+ '->' + dstX + ',' + dstY + ']'
+				+ ' screen=' + screenCtor + ':' + (screen as { width?: number }).width
+				+ 'x' + (screen as { height?: number }).height
+				+ ' ok=' + ok);
+		}
+		return ok;
 	} catch (err) {
-		console.debug('[canvas-runner] copyBridgeToCanvas threw', err);
+		console.debug('[bridge] tick=' + tick + ' THREW', err);
 		return false;
 	}
 }
@@ -928,13 +1042,92 @@ function createCanvasEntry(el: HtmlElement): CanvasEntry {
 		hasWebGL: false,
 		contextKind: '',
 	};
+	// Synthesized parent reporting the Switch screen box (1280×720). Used
+	// by engines that size canvas to its container via
+	// `canvas.parentElement.getBoundingClientRect()` (Cocos Creator does
+	// this in its boot scripts). The CanvasShim itself doesn't track the
+	// real DOM parent, but the screen box is the right answer for
+	// fullscreen-style games — they want to fill the available area.
+	const SCREEN_W = 1280, SCREEN_H = 720;
+	const screenParent = {
+		tagName: 'DIV',
+		clientWidth: SCREEN_W,
+		clientHeight: SCREEN_H,
+		offsetWidth: SCREEN_W,
+		offsetHeight: SCREEN_H,
+		getBoundingClientRect() {
+			return { x: 0, y: 0, top: 0, left: 0, right: SCREEN_W, bottom: SCREEN_H, width: SCREEN_W, height: SCREEN_H };
+		},
+		appendChild(child: unknown) { return child; },
+		removeChild(child: unknown) { return child; },
+		insertBefore(child: unknown) { return child; },
+	};
+	// Permissive style bag. Plain reads/writes pass through; the
+	// `cursor` key is intercepted via a Proxy so the page-mouse
+	// forwarder can pick up Cocos/etc. `canvas.style.cursor = "url(...)"`
+	// writes and load the sprite. Other CSS props are stored but inert
+	// — the Switch has no live canvas CSS engine.
+	const styleStorage: Record<string, unknown> = {};
+	const styleBag = new Proxy(styleStorage, {
+		set(target, prop, value) {
+			target[prop as string] = value;
+			if (prop === 'cursor') {
+				try {
+					const cssVal = typeof value === 'string' ? value : (value == null ? null : String(value));
+					setCursorFromCss(cssVal);
+				} catch (_) { /* swallow — leave the value stored */ }
+			}
+			return true;
+		},
+	}) as Record<string, unknown>;
 	entry.shim = {
 		get width() { return offscreen.width; },
 		set width(v: number) { offscreen.width = v; },
 		get height() { return offscreen.height; },
 		set height(v: number) { offscreen.height = v; },
-		addEventListener(_type, _listener, _options) { /* no-op */ },
-		removeEventListener(_type, _listener, _options) { /* no-op */ },
+		get parentElement() { return screenParent; },
+		get parentNode() { return screenParent; },
+		get style() { return styleBag; },
+		// Forward listener registration to the matching live canvas
+		// element. The shim is what page scripts hold via the canvas
+		// reference they cached at boot (Cocos Creator's `this._canvas`,
+		// engines that ran `document.querySelector('canvas')` from an
+		// inline script), but the actual dispatch site is the live element
+		// — `page-touch-forwarder.ts` walks the live root and dispatches
+		// TouchEvent / PointerEvent on each `<CANVAS>` LiveElement. Without
+		// this forwarding, Cocos's `addEventListener('touchstart', ...)`
+		// drops the handler and the game gets no input despite renders.
+		// Three.js's GL-context-loss listeners still work because the live
+		// element silently accepts unknown event types (no listeners
+		// registered → dispatch no-op).
+		addEventListener(type: unknown, listener: unknown, _options?: unknown): void {
+			if (typeof type !== 'string' || typeof listener !== 'function') return;
+			const liveEl = findLiveElement(
+				getLiveRoot(),
+				(el) => el.tagName === 'CANVAS'
+					&& (el as unknown as { getOffscreen?: () => unknown }).getOffscreen?.() === offscreen,
+			);
+			if (liveEl) liveEl.addEventListener(type, listener as Function);
+		},
+		removeEventListener(type: unknown, listener: unknown, _options?: unknown): void {
+			if (typeof type !== 'string' || typeof listener !== 'function') return;
+			const liveEl = findLiveElement(
+				getLiveRoot(),
+				(el) => el.tagName === 'CANVAS'
+					&& (el as unknown as { getOffscreen?: () => unknown }).getOffscreen?.() === offscreen,
+			);
+			if (liveEl) liveEl.removeEventListener(type, listener as Function);
+		},
+		focus() { /* Switch has no focus model — required for Cocos's touchstart callback */ },
+		/* 2026-06-08 ROUND 46: Web Fullscreen API. Forwards to the shell's
+		 * fullscreen-canvas flow via globalThis.__swbRequestFullscreenCanvas,
+		 * installed at shell construction. Resolves once mode flipped. */
+		requestFullscreen(_options?: unknown): Promise<void> {
+			const trigger = (globalThis as { __swbRequestFullscreenCanvas?: () => Promise<void> })
+				.__swbRequestFullscreenCanvas;
+			if (typeof trigger === 'function') return trigger();
+			return Promise.resolve();
+		},
 		getBoundingClientRect() {
 			// Find the live canvas element this offscreen is wired into and
 			// return its layout box. Wiring + layout both happen AFTER page
@@ -1072,7 +1265,9 @@ function buildDocumentShim(
 	byId: Map<string, CanvasEntry>,
 	ordered: CanvasEntry[],
 	scriptShimsById: Map<string, ScriptShim>,
+	scriptShimsAll: ScriptShim[],
 	preserveLiveRoot: boolean,
+	pageUrl?: string,
 ) {
 	// Reset live root per page navigation — live elements from the
 	// previous page must not survive into the next.
@@ -1096,6 +1291,45 @@ function buildDocumentShim(
 		body,
 		documentElement: documentEl,
 		head,
+		// Spec strings page scripts probe to decide whether to wait
+		// (`readyState === 'loading'`) or proceed (`'complete'`). The page
+		// is fully parsed + populated by the time scripts run here, so
+		// always report 'complete'. SystemJS's `prepareImport()` hangs on
+		// 'loading' waiting for DOMContentLoaded — without this default,
+		// Cocos Creator + any SystemJS-based bundle stalls forever.
+		readyState: 'complete' as const,
+		// Touch-event feature flags. Cocos Creator's input system probes
+		// `document.documentElement.ontouchstart !== undefined` OR
+		// `document.ontouchstart !== undefined` to decide whether to attach
+		// touch listeners vs falling back to keyboard/mouse — with neither
+		// defined, the engine registered only `keydown/keyup` on the
+		// canvas and tap input never reached the game. Properties as null
+		// satisfy the `!== undefined` check without claiming any specific
+		// handler. The `'ontouchstart' in window` check is handled
+		// separately in `getLiveWindowProxy()` via `has` trap. See pvzge
+		// 2026-06-07 touch wiring.
+		ontouchstart: null,
+		ontouchmove: null,
+		ontouchend: null,
+		ontouchcancel: null,
+		// Mouse-event feature flags. Pages that prefer the mouse path
+		// (or that probe via `'onmousedown' in document` before binding
+		// listeners) take the mouse branch and get the synthetic events
+		// dispatched by the software-cursor driver in
+		// `page-mouse-forwarder.ts`. Engines that don't probe (e.g.
+		// hand-rolled `addEventListener('mousedown', ...)` callers) are
+		// already satisfied by the LiveWindow listener registry.
+		onmousedown: null,
+		onmousemove: null,
+		onmouseup: null,
+		onclick: null,
+		oncontextmenu: null,
+		onpointerdown: null,
+		onpointermove: null,
+		onpointerup: null,
+		// `document.baseURI` for relative-URL resolution. SystemJS, fetch,
+		// and `new URL(rel, document.baseURI)` callers depend on this.
+		baseURI: pageUrl ?? 'brewser://about:blank',
 		// `window` shim — page scripts that register
 		// `window.addEventListener('mousemove'/'mouseup'/'touchmove'/'touchend')`
 		// (lil-gui slider/number drag pattern) get a real listener
@@ -1142,6 +1376,12 @@ function buildDocumentShim(
 		},
 		querySelectorAll(selector: string): Array<CanvasShim | ScriptShim | LiveElement> {
 			if (selector === 'canvas') return ordered.map((e) => e.shim);
+			// Script-tag enumeration — SystemJS's `prepareImport` calls
+			// `document.querySelectorAll('script')` to scan for
+			// `systemjs-importmap` / `systemjs-module` tags, and a separate
+			// `'script[src]'` call to locate the running module's URL.
+			if (selector === 'script') return scriptShimsAll.slice();
+			if (selector === 'script[src]') return scriptShimsAll.filter((s) => s.src !== '');
 			if (selector.startsWith('#')) {
 				const match = this.getElementById(selector.slice(1));
 				return match ? [match] : [];
@@ -1157,7 +1397,7 @@ function buildDocumentShim(
 		getElementsByTagName(tag: string): Array<CanvasShim | ScriptShim | LiveElement> {
 			const lower = tag.toLowerCase();
 			if (lower === 'canvas') return ordered.map((e) => e.shim);
-			if (lower === 'script') return Array.from(scriptShimsById.values());
+			if (lower === 'script') return scriptShimsAll.slice();
 			if (lower === 'head') return [head];
 			if (lower === 'body') return [body];
 			if (lower === 'html') return [documentEl];
@@ -1184,6 +1424,24 @@ function buildDocumentShim(
 		 * in M2.4 when those need behaviour beyond a paintable rect.
 		 */
 		createElement(tag: string): LiveElement {
+			// 2026-06-08 ROUND 30: `document.createElement('audio')` must
+			// return an HTMLAudioElement-compatible object (in real browsers
+			// it's equivalent to `new Audio()`). Cocos's DOM audio loader uses
+			// `document.createElement("audio")` (not `new Audio()`) — without
+			// this routing the returned LiveElement was a no-op paintable
+			// rect, so audio.src/play/addEventListener/etc. did nothing.
+			// Generic Web API behavior — any engine using <audio> via
+			// createElement benefits.
+			const lowerTag = typeof tag === 'string' ? tag.toLowerCase() : '';
+			if (lowerTag === 'audio') {
+				const AudioCtor = (globalThis as unknown as { Audio?: new () => unknown }).Audio;
+				if (typeof AudioCtor === 'function') {
+					try {
+						console.debug('[createElement] routing audio → new Audio()');
+						return new AudioCtor() as unknown as LiveElement;
+					} catch (e) { console.debug('[createElement] audio routing threw: ' + String(e)); }
+				}
+			}
 			return new LiveElement(tag);
 		},
 		/** `document.createTextNode(data)` — returns a `#text`-tagged
@@ -1227,6 +1485,102 @@ function buildDocumentShim(
 	// two-surface install (Element prototype + per-page document).
 	installPointerLockOnDocumentShim(shim as unknown as Record<string, unknown>);
 	return shim;
+}
+
+/** Install per-page-nav globals that SystemJS / indirect-eval'd module
+ * bodies need to see. Modules eval'd via `(0, eval)(src)` (the SystemJS
+ * pattern) run in GLOBAL scope, so their `document` / `location` /
+ * `navigator` references resolve via globalThis — NOT the per-script
+ * function's `document` parameter. Without this bridge, every Cocos /
+ * Emscripten / SystemJS bundle stalls or throws at boot waiting for
+ * properties that exist only on the per-script param.
+ *
+ * Called once per page nav, before any page script runs. Subsequent
+ * page navs overwrite the values.
+ */
+function installPageGlobals(documentShim: object, pageUrl: string | undefined): void {
+	const g = globalThis as Record<string, unknown>;
+
+	// Bridge documentShim onto globalThis so module-scope `document.foo`
+	// resolves to the per-page shim, not whatever was left over.
+	try { g.document = documentShim; } catch (_) { /* ignore frozen */ }
+
+	// Build a Location-shaped object from the current page URL. Cocos +
+	// many other engines parse this at boot for behaviour gates and
+	// asset path resolution. URL parsing is best-effort; an unparseable
+	// or missing pageUrl falls back to `about:blank` shaped object.
+	let loc: Record<string, unknown> | null = null;
+	if (typeof pageUrl === 'string' && pageUrl.length > 0) {
+		try {
+			const u = new URL(pageUrl);
+			loc = {
+				href: pageUrl,
+				origin: u.origin,
+				protocol: u.protocol,
+				host: u.host,
+				hostname: u.hostname || (u.host.split(':')[0] ?? ''),
+				port: u.port,
+				pathname: u.pathname,
+				search: u.search,
+				hash: u.hash,
+				reload() { /* no-op */ },
+				assign(target: string) { /* no-op */ void target; },
+				replace(target: string) { /* no-op */ void target; },
+				toString() { return pageUrl; },
+			};
+		} catch (_) { /* malformed URL — fall through to default */ }
+	}
+	if (!loc) {
+		loc = {
+			href: 'about:blank', origin: 'null', protocol: 'about:', host: '',
+			hostname: '', port: '', pathname: 'blank', search: '', hash: '',
+			reload() {}, assign() {}, replace() {},
+			toString() { return 'about:blank'; },
+		};
+	}
+	try { g.location = loc; } catch (_) { /* ignore frozen */ }
+
+	// Default desktop-Chrome UA on navigator. Cocos's `cc.sys` does
+	// `navigator.userAgent.toLowerCase()` for platform detection and the
+	// generic web path expects a desktop-shaped UA. The nxjs runtime's
+	// own navigator (set up earlier in init) reports `@switch-web/runtime`
+	// which Cocos's matcher doesn't recognise → falls through to mobile
+	// detection paths that assume touch-only input. Override + extend.
+	const DESKTOP_UA =
+		'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+		'(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+	const navDefaults: Record<string, unknown> = {
+		userAgent: DESKTOP_UA,
+		appName: 'Netscape',
+		appVersion: '5.0 (Windows)',
+		appCodeName: 'Mozilla',
+		platform: 'Win32',
+		product: 'Gecko',
+		productSub: '20030107',
+		vendor: 'Google Inc.',
+		vendorSub: '',
+		language: 'en-US',
+		languages: ['en-US', 'en'],
+		onLine: true,
+		cookieEnabled: false,
+		doNotTrack: null,
+		maxTouchPoints: 0,
+		hardwareConcurrency: 4,
+	};
+	const existingNav = g.navigator as Record<string, unknown> | undefined;
+	if (existingNav && typeof existingNav === 'object') {
+		// Override userAgent (the runtime's `@switch-web/runtime` confuses
+		// engine detection) and fill in any missing defaults.
+		try { existingNav.userAgent = DESKTOP_UA; } catch (_) { /* ignore */ }
+		for (const k of Object.keys(navDefaults)) {
+			if (existingNav[k] === undefined) {
+				try { existingNav[k] = navDefaults[k]; } catch (_) { /* ignore */ }
+			}
+		}
+	} else {
+		try { g.navigator = navDefaults; } catch (_) { /* ignore */ }
+	}
+
 }
 
 function buildConsoleShim() {

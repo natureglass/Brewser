@@ -2,7 +2,7 @@
 <html>
 <head>
 <title>Test fixture: external CSS</title>
-<link rel="stylesheet" href="romfs:/test-css/external.css">
+<link rel="stylesheet" href="romfs:/dev/external.css">
 <style>
   /* Inline style block — later in source than the <link>, so for rules
      of equal specificity these win. */
@@ -13,7 +13,7 @@
 <body>
 <h1>External CSS fixture</h1>
 <p>The body's navy-blue background and light grey text come from the
-external stylesheet at <span class="tag">romfs:/test-css/external.css</span>.
+external stylesheet at <span class="tag">romfs:/dev/external.css</span>.
 That same sheet styles the h1 above with a slate-blue backdrop.</p>
 <h2>Cascade with inline &lt;style&gt;</h2>
 <p>The h2 above uses the external rule for italic but the inline-style

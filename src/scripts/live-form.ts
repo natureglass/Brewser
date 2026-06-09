@@ -780,7 +780,7 @@ export async function handleFormTap(el: LiveElement, tapX?: number, clickAlready
 	return false;
 }
 
-async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
+export async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 	if (!keyboardOpener) return false;
 	const cur = getInputValue(el);
 	// The keyboard itself manages the `isKeyboardOpen` flag now (set on
