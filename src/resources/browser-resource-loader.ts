@@ -60,14 +60,14 @@ const decoder = new TextDecoder();
 // pvzge's resources bundle has files like
 // `6f01cf7f-81bf-...@b47c0@e9a6d.png`). DIR_SEGMENT/PATH_PATTERN do not
 // need `@` since directories never use it in Cocos's layout.
-// The dot stays restricted to the static-asset filename position
-// (FILE_SEGMENT) so a `..` can never appear as a directory segment and
-// escape the profile dir. The leading-underscore/digit allowance
-// doesn't weaken the `..` defense because `..` starts with `.`, which
-// is still not in the first-character class for any regex.
-const DIR_SEGMENT = /^[a-z0-9_][a-z0-9_-]*$/i;
+// DIR_SEGMENT also allows INTERIOR `.` so reverse-DNS directory names
+// (`apps/featured/com.natureglass.spectraplay/...`) resolve. The `..`
+// directory-escape defense stays intact because it relies on the
+// first-character class `[a-z0-9_]` — `..` (and `.`, `.git`, `...`)
+// all start with `.` which is not a valid first char.
+const DIR_SEGMENT = /^[a-z0-9_][a-z0-9._-]*$/i;
 const FILE_SEGMENT = /^[a-z0-9_][a-z0-9.@_-]*$/i;
-const PATH_PATTERN = /^[a-z0-9_][a-z0-9_-]*(?:\/[a-z0-9_][a-z0-9_-]*)*$/i;
+const PATH_PATTERN = /^[a-z0-9_][a-z0-9._-]*(?:\/[a-z0-9_][a-z0-9._-]*)*$/i;
 
 /** Recognised static-asset MIME types keyed by extension (lowercase). */
 const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
@@ -206,7 +206,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			}
 		}
 
-		console.debug(`[switch-web-browser] unknown brewser:// page: ${request.url}`);
+		console.debug(`[brewser] unknown brewser:// page: ${request.url}`);
 		return notFoundResponse(request.url);
 	}
 

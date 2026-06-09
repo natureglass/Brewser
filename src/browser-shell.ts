@@ -454,7 +454,6 @@ export class BrowserShell {
 		// (existence check + skip for files that already exist) so the
 		// user's edits survive but a deleted file is restored next run.
 		await this.profile.seedBuiltinPages();
-		await this.profile.seedBuiltinAppPages();
 		await this.profile.seedBuiltinDevPages();
 		await this.profile.seedBuiltinAssets();
 		await this.profile.seedTemplates();
@@ -1165,7 +1164,7 @@ export class BrowserShell {
 		const path = `${dir}screenshot_${ts}.png`;
 		canvas.toBlob((blob: Blob | null) => {
 			if (!blob) {
-				console.debug('[switch-web-browser] screenshot: toBlob returned null');
+				console.debug('[brewser] screenshot: toBlob returned null');
 				return;
 			}
 			// Flash AFTER toBlob's internal canvas read so the saved PNG
@@ -1175,9 +1174,9 @@ export class BrowserShell {
 			blob.arrayBuffer().then((buf: ArrayBuffer) => {
 				try {
 					Switch.writeFileSync(path, buf);
-					console.debug('[switch-web-browser] screenshot saved: ' + path);
+					console.debug('[brewser] screenshot saved: ' + path);
 				} catch (e) {
-					console.debug('[switch-web-browser] screenshot write failed: '
+					console.debug('[brewser] screenshot write failed: '
 						+ (e instanceof Error ? e.message : String(e)));
 				}
 			});
@@ -1701,7 +1700,7 @@ export class BrowserShell {
 			}
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {
-			console.debug(`[switch-web-browser] write config.json failed: ${error}`);
+			console.debug(`[brewser] write config.json failed: ${error}`);
 			return;
 		}
 		this.template = loadTemplate(this.profile.appRoot);

@@ -1,7 +1,7 @@
-# switch-web-browser
+# brewser
 
 Future browser shell for Nintendo Switch homebrew. Built on top of
-[`@switch-web/runtime`](../switch-web-runtime).
+[`@switch-web/runtime`](../brewser-runtime).
 
 > **Status: scaffold + `brewser://` pipeline + soft-keyboard address bar.**
 > Launching the NRO routes through
@@ -39,10 +39,10 @@ Future browser shell for Nintendo Switch homebrew. Built on top of
 ## Build
 
 ```powershell
-cd D:\Workspace\switch-web-browser
+cd D:\Workspace\brewser
 npm install
 npm run build         # esbuild emits romfs/main.js
-npm run nro           # @nx.js/nro packages romfs + nacp into switch-web-browser.nro
+npm run nro           # @nx.js/nro packages romfs + nacp into brewser.nro
 npm run typecheck     # optional, uses sibling runtime's tsc
 ```
 
@@ -58,13 +58,13 @@ are 16 hex digits ending in `0000`.
 
 ### Icon
 
-If `D:\Workspace\switch-web-browser\icon.jpg` is present, `nxjs-nro` uses
+If `D:\Workspace\brewser\icon.jpg` is present, `nxjs-nro` uses
 it. Otherwise the default nx.js icon is bundled. Drop a 256×256 JPEG at
 that path when you have artwork.
 
 ### Deploying to Citron
 
-Copy `switch-web-browser.nro` into the Citron homebrew menu's NRO folder
+Copy `brewser.nro` into the Citron homebrew menu's NRO folder
 (usually `%APPDATA%\citron\sdmc\switch\` on Windows). On real hardware,
 copy to the SD card's `/switch/` directory.
 
@@ -75,17 +75,17 @@ nxjs-source           (native Switch homebrew layer)
    ↑
 @switch-web/runtime   (shared WebView, shims, fetch, permissions)
    ↑
-switch-web-browser    (this repo: browser shell)
+brewser    (this repo: browser shell)
 ```
 
-`switch-web-browser` **does not** import from `switch-webapp-player`. The
+`brewser` **does not** import from `switch-webapp-player`. The
 player and the browser are siblings that both depend on
 `@switch-web/runtime`.
 
 ## Repo layout
 
 ```text
-switch-web-browser/
+brewser/
 ├─ package.json
 ├─ tsconfig.json
 ├─ README.md

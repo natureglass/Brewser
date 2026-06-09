@@ -1,9 +1,10 @@
 romfs/apps/
 node_modules/
+build/
 romfs/main.js
 romfs/main.js.map
-switch-web-browser.nro
-switch-web-browser.nsp
+brewser.nro
+brewser.nsp
 icon.jpg
 *.log
 .DS_Store

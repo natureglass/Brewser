@@ -29,133 +29,6 @@ const BUILTIN_PAGES: readonly string[] = [
 	'bookmarks.html',
 ];
 
-/** App pages — apps catalog entries listed on apps.html (the launcher).
- * Each entry is a path under `romfs:/apps/<rest>` mirrored to
- * `<appRoot>apps/<rest>`. Apps live at the **app root**, NOT under any
- * per-profile dir, so they're shared across profiles. The apps.html
- * launcher itself lives in BUILTIN_PAGES because it's a regular
- * per-profile page that just RENDERS the catalog. */
-const BUILTIN_APP_PAGES: readonly string[] = [
-	'mediaplayer/index.html',
-	'mediaplayer/assets/audioplayer_logo.png',
-	'mediaplayer/config.json',
-	// ThreeJSDemos — the launcher page lives at index.html (was
-	// formerly threejs-demos.html at the per-profile root); each demo
-	// subdir holds its own index.html + assets. Shared three.js + addon
-	// libs live under libs/. Demos that exist in romfs but aren't seeded
-	// here are still reachable via the romfs:/ fallback in the resource
-	// loader; only the curated set below is mirrored to SDMC on first run.
-	'ThreeJSDemos/index.html',
-	'ThreeJSDemos/assets/threejsdemos_logo.png',
-	'ThreeJSDemos/libs/three.iife.js',
-	'ThreeJSDemos/libs/harness.js',
-	'ThreeJSDemos/libs/orbit-controls.js',
-	'ThreeJSDemos/libs/first-person-controls.js',
-	'ThreeJSDemos/libs/obj-loader.js',
-	'ThreeJSDemos/libs/effect-composer.js',
-	'ThreeJSDemos/textured-rotating-cube/index.html',
-	'ThreeJSDemos/textured-rotating-cube/assets/main.js',
-	'ThreeJSDemos/textured-rotating-cube/assets/rendering-gl-drawelements.html',
-	'ThreeJSDemos/geometry-cube/index.html',
-	'ThreeJSDemos/geometry-cube/assets/main.js',
-	'ThreeJSDemos/geometry-cube/assets/crate.png',
-	'ThreeJSDemos/geometry-cube/assets/rendering-gl-drawelements.html',
-	'ThreeJSDemos/webgl-lines-dashed/index.html',
-	'ThreeJSDemos/webgl-lines-dashed/assets/main.js',
-	'ThreeJSDemos/webgl-lines-dashed/assets/state-gl-initial-state.html',
-	'ThreeJSDemos/webgl-lines-colors/index.html',
-	'ThreeJSDemos/webgl-lines-colors/assets/main.js',
-	'ThreeJSDemos/webgl-lines-colors/assets/attribs-gl-bindAttribLocation-aliasing.html',
-	'ThreeJSDemos/webgl-geometry-colors/index.html',
-	'ThreeJSDemos/webgl-geometry-colors/assets/main.js',
-	'ThreeJSDemos/webgl-geometry-colors/assets/programs-gl-get-active-attribute.html',
-	'ThreeJSDemos/webgl-layers/index.html',
-	'ThreeJSDemos/webgl-layers/assets/main.js',
-	'ThreeJSDemos/webgl-layers/assets/programs-program-infolog.html',
-	'ThreeJSDemos/misc-controls-orbit/index.html',
-	'ThreeJSDemos/misc-controls-orbit/assets/main.js',
-	'ThreeJSDemos/misc-controls-orbit/assets/uniforms-gl-uniformmatrix4fv.html',
-	'ThreeJSDemos/webgl-camera/index.html',
-	'ThreeJSDemos/webgl-camera/assets/main.js',
-	'ThreeJSDemos/webgl-camera/assets/rendering-gl-drawarrays.html',
-	'ThreeJSDemos/webgl-geometry-shapes/index.html',
-	'ThreeJSDemos/webgl-geometry-shapes/assets/main.js',
-	'ThreeJSDemos/webgl-geometry-shapes/assets/uv_grid_opengl.jpg',
-	'ThreeJSDemos/webgl-sprites/index.html',
-	'ThreeJSDemos/webgl-sprites/assets/main.js',
-	'ThreeJSDemos/webgl-sprites/assets/sprite0.png',
-	'ThreeJSDemos/webgl-sprites/assets/sprite1.png',
-	'ThreeJSDemos/webgl-sprites/assets/sprite2.png',
-	'ThreeJSDemos/webgl-sprites/assets/rendering-gl-drawelements.html',
-	'ThreeJSDemos/webgl-geometry-dynamic/index.html',
-	'ThreeJSDemos/webgl-geometry-dynamic/assets/main.js',
-	'ThreeJSDemos/webgl-geometry-dynamic/assets/water.jpg',
-	'ThreeJSDemos/webgl-geometry-dynamic/assets/buffers-buffer-data-and-buffer-sub-data.html',
-	'ThreeJSDemos/webgl-points-sprites/index.html',
-	'ThreeJSDemos/webgl-points-sprites/assets/main.js',
-	'ThreeJSDemos/webgl-points-sprites/assets/snowflake1.png',
-	'ThreeJSDemos/webgl-points-sprites/assets/snowflake2.png',
-	'ThreeJSDemos/webgl-points-sprites/assets/snowflake3.png',
-	'ThreeJSDemos/webgl-points-sprites/assets/snowflake4.png',
-	'ThreeJSDemos/webgl-points-sprites/assets/snowflake5.png',
-	'ThreeJSDemos/webgl-points-sprites/assets/uniforms-null-uniform-location.html',
-	'ThreeJSDemos/webgl-geometries/index.html',
-	'ThreeJSDemos/webgl-geometries/assets/main.js',
-	'ThreeJSDemos/webgl-geometries/assets/uv_grid_opengl.jpg',
-	'ThreeJSDemos/webgl-geometries/assets/state-gl-enable-enum-test.html',
-	'ThreeJSDemos/webgl-materials-blending/index.html',
-	'ThreeJSDemos/webgl-materials-blending/assets/main.js',
-	'ThreeJSDemos/webgl-materials-blending/assets/uv_grid_opengl.jpg',
-	'ThreeJSDemos/webgl-materials-blending/assets/sprite0.jpg',
-	'ThreeJSDemos/webgl-materials-blending/assets/sprite0.png',
-	'ThreeJSDemos/webgl-materials-blending/assets/lensflare0.png',
-	'ThreeJSDemos/webgl-materials-blending/assets/lensflare0_alpha.png',
-	'ThreeJSDemos/webgl-materials-blending/assets/state-gl-blend-state.html',
-	'ThreeJSDemos/webgl-interactive-cubes/index.html',
-	'ThreeJSDemos/webgl-interactive-cubes/assets/main.js',
-	'ThreeJSDemos/webgl-interactive-cubes/assets/uniforms-emissive-uniform.html',
-	'ThreeJSDemos/webgl-materials-wireframe/index.html',
-	'ThreeJSDemos/webgl-materials-wireframe/assets/main.js',
-	'ThreeJSDemos/webgl-materials-wireframe/assets/WaltHeadLo_buffergeometry.json',
-	'ThreeJSDemos/webgl-materials-wireframe/assets/rendering-triangle.html',
-	'ThreeJSDemos/webgl-instancing-dynamic/index.html',
-	'ThreeJSDemos/webgl-instancing-dynamic/assets/main.js',
-	'ThreeJSDemos/webgl-instancing-dynamic/assets/suzanne_buffergeometry.json',
-	'ThreeJSDemos/webgl-instancing-dynamic/assets/extensions-angle-instanced-arrays.html',
-	'ThreeJSDemos/webgl-loader-obj/index.html',
-	'ThreeJSDemos/webgl-loader-obj/assets/main.js',
-	'ThreeJSDemos/webgl-loader-obj/assets/male02.obj',
-	'ThreeJSDemos/webgl-loader-obj/assets/male02.mtl',
-	'ThreeJSDemos/webgl-loader-obj/assets/01_-_Default1noCulling.JPG',
-	'ThreeJSDemos/webgl-loader-obj/assets/male-02-1noCulling.JPG',
-	'ThreeJSDemos/webgl-loader-obj/assets/orig_02_-_Defaul1noCulling.JPG',
-	'ThreeJSDemos/webgl-loader-obj/assets/uv_grid_opengl.jpg',
-	'ThreeJSDemos/webgl-loader-obj/assets/extensions-oes-standard-derivatives.html',
-	'ThreeJSDemos/webgl-postprocessing/index.html',
-	'ThreeJSDemos/webgl-postprocessing/assets/main.js',
-	'ThreeJSDemos/webgl-postprocessing/assets/renderbuffers-framebuffer-object-attachment.html',
-	'ThreeJSDemos/webgl-depth-texture/index.html',
-	'ThreeJSDemos/webgl-depth-texture/assets/main.js',
-	'ThreeJSDemos/webgl-depth-texture/assets/extensions-webgl-depth-texture.html',
-	'ThreeJSDemos/webgl-shadowmap/index.html',
-	'ThreeJSDemos/webgl-shadowmap/assets/main.js',
-	'ThreeJSDemos/webgl-buffergeometry-indexed/index.html',
-	'ThreeJSDemos/webgl-buffergeometry-indexed/assets/main.js',
-	'ThreeJSDemos/webgl-custom-attributes/index.html',
-	'ThreeJSDemos/webgl-custom-attributes/assets/main.js',
-	'ThreeJSDemos/webgl-custom-attributes/assets/passthrough-cpu-data-texture-sample.html',
-	'ThreeJSDemos/webgl-morphtargets-sphere/index.html',
-	'ThreeJSDemos/webgl-morphtargets-sphere/assets/main.js',
-	'ThreeJSDemos/webgl-morphtargets-sphere/assets/morph-sphere.bin',
-	'ThreeJSDemos/webgl-morphtargets-sphere/assets/disc.png',
-	'ThreeJSDemos/webgl-shader/index.html',
-	'ThreeJSDemos/webgl-shader/assets/main.js',
-	'ThreeJSDemos/webgl-materials-texture-filters/index.html',
-	'ThreeJSDemos/webgl-materials-texture-filters/assets/main.js',
-	'ThreeJSDemos/webgl-materials-texture-filters/assets/caravaggio.jpg',
-	'ThreeJSDemos/webgl-materials-texture-filters/assets/textures-mipmap-filter-and-generate.html',
-];
-
 /** Dev / test-fixture pages seeded from `romfs:/dev/` into the
  * app-level `dev/` tree (shared across profiles). Each entry is a
  * path relative to `romfs:/dev/` and mirrors to `<appRoot>dev/<rel>`.
@@ -181,9 +54,6 @@ const BUILTIN_DEV_PAGES: readonly string[] = [
 	'full-webgl1-conformance/index.html',
 	'full-webgl1-conformance/assets/runner.js',
 	'full-webgl1-conformance/assets/tests.json',
-	'nxjs-webgl-demo/index.html',
-	'nxjs-webgl-demo/assets/main.js',
-	'nxjs-webgl-demo/assets/logo.png',
 	'two.html',
 	'images.html',
 	'pre.html',
@@ -350,7 +220,7 @@ export class BrowserProfile {
 		try {
 			Switch.mkdirSync(this.storageRoot);
 		} catch (error) {
-			console.debug(`[switch-web-browser] failed to create profile dir ${this.storageRoot}: ${error}`);
+			console.debug(`[brewser] failed to create profile dir ${this.storageRoot}: ${error}`);
 		}
 		// Subdirectories the seeders will write into; create them now so
 		// writeFileSync below doesn't fail on missing parents.
@@ -360,71 +230,15 @@ export class BrowserProfile {
 		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}templates/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/mediaplayer/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/mediaplayer/assets/`); } catch (_) { /* exists */ }
+		// `apps/` itself is intentionally NOT pre-created here. Apps live
+		// in arbitrary subtrees (e.g. `apps/<channel>/<reverse-dns>/...`)
+		// that are deployed via robocopy; the structure changes over time
+		// and the shell must not assume any particular shape.
 		// App-level dev surface: HTML/CSS/canvas/WebGL test fixtures +
 		// Khronos conformance corpora. Mirrors `BUILTIN_DEV_PAGES`.
 		try { Switch.mkdirSync(`${this.appRoot}dev/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}dev/nxjs-webgl-demo/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}dev/nxjs-webgl-demo/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/libs/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/textured-rotating-cube/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/textured-rotating-cube/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/geometry-cube/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/geometry-cube/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-dashed/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-dashed/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-colors/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-lines-colors/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-colors/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-colors/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-layers/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-layers/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/misc-controls-orbit/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/misc-controls-orbit/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-camera/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-camera/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-shapes/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-shapes/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-sprites/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-sprites/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-dynamic/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometry-dynamic/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-points-sprites/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-points-sprites/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometries/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-geometries/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-blending/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-blending/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-interactive-cubes/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-interactive-cubes/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-wireframe/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-wireframe/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-instancing-dynamic/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-instancing-dynamic/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-loader-obj/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-loader-obj/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-postprocessing/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-postprocessing/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-depth-texture/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-depth-texture/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shadowmap/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shadowmap/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-buffergeometry-indexed/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-buffergeometry-indexed/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-custom-attributes/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-custom-attributes/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-morphtargets-sphere/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-morphtargets-sphere/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shader/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-shader/assets/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-texture-filters/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}apps/ThreeJSDemos/webgl-materials-texture-filters/assets/`); } catch (_) { /* exists */ }
 	}
 
 	/** Absolute SD-card path to a seeded HTML page. The browser's
@@ -432,12 +246,6 @@ export class BrowserProfile {
 	 * Centralised so the on-disk layout lives in one place. */
 	pagePath(filename: string): string {
 		return `${this.storageRoot}${filename}`;
-	}
-
-	/** Absolute SD-card path to a seeded app page or asset. Apps live
-	 * at the (app-level) `apps/` dir — see BUILTIN_APP_PAGES. */
-	appPagePath(filename: string): string {
-		return `${this.appRoot}apps/${filename}`;
 	}
 
 	/** Absolute SD-card path to a seeded dev/test-fixture page or
@@ -475,7 +283,7 @@ export class BrowserProfile {
 				const text = await response.text();
 				Switch.writeFileSync(target, text);
 			} catch (error) {
-				console.debug(`[switch-web-browser] seed ${rel} failed: ${error}`);
+				console.debug(`[brewser] seed ${rel} failed: ${error}`);
 			}
 		}
 	}
@@ -501,26 +309,7 @@ export class BrowserProfile {
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				Switch.writeFileSync(target, bytes);
 			} catch (error) {
-				console.debug(`[switch-web-browser] seed ${rel} failed: ${error}`);
-			}
-		}
-	}
-
-	/** Copy each `romfs:/apps/<rel>` into `<appRoot>apps/<rel>` if the
-	 * target file is missing. App pages live at the app-level root,
-	 * shared across profiles; seeding semantics otherwise match
-	 * `seedBuiltinPages`. */
-	async seedBuiltinAppPages(): Promise<void> {
-		for (const rel of BUILTIN_APP_PAGES) {
-			const target = this.appPagePath(rel);
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/apps/${rel}`);
-				if (!response.ok) continue;
-				const bytes = new Uint8Array(await response.arrayBuffer());
-				Switch.writeFileSync(target, bytes);
-			} catch (error) {
-				console.debug(`[switch-web-browser] seed app ${rel} failed: ${error}`);
+				console.debug(`[brewser] seed ${rel} failed: ${error}`);
 			}
 		}
 	}
@@ -539,7 +328,7 @@ export class BrowserProfile {
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				Switch.writeFileSync(target, bytes);
 			} catch (error) {
-				console.debug(`[switch-web-browser] seed dev ${rel} failed: ${error}`);
+				console.debug(`[brewser] seed dev ${rel} failed: ${error}`);
 			}
 		}
 	}
@@ -559,7 +348,7 @@ export class BrowserProfile {
 				const bytes = new Uint8Array(await response.arrayBuffer());
 				Switch.writeFileSync(target, bytes);
 			} catch (error) {
-				console.debug(`[switch-web-browser] seed asset ${rel} failed: ${error}`);
+				console.debug(`[brewser] seed asset ${rel} failed: ${error}`);
 			}
 		}
 	}

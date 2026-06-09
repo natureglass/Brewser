@@ -1,6 +1,6 @@
 # Security model
 
-`switch-web-browser` runs untrusted web content on top of nx.js homebrew
+`brewser` runs untrusted web content on top of nx.js homebrew
 APIs. The security model is enforced by `BrowserPermissionPolicy`
 (`src/permissions/browser-permission-policy.ts`), consulted by the runtime
 before any privileged action.

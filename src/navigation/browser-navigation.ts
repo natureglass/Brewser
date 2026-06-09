@@ -79,7 +79,7 @@ export class BrowserNavigation {
 			}
 		} catch (error) {
 			const detail = describeError(error);
-			console.debug(`[switch-web-browser] load failed for ${url}: ${detail.message}`);
+			console.debug(`[brewser] load failed for ${url}: ${detail.message}`);
 			if (url !== ERROR_URL) {
 				(globalThis as { __browserLastError?: LastErrorDetail }).__browserLastError = {
 					url,
@@ -88,7 +88,7 @@ export class BrowserNavigation {
 				try {
 					await this.webView.load({ url: ERROR_URL });
 				} catch (innerError) {
-					console.debug(`[switch-web-browser] error page also failed: ${describeError(innerError).message}`);
+					console.debug(`[brewser] error page also failed: ${describeError(innerError).message}`);
 				}
 			}
 		}

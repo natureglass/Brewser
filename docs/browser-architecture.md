@@ -1,7 +1,7 @@
 # Browser architecture
 
-`switch-web-browser` is a browser shell that runs on top of
-[`@switch-web/runtime`](../../switch-web-runtime). It shares all the
+`brewser` is a browser shell that runs on top of
+[`@switch-web/runtime`](../../brewser-runtime). It shares all the
 nx.js-facing glue — browser-like globals, WebGL/touch/gamepad shims, local
 fetch wrapper, app-session lifecycle — with `switch-webapp-player`.
 
@@ -523,7 +523,7 @@ before the auto-built `LocalResourceLoader` / `NativeFetchLoader`. So
 `BrowserResourceLoader` claims `brewser://` URLs before `NativeFetchLoader`
 sees them, but `http(s)://` URLs still fall through to the auto-built
 `NativeFetchLoader` without the browser having to re-register it. See
-`switch-web-runtime/docs/resource-loading.md` for the full ordering rules.
+`brewser-runtime/docs/resource-loading.md` for the full ordering rules.
 
 ## Non-goals (still)
 
@@ -546,6 +546,6 @@ sees them, but `http(s)://` URLs still fall through to the auto-built
 
 ## Anti-imports
 
-`switch-web-browser` must not import from `../switch-webapp-player/`. If the
+`brewser` must not import from `../switch-webapp-player/`. If the
 browser ever needs something the player has, lift it into
 `@switch-web/runtime` first, then import it from there.

@@ -75,7 +75,7 @@ export class SwitchUaFetchLoader implements ResourceLoader {
 
 	async load(request: ResourceRequest): Promise<Response> {
 		if (this.permissionPolicy && !this.permissionPolicy.allowNetworkURL(request.url)) {
-			console.debug('[switch-web-browser] network fetch denied: ' + request.url);
+			console.debug('[brewser] network fetch denied: ' + request.url);
 			return deniedResponse(request.url, 'Network access denied');
 		}
 

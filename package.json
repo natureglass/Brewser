@@ -1,12 +1,12 @@
 {
-  "name": "switch-web-browser",
+  "name": "brewser",
   "version": "0.0.0",
   "private": true,
   "description": "Switch homebrew browser shell built on @switch-web/runtime. Currently a minimal scaffold.",
   "scripts": {
-    "build": "esbuild --bundle --sourcemap --sources-content=false --target=es2022 --format=esm --outdir=romfs src/main.ts",
+    "build": "esbuild --bundle --sourcemap --sources-content=false --target=es2022 --format=esm --outdir=build src/main.ts",
     "sync-khronos": "node scripts/sync-khronos-tests.mjs",
-    "nro": "node scripts/sync-khronos-tests.mjs && node scripts/build-icon.mjs && nxjs-nro",
+    "nro": "node scripts/sync-khronos-tests.mjs && node scripts/build-icon.mjs && node scripts/stage-main.mjs && nxjs-nro && node scripts/unstage-main.mjs",
     "nsp": "nxjs-nsp",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -16,7 +16,7 @@
     "email": "alexdaskalakis@hotmail.com"
   },
   "dependencies": {
-    "@switch-web/runtime": "file:../switch-web-runtime",
+    "@switch-web/runtime": "file:../brewser-runtime",
     "css-tree": "^3.2.1"
   },
   "devDependencies": {

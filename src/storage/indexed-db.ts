@@ -1,5 +1,5 @@
 /**
- * Tier-1 IndexedDB polyfill for switch-web-browser.
+ * Tier-1 IndexedDB polyfill for brewser.
  *
  * Pure-JS, file-backed (one JSON file per database) at
  * `sdmc:/switch/brewser/indexedDB/<dbName>.json` for production pages,

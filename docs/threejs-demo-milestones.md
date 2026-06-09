@@ -1,7 +1,7 @@
 # Three.js demo porting milestones
 
 Running list of Three.js example pages we're porting to
-`brewser://apps/ThreeJSDemos/<name>/` on switch-web-browser. Each shipped
+`brewser://apps/ThreeJSDemos/<name>/` on brewser. Each shipped
 milestone has a project memory (`project_swb_threejs_*`) holding the
 full per-demo details — this file is the high-level index plus the
 shared scaffolding rules. Look up a memory by name in

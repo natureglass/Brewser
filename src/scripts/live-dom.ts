@@ -1,4 +1,4 @@
-// Live-DOM for switch-web-browser. Originally Phase 1 (Stats slice);
+// Live-DOM for brewser. Originally Phase 1 (Stats slice);
 // expanded in Phase 2.0 to a generic element surface that future
 // milestones build text rendering / CSS / flex layout / form widgets
 // on top of. lil-gui is the eventual phase-2.6 target.

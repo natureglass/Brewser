@@ -66,5 +66,5 @@ async function main() {
 }
 
 main().catch((error) => {
-	console.debug('[switch-web-browser] fatal error:', error);
+	console.debug('[brewser] fatal error:', error);
 });

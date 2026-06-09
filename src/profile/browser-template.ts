@@ -303,7 +303,7 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				: {},
 		};
 	} catch (error) {
-		console.debug(`[switch-web-browser] config.json parse failed: ${error}`);
+		console.debug(`[brewser] config.json parse failed: ${error}`);
 		return DEFAULT_CONFIG;
 	}
 }
@@ -354,7 +354,7 @@ function loadAppEntryFile(appRoot: string, filename: string): AppEntry[] {
 			&& typeof e.logo === 'string' && typeof e.url === 'string',
 		);
 	} catch (error) {
-		console.debug(`[switch-web-browser] ${filename} parse failed: ${error}`);
+		console.debug(`[brewser] ${filename} parse failed: ${error}`);
 		return [];
 	}
 }
@@ -379,7 +379,7 @@ export function loadSearchEngines(appRoot: string): SearchEngine[] {
 		);
 		return engines.length > 0 ? engines : [DEFAULT_SEARCH_ENGINE];
 	} catch (error) {
-		console.debug(`[switch-web-browser] search_engines.json parse failed: ${error}`);
+		console.debug(`[brewser] search_engines.json parse failed: ${error}`);
 		return [DEFAULT_SEARCH_ENGINE];
 	}
 }
@@ -410,7 +410,7 @@ export function loadTemplateRegistry(appRoot: string): TemplateEntry[] {
 			!!e && typeof e.title === 'string' && typeof e.path === 'string',
 		);
 	} catch (error) {
-		console.debug(`[switch-web-browser] templates.json parse failed: ${error}`);
+		console.debug(`[brewser] templates.json parse failed: ${error}`);
 		return [];
 	}
 }
@@ -449,7 +449,7 @@ export function loadTemplate(appRoot: string): BrowserTemplate {
 			const parsed = JSON.parse(decoder.decode(raw)) as Partial<BrowserTemplate>;
 			return mergeTemplate(DEFAULT_TEMPLATE, parsed);
 		} catch (error) {
-			console.debug(`[switch-web-browser] template '${rel}' parse failed: ${error}`);
+			console.debug(`[brewser] template '${rel}' parse failed: ${error}`);
 			continue;
 		}
 	}

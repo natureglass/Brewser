@@ -1,5 +1,5 @@
 /**
- * Tier-1 Pointer Lock API polyfill for switch-web-browser.
+ * Tier-1 Pointer Lock API polyfill for brewser.
  *
  * The Switch has no mouse cursor in handheld mode, so this is a
  * **compatibility stub** — games that call `requestPointerLock()` keep

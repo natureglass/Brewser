@@ -1,5 +1,5 @@
 /**
- * Tier-1 Web Storage API (`localStorage`) for switch-web-browser.
+ * Tier-1 Web Storage API (`localStorage`) for brewser.
  *
  * The nx.js runtime ships its own `localStorage` lazy getter at
  * `globalThis.localStorage`, but it (a) returns `undefined` when the

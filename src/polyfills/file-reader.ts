@@ -1,5 +1,5 @@
 /**
- * Tier-1 `FileReader` polyfill for switch-web-browser.
+ * Tier-1 `FileReader` polyfill for brewser.
  *
  * Reads Blob / File / ArrayBufferView sources into a string or
  * ArrayBuffer asynchronously, fires the standard onload / onerror /

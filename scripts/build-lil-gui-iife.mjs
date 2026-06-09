@@ -12,7 +12,7 @@
 //          `↕` U+2195 → `▼` U+25BC (dropdown arrow)
 //          `✓` U+2713 stays — in font.
 //      - `width:100%` → `flex:1` (no percent-width support in
-//        switch-web-browser's M2.3 layout; flex:1 inside lil-gui's
+//        brewser's M2.3 layout; flex:1 inside lil-gui's
 //        flex containers gives the same visual fill).
 //      - VAR percentage refs replaced with px equivalents:
 //          `min-width:var(--name-width)` → `min-width:90px`
@@ -34,7 +34,7 @@ const SRC = resolve(__dirname, '..', '..', 'three-latest', 'examples', 'jsm', 'l
 const DST = resolve(__dirname, '..', 'romfs', 'apps', 'ThreeJSDemos', 'libs', 'lil-gui.iife.js');
 
 const HEADER = `/**
- * lil-gui (v0.17) IIFE conversion for switch-web-browser.
+ * lil-gui (v0.17) IIFE conversion for brewser.
  * Original: three-latest/examples/jsm/libs/lil-gui.module.min.js
  * Build script: scripts/build-lil-gui-iife.mjs
  *

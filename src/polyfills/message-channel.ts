@@ -1,5 +1,5 @@
 /**
- * Tier-1 `MessageChannel` + `MessagePort` polyfill for switch-web-browser.
+ * Tier-1 `MessageChannel` + `MessagePort` polyfill for brewser.
  *
  * Both ports live in the same JS context (single QuickJS isolate, no
  * Workers), so we implement the entanglement by direct reference:

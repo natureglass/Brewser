@@ -23,7 +23,7 @@ const SRC = resolve(__dirname, '..', '..', 'three-latest', 'examples', 'jsm', 'l
 const DST = resolve(__dirname, '..', 'romfs', 'apps', 'ThreeJSDemos', 'libs', 'lil-gui-unpatched.iife.js');
 
 const HEADER = `/**
- * lil-gui (v0.17) UNPATCHED IIFE conversion for switch-web-browser.
+ * lil-gui (v0.17) UNPATCHED IIFE conversion for brewser.
  * Original: three-latest/examples/jsm/libs/lil-gui.module.min.js
  * Build script: scripts/build-lil-gui-unpatched-iife.mjs
  *

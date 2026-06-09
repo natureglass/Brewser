@@ -114,7 +114,7 @@ export class BookmarksStore {
 		} catch (error) {
 			// File missing on first run is normal; any other read failure
 			// just leaves the list empty for this session.
-			console.debug(`[switch-web-browser] bookmarks load failed: ${error}`);
+			console.debug(`[brewser] bookmarks load failed: ${error}`);
 		}
 	}
 
@@ -122,7 +122,7 @@ export class BookmarksStore {
 		try {
 			Switch.writeFileSync(this.path, JSON.stringify(this.bookmarks, null, 2));
 		} catch (error) {
-			console.debug(`[switch-web-browser] bookmarks persist failed: ${error}`);
+			console.debug(`[brewser] bookmarks persist failed: ${error}`);
 		}
 	}
 }

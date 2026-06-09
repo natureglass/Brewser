@@ -91,7 +91,7 @@ export class HistoryStore {
 				this.entries = this.entries.slice(-this.maxEntries);
 			}
 		} catch (error) {
-			console.debug(`[switch-web-browser] history load failed: ${error}`);
+			console.debug(`[brewser] history load failed: ${error}`);
 		}
 	}
 
@@ -100,7 +100,7 @@ export class HistoryStore {
 			const body = this.entries.map((e) => JSON.stringify(e)).join('\n');
 			Switch.writeFileSync(this.path, body ? `${body}\n` : '');
 		} catch (error) {
-			console.debug(`[switch-web-browser] history persist failed: ${error}`);
+			console.debug(`[brewser] history persist failed: ${error}`);
 		}
 	}
 }

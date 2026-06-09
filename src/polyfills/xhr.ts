@@ -1,5 +1,5 @@
 /**
- * Tier-1 `XMLHttpRequest` polyfill for switch-web-browser.
+ * Tier-1 `XMLHttpRequest` polyfill for brewser.
  *
  * Implements the subset of XHR that Cocos Creator / GameMaker / Construct 3
  * HTML5 exports / itch.io games typically rely on: open/send/abort,

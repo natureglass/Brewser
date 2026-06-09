@@ -56,7 +56,7 @@ function loadImage(src: string): Promise<Image | null> {
 		const img = new Image();
 		img.onload = () => resolve(img);
 		img.onerror = () => {
-			console.debug(`[switch-web-browser] icon load failed: ${src}`);
+			console.debug(`[brewser] icon load failed: ${src}`);
 			resolve(null);
 		};
 		img.src = src;
