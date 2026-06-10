@@ -202,6 +202,27 @@ export interface BrowserConfig {
 	 * effectively keep the cursor always on; values <= 0 hide
 	 * immediately after motion stops. Default 3000 ms. */
 	mouseIdleMs: number;
+	/** Reserved for a future auto-rotate-canvas feature. Carried through
+	 * the settings round-trip so the value survives Save, but the shell
+	 * does not act on it today — flipping it from the Settings page is a
+	 * no-op until a consumer is wired up. */
+	autoRotate: boolean;
+	/** Enable navigation-flow diagnostic logging to
+	 * `sdmc:/switch/brewser/logs/shell-nav-diag.log`. Off by default;
+	 * flip on when investigating a hung navigation, a click that didn't
+	 * trigger a load, or a touch sink that swallowed an intent. Writes
+	 * from three sites in lockstep: `_navDiag` in the WebView runtime
+	 * (load/endSession/fetchAndExecute boundaries), `_shellInputDiag` in
+	 * the shell input pump, and `_touchDiag` in controller-shortcuts. */
+	navDebug: boolean;
+	/** Enable per-image load diagnostic logging to
+	 * `sdmc:/switch/brewser/logs/swb_img_diag.log`. Off by default. Useful
+	 * for diagnosing missing-image bugs (the resolved fetch URL, decode
+	 * success, naturalWidth/Height) without needing visible stdout on
+	 * real Switch hardware. Capped at 500 entries per session so a
+	 * broken page can't fill the SD card. Gates `_imgDiag` in
+	 * `scripts/live-dom.ts`. */
+	swbImgDebug: boolean;
 	/** Joycon button → engine action override map. Keys are Switch
 	 * face / shoulder labels (A, B, X, Y, L, R, ZL, ZR, MINUS, PLUS,
 	 * L_STICK, R_STICK, UP, DOWN, LEFT, RIGHT, HOME, CAPTURE,
@@ -226,6 +247,9 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	theme: 'light',
 	clickSounds: true,
 	mouseIdleMs: 3000,
+	autoRotate: true,
+	navDebug: false,
+	swbImgDebug: false,
 	buttonMapping: {},
 };
 
@@ -294,6 +318,15 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			mouseIdleMs: typeof parsed?.mouseIdleMs === 'number' && Number.isFinite(parsed.mouseIdleMs)
 				? Math.max(0, Math.min(3_600_000, parsed.mouseIdleMs))
 				: DEFAULT_CONFIG.mouseIdleMs,
+			autoRotate: typeof parsed?.autoRotate === 'boolean'
+				? parsed.autoRotate
+				: DEFAULT_CONFIG.autoRotate,
+			navDebug: typeof parsed?.navDebug === 'boolean'
+				? parsed.navDebug
+				: DEFAULT_CONFIG.navDebug,
+			swbImgDebug: typeof parsed?.swbImgDebug === 'boolean'
+				? parsed.swbImgDebug
+				: DEFAULT_CONFIG.swbImgDebug,
 			// `buttonMapping` is a permissive bag — the button-router
 			// validates each key/value at apply time. Just pass it
 			// through as-is when the JSON has an object there;
@@ -308,11 +341,13 @@ export function loadConfig(appRoot: string): BrowserConfig {
 	}
 }
 
-/** One entry in `apps.json`. `logo` + `url` are paths relative to the
- * profile root's `pages/` dir (e.g. `sdmc:/switch/brewser/apps/foo/assets/logo.png` for app logos),
- * authored the same way the welcome page's relative asset paths are.
- * `logo` is used verbatim as an `<img src>`; `url` is rewritten to an
- * absolute `brewser://` URL for the card link (see `renderAppCards`). */
+/** One rendered card on the Apps / Featured page. The shape is shared
+ * between every catalog group — `loadCatalogGroup` constructs these
+ * from the unified `catalog.json` schema (id + name + entry + logo)
+ * and the rendering code in `browser-resource-loader.ts` just emits
+ * `.app-card` markup. `logo` is used verbatim as an `<img src>`; `url`
+ * is rewritten to an absolute `brewser://` URL for the card link
+ * (see `renderAppCards`). */
 export interface AppEntry {
 	title: string;
 	description: string;
@@ -320,43 +355,89 @@ export interface AppEntry {
 	url: string;
 }
 
-/** Read + validate `<profile>/apps.json` — the catalog the Apps page
- * lists as cards. Returns the entries in source order; missing,
- * malformed, or non-array files yield an empty list (the page then
- * shows its empty-state). Each entry must carry all four string
- * fields; partial entries are dropped. */
-export function loadApps(appRoot: string): AppEntry[] {
-	return loadAppEntryFile(appRoot, 'apps.json');
+/** Catalog group name — every entry in `catalog.json` lives under one
+ * of these three top-level arrays. The Apps page renders each group
+ * in its own tab; the welcome page renders only `featured`. */
+export type CatalogGroup = 'featured' | 'community' | 'experimental';
+
+export const CATALOG_GROUPS: readonly CatalogGroup[] = ['featured', 'community', 'experimental'];
+
+/** One entry as authored in `catalog.json`. The catalog is the single
+ * source of truth — apps are grouped under three top-level arrays
+ * (`featured`, `community`, `experimental`), and each entry carries
+ * everything needed to render a card AND to find the app on disk:
+ *
+ *   - `id` — reverse-DNS folder name under
+ *     `sdmc:/switch/brewser/apps/<group>/<id>/` (and the brewser://
+ *     equivalent).
+ *   - `name` — display title on the card.
+ *   - `description` — short blurb under the title.
+ *   - `logo` — relative path to the card's image, resolved against
+ *     the app's own dir (e.g. `assets/tiktok_logo.png` →
+ *     `brewser://apps/<group>/<id>/assets/tiktok_logo.png`).
+ *   - `entry` — relative path to the launcher HTML
+ *     (e.g. `index.html`).
+ *
+ * Other catalog fields (version, permissions, features, files…) are
+ * ignored by the shell today; future code can read them from the
+ * raw catalog without changing this interface. */
+interface RawCatalogEntry {
+	id: string;
+	name: string;
+	description?: string;
+	logo: string;
+	entry: string;
 }
 
-/** Read + validate `<profile>/featured.json` — the curated subset
- * the welcome page lists as cards under "Featured Apps". Same schema
- * as `apps.json` (`AppEntry`); same lenient parsing semantics. The
- * two files are separate so the welcome page can spotlight a smaller
- * set without disturbing the full catalog on the Apps page. */
-export function loadFeatured(appRoot: string): AppEntry[] {
-	return loadAppEntryFile(appRoot, 'featured.json');
+/** Read + validate `<profile>/catalog.json` and return the entries for
+ * the requested group, mapped to `AppEntry` cards. Missing / malformed
+ * file → empty list; entries missing any required field are dropped.
+ *
+ * `logo` and `url` are emitted as `brewser://apps/<group>/<id>/...`
+ * paths so they flow through the resource loader (same path as the
+ * launched app). The brewser:// scheme keeps the on-device file layout
+ * (sdmc vs. romfs) hidden from the page. */
+export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry[] {
+	const raw = readCatalogGroup(appRoot, group);
+	return raw.map((e) => ({
+		title: e.name,
+		description: e.description ?? '',
+		logo: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.logo)}`,
+		url: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.entry)}`,
+	}));
 }
 
-function loadAppEntryFile(appRoot: string, filename: string): AppEntry[] {
+function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${appRoot}${filename}`);
+		raw = Switch.readFileSync(`${appRoot}catalog.json`);
 	} catch (_) {
 		return [];
 	}
 	if (!raw) return [];
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is AppEntry =>
-			!!e && typeof e.title === 'string' && typeof e.description === 'string'
-			&& typeof e.logo === 'string' && typeof e.url === 'string',
+		const arr = parsed && Array.isArray(parsed[group]) ? parsed[group] : null;
+		if (!arr) return [];
+		return arr.filter((e: unknown): e is RawCatalogEntry =>
+			!!e && typeof e === 'object'
+			&& typeof (e as RawCatalogEntry).id === 'string'
+			&& typeof (e as RawCatalogEntry).name === 'string'
+			&& typeof (e as RawCatalogEntry).logo === 'string'
+			&& typeof (e as RawCatalogEntry).entry === 'string'
+			&& (typeof (e as RawCatalogEntry).description === 'string'
+				|| typeof (e as RawCatalogEntry).description === 'undefined'),
 		);
 	} catch (error) {
-		console.debug(`[brewser] ${filename} parse failed: ${error}`);
+		console.debug(`[brewser] catalog.json parse failed: ${error}`);
 		return [];
 	}
+}
+
+function stripLeadingSlashes(p: string): string {
+	let i = 0;
+	while (i < p.length && p[i] === '/') i++;
+	return p.slice(i);
 }
 
 /** Read + validate `<profile>/search_engines.json`. Returns the

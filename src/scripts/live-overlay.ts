@@ -41,7 +41,7 @@
 //     wrapping (M2.3 layout pass).
 
 import { isBoldWeight, isItalicStyle, isPercent, quoteFontFamily, resolveCanvasFont, resolveLength } from './inline-css.js';
-import { getComputedLiveStyle, getKeyframes, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
+import { getComputedLiveStyle, getKeyframes, someStylesheetUsesSibling, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
 import { ensureCssAnimation, getBackgroundImage, getCssAnimState, getLiveTreeVersion, type LiveElement } from './live-dom.js';
 import { buildFormSubmitUrl, findEnclosingForm, paintFormWidget } from './live-form.js';
 import {
@@ -468,8 +468,18 @@ export function patchLiveDirtyRegions(): boolean {
 			+ Math.round(rect.w) + 'x' + Math.round(rect.h) + ']');
 	}
 	if (rects.length === 0) {
-		// Only non-visual mutations — layout/paint unchanged; sync so we don't
-		// trigger a pointless full rebuild.
+		// Only non-visual mutations — layout/paint unchanged on the
+		// element ITSELF; normally we sync the cache version so the next
+		// paint blits as-is. BUT: if the page has sibling-combinator
+		// rules (`input:checked ~ .panel`), an attribute flip on a
+		// hidden element CAN change the cascade for visible siblings.
+		// In that case we must NOT claim patch success — return false so
+		// `paintLiveOverlay`'s full-rebuild branch runs (which
+		// `resetLayoutCache()`s and re-cascades every element).
+		if (someStylesheetUsesSibling()) {
+			_partialDbg('  PATCH punt: 0 visible regions + sibling rules → full rebuild');
+			return false;
+		}
 		_partialDbg('  PATCH ok: 0 visible regions');
 		syncLiveCacheVersion();
 		requestFullRepaint();
@@ -1822,6 +1832,15 @@ function paintOneInlineAtom(
 ): void {
 	if (atom.isBr) return; // pure layout marker
 	const cs = getComputedLiveStyle(atom.el);
+	// `display: inline-block`: paint the box (bg / border / padding) plus
+	// the inline-block's whole subtree. `paintSubtreeLaid` reads the layout
+	// box stored by `layoutInline`'s placement loop, paints decoration via
+	// `paintBoxedElement`, and recurses into children — which themselves
+	// were laid out into the inline-block's content rect.
+	if (atom.isInlineBlock) {
+		paintSubtreeLaid(ctx, atom.el);
+		return;
+	}
 	if (atom.el.tagName === 'IMG') {
 		paintImg(ctx, atom.el, cs, {
 			x: atom.x, y: atom.y, w: atom.w, h: atom.h,
@@ -1846,6 +1865,21 @@ function paintOneInlineAtom(
 					atom.x, atom.y, atom.w, atom.h);
 			} catch (_) { /* swallow — drawImage on uninitialised canvas */ }
 		}
+		return;
+	}
+	if (atom.el.tagName === 'INPUT') {
+		// Replaced-inline form widget. Hand off to the form-widget
+		// painter using the atom's box as the layout box — same
+		// dispatch the block painter uses for INPUT, so checkbox /
+		// radio / text-field / range / button all render correctly
+		// inside an inline-flow parent (a `<label>`, a `<p>` with
+		// `<input>` between text, etc.).
+		paintFormWidget(ctx, atom.el, cs, {
+			x: atom.x, y: atom.y, w: atom.w, h: atom.h,
+			contentX: atom.x, contentY: atom.y,
+			contentW: atom.w, contentH: atom.h,
+			intrinsicContentH: atom.h, intrinsicContentW: atom.w,
+		});
 		return;
 	}
 	if (!atom.text) return;

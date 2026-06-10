@@ -44,7 +44,7 @@
 //   - `grid`.
 //   - `inline` participating in line-box layout.
 
-import { getComputedLiveStyle, type ComputedLiveStyle } from './live-css.js';
+import { getComputedLiveStyle, setLayoutCacheResetFn, type ComputedLiveStyle } from './live-css.js';
 import type { LiveElement } from './live-dom.js';
 import { quoteFontFamily, resolveLength, type CssLength } from './inline-css.js';
 
@@ -100,6 +100,14 @@ export interface InlineAtom {
 	/** True for `<br>`; the painter skips drawing but the layout already
 	 * advanced the y cursor by line-height. */
 	isBr: boolean;
+	/** True for `display: inline-block` non-replaced elements. The painter
+	 * dispatches these to `paintSubtreeLaid` so the box decoration (bg /
+	 * border / padding) paints, then its own laid-out children paint inside.
+	 * `(x, y, w, h)` is the border box; `mLeft` / `mRight` are CSS
+	 * horizontal margins consumed in the line outside that box. */
+	isInlineBlock?: boolean;
+	mLeft?: number;
+	mRight?: number;
 }
 export interface InlineLayout {
 	atoms: InlineAtom[];
@@ -115,6 +123,11 @@ export function resetLayoutCache(): void {
 	inlineCacheTouched.forEach((e) => inlineCache.delete(e));
 	inlineCacheTouched.clear();
 }
+
+// Wire `resetLayoutCache` so `live-css.ts invalidateForSiblingCascade`
+// can clear our caches without a direct import (which would create a
+// cycle via live-layout → live-css → live-layout).
+setLayoutCacheResetFn(resetLayoutCache);
 
 export function getLayoutBox(el: LiveElement): LayoutBox | undefined {
 	return cache.get(el);
@@ -452,11 +465,24 @@ function layoutChildren(
 	// here lets layoutInline flow the span (whose `walkInline` recurses
 	// into its IMG kid as a replaced-inline atom) on the same line as the
 	// URL text — matches real browsers.
+	// Replaced form widgets + IMG / CANVAS / BR are handled by walkInline
+	// as atoms regardless of declared display. When the parent has a
+	// `#text` child, treat them as inline-flow so text + atom land on
+	// the same line — `<label><input type=radio> Caption</label>` is
+	// the canonical case. Without this gate, INPUT (no UA-default
+	// display in this engine) makes allInline=false → layoutBlock
+	// stacks the widget above the caption. Gated on a #text kid so a
+	// `<form>` of stacked text inputs (whitespace-only text between
+	// tags is dropped by the parser) keeps block-stacking.
+	const kidsIncludeText = kids.some((k) => k.tagName === '#text');
 	let allInline = true;
 	for (const c of kids) {
 		const ccs = getComputedLiveStyle(c);
 		const d = ccs.display;
-		if (d !== 'inline' && d !== 'inline-block') { allInline = false; break; }
+		const t = c.tagName;
+		const isReplacedAtom = kidsIncludeText
+			&& (t === 'INPUT' || t === 'IMG' || t === 'CANVAS' || t === 'BR');
+		if (d !== 'inline' && d !== 'inline-block' && !isReplacedAtom) { allInline = false; break; }
 	}
 	if (allInline) {
 		return layoutInline(parent, kids, cs, originX, originY, contentW, contentH);
@@ -509,6 +535,9 @@ function layoutInline(
 		isWhitespace: boolean;
 		font: string;
 		fontSize: number;
+		isInlineBlock?: boolean;
+		mLeft?: number;
+		mRight?: number;
 	}
 	const work: WorkAtom[] = [];
 
@@ -594,6 +623,73 @@ function layoutInline(
 			});
 			return;
 		}
+		// INPUT: replaced-inline; one indivisible atom sized by its
+		// intrinsic dims (e.g. a square for checkbox/radio, a text-line
+		// for text inputs). Without this branch, an `<input>` inside an
+		// inline-flow parent (a `<label>`, a paragraph with inline
+		// markup, etc.) falls through to the "generic inline element"
+		// path below — which walks its (empty) text content + children
+		// and contributes nothing, so the widget is invisible. paintInput
+		// reads from the layout box stored in the placement loop. */
+		if (el.tagName === 'INPUT') {
+			const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+			if (type !== 'hidden') {
+				const styleW = typeof cs.width === 'number' ? cs.width : undefined;
+				const styleH = typeof cs.height === 'number' ? cs.height : undefined;
+				const inputFontPx = fontSize;
+				let w: number;
+				let h: number;
+				if (type === 'checkbox' || type === 'radio') {
+					const sq = Math.max(14, inputFontPx + 2);
+					w = styleW ?? sq;
+					h = styleH ?? sq;
+				} else if (type === 'range') {
+					w = styleW ?? 160;
+					h = styleH ?? Math.max(20, inputFontPx + 8);
+				} else if (type === 'submit' || type === 'button' || type === 'reset') {
+					// Text-button intrinsic width = label text + horizontal padding.
+					const label = el.getAttribute('value') ?? '';
+					ctx!.save();
+					ctx!.font = font;
+					const labelW = label ? ctx!.measureText(label).width : 60;
+					ctx!.restore();
+					w = styleW ?? Math.ceil(labelW + 24);
+					h = styleH ?? Math.round(inputFontPx * 1.6 + 6);
+				} else {
+					// text / search / email / url / tel / password / number / color / date / …
+					const sizeAttr = parseInt(el.getAttribute('size') ?? '20', 10);
+					const charW = inputFontPx * 0.55;
+					w = styleW ?? Math.ceil(sizeAttr * charW + 12);
+					h = styleH ?? Math.round(inputFontPx * 1.4 + 6);
+				}
+				work.push({
+					el, text: '', w, h,
+					isBr: false, isWhitespace: false, font, fontSize,
+				});
+			}
+			return;
+		}
+		// `display: inline-block`: full-fledged inline-flow atom with its
+		// own border box (bg / border / padding). Sized bottom-up by
+		// intrinsicContentWidth/Height — both helpers respect explicit
+		// CSS width/height, min/max, and add padding. The actual subtree
+		// layout (kids placed inside our content rect) happens in the
+		// placement loop below, once x/y are known. Horizontal margins
+		// participate in the inline flow (CSS spec: vertical margins
+		// don't apply to inline-block on a line); we attach them to the
+		// atom so packing can account for them.
+		if (cs.display === 'inline-block') {
+			const w = intrinsicContentWidth(el, cs);
+			const h = intrinsicContentHeight(el, cs);
+			work.push({
+				el, text: '', w, h,
+				isBr: false, isWhitespace: false, font, fontSize,
+				isInlineBlock: true,
+				mLeft: cs.marginLeft ?? 0,
+				mRight: cs.marginRight ?? 0,
+			});
+			return;
+		}
 		// Generic inline element: own textContent FIRST (model limitation —
 		// we don't interleave text nodes with children unless the page
 		// uses createTextNode), then walk inline children.
@@ -637,7 +733,12 @@ function layoutInline(
 			continue;
 		}
 		if (a.isWhitespace && current.items.length === 0) continue;
-		const projected = current.w + a.w;
+		// Inline-block atoms also consume horizontal margins around their
+		// border box (CSS spec: vertical margins don't apply on a line).
+		// Default 0 for word / IMG / CANVAS / INPUT atoms keeps existing
+		// flow math unchanged; only inline-block atoms set mLeft/mRight.
+		const effW = a.w + (a.mLeft ?? 0) + (a.mRight ?? 0);
+		const projected = current.w + effW;
 		if (!noWrap && current.items.length > 0 && projected > contentW && !a.isWhitespace) {
 			while (current.items.length > 0 && current.items[current.items.length - 1].isWhitespace) {
 				const trimmed = current.items.pop()!;
@@ -648,7 +749,7 @@ function layoutInline(
 			if (a.isWhitespace) continue;
 		}
 		current.items.push(a);
-		current.w += a.w;
+		current.w += effW;
 		if (a.h > current.h) current.h = a.h;
 	}
 	if (current.items.length > 0) lines.push(current);
@@ -670,10 +771,17 @@ function layoutInline(
 		else if (align === 'right' || align === 'end') lineX = originX + contentW - line.w;
 		let cursor = lineX;
 		for (const item of line.items) {
+			// Inline-block atoms paint a border box offset from cursor by
+			// the left margin; cursor then advances past margin+box+rmargin.
+			// Other atoms have 0 margins so the offset / advance collapses
+			// to the original `cursor += item.w` flow.
+			const mL = item.mLeft ?? 0;
+			const mR = item.mRight ?? 0;
+			const atomX = cursor + mL;
 			const atomY = y + (lh - item.h) / 2;
 			placed.push({
 				el: item.el,
-				x: cursor,
+				x: atomX,
 				y: atomY,
 				w: item.w,
 				h: item.h,
@@ -681,21 +789,45 @@ function layoutInline(
 				font: item.font,
 				fontSize: item.fontSize,
 				isBr: item.isBr,
+				isInlineBlock: item.isInlineBlock,
+				mLeft: mL,
+				mRight: mR,
 			});
-			// Replaced inline atoms (IMG / CANVAS) also need a per-element
-			// layout box so `getLayoutBox(el)` works for hitTestLive and
-			// for the shell's `overlayLiveAnimatedCanvases` walker — both
-			// query the per-element cache, not the inline-atom layout.
+			// Replaced inline atoms (IMG / CANVAS / INPUT) also need a
+			// per-element layout box so `getLayoutBox(el)` works for
+			// hitTestLive, the form-widget painter (paintRadio /
+			// paintCheckbox / paintTextField read box from the cache),
+			// and `overlayLiveAnimatedCanvases`.
 			const tag = item.el.tagName;
-			if (tag === 'IMG' || tag === 'CANVAS') {
+			if (tag === 'IMG' || tag === 'CANVAS' || tag === 'INPUT') {
 				storeBox(item.el, {
-					x: cursor, y: atomY, w: item.w, h: item.h,
-					contentX: cursor, contentY: atomY,
+					x: atomX, y: atomY, w: item.w, h: item.h,
+					contentX: atomX, contentY: atomY,
 					contentW: item.w, contentH: item.h,
 					intrinsicContentH: item.h, intrinsicContentW: item.w,
 				});
 			}
-			cursor += item.w;
+			// Inline-block: now that x/y are known, store the box (so
+			// `getLayoutBox(el)` works for hit-test + the painter) AND
+			// lay out children inside the content rect. layoutChildren
+			// routes the kids through the normal block / inline / flex
+			// dispatch — termination guaranteed since the tree is finite.
+			if (item.isInlineBlock) {
+				const ccs = getComputedLiveStyle(item.el);
+				const pad = padding(ccs);
+				const cX = atomX + pad.left;
+				const cY = atomY + pad.top;
+				const cW = Math.max(0, item.w - pad.left - pad.right);
+				const cH = Math.max(0, item.h - pad.top - pad.bottom);
+				storeBox(item.el, {
+					x: atomX, y: atomY, w: item.w, h: item.h,
+					contentX: cX, contentY: cY,
+					contentW: cW, contentH: cH,
+					intrinsicContentH: cH, intrinsicContentW: cW,
+				});
+				layoutChildren(item.el, cX, cY, cW, cH);
+			}
+			cursor += mL + item.w + mR;
 		}
 		y += lh;
 	}
@@ -1941,6 +2073,17 @@ function layoutLeaf(
 			w = 0;
 		} else if (type === 'checkbox' || type === 'radio') {
 			intrinsicVoidH = Math.max(14, fontPx + 2);
+			// Checkboxes + radios are square: paintCheckbox / paintRadio
+			// both `Math.min(box.w, box.h)` for the visual extent, so a
+			// 0-width box paints nothing visible. The intrinsic-width path
+			// (`intrinsicContentWidth`) returns 0 for childless / textless
+			// inputs, which is what an inline-flow parent uses to size the
+			// atom. Override `w` here to match the height so an inline
+			// `<input type="radio">` (inside `<label>` or alongside text)
+			// reserves a visible square slot.
+			if (cs.width === undefined && el.style.width === undefined) {
+				w = intrinsicVoidH;
+			}
 		} else if (type === 'range') {
 			intrinsicVoidH = Math.max(20, fontPx + 8);
 		} else if (type === 'submit' || type === 'button' || type === 'reset') {
@@ -2202,6 +2345,19 @@ function intrinsicContentWidth(el: LiveElement, cs: ComputedLiveStyle): number {
 	}
 	const explicit = typeof cs.width === 'number' ? cs.width : undefined;
 	let w: number;
+	// Replaced form widgets (checkbox / radio) have no children + no text
+	// content, so the kid-loop fallback below returns 0. That makes an
+	// inline `<input type=radio>` sized as a zero-width atom by the inline
+	// layout — invisible. Reserve a square based on font-size, matching
+	// what `layoutLeaf` does for the block path.
+	if (explicit === undefined && el.tagName === 'INPUT') {
+		const type = (el.getAttribute('type') ?? 'text').toLowerCase();
+		if (type === 'checkbox' || type === 'radio') {
+			const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
+			const size = Math.max(14, fontPx + 2);
+			return size + padL + padR;
+		}
+	}
 	if (explicit === undefined && el.tagName === 'IMG') {
 		// `width: auto` image: width follows the natural aspect ratio
 		// against the explicit height (matches the layoutLeaf IMG path),
@@ -2316,11 +2472,22 @@ function intrinsicContentHeight(el: LiveElement, cs: ComputedLiveStyle): number 
 			// `<a>` inside reported sum-of-heights as its intrinsic, so a
 			// row that's really one-line-tall claimed multi-line height
 			// and pushed the snippet below by ~50px of phantom whitespace.
+			// Mirror layoutChildren's replaced-atom promotion: when the
+			// parent has a #text kid, INPUT / IMG / CANVAS / BR participate
+			// in inline flow alongside the text so cross-axis height is
+			// the tallest kid (not the sum). Without this, a label like
+			// `<label><input type=radio> Caption</label>` reports
+			// height = INPUT(20) + textLine(22) = 42 here even though
+			// the actual inline flow lays them on one line.
+			const ktext = kids.some((c) => c.tagName === '#text');
 			let allInlineKids = true;
 			for (const c of kids) {
 				const ccs = getComputedLiveStyle(c);
 				const d = ccs.display;
-				if (d !== 'inline' && d !== 'inline-block') { allInlineKids = false; break; }
+				const t = c.tagName;
+				const isReplacedAtom = ktext
+					&& (t === 'INPUT' || t === 'IMG' || t === 'CANVAS' || t === 'BR');
+				if (d !== 'inline' && d !== 'inline-block' && !isReplacedAtom) { allInlineKids = false; break; }
 			}
 			if (isFlexRow || allInlineKids) {
 				// Cross axis is vertical → row height is the tallest child.

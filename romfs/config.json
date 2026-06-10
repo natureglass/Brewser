@@ -10,6 +10,8 @@
   "autoRotate": true,
   "clickSounds": true,
   "mouseIdleMs": 3000,
+  "navDebug": false,
+  "swbImgDebug": false,
   "buttonMapping": {
     "leftClick": "A",
     "rightClick": "B",

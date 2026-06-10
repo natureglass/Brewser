@@ -8,14 +8,40 @@
 </style>
 </head>
 <body>
+<!-- CSS-only tabs: each radio drives one panel via the `~` (general
+     sibling) combinator. The radios MUST be direct children of <body>
+     so they're siblings of `.page-shell` (where the panels live).
+     They're hidden via `display:none` in main.css; the labels inside
+     `.tab-bar` forward taps via `for=`. The radio engine in live-form.ts
+     mirrors `checked` to the attribute so the `:checked` selector
+     picks up the new state on the next paint.
+     `apps-tab-featured` carries the default `checked` attribute. -->
+<input type="radio" id="apps-tab-featured" name="apps-tab" checked>
+<input type="radio" id="apps-tab-community" name="apps-tab">
+<input type="radio" id="apps-tab-experimental" name="apps-tab">
+
 <div class="page-shell">
-  <div class="app-grid" aria-label="Installed apps">
-    <!-- Cards injected from apps.json by the resource loader. Each entry
-         becomes an `.app-card` (logo + title + description). The logo is
-         the entry's relative `logo` path used verbatim; the card link is
-         the entry's `url` rewritten to a brewser:// URL. Edit apps.json
-         to change what shows here. -->
-    <browser-apps></browser-apps>
+  <nav class="tab-bar" aria-label="App catalog groups">
+    <label for="apps-tab-featured" class="tab-label">Featured</label>
+    <label for="apps-tab-community" class="tab-label">Community</label>
+    <label for="apps-tab-experimental" class="tab-label">Experimental</label>
+  </nav>
+  <div class="tab-panels clickable">
+    <section class="tab-panel" data-tab="featured" aria-label="Featured apps">
+      <div class="app-grid">
+        <browser-featured></browser-featured>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="community" aria-label="Community apps">
+      <div class="app-grid">
+        <browser-community></browser-community>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="experimental" aria-label="Experimental apps">
+      <div class="app-grid">
+        <browser-experimental></browser-experimental>
+      </div>
+    </section>
   </div>
 </div>
 </body>

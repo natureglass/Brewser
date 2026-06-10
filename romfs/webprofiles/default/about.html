@@ -1,163 +1,24 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1"
-  />
-
   <title>About Brewser</title>
-
-  <!-- Brewser built-in stylesheet -->
   <link rel="stylesheet" href="brewser://assets/main.css">
-
-  <style>
-    body {
-      padding: 28px 48px;
-    }
-
-    h1 { margin-bottom: 4px; line-height: 1.12; }
-
-    /* Featured Apps heading — bumped to feel like a real section title
-      instead of a sub-heading. Tracking + weight match the rest of the
-      page; the colour stays in the blue accent family (inherited from
-      main.css). */
-    h2 {
-      margin-top: 26px;
-      margin-bottom: 20px;
-      font-size: 2em;
-      letter-spacing: 0.005em;
-    }
-
-    .featured-section { margin-top: 0; margin-bottom: 16px; }
-
-    /* The featured-header row sits on top of the grid: section title on
-      the left, secondary nav (Bookmarks, History) flush right. Reuses
-      the same flex shape the old top-bar had. */
-    .featured-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 18px;
-      margin-bottom: 32px;
-      flex-wrap: wrap;
-    }
-
-    .featured-header h2 {
-      /* Override the page-level h2 vertical margins — the section's own
-        layout handles spacing now. */
-      margin: 0;
-    }
-
-    .top-links {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .about-hero {
-      margin-bottom: 28px;
-    }
-
-    .about-badge-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 18px 0 0;
-    }
-
-    .about-badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 34px;
-      padding: 7px 12px;
-      color: #c2e0ff;
-      background-color: #14202d;
-      border: 1px solid rgba(122, 162, 255, 0.34);
-      border-radius: 999px;
-      font-size: 15px;
-      font-weight: 700;
-    }
-
-    .about-section {
-      margin-top: 30px;
-    }
-
-    .about-card {
-      background:
-        radial-gradient(circle at top left, rgba(122, 162, 255, 0.18), transparent 38%),
-        linear-gradient(135deg, #14202d, #10192a 72%);
-      border: 1px solid rgba(122, 162, 255, 0.34);
-      border-radius: 16px;
-      padding: 20px 18px;
-      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    }
-
-    .about-card h2,
-    .about-card h3 {
-      margin-top: 0;
-    }
-
-    .about-card p {
-      color: #9bb1d6;
-      line-height: 1.45;
-    }
-
-    .about-meta {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      margin-top: 18px;
-    }
-
-    .about-meta article {
-      background-color: #14202d;
-      padding: 14px 16px;
-      border-left: 3px solid #7aa2ff;
-      border-radius: 6px;
-    }
-
-    .about-meta strong {
-      display: block;
-      color: #ffd35e;
-      margin-bottom: 6px;
-    }
-
-    .about-meta span {
-      display: block;
-      color: #9bb1d6;
-      line-height: 1.35;
-    }
-
-    .about-footer-note {
-      margin-top: 34px;
-      padding-top: 18px;
-      border-top: 1px solid rgba(122, 162, 255, 0.24);
-      color: #6a7c95;
-      font-size: 15px;
-      line-height: 1.45;
-    }
-
-  </style>
 </head>
 
 <body>
-  <main class="page-shell">
 
-    <section class="featured-section" aria-label="Featured Apps">
-      <header class="featured-header">
+  <div class="page-shell">
+
+    <section class="top-section">
+      <header class="top-header">
         <h2>About Brewser</h2>
-        <!-- Bookmarks + History on the same line as the section title,
-            pushed right by .featured-header's space-between. -->
         <nav class="top-links" aria-label="Browser navigation">
           <a class="munch-link" href="brewser://home/">Home</a>
         </nav>
       </header>
-
     </section>
+
+    <p class="lead">Learn more about Brewser and its features.</p>
 
     <section class="about-hero about-card">
       <p>

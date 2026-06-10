@@ -24,7 +24,7 @@
 // without coupling this module to the shell's KeyboardOverlay class.
 
 import { resolveCanvasFont } from './inline-css.js';
-import { getComputedLiveStyle, type ComputedLiveStyle } from './live-css.js';
+import { getComputedLiveStyle, invalidateForSiblingCascade, someStylesheetUsesSibling, type ComputedLiveStyle } from './live-css.js';
 import { bumpLiveTreeVersion, getLiveRoot, type LiveElement } from './live-dom.js';
 import { getLayoutBox, type LayoutBox } from './live-layout.js';
 import { patchLiveCacheRegion, patchLiveDirtyRegions, syncLiveCacheVersion } from './live-overlay.js';
@@ -34,7 +34,14 @@ import { requestFullRepaint } from './live-paint-control.js';
 // Keyboard opener registration (called by the shell)
 // =========================================================================
 
-type KeyboardOpener = (initial: string) => Promise<string | null>;
+/** Per-call options the shell-registered opener forwards to the
+ * KeyboardOverlay. `validate` gates the Submit key + `+`-press so
+ * `<input type="number">` taps can reject letter-laden input the way
+ * real browsers paint a disabled Enter on their numeric soft keyboard. */
+export interface KeyboardOpenOptions {
+	validate?: (value: string) => boolean;
+}
+type KeyboardOpener = (initial: string, options?: KeyboardOpenOptions) => Promise<string | null>;
 let keyboardOpener: KeyboardOpener | null = null;
 export function setKeyboardOpener(fn: KeyboardOpener | null): void {
 	keyboardOpener = fn;
@@ -681,7 +688,32 @@ export async function handleFormTap(el: LiveElement, tapX?: number, clickAlready
 				fireEvent(el, 'change');
 				patched.push(el);
 			}
-			patchAndSync(...patched);
+			// Sibling-combinator rules (e.g. `input:checked ~ .panel`)
+			// make the cascade for LATER siblings depend on `:checked`.
+			// The patchAndSync fast path only repaints the radios; to
+			// reflect a cascade flip in siblings (tab UIs), force a full
+			// rebuild by skipping the cache-version sync and letting the
+			// implicit `bumpLiveTreeVersion` from `setAttribute('checked')`
+			// trigger paintLiveOverlay's full pass on the next frame.
+			if (someStylesheetUsesSibling()) {
+				// `setAttribute('checked')` above already bumped the tree
+				// version + invalidated each radio's OWN subtree cascade,
+				// but the panels (which match via `input:checked ~ .panel`)
+				// keep their cached cascade — `walkInvalidate(radio)`
+				// doesn't reach siblings. Without a global cascade clear
+				// the radio's box (which is `display:none`, so has no
+				// rect) would let `patchLiveDirtyRegions` declare "no
+				// visible regions changed" + sync the cache version,
+				// silently dropping the rebuild. Clear the whole cache
+				// + mark the document root dirty so the next paint
+				// re-lays-out the body subtree with the fresh `:checked`
+				// state and the panels re-cascade. Costs a full rebuild
+				// per tab tap — acceptable.
+				for (const e of patched) invalidateForSiblingCascade(e);
+				requestFullRepaint();
+			} else {
+				patchAndSync(...patched);
+			}
 			return true;
 		}
 		if (type === 'range') {
@@ -780,6 +812,54 @@ export async function handleFormTap(el: LiveElement, tapX?: number, clickAlready
 	return false;
 }
 
+/** Build a per-input validator the keyboard uses to gate its Submit
+ * key. Returns `null` when the input doesn't impose constraints (text
+ * / URL / search fields) so the keyboard reuses the always-allow path
+ * shared with the URL bar + search box. For `<input type="number">`
+ * the validator accepts only a strict JS-style numeric literal —
+ * matches `sanitizeKeyboardResult`'s acceptance set so anything the
+ * sanitizer would empty-out is also rejected up-front. */
+function buildKeyboardValidator(el: LiveElement): ((value: string) => boolean) | null {
+	if (el.tagName !== 'INPUT') return null;
+	const type = inputType(el);
+	if (type !== 'number') return null;
+	return (value: string): boolean => {
+		const t = value.trim();
+		if (t === '') return false;
+		return /^-?\d+(?:\.\d+)?$/.test(t);
+	};
+}
+
+/** Filter / clamp the keyboard's raw result against the input's
+ * declared type. Mirrors how real browsers treat an unparseable
+ * `<input type="number">` submission: the slot ends up empty rather
+ * than holding `"foo"`. For valid numeric input the value is also
+ * clamped to `[min, max]` when those attributes are set so a typed
+ * `9999` in a `max="1000"` field commits as `"1000"` — same shape as
+ * the Settings page's shell-side `loadConfig` clamps. */
+function sanitizeKeyboardResult(el: LiveElement, raw: string): string {
+	if (el.tagName !== 'INPUT') return raw;
+	const type = inputType(el);
+	if (type === 'number') {
+		const trimmed = raw.trim();
+		// Match a JS-parseable signed number with optional fraction.
+		// Anything else (letters, multiple dots, stray punctuation)
+		// → empty string, same as Chrome's behaviour on a bad submit.
+		if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) return '';
+		let n = parseFloat(trimmed);
+		if (!Number.isFinite(n)) return '';
+		const min = parseFloat(el.getAttribute('min') ?? '');
+		const max = parseFloat(el.getAttribute('max') ?? '');
+		if (Number.isFinite(min) && n < min) n = min;
+		if (Number.isFinite(max) && n > max) n = max;
+		// Trunc when both bounds are integer-shaped (matches
+		// loadConfig's `maxHistory` integer handling).
+		if (Number.isInteger(min) && Number.isInteger(max)) n = Math.trunc(n);
+		return String(n);
+	}
+	return raw;
+}
+
 export async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 	if (!keyboardOpener) return false;
 	const cur = getInputValue(el);
@@ -787,9 +867,10 @@ export async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 	// entry, cleared on the resolve path) so the URL bar and `<input>`
 	// paths are gated uniformly. It also calls `requestFullRepaint()` on
 	// close so the next idle tick blits the page back over the panel.
+	const validate = buildKeyboardValidator(el);
 	let result: string | null;
 	try {
-		result = await keyboardOpener(cur);
+		result = await keyboardOpener(cur, validate ? { validate } : undefined);
 	} catch (_) {
 		result = null;
 	}
@@ -797,6 +878,15 @@ export async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 		fireEvent(el, 'blur');
 		return true;
 	}
+	// Spec-style validation pass before commit. The brewser keyboard is
+	// a single alphanumeric layout (no per-input-mode variant), so a
+	// user typing into `<input type="number">` can still hit letter
+	// keys. Real browsers reject non-conforming text by leaving
+	// `.value` empty on submit; mirror that here for `type="number"`
+	// (and friends), plus enforce `min`/`max` clamps so the on-disk
+	// value is always within the field's declared bounds. Other input
+	// types pass through unchanged.
+	result = sanitizeKeyboardResult(el, result);
 	setInputValue(el, result);
 	fireEvent(el, 'input');
 	fireEvent(el, 'change');

@@ -23,6 +23,13 @@ export interface KeyboardScrollCallbacks {
 	/** Positive delta = scroll content DOWN (matches handleScroll's
 	 * sign convention in browser-shell). */
 	onScroll?: (delta: number) => void;
+	/** Optional submit gate. When supplied, the Submit key (and the
+	 * `+` button shortcut) only fire when this returns `true` for the
+	 * current edit buffer. Used by `<input type="number">` to block
+	 * submission of letter-laden strings the same way real browsers
+	 * gray out their virtual-keyboard Enter for invalid form fields.
+	 * Undefined → submit is always allowed (URL bar, search bar). */
+	validate?: (value: string) => boolean;
 }
 
 interface Key {
@@ -183,6 +190,12 @@ export class KeyboardOverlay {
 	private readonly flatRects: KeyRect[];
 	private template: BrowserTemplate = DEFAULT_TEMPLATE;
 	private panelBackground: Image | null = null;
+	/** Submit-gate validator for the in-flight session — set in `open`,
+	 * cleared on resolve. `render` reads it to paint the Submit key in
+	 * the disabled palette when the current buffer would be rejected,
+	 * which is the user-visible counterpart to the `activate`/`plus`
+	 * gates below. Undefined / `null` → Submit always renders enabled. */
+	private validate: ((value: string) => boolean) | null = null;
 
 	constructor() {
 		this.canvas = nxScreen();
@@ -219,6 +232,10 @@ export class KeyboardOverlay {
 			focusRow: 0,
 			focusCol: 0,
 		};
+		// Stash the session validator so `render` can paint the Submit
+		// key in disabled style without threading the callback through
+		// every notifyChange tick. Cleared in the resolve path below.
+		this.validate = callbacks.validate ?? null;
 		// Flag the paint pipeline that the keyboard owns the screen — the
 		// live-overlay's `paintLiveOverlay` early-returns on this flag so
 		// rAF/video ticks don't clobber the keyboard pixels. Cleared in
@@ -240,6 +257,7 @@ export class KeyboardOverlay {
 				},
 				(value) => {
 					setKeyboardOpen(false);
+					this.validate = null;
 					resolve(value);
 				},
 				this.layout.panelTop,
@@ -292,11 +310,30 @@ export class KeyboardOverlay {
 		const keyAlpha = clamp01(1 - kb.transparency);
 		const prevAlpha = ctx.globalAlpha;
 		ctx.globalAlpha = keyAlpha;
+		// Pre-compute whether Submit should render in the disabled
+		// palette (validator rejects current buffer). Tied to the same
+		// gate `activate('submit')` + the pollLoop's `+`-press path read,
+		// so the user always sees the correct affordance before tapping.
+		const submitDisabled = !!this.validate && !this.validate(state.value);
 		for (let r = 0; r < this.layout.rects.length; r++) {
 			for (let c = 0; c < this.layout.rects[r].length; c++) {
 				const rect = this.layout.rects[r][c];
 				const focused = r === state.focusRow && c === state.focusCol;
 				const isAction = Boolean(rect.key.action);
+				const isSubmit = rect.key.action === 'submit';
+				if (isSubmit && submitDisabled) {
+					// Disabled Submit: muted bg (regular key colour, not
+					// the brighter action colour) + dimmed label, matching
+					// the .settings-save[disabled] treatment on the HTML
+					// settings page. Skip the focus highlight so a hover
+					// over the key doesn't suggest interactivity.
+					ctx.fillStyle = kb.keyBg;
+					ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+					ctx.fillStyle = kb.helpText;
+					ctx.font = '20px system-ui';
+					ctx.fillText(rect.key.label, rect.x + rect.width / 2, rect.y + rect.height / 2);
+					continue;
+				}
 				ctx.fillStyle = focused
 					? (isAction ? kb.keyActionFocusBg : kb.keyFocusBg)
 					: (isAction ? kb.keyActionBg : kb.keyBg);
@@ -477,6 +514,14 @@ class KeyboardSession {
 		playClick();
 		const action = rect.key.action;
 		if (action === 'submit') {
+			// Validator gate — when the caller (e.g. number-typed input)
+			// declares the current buffer unsubmittable, swallow the tap
+			// but keep the keyboard open. No state change, just the
+			// click feedback above, mirroring how real browsers paint a
+			// disabled Enter key.
+			if (this.callbacks.validate && !this.callbacks.validate(this.state.value)) {
+				return;
+			}
 			this.finish(this.state.value);
 			return;
 		}
@@ -597,8 +642,18 @@ class KeyboardSession {
 				return;
 			}
 			if (rising(prev, next, 'plus')) {
-				this.finish(this.state.value);
-				return;
+				// Mirror the Submit-key gate so the `+` shortcut also
+				// honors validator rejection. Without this, an invalid
+				// buffer the user can't tap-Submit could still be plus-
+				// submitted, defeating the disabled-Submit affordance.
+				// Swallow the press silently — falling through to the
+				// scroll + cursor tick path keeps `prev` updated so the
+				// next plus-rising is detected correctly.
+				const allow = !this.callbacks.validate || this.callbacks.validate(this.state.value);
+				if (allow) {
+					this.finish(this.state.value);
+					return;
+				}
 			}
 
 			// Right-stick Y → page scroll behind the keyboard. The shell's

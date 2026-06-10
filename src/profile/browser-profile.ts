@@ -72,6 +72,12 @@ const BUILTIN_DEV_PAGES: readonly string[] = [
 	'canvas-webgl.html',
 	'benchmark.html',
 	'widgets.html',
+	// Diagnostic ladder for CSS-only tab UIs (2026-06-10). Four
+	// progressive variations isolate which layer breaks: bare radio
+	// routing → `~` sibling combinator → `+` adjacent sibling →
+	// inline-flex pill labels (the apps.html shape). Each variation
+	// uses different colors so the broken layer is obvious at a glance.
+	'tabs.html',
 	'tables.html',
 	'svg.html',
 	'rounded.html',
@@ -172,8 +178,11 @@ const BUILTIN_TEMPLATE_FILES: readonly string[] = [
 	'config.json',
 	'templates.json',
 	'search_engines.json',
-	'apps.json',
-	'featured.json',
+	// Unified app catalog (2026-06-10) — replaced apps.json + featured.json.
+	// Three top-level arrays (featured / community / experimental); each
+	// drives one tab on apps.html, and `featured` also seeds home.html's
+	// Featured Apps grid. See `loadCatalogGroup` in browser-template.ts.
+	'catalog.json',
 	'templates/default.json',
 	'templates/light.json',
 	'templates/bottom-bar.json',

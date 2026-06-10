@@ -16,15 +16,21 @@
 import { nxScreen } from '@switch-web/runtime';
 import {
 	getLiveRoot,
+	getLiveViewport,
 	getLiveWindow,
 	hitTestLive,
 	pageHasListenerFor,
 	type LiveElement,
-	type LiveViewport,
 } from '../scripts/live-dom.js';
 import { getComputedLiveStyle } from '../scripts/live-css.js';
 import { getButtonIndexForAction } from './button-router.js';
-import { playClick } from '../audio/click-sound.js';
+import {
+	abortLivePress,
+	beginLivePress,
+	dispatchChromeTap,
+	endLivePress,
+	type LivePressHandle,
+} from './live-input-dispatch.js';
 
 // Screen dimensions match the static framebuffer the canvas-runner's
 // synthesized parent reports (1280×720). Updating this requires the
@@ -147,6 +153,13 @@ const spriteCache = new Map<string, CursorSprite>();
 // Tracks the LiveElement the cursor is currently over so we fire
 // mouseenter / mouseleave / mouseover / mouseout transitions on motion.
 let lastHoverEl: LiveElement | null = null;
+
+// Active engine-mouse left-button press handle. Set on aRising over a
+// LiveElement in the content area; cleared on aFalling. Held across
+// ticks so the eventual `endLivePress` (and the deferred :active clear
+// inside it) fires on the SAME element the press opened on, even if
+// the cursor drifts onto a different element during the hold. */
+let activeMousePress: LivePressHandle | null = null;
 
 // Tracks the previous frame's button snapshot for edge detection — A
 // rising = mousedown+click, A falling = mouseup. Set lazily on first
@@ -390,40 +403,92 @@ export function tickMouseInput(): MouseTickResult {
 	// primary mouse action and the router skips shell dispatch when
 	// A is bound to leftClick.
 	//
-	// Chrome-strip clicks (back / forward / home / star / address-bar
-	// / settings) live in the touch handler in
-	// `controller-shortcuts.ts installCanvasTouch` — those buttons
-	// aren't LiveElements, so direct mouse-event dispatch wouldn't
-	// reach them. We synthesize a touch on nxScreen ONLY when the
-	// cursor sits in the chrome y-zone; in the content area, the
-	// direct mousedown / mouseup / click already reaches the
-	// LiveElement under the cursor, and synthesizing touch there
-	// would double-fire handlers (LiveElement gets BOTH the direct
-	// mouse event AND a synthesized touchstart that the chrome touch
-	// handler dispatches mousedown for too).
+	// 2026-06-10: chrome + live-DOM dispatch unified via
+	// `live-input-dispatch`. Chrome zone calls `dispatchChromeTap`
+	// directly (no more synth-touch on nxScreen). Content area opens
+	// a `beginLivePress` on the LiveElement under the cursor so the
+	// shell-side intent path (navigate / button-action / summary /
+	// video-control / form-tap) runs identically to touch. The press
+	// handle is held across the A-hold; `endLivePress` on aFalling
+	// fires the click event, runs the intent dispatch, and schedules
+	// the deferred `:active` clear so the user sees the pressed
+	// visual for at least ~120 ms even on instant taps.
 	if (aRising) {
 		cursor.buttonsDown.left = true;
 		cursor.visible = true;
 		cursor.lastMotionAt = now;
-		dispatchMouseButton('mousedown', MOUSE_BUTTON_LEFT);
 		if (cursorInChromeZone()) {
-			// The synth touch on nxScreen drives the existing chrome
-			// strip handler, which itself plays the click sound (so we
-			// don't fire `playClick()` here for chrome — avoids
-			// doubling). For content area, the chrome-zone branch
-			// doesn't run; we fall through to the interactive-target
-			// check below.
-			dispatchScreenTouch('touchstart');
-		} else if (isInteractiveTargetUnderCursor()) {
-			playClick();
+			// Chrome strip — single-shot dispatch on press. No
+			// LiveElement press lifecycle (chrome isn't part of the
+			// live tree).
+			dispatchChromeTap(cursor.x, cursor.y);
+		} else {
+			const hit = hitElementUnderCursor();
+			if (hit) {
+				// Content-area press on a live-DOM element. The press
+				// handle owns mousedown + :active toggle + intent
+				// dispatch lifecycle.
+				activeMousePress = beginLivePress(hit, cursor.x, cursor.y, 'mouse');
+				// Window-side + pointer events still go out so engines
+				// that listen on window or via the unified Pointer API
+				// see the press (Cocos's input system, for instance).
+				dispatchPointerOnTarget(hit, 'pointerdown', MOUSE_BUTTON_LEFT);
+				dispatchMouseButtonOnWindow('mousedown', MOUSE_BUTTON_LEFT, hit);
+			} else {
+				// Full-canvas page (engine handles its own hit testing
+				// via window listeners) — fall back to the prior
+				// dispatch shape, which dispatches on the primary
+				// CANVAS LiveElement + window.
+				dispatchMouseButton('mousedown', MOUSE_BUTTON_LEFT);
+			}
 		}
 		consumedA = true;
 		cursorChanged = true;
 	} else if (aFalling) {
 		cursor.buttonsDown.left = false;
-		dispatchMouseButton('mouseup', MOUSE_BUTTON_LEFT);
-		dispatchMouseButton('click', MOUSE_BUTTON_LEFT);
-		if (cursorInChromeZone()) dispatchScreenTouch('touchend');
+		if (activeMousePress) {
+			const hit = hitElementUnderCursor();
+			// Pointer-event sibling on whichever live target the cursor
+			// is over now (mouseup-on-different-element semantics
+			// match real-browser behaviour where mouseup fires at the
+			// release position, not the press position).
+			if (hit) dispatchPointerOnTarget(hit, 'pointerup', MOUSE_BUTTON_LEFT);
+			dispatchMouseButtonOnWindow('mouseup', MOUSE_BUTTON_LEFT, hit);
+			// If the cursor drifted off the press target, abort
+			// rather than fire click+intent on a stale element. This
+			// matches the desktop browser convention where a press
+			// that drags off cancels the click.
+			if (hit && hit === activeMousePress.el) {
+				const unhandled = endLivePress(activeMousePress, cursor.x, cursor.y);
+				// Single-vs-double tap discrimination lives in the
+				// touch controller — the engine-mouse path has no
+				// double-tap timer today, so video-frame-tap fires a
+				// straight play/pause toggle on the controller's
+				// behalf. `dbltap-action` is a touch-only gesture
+				// (the cursor can't dbltap meaningfully).
+				if (unhandled?.kind === 'video-frame-tap') {
+					// No double-tap timer for the cursor path —
+					// surface as a play/pause toggle via the regular
+					// video-control route by no-op'ing for now.
+					// (Touch handles this case via
+					// `handleVideoFrameTap` which itself swallows the
+					// first tap; the cursor user can use the on-video
+					// controls bar instead.)
+				}
+				dispatchMouseButtonOnWindow('click', MOUSE_BUTTON_LEFT, hit);
+			} else {
+				abortLivePress(activeMousePress);
+			}
+			activeMousePress = null;
+		} else if (cursorInChromeZone()) {
+			// Chrome dispatch already fired on the rising edge; nothing
+			// to do on falling.
+		} else {
+			// No press was open (e.g., page-canvas-only mode). Mirror
+			// the legacy dispatch path.
+			dispatchMouseButton('mouseup', MOUSE_BUTTON_LEFT);
+			dispatchMouseButton('click', MOUSE_BUTTON_LEFT);
+		}
 		consumedA = true;
 		cursorChanged = true;
 	}
@@ -495,47 +560,20 @@ function currentButtonsMask(): number {
 	return m;
 }
 
-// Cached viewport for live-DOM hit-testing. The shell pushes the
-// current viewport via setLiveViewport but mouseinput needs it too —
-// we read from the live-dom internal state through a re-hit-test each
-// call. For simplicity assume a full-screen viewport here; the touch
-// path uses the same assumption for inline-canvas pages.
-const FULL_VIEWPORT: LiveViewport = { x: 0, y: 0, width: SCREEN_W, height: SCREEN_H };
-
-/** True iff the element (or any ancestor) under the cursor is a
- * link, button, summary, or click-like form widget — used to gate the
- * audible click feedback so mouse-clicks on body/text/images stay
- * silent. Cheap walk up the live-DOM parent chain; no layout work
- * needed since hit-testing already populated the live state. */
-function isInteractiveTargetUnderCursor(): boolean {
-	const hit = hitElementUnderCursor();
-	for (let n: LiveElement | null = hit; n; n = n.parent) {
-		const tag = n.tagName;
-		if (tag === 'A' && (n.getAttribute('href') ?? '') !== '') return true;
-		if (tag === 'BUTTON') return true;
-		if (tag === 'SUMMARY') return true;
-		if (tag === 'LABEL') return true;
-		if (tag === 'SELECT') return true;
-		if (tag === 'INPUT') {
-			const type = (n.getAttribute('type') ?? '').toLowerCase();
-			if (type === '' || type === 'text' || type === 'email'
-				|| type === 'url' || type === 'tel' || type === 'password'
-				|| type === 'search' || type === 'number' || type === 'range') {
-				// Text-ish inputs and range sliders: not "click-like."
-				// Skip the sound to avoid chirping on each slider step
-				// and on text-box focus.
-				return false;
-			}
-			// submit / button / reset / checkbox / radio / image — click-like.
-			return true;
-		}
-	}
-	return false;
-}
+// 2026-06-10: `getLiveViewport()` returns the same viewport object the
+// shell pushes per-frame via `setLiveViewport`. In normal mode it has
+// `y = chromeHeight` (typically 56) and `height = SCREEN_H - chrome`;
+// in fullscreen-page / fullscreen-canvas / video-fullscreen it covers
+// the whole screen. The touch path reads it via `liveViewport` for
+// hit-testing, and the cursor now does the same — without this, the
+// mouse hit-test was using a hardcoded (0, 0, 1280, 720) viewport so
+// every body-flow element it tested lived 56px higher than where the
+// painter actually drew it. Users had to click 56px above buttons in
+// content area to register the hit.
 
 function hitElementUnderCursor(): LiveElement | null {
 	try {
-		return hitTestLive(getLiveRoot(), cursor.x, cursor.y, FULL_VIEWPORT);
+		return hitTestLive(getLiveRoot(), cursor.x, cursor.y, getLiveViewport());
 	} catch (_) {
 		return null;
 	}
@@ -643,6 +681,22 @@ function dispatchMouseButton(type: string, button: number): void {
 			(target as unknown as { dispatchEvent: (e: unknown) => void }).dispatchEvent(pEv);
 		}
 	}
+	dispatchMouseButtonOnWindow(type, button, target);
+}
+
+/** Dispatch the window-side mouseup/mousedown/click + pointer pair only.
+ * Used by the new press flow (`beginLivePress`/`endLivePress` emit on
+ * the live target themselves; the window still needs the events for
+ * page-script window-level listeners like Cocos's input system). */
+function dispatchMouseButtonOnWindow(
+	type: string,
+	button: number,
+	target: LiveElement | null,
+): void {
+	const win = getLiveWindow();
+	const pointerType = type === 'mousedown' ? 'pointerdown'
+		: type === 'mouseup' ? 'pointerup'
+			: null;
 	const winEv = buildMouseEvent(type, button);
 	winEv.target = target ?? win;
 	winEv.currentTarget = win;
@@ -653,6 +707,21 @@ function dispatchMouseButton(type: string, button: number): void {
 		winPe.currentTarget = win;
 		win.dispatchEvent(winPe as { type: string; [k: string]: unknown });
 	}
+}
+
+/** Dispatch a pointerdown / pointerup on the live target only. The
+ * matching mouseevent already fires inside `beginLivePress` /
+ * `endLivePress`; this completes the pair so engines reading either API
+ * see the same input. */
+function dispatchPointerOnTarget(
+	target: LiveElement,
+	pointerType: 'pointerdown' | 'pointerup',
+	button: number,
+): void {
+	const pEv = buildPointerEvent(pointerType, button);
+	pEv.target = target;
+	pEv.currentTarget = target;
+	(target as unknown as { dispatchEvent: (e: unknown) => void }).dispatchEvent(pEv);
 }
 
 function updateHover(): void {
@@ -677,6 +746,14 @@ function updateHover(): void {
 		dispatchTo(hit, 'pointerover', 0);
 		dispatchTo(hit, 'pointerenter', 0);
 	}
+	// 2026-06-10: `setPseudoHover(...)` was wired here briefly so CSS
+	// `:hover` rules would visualize for the engine-mouse cursor. The
+	// per-frame cascade invalidation + repaint that triggered tanked
+	// system FPS on real hardware (every cursor motion across an
+	// interactive element forced a full live-overlay rebuild). The
+	// pseudo plumbing in live-css.ts stays in place for a future
+	// finer-grained reintroduction, but for now hover is mouse-event-
+	// only (page-script may still react to mouseover / pointerenter).
 	applyHoverElementCursor(hit);
 }
 
@@ -687,48 +764,6 @@ function applyHoverElementCursor(el: LiveElement | null): void {
 		const v = cs.cursor;
 		if (typeof v === 'string') setCursorFromCss(v);
 	} catch (_) { /* style read failed — keep current cursor */ }
-}
-
-/**
- * Synthesize a touch event on nxScreen so the existing chrome-strip
- * handler in `controller-shortcuts.ts installCanvasTouch` runs. Cursor
- * A-clicks on the chrome strip (back / forward / home / star / address
- * bar / settings) need the chrome touch path — those handlers are
- * bound to nxScreen touchstart, NOT to the LiveElement mouse path.
- * Also lets us drive arbitrary touch-only pages with the cursor.
- */
-function dispatchScreenTouch(type: 'touchstart' | 'touchmove' | 'touchend'): void {
-	try {
-		const screen = nxScreen() as unknown as { dispatchEvent?: (e: unknown) => void };
-		if (!screen || typeof screen.dispatchEvent !== 'function') return;
-		const touch = {
-			clientX: cursor.x,
-			clientY: cursor.y,
-			pageX: cursor.x,
-			pageY: cursor.y,
-			screenX: cursor.x,
-			screenY: cursor.y,
-			identifier: 0,
-			radiusX: 1,
-			radiusY: 1,
-			rotationAngle: 0,
-			force: 1,
-		};
-		const touches = type === 'touchend' ? [] : [touch];
-		screen.dispatchEvent({
-			type,
-			touches,
-			changedTouches: [touch],
-			targetTouches: touches,
-			bubbles: true,
-			cancelable: true,
-			isTrusted: true,
-			preventDefault: () => { /* no-op */ },
-			stopPropagation: () => { /* no-op */ },
-		});
-	} catch (e) {
-		console.debug('[page-mouse-fwd] dispatchScreenTouch threw: ' + String(e));
-	}
 }
 
 function dispatchTo(el: LiveElement, type: string, button: number): void {

@@ -5,7 +5,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, loadApps, loadConfig, loadFeatured, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
+import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadSearchEngines, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
 
 /**
  * Serves the browser's built-in pages.
@@ -18,8 +18,9 @@ import { type AppEntry, loadApps, loadConfig, loadFeatured, loadTemplateRegistry
  *   - Directory / page URLs: `brewser://X/Y/` → tries
  *     `pages/X/Y.html` first, then `pages/X/Y/index.html`. Content-type
  *     is always `text/html`. Custom tags (`<browser-bookmarks>`,
- *     `<browser-history>`, `<browser-templates>`, `<browser-apps>`,
- *     `<browser-featured>`, `<browser-search>`) are expanded
+ *     `<browser-history>`, `<browser-templates>`,
+ *     `<browser-featured>` / `<browser-community>` /
+ *     `<browser-experimental>`, `<browser-search>`) are expanded
  *     server-side before the response is returned.
  *   - Static asset URLs: `brewser://X/Y/assets/main.js` →
  *     `pages/X/Y/assets/main.js` with a MIME type derived from the
@@ -35,8 +36,9 @@ import { type AppEntry, loadApps, loadConfig, loadFeatured, loadTemplateRegistry
  *   `<browser-bookmarks limit="N">` → most-recently-added bookmarks
  *   `<browser-history   limit="N">` → most-recent visits
  *   `<browser-templates>`           → entries from `templates.json`
- *   `<browser-apps>`                → cards from `apps.json` (full catalog)
- *   `<browser-featured>`            → cards from `featured.json` (curated subset)
+ *   `<browser-featured>`            → cards from `catalog.json`'s `featured`
+ *   `<browser-community>`           → cards from `catalog.json`'s `community`
+ *   `<browser-experimental>`        → cards from `catalog.json`'s `experimental`
  *   `<browser-search>`              → search bar for the active engine
  * Substitution is a plain text replace, so authors can place the tags
  * anywhere in the document, wrap them in containers, or restyle the
@@ -125,7 +127,7 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 export interface BrowserResourceLoaderOptions {
 	/** Per-profile root for `pages/` lookups. */
 	storageRoot: string;
-	/** App-level root for `loadApps` / `loadConfig` / `loadSearchEngines` / `loadTemplateRegistry`. */
+	/** App-level root for `loadCatalogGroup` / `loadConfig` / `loadSearchEngines` / `loadTemplateRegistry`. */
 	appRoot: string;
 	bookmarksStore: BookmarksStore;
 	historyStore: HistoryStore;
@@ -165,10 +167,27 @@ export class BrowserResourceLoader implements ResourceLoader {
 		const canonical = canonicalUrl(request.url);
 		const classification = classifyUrl(canonical);
 
+		// DIAGNOSTIC PROBE (TEMP) — log every PNG request so we can see
+		// where Image.src calls land. Filter to .png to keep log volume
+		// sane across asset-heavy apps like pvzge.
+		const isPng = /\.png(?:\?|#|$)/i.test(request.url);
+		if (isPng) {
+			const cls = classification ? classification.kind : 'null';
+			const rel = classification?.kind === 'static' ? classification.relPath : '<n/a>';
+			console.debug(`[brewser:img-probe] url=${request.url} cls=${cls} rel=${rel}`);
+		}
+
 		if (classification?.kind === 'static') {
 			try {
-				const data = Switch.readFileSync(this.resolveContentPath(classification.relPath));
+				const resolvedPath = this.resolveContentPath(classification.relPath);
+				if (isPng) {
+					console.debug(`[brewser:img-probe] readFile path=${resolvedPath}`);
+				}
+				const data = Switch.readFileSync(resolvedPath);
 				if (data) {
+					if (isPng) {
+						console.debug(`[brewser:img-probe] readFile OK size=${data.byteLength}`);
+					}
 					const body = classification.binary
 						? data
 						: decoder.decode(data);
@@ -177,8 +196,14 @@ export class BrowserResourceLoader implements ResourceLoader {
 						headers: { 'content-type': classification.mime },
 					});
 				}
-			} catch (_) {
+				if (isPng) {
+					console.debug(`[brewser:img-probe] readFile returned falsy data`);
+				}
+			} catch (e) {
 				// Missing file falls through to the 404 below.
+				if (isPng) {
+					console.debug(`[brewser:img-probe] readFile threw: ${String((e as Error)?.message || e)}`);
+				}
 			}
 		} else if (classification?.kind === 'html') {
 			// Try each candidate in order: `pages/X/Y.html` first, then
@@ -229,43 +254,41 @@ export class BrowserResourceLoader implements ResourceLoader {
 			() => this.renderTemplates(),
 		);
 		out = out.replace(
+			/<browser-settings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-settings\s*>)?/gi,
+			() => this.renderSettings(),
+		);
+		out = out.replace(
 			/<browser-search(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-search\s*>)?/gi,
 			() => this.renderSearch(),
 		);
 		out = out.replace(
-			/<browser-apps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-apps\s*>)?/gi,
-			() => this.renderApps(),
+			/<browser-featured(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-featured\s*>)?/gi,
+			() => this.renderGroup('featured'),
 		);
 		out = out.replace(
-			/<browser-featured(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-featured\s*>)?/gi,
-			() => this.renderFeatured(),
+			/<browser-community(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-community\s*>)?/gi,
+			() => this.renderGroup('community'),
+		);
+		out = out.replace(
+			/<browser-experimental(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-experimental\s*>)?/gi,
+			() => this.renderGroup('experimental'),
 		);
 		return out;
 	}
 
-	/** Render the Apps page cards from `apps.json`. Each entry becomes a
-	 * `.app-card` link (logo on top, then title + description) styled by
-	 * apps.html's own stylesheet — this only emits the structural
-	 * markup, mirroring `renderBookmarks`. Empty / missing catalog →
-	 * an empty-state `<p>`. */
-	private renderApps(): string {
-		const apps = loadApps(this.appRoot);
-		if (apps.length === 0) {
-			return '<p class="empty">No apps installed yet. Add entries to <code>apps.json</code>.</p>';
+	/** Render one catalog group's cards (`.app-card` links — logo on
+	 * top, then title + description) styled by main.css's `.app-grid`
+	 * + `.app-card` rules. Each entry comes from `catalog.json`'s
+	 * `featured` / `community` / `experimental` array; `loadCatalogGroup`
+	 * builds the `brewser://apps/<group>/<id>/...` paths used for both
+	 * the logo `<img src>` and the card's `href`. Empty / missing group
+	 * → an empty-state `<p>`. */
+	private renderGroup(group: CatalogGroup): string {
+		const entries = loadCatalogGroup(this.appRoot, group);
+		if (entries.length === 0) {
+			return `<p class="empty">No ${group} apps yet. Add entries to <code>catalog.json</code>'s <code>${group}</code> array.</p>`;
 		}
-		return renderAppCards(apps);
-	}
-
-	/** Render the welcome-page "Featured Apps" grid from `featured.json`.
-	 * Reuses the same `.app-card` markup as `renderApps`, so the welcome
-	 * page just needs `apps.html`-style CSS for the grid + card. Empty /
-	 * missing catalog → an empty-state `<p>`. */
-	private renderFeatured(): string {
-		const featured = loadFeatured(this.appRoot);
-		if (featured.length === 0) {
-			return '<p class="empty">No featured apps yet. Add entries to <code>featured.json</code>.</p>';
-		}
-		return renderAppCards(featured);
+		return renderAppCards(entries);
 	}
 
 	/** Render the welcome-page search bar for the active engine (per
@@ -331,6 +354,123 @@ export class BrowserResourceLoader implements ResourceLoader {
 			}
 			return `<button class="template-row" type="button" data-action="select-template:${path}">${indicator}${label}</button>`;
 		}).join('');
+	}
+
+	/** Full settings form. Every editable `config.json` key is rendered as a
+	 * native form widget tagged with `data-setting="<key>"`. The Save
+	 * button (`data-action="save-settings"`, sticky bottom-right) is the
+	 * single apply point — until it fires, every edit lives only in the
+	 * live-DOM widget state, so the user can poke around without
+	 * committing.
+	 *
+	 * Mirrors `loadConfig`'s clamps/types — the shell-side reader applies
+	 * the same bounds on the way out, so an out-of-range type-in is
+	 * silently clamped rather than rejecting the save. */
+	private renderSettings(): string {
+		const config = loadConfig(this.appRoot);
+		const engines = loadSearchEngines(this.appRoot);
+		const templates = loadTemplateRegistry(this.appRoot);
+
+		const checked = (b: boolean) => b ? ' checked' : '';
+
+		const templateRows = templates.length === 0
+			? '<p class="empty">No templates registered. Edit <code>templates.json</code> to add one.</p>'
+			: templates.map((e) => {
+				const path = htmlEscape(e.path);
+				const title = htmlEscape(e.title);
+				return (
+					'<label class="settings-radio">'
+					+ `<input type="radio" name="setting-template" value="${path}" data-setting="template"${checked(e.path === config.template)}>`
+					+ `<span class="settings-radio-label">${title} <span class="path">${path}</span></span>`
+					+ '</label>'
+				);
+			}).join('');
+
+		const themeRow = (
+			'<div class="settings-row">'
+			+ '<span class="settings-label">Theme</span>'
+			+ '<div class="settings-radios">'
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="light" data-setting="theme"${checked(config.theme === 'light')}> <span>Light</span></label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="dark" data-setting="theme"${checked(config.theme === 'dark')}> <span>Dark</span></label>`
+			+ '</div>'
+			+ '</div>'
+		);
+
+		// Search-engine picker — rendered as a radio list (one row per
+		// engine) instead of a `<select>`. The live-form SELECT tap
+		// handler cycles options on tap (see comment "M2.5 popup overlay"
+		// in live-form.ts paintSelect), which is unintuitive for a
+		// "pick one" preference. Radios share the same widget shape as
+		// the Template list so the visual language stays consistent. */
+		const searchRows = engines.length === 0
+			? `<p class="empty">No search engines registered. Edit <code>search_engines.json</code> to add one.</p>`
+			: engines.map((e) => {
+				const title = htmlEscape(e.title);
+				return (
+					'<label class="settings-radio">'
+					+ `<input type="radio" name="setting-searchEngine" value="${title}" data-setting="searchEngine"${checked(e.title === config.searchEngine)}>`
+					+ `<span class="settings-radio-label">${title}</span>`
+					+ '</label>'
+				);
+			}).join('');
+		const searchRow = (
+			'<div class="settings-row">'
+			+ '<span class="settings-label">Search engine</span>'
+			+ '<div class="settings-templates">' + searchRows + '</div>'
+			+ '</div>'
+		);
+
+		const numberRow = (key: string, label: string, value: number, min: number, max: number, hint: string): string => (
+			'<div class="settings-row">'
+			+ `<label class="settings-label" for="setting-${key}">${htmlEscape(label)}<span class="settings-hint">${htmlEscape(hint)}</span></label>`
+			+ `<input id="setting-${key}" name="setting-${key}" data-setting="${key}" type="number" inputmode="numeric" min="${min}" max="${max}" value="${value}">`
+			+ '</div>'
+		);
+
+		const toggleRow = (key: string, label: string, value: boolean, hint: string): string => (
+			'<div class="settings-row settings-row-toggle">'
+			+ `<label class="settings-toggle">`
+			+ `<input type="checkbox" name="setting-${key}" data-setting="${key}"${checked(value)}>`
+			+ `<span class="settings-label">${htmlEscape(label)}<span class="settings-hint">${htmlEscape(hint)}</span></span>`
+			+ '</label>'
+			+ '</div>'
+		);
+
+		return (
+			'<div class="settings-form">'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Template</legend>'
+			+ '<div class="settings-templates">' + templateRows + '</div>'
+			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Appearance</legend>'
+			+ themeRow
+			+ searchRow
+			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Performance</legend>'
+			+ numberRow('wwwRenderChunkMs', 'External page render budget', config.wwwRenderChunkMs, 1, 1000, 'ms per frame while building http(s) pages (1–1000)')
+			+ numberRow('scrollChunkMs', 'Scroll-time render budget', config.scrollChunkMs, 1, 1000, 'ms per frame while scrolling a still-building page (1–1000)')
+			+ numberRow('maxHistory', 'Max history entries', config.maxHistory, 1, 10000, 'oldest entries are dropped past this cap (1–10000)')
+			+ numberRow('mouseIdleMs', 'Cursor idle hide', config.mouseIdleMs, 0, 3_600_000, 'ms of stick-idle before the cursor hides (0–3 600 000)')
+			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Behaviour</legend>'
+			+ toggleRow('videoNVTEGRA', 'NVTEGRA hardware video decode', config.videoNVTEGRA, 'try the hw decoder first, fall back to software per element')
+			+ toggleRow('autoRotate', 'Auto-rotate canvas', config.autoRotate, 'reserved — no consumer wired up today, value round-trips through Save')
+			+ toggleRow('clickSounds', 'Click sounds', config.clickSounds, 'short click.wav on link / button / chrome activation')
+			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Diagnostics</legend>'
+			+ toggleRow('navDebug', 'Navigation debug log', config.navDebug, 'writes shell-nav-diag.log on every navigation / shell input / touch')
+			+ toggleRow('swbImgDebug', 'Image-load debug log', config.swbImgDebug, 'writes swb_img_diag.log per image load (capped at 500 entries)')
+			+ '</fieldset>'
+			+ '</div>'
+			+ '<div class="settings-savebar">'
+			+ '<span class="settings-status" data-settings-status>No unsaved changes.</span>'
+			+ '<button type="button" class="settings-save" data-action="save-settings" data-settings-save disabled>Save</button>'
+			+ '</div>'
+		);
 	}
 }
 
@@ -446,15 +586,13 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 	}).join('');
 }
 
-/** Turn an `apps.json` `url` into a navigable href. Entries are
- * authored relative to the profile's `pages/` dir (`../pages/<rest>`),
- * matching how the welcome page references its assets. Navigation goes
- * through `globalThis.fetch`, which has no base-URL resolution and only
- * `brewser://` loaders registered (local fetch is disabled), so a bare
- * relative path would 404 to the error page. Strip the leading
- * `../`/`./` and the `pages/` prefix and re-express the remainder as a
- * `brewser://` URL, which `BrowserResourceLoader` maps back to
- * `<profile>/pages/<rest>`. Already-absolute URLs pass through. */
+/** Turn a card's `url` into a navigable href. `loadCatalogGroup`
+ * already emits `brewser://apps/<group>/<id>/<entry>` for every
+ * catalog entry, so this is a pass-through for current callers — kept
+ * for the legacy `pages/`-relative shape so older user-edited entries
+ * still work. Already-absolute URLs (including `brewser://`) pass
+ * through; bare relative paths get the leading `../` / `pages/`
+ * stripped + re-expressed as `brewser://`. */
 function appUrlToBrowserHref(url: string): string {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
 	const rel = url.replace(/^(?:\.\.?\/)+/, '').replace(/^pages\//, '');

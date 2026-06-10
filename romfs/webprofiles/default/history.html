@@ -1,29 +1,29 @@
 <!doctype html>
 <html lang="en">
-<head>
-<title>History — Brewser</title>
-<link rel="stylesheet" href="brewser://assets/main.css">
-<style>
-  body { padding: 28px; }
-</style>
-</head>
-<body>
-<div class="page-shell">
-  <header class="top-bar">
-    <h1>History</h1>
-    <!-- data-action="clear-history" is intercepted by the shell
-         (browser-shell.ts dispatchButtonAction) — clears the history
-         store and reloads the page so the list re-renders empty. -->
-    <button class="clear-btn" type="button" data-action="clear-history">Clear History</button>
-  </header>
+  <head>
+    <title>History — Brewser</title>
+    <link rel="stylesheet" href="brewser://assets/main.css">
+  </head>
 
-  <p class="lead">Recent visits, most recent first. Tap a row to open it
-  again.</p>
+  <body>
 
-  <!-- Replaced by the resource loader with a list of recent visits.
-       `limit="N"` caps how many rows render; the cap on what's
-       *persisted* is config.json's `maxHistory`. -->
-  <browser-history limit="100"></browser-history>
-</div>
-</body>
+    <div class="page-shell">
+
+      <section class="top-section">
+        <header class="top-header">
+          <h2>History</h2>
+          <nav class="top-links" aria-label="Browser navigation">
+            <button class="clear-btn" type="button" data-action="clear-history">Clear History</button>
+            <a class="munch-link" href="brewser://home/">Home</a>
+          </nav>
+        </header>
+      </section>
+
+      <p class="lead">Recent visits, most recent first. Tap a row to open it again.</p>
+
+      <browser-history limit="100"></browser-history>
+
+    </div>
+
+  </body>
 </html>

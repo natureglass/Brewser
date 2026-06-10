@@ -6,10 +6,15 @@
    romfs:/webprofiles/default/assets/main.css by seedBuiltinAssets on
    first run; user-edits on disk persist (missing-only seeder).
 
-   Pages intentionally own their own body padding here (per-page
-   convention: 28px 48px for text-heavy pages, 32px 28px for home,
-   28px for the top-bar pages). error.html does NOT link this sheet —
-   its palette is unrelated. */
+   Body padding is now global (28px 48px on the `body` rule below); the
+   old per-page convention (32px 28px for home, 28px for the top-bar
+   pages) no longer applies. error.html does NOT link this sheet — its
+   palette is unrelated.
+
+   PERF NOTE: gradients, box-shadows, radial glows and transitions
+   were stripped out to stay cheap on the software/low-end GPU path.
+   Visuals are now flat solid fills drawn from the same palette, so
+   colour uniformity is preserved while per-frame paint cost drops. */
 
 * {
   box-sizing: border-box;
@@ -18,9 +23,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top, rgba(122, 162, 255, 0.12), transparent 32%),
-    #0b1220;
+  padding: 28px 48px;
+  background: #0b1220;
   color: #e0e8f4;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 18px;
@@ -86,16 +90,13 @@ code, kbd { color: #c2e0ff; }
   text-decoration: none;
   font-weight: 700;
   letter-spacing: 0.01em;
-  background:
-    radial-gradient(circle at top left, rgba(122, 162, 255, 0.28), transparent 36%),
-    linear-gradient(135deg, #14202d, #10192a 72%);
-  border: 1px solid rgba(122, 162, 255, 0.4);
+  background: #14202d;
+  border: 1px solid #3a4f7a;
   border-radius: 999px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .munch-link:focus-visible {
-  outline: 2px solid rgba(126, 218, 159, 0.72);
+  outline: 2px solid #7eda9f;
   outline-offset: 3px;
 }
 
@@ -117,12 +118,9 @@ code, kbd { color: #c2e0ff; }
   font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
-  background:
-    radial-gradient(circle at top left, rgba(255, 60, 65, 0.22), transparent 36%),
-    linear-gradient(135deg, #2a151a, #1a1018 72%);
-  border: 1px solid rgba(255, 60, 65, 0.55);
+  background: #2a151a;
+  border: 1px solid #7a3338;
   border-radius: 999px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /* Internet search bar — emitted by <browser-search> (loader). */
@@ -138,12 +136,9 @@ code, kbd { color: #c2e0ff; }
   width: min(760px, 100%);
   min-height: 66px;
   padding: 8px;
-  background:
-    radial-gradient(circle at top left, rgba(122, 162, 255, 0.24), transparent 34%),
-    linear-gradient(135deg, #14202d, #10192a 72%);
-  border: 1px solid rgba(122, 162, 255, 0.42);
+  background: #14202d;
+  border: 1px solid #3a4f7a;
   border-radius: 999px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .search-logo {
@@ -175,20 +170,76 @@ code, kbd { color: #c2e0ff; }
   border: none;
   cursor: pointer;
   color: #0b1220;
-  background: linear-gradient(135deg, #ffd35e, #7eda9f);
+  background: #ffd35e;
   font: inherit;
   font-weight: 800;
   padding: 13px 22px;
   border-radius: 999px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
-  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .search-button:hover,
 .search-button:focus-visible {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.28);
+  background: #7eda9f;
   outline: none;
+}
+
+/* CSS-only radio tabs on apps.html. The three radios live as direct
+   children of <body> (so they're siblings of `.page-shell`) and are
+   hidden — `:checked` drives panel visibility via the `~` (general
+   sibling) combinator. Pages with these rules force a full cache
+   rebuild on each radio tap (see someStylesheetUsesSibling in
+   live-css.ts), so the cost shows up only on tab switches, not idle
+   scroll. */
+input[name="apps-tab"] { display: none; }
+
+.tab-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.tab-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132px;
+  min-height: 44px;
+  padding: 10px 22px;
+  color: #9bb1d6;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  background: #10192a;
+  border: 1px solid #28365c;
+  border-radius: 999px;
+}
+
+.tab-panel { display: none; }
+
+/* Active-tab visuals + active panel — the three `:checked` rules below
+   are the whole tab-switching mechanism. Each radio sits before
+   `.page-shell` in the DOM; `~ .page-shell` walks forward to the shell
+   and `.tab-label[for=...]` / `.tab-panel[data-tab=...]` pick out the
+   matching label + panel inside it. */
+#apps-tab-featured:checked ~ .page-shell .tab-label[for="apps-tab-featured"],
+#apps-tab-community:checked ~ .page-shell .tab-label[for="apps-tab-community"],
+#apps-tab-experimental:checked ~ .page-shell .tab-label[for="apps-tab-experimental"] {
+  color: #0b1220;
+  background: #ffd35e;
+  border-color: #ffd35e;
+}
+
+#apps-tab-featured:checked ~ .page-shell .tab-panel[data-tab="featured"],
+#apps-tab-community:checked ~ .page-shell .tab-panel[data-tab="community"],
+#apps-tab-experimental:checked ~ .page-shell .tab-panel[data-tab="experimental"] {
+  display: block;
+}
+
+.tab-label:active {
+  background: #0a1220;
+  border-color: #7aa2ff;
 }
 
 /* App / Featured grid — 4-column responsive grid of .app-card anchors
@@ -210,12 +261,9 @@ code, kbd { color: #c2e0ff; }
   text-align: center;
   color: #eaf2ff;
   text-decoration: none;
-  background:
-    radial-gradient(circle at top left, rgba(122, 162, 255, 0.28), transparent 36%),
-    linear-gradient(135deg, #14202d, #10192a 72%);
-  border: 1px solid rgba(122, 162, 255, 0.34);
+  background: #14202d;
+  border: 1px solid #314672;
   border-radius: 16px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .app-logo {
@@ -320,59 +368,377 @@ button.template-row.active .radio-dot {
 /* Press indication — visible "depressed" state on tap. Pure colour
    delta (darker background + brighter accent border) so the engine
    paints the state statically without needing transitions/animations.
-   The live-css :active wiring (controller-shortcuts.ts setPseudoActive
-   on touchstart/touchend) drives the state flip; stylesheetsWithActive
-   is gated so adding these rules costs a per-tap cascade invalidation.
+   The live-css :active wiring (live-input-dispatch.ts beginLivePress /
+   endLivePress, called from both touch and engine-mouse) drives the
+   state flip; stylesheetsWithActive is gated so adding these rules
+   costs a per-tap cascade invalidation. The endLivePress hold timer
+   keeps :active visible for ~120ms after a fast tap so the press
+   visual is reliably observable.
+
+   `:hover` is intentionally absent — the engine-mouse cursor moves
+   across hover boundaries fast enough that per-frame cascade
+   invalidation + repaint tanks system FPS. Touch has no hover concept
+   either. Page authors who NEED hover should re-enable the sink in
+   page-mouse-forwarder.updateHover with finer-grained throttling.
 
    For button.template-row the [data-action] attribute selector scopes
    the press style to inactive rows — the currently-selected row
    (rendered without data-action by the loader) won't flash on tap. */
-.munch-link:active {
+.clickable .munch-link:active {
   background: #0a1220;
-  border-color: rgba(122, 162, 255, 0.9);
+  border-color: #7aa2ff;
 }
 .clear-btn:active {
   background: #170a10;
-  border-color: rgba(255, 80, 85, 0.95);
+  border-color: #ff5055;
 }
-.app-card:active {
+.clickable .app-card:active {
   background: #0a1220;
-  border-color: rgba(122, 162, 255, 0.8);
+  border-color: #7aa2ff;
 }
 .search-button:active {
-  background: linear-gradient(135deg, #b89238, #4ea670);
+  background: #4ea670;
+}
+.tab-label:active {
+  color: #eaf2ff;
+  background: #0c1422;
+  border-color: #7aa2ff;
 }
 button.template-row[data-action]:active {
   background-color: #0e1830;
   border-color: #7eda9f;
 }
-ul.settings-list a:active {
+ul.settings-list a:active,
+ul.settings-list li:active {
   background-color: #0e1830;
 }
 
-@media (max-width: 900px) {
-  .app-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+/* ---- about.html ----------------------------------------------------
+   Migrated from about.html's inline <style>. The 28px 48px text-heavy
+   body padding now lives on the global `body` rule above. Gradients /
+   shadows / glows that were in the inline sheet are flattened to solid
+   palette fills, in line with the rest of this stylesheet. */
+.page-about h1 { margin-bottom: 4px; line-height: 1.12; }
+
+/* Featured Apps heading — bumped to feel like a real section title
+   instead of a sub-heading. Tracking + weight match the rest of the
+   page; the colour stays in the blue accent family. */
+
+.top-section h2 {
+  margin-top: 26px;
+  margin-bottom: 20px;
+  font-size: 2em;
+  letter-spacing: 0.005em;
 }
 
-@media (max-width: 620px) {
-  .munch-link {
-    min-width: 96px;
-    padding-inline: 16px;
-  }
+.top-section { margin-top: 0; margin-bottom: 16px; }
 
-  .app-grid {
-    grid-template-columns: 1fr;
-  }
+/* The featured-header row sits on top of the grid: section title on
+   the left, secondary nav (Bookmarks, History) flush right. Reuses
+   the same flex shape the old top-bar had. */
+.top-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
 
-  .search-form {
-    border-radius: 28px;
-    align-items: stretch;
-    flex-wrap: wrap;
-    padding: 10px;
-  }
-  .search-logo { margin-top: 4px; }
-  .search-input { flex: 1 1 calc(100% - 78px); }
-  .search-button { width: 100%; margin-top: 8px; }
+.top-header h2 {
+  /* Override the page-level h2 vertical margins — the section's own
+     layout handles spacing now. */
+  margin: 0;
+}
+
+.top-links {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.about-hero {
+  margin-bottom: 28px;
+}
+
+.about-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 0;
+}
+
+.about-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  color: #c2e0ff;
+  background-color: #14202d;
+  border: 1px solid #314672;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.about-section {
+  margin-top: 30px;
+}
+
+.about-card {
+  background: #14202d;
+  border: 1px solid #314672;
+  border-radius: 16px;
+  padding: 20px 18px;
+}
+
+.about-card h2,
+.about-card h3 {
+  margin-top: 0;
+}
+
+.about-card p {
+  color: #9bb1d6;
+  line-height: 1.45;
+}
+
+.about-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.about-meta article {
+  background-color: #14202d;
+  padding: 14px 16px;
+  border-left: 3px solid #7aa2ff;
+  border-radius: 6px;
+}
+
+.about-meta strong {
+  display: block;
+  color: #ffd35e;
+  margin-bottom: 6px;
+}
+
+.about-meta span {
+  display: block;
+  color: #9bb1d6;
+  line-height: 1.35;
+}
+
+.about-footer-note {
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid #28365c;
+  color: #6a7c95;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* ---- settings.html / <browser-settings> ----------------------------
+   The loader emits `.settings-form` with one `.settings-group`
+   `<fieldset>` per section (Template, Appearance, Performance,
+   Behaviour, Diagnostics) and a `.settings-savebar` strip at the
+   bottom whose Save button is the only commit point. Every input is
+   tagged with `data-setting="<key>"` so the shell's `save-settings`
+   handler can walk the live root and read staged values back. Bottom
+   padding on `.settings-page` makes room for the sticky save bar so
+   the last fieldset doesn't end up hidden under it. */
+.settings-page { padding-bottom: 96px; }
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+fieldset.settings-group {
+  background-color: #14202d;
+  border: 1px solid #314672;
+  border-radius: 12px;
+  padding: 14px 18px 18px;
+  margin: 0;
+}
+
+fieldset.settings-group legend {
+  color: #ffd35e;
+  font-weight: 700;
+  padding: 0 8px;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-row-toggle { margin-top: 10px; }
+
+.settings-label {
+  display: block;
+  color: #e0e8f4;
+  font-weight: 600;
+}
+
+.settings-hint {
+  display: block;
+  color: #9bb1d6;
+  font-size: 14px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.path { color: #9bb1d6; }
+
+/* Numeric / text inputs. Live-form.ts paints these via the
+   form-widget painter; we set explicit colours so the placeholder
+   palette matches the page card backdrops. Width AND height are set
+   explicitly because the live-layout column-flex axis was computing
+   the intrinsic input height too small inside `.settings-row`,
+   leaving only the bottom edge of the box visible under the labels —
+   pinning the height makes the input box paint at its full size. */
+.settings-form input[type="number"],
+.settings-form input[type="text"] {
+  background: #0e1830;
+  color: #e0e8f4;
+  border: 1px solid #2a3a66;
+  border-radius: 8px;
+  padding: 0 12px;
+  font: inherit;
+  width: 260px;
+  height: 44px;
+}
+
+/* Radio rows — used by the Template list (stacked) and the Theme row
+   (inline). Both share the `.settings-radio` class; `.inline` flips
+   the layout from one-per-line to flex-row. */
+.settings-radio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #0e1830;
+  border: 1px solid #2a3a66;
+  border-radius: 10px;
+  color: #e0e8f4;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.settings-radio.inline {
+  margin-top: 0;
+  padding: 8px 14px;
+  min-width: 100px;
+  justify-content: center;
+}
+
+.settings-radio input[type="radio"] {
+  margin: 0;
+}
+
+.settings-radio-label { flex: 1; }
+
+.settings-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-templates {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Checkbox toggle rows. Live-form.ts paints the checkmark inside the
+   box; we make the box noticeably larger than the default 20×20 so
+   the checkmark stroke (~12% of box width) reads from a normal
+   viewing distance. The dark fill + light highlight border give the
+   checked state high contrast against the row background. */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: #0e1830;
+  border: 1px solid #2a3a66;
+  border-radius: 10px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.settings-toggle input[type="checkbox"] {
+  width: 30px;
+  height: 30px;
+  background: #1a2440;
+  color: #7eda9f;
+  border: 1px solid #7aa2ff;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+/* Sticky bottom-right save bar — visible across the whole content
+   area, anchored to the bottom of the viewport so the Save button
+   stays reachable while the user scrolls through the form.
+
+   Width is set explicitly because the live-layout engine only honors
+   `right:` anchoring when `width` is known (see `layoutFixedRoot` →
+   `if (csRight !== undefined && explicitW !== undefined)`). Without
+   it the bar stretches to viewport width and the 999px radius paints
+   the whole content area as one giant ellipse. */
+.settings-savebar {
+  position: fixed;
+  right: 24px;
+  bottom: 18px;
+  width: 300px;
+  height: 60px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #14202d;
+  border: 1px solid #314672;
+  border-radius: 14px;
+}
+
+/* `flex-grow: 1` on the status text expands it to fill all the spare
+   main-axis space, anchoring the Save button flush against the bar's
+   right padding edge. Auto-margins (the usual CSS idiom) aren't
+   honored in the engine's flex layout (`live-layout.ts` drops them
+   to 0), so this is the load-bearing trick that keeps the button
+   pinned to the right regardless of how long the status text is. */
+.settings-status {
+  flex-grow: 1;
+  color: #9bb1d6;
+  font-size: 15px;
+}
+
+.settings-save {
+  border: none;
+  cursor: pointer;
+  color: #0b1220;
+  background: #ffd35e;
+  font: inherit;
+  font-weight: 800;
+  padding: 10px 22px;
+  border-radius: 999px;
+}
+
+.settings-save:active {
+  background: #4ea670;
+}
+
+/* Disabled Save = no unsaved changes. Pure colour delta so the
+   software-painter doesn't need a transition; cursor flips to `default`
+   to communicate "nothing to do." */
+.settings-save[disabled] {
+  background: #2a3a66;
+  color: #6a7c95;
+  cursor: default;
 }

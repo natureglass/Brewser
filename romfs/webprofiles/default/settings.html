@@ -1,34 +1,71 @@
 <!doctype html>
 <html lang="en">
 <head>
-<title>Settings — brewser</title>
-<link rel="stylesheet" href="brewser://assets/main.css">
-<style>
-  body { padding: 28px 48px; }
-  h2 { margin-top: 28px; }
-</style>
+  <title>Settings — brewser</title>
+  <link rel="stylesheet" href="brewser://assets/main.css">
 </head>
+
 <body>
-<h1>Settings</h1>
-<p class="lead">Tap a template to switch designs.</p>
 
-<h2>Templates</h2>
-<!-- The loader replaces <browser-templates> with a list of the
-     entries registered in `templates.json`. The active row (per
-     `config.json`) is rendered as a non-clickable "disabled" button;
-     every other row is a `<button data-action="select-template:...">`
-     whose tap the shell intercepts to rewrite `config.json` and
-     reload. -->
-<browser-templates></browser-templates>
+  <section class="top-section">
+    <header class="top-header">
+      <h2>Settings</h2>
+      <nav class="top-links" aria-label="Browser navigation">
+        <a class="munch-link" href="brewser://home/">Home</a>
+      </nav>
+    </header>
+  </section>
 
-<h2>Developer</h2>
-<!-- Dev surface moved here from the home top-bar 2026-06-02 so the
-     home page stays focused on Featured Apps. Single row pointing
-     at brewser://dev/ (test fixtures + Khronos conformance corpora). -->
-<ul class="settings-list">
-  <li><a href="brewser://dev/">Dev experiments</a>
-    <span class="desc">HTML / CSS / canvas / WebGL test fixtures and the full Khronos WebGL 1 / WebGL 2 conformance suites.</span>
-  </li>
-</ul>
+  <p class="lead">Core behavior settings for Brewser.</p>
+
+  <browser-settings></browser-settings>
+
+  <h2>Developer</h2>
+
+  <ul class="settings-list">
+    <li><a href="brewser://dev/">Dev experiments</a>
+      <span class="desc">HTML / CSS / canvas / WebGL test fixtures and the full Khronos WebGL 1 / WebGL 2 conformance suites.</span>
+    </li>
+  </ul>
+
+  <script>
+    (function () {
+      var saveBtn = document.querySelector('[data-settings-save]');
+      var status = document.querySelector('[data-settings-status]');
+      if (!saveBtn) return;
+
+      function readValue(el) {
+        var tag = (el.tagName || '').toUpperCase();
+        var type = (el.getAttribute && el.getAttribute('type') || '').toLowerCase();
+        if (tag === 'INPUT' && (type === 'checkbox' || type === 'radio')) {
+          return el.checked ? '1' : '0';
+        }
+        return el.value != null ? String(el.value) : '';
+      }
+
+      var widgets = document.querySelectorAll('[data-setting]');
+      var baseline = [];
+      for (var i = 0; i < widgets.length; i++) baseline.push(readValue(widgets[i]));
+
+      function recompute() {
+        var dirty = false;
+        for (var i = 0; i < widgets.length; i++) {
+          if (readValue(widgets[i]) !== baseline[i]) { dirty = true; break; }
+        }
+        if (dirty) {
+          saveBtn.removeAttribute('disabled');
+          if (status) status.textContent = 'Unsaved changes.';
+        } else {
+          saveBtn.setAttribute('disabled', '');
+          if (status) status.textContent = 'No unsaved changes.';
+        }
+      }
+
+      for (var j = 0; j < widgets.length; j++) {
+        widgets[j].addEventListener('input', recompute);
+        widgets[j].addEventListener('change', recompute);
+      }
+    })();
+  </script>
 </body>
 </html>

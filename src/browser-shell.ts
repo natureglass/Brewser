@@ -1,12 +1,19 @@
-import { captureNativeFetch, nxScreen, WebView, type WebViewDelegate } from '@switch-web/runtime';
+import { captureNativeFetch, nxScreen, setNavDebugEnabled, WebView, type WebViewDelegate } from '@switch-web/runtime';
 
 // Shell-input diagnostic. Writes which `input.kind` the shell saw and
 // before/after the navigateTo dispatch — narrows whether a click ever
 // reached navigateTo, vs. the touch listener never firing, vs. the
-// navigation hanging in load().
+// navigation hanging in load(). Gated by `config.json` -> `navDebug`;
+// flipped on at startup once `loadConfig` runs (see `setShellInputDebugEnabled`
+// call in `start()`).
 const _SHELL_INPUT_DIAG_PATH = 'sdmc:/switch/brewser/logs/shell-nav-diag.log';
 const _shellInputDiagStart = Date.now();
+let _shellInputDebugEnabled = false;
+function setShellInputDebugEnabled(enabled: boolean): void {
+	_shellInputDebugEnabled = enabled;
+}
 function _shellInputDiag(label: string): void {
+	if (!_shellInputDebugEnabled) return;
 	try {
 		const sw = (globalThis as { Switch?: { appendFileSync?: (p: string, d: string) => void } }).Switch;
 		if (sw?.appendFileSync) {
@@ -35,10 +42,10 @@ import {
 	tickAnimationFrames,
 	type PageScriptContext,
 } from './scripts/canvas-runner.js';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLiveProfileRoot, setLivePageBase, type LiveElement } from './scripts/live-dom.js';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLivePageBase, setSwbImgDebugEnabled, type LiveElement } from './scripts/live-dom.js';
 import { setMediaColorScheme } from './scripts/live-css.js';
 import { setCssViewport } from './scripts/inline-css.js';
-import { openKeyboardAndApply, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
+import { getInputChecked, getInputValue, openKeyboardAndApply, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
@@ -81,6 +88,7 @@ import {
 	setLiveViewport,
 	setNavigating,
 	setStarEnabled,
+	setTouchDebugEnabled,
 	waitForControllerInput,
 	type BrowserMode,
 } from './input/controller-shortcuts.js';
@@ -231,6 +239,18 @@ export class BrowserShell {
 		// `controller-shortcuts.ts` (which fires shell actions for
 		// labels assigned back/forward/reload/etc.).
 		setButtonMapping(startupConfig.buttonMapping);
+		// Wire the `navDebug` config gate. Off by default; flip on to
+		// trace navigation flow + shell input + touch dispatch into
+		// `sdmc:/switch/brewser/logs/shell-nav-diag.log` from all three
+		// writer sites (runtime WebView, shell input pump, controller-
+		// shortcuts touch path).
+		setShellInputDebugEnabled(startupConfig.navDebug);
+		setNavDebugEnabled(startupConfig.navDebug);
+		setTouchDebugEnabled(startupConfig.navDebug);
+		// Image-load diagnostic gate (`config.json` -> `swbImgDebug`).
+		// Independent of `navDebug` — leave one on while debugging
+		// without paying the I/O cost of the other.
+		setSwbImgDebugEnabled(startupConfig.swbImgDebug);
 		// Click-sound subsystem. `clickSounds` in config.json gates the
 		// feature; the path comes from the active profile's seeded
 		// asset slot (`<storageRoot>assets/click.wav`). Preload kicks
@@ -386,8 +406,9 @@ export class BrowserShell {
 		// the page behind the keyboard can be scrolled while it's modal
 		// (right-stick Y, swipe above the panel) — same behavior as the
 		// URL bar / search paths.
-		setKeyboardOpener((initial) => this.keyboard.open(initial, {
+		setKeyboardOpener((initial, options) => this.keyboard.open(initial, {
 			onScroll: (delta) => this.handleScroll(delta),
+			validate: options?.validate,
 		}));
 		// Wire `<input>.focus()` calls from page scripts (Cocos Creator's
 		// EditBox does `document.createElement('input')` + appendChild +
@@ -397,11 +418,6 @@ export class BrowserShell {
 		// + fires input/change/blur. Without this, Cocos's text input is
 		// dead (its focus() call is a no-op without a registered handler).
 		setInputFocusHandler((el) => { void openKeyboardAndApply(el); });
-		// Let live-DOM `<img>` resolve profile-pages-relative srcs
-		// (`../pages/<rest>`) to the absolute SD-card profile path, so page
-		// images load the editable profile copy instead of nx.js's romfs
-		// base (which needs a .nro rebuild + redeploy to update).
-		setLiveProfileRoot(this.profile.storageRoot);
 		// 2026-06-08 ROUND 46: expose a page-script-callable function so
 		// `canvas.requestFullscreen()` (Web Fullscreen API) can trigger
 		// the same fullscreen-canvas flow as the gamepad B-button
@@ -1610,6 +1626,9 @@ export class BrowserShell {
 			case 'clear-bookmarks':
 				await this.clearBookmarks();
 				break;
+			case 'save-settings':
+				await this.saveSettings();
+				break;
 			default:
 				// Unknown action — no-op.
 				break;
@@ -1715,6 +1734,194 @@ export class BrowserShell {
 		// new active template row shows) and re-paints with the new
 		// colours / padding.
 		await this.runNavigation(() => this.navigation.reload());
+	}
+
+	/**
+	 * Settings-page Save button handler. Walks the live DOM for every
+	 * `[data-setting="<key>"]` widget the loader emitted, reads the
+	 * staged value via `getInputValue` / `getInputChecked`, merges the
+	 * result into `<profile>/config.json` (preserving any unknown keys
+	 * the user may have hand-edited) using the SAME clamps + type guards
+	 * `loadConfig` enforces, then re-applies the keys whose runtime
+	 * hooks can take effect without a restart. Keys without a runtime
+	 * apply path (`maxHistory`, `autoRotate`, `buttonMapping`) round-
+	 * trip into the file and take effect on next launch.
+	 *
+	 * Template changes go through the same loadTemplate + setTemplate +
+	 * refreshTemplateBackgrounds dance `selectTemplate` does so the
+	 * chrome / keyboard / icons reflect the new design immediately.
+	 * Mirrors selectTemplate's write shape: spread the existing config
+	 * forward, overlay the staged edits, then `Switch.writeFileSync` so
+	 * a partial / hand-edited config doesn't lose unknown keys.
+	 */
+	private async saveSettings(): Promise<void> {
+		// Page-rendered Save button carries `disabled` while there are no
+		// staged edits (managed by settings.html's inline diff script).
+		// findTapIntent ignores disabled state and dispatches the action
+		// anyway, so guard here — a no-op save would still rewrite
+		// config.json with identical content, costing an unnecessary
+		// reload. Walk the live root for the button by its action; if
+		// it's missing the page is something else entirely (clean no-op).
+		if (this.isSaveButtonDisabled()) return;
+		const configPath = `${this.profile.appRoot}config.json`;
+		const prior = loadConfig(this.profile.appRoot);
+		const staged = this.readStagedSettings();
+		if (Object.keys(staged).length === 0) return; // nothing to commit
+
+		// Spread the on-disk raw object so user-edited unknown keys
+		// survive — same shape `selectTemplate` uses.
+		let next: Record<string, unknown> = { ...prior, ...staged };
+		try {
+			const raw = Switch.readFileSync(configPath);
+			if (raw) {
+				const parsed = JSON.parse(new TextDecoder().decode(raw));
+				if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+					next = { ...(parsed as Record<string, unknown>), ...staged };
+				}
+			}
+		} catch (_) {
+			// Missing / unreadable — `next` already carries clamped
+			// defaults + staged edits, so writing it produces a valid
+			// file either way.
+		}
+		try {
+			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
+		} catch (error) {
+			console.debug(`[brewser] write config.json failed: ${error}`);
+			return;
+		}
+
+		// Re-apply runtime hooks for keys whose effect we want live
+		// without forcing a restart. Keys absent from `staged` go
+		// untouched — no point re-pushing a value the user didn't change.
+		const fresh = loadConfig(this.profile.appRoot);
+		if ('theme' in staged) {
+			this.colorScheme = fresh.theme;
+			setMediaColorScheme(this.colorScheme);
+			setLiveFormColorScheme(this.colorScheme);
+		}
+		if ('clickSounds' in staged) {
+			setClickSoundEnabled(fresh.clickSounds);
+		}
+		if ('videoNVTEGRA' in staged) {
+			setVideoTryHwAccel(fresh.videoNVTEGRA);
+		}
+		if ('wwwRenderChunkMs' in staged) {
+			this.wwwRenderChunkMs = fresh.wwwRenderChunkMs;
+			setLiveBuildChunkMs(fresh.wwwRenderChunkMs);
+		}
+		if ('scrollChunkMs' in staged) {
+			setLiveScrollChunkMs(fresh.scrollChunkMs);
+		}
+		if ('mouseIdleMs' in staged) {
+			setCursorIdleMs(fresh.mouseIdleMs);
+		}
+		if ('navDebug' in staged) {
+			setShellInputDebugEnabled(fresh.navDebug);
+			setNavDebugEnabled(fresh.navDebug);
+			setTouchDebugEnabled(fresh.navDebug);
+		}
+		if ('swbImgDebug' in staged) {
+			setSwbImgDebugEnabled(fresh.swbImgDebug);
+		}
+		// `maxHistory` is fixed at HistoryStore construction; `autoRotate`
+		// has no live consumer today; `buttonMapping` is out of scope for
+		// this form. All three round-trip into config.json above and
+		// take effect on next launch.
+
+		// Template + searchEngine are read by the resource loader at
+		// render time, so a reload picks them up. If template actually
+		// changed, push the new design into the UI / keyboard / icons
+		// the same way selectTemplate does — otherwise the chrome would
+		// keep painting in the old colours until next launch.
+		if ('template' in staged && staged.template !== prior.template) {
+			this.template = loadTemplate(this.profile.appRoot);
+			this.ui.setTemplate(this.template);
+			this.keyboard.setTemplate(this.template);
+			this.publishChromeRegion();
+			this.ui.setIcons(await loadChromeIcons(this.resolveIconPaths()));
+			await this.refreshTemplateBackgrounds();
+		}
+
+		// Reload the page so the form re-renders against the persisted
+		// values (radio + select + number widgets show the saved state,
+		// the inline script's "no unsaved changes" baseline resets, and
+		// the search-bar logo on any other page reflects the new engine).
+		await this.runNavigation(() => this.navigation.reload());
+	}
+
+	/** Find the Settings page's Save button in the live root and return
+	 * whether it carries the `disabled` attribute. Used by saveSettings
+	 * to short-circuit no-op invocations without rewriting config.json
+	 * or paying the reload cost. Returns false when the button isn't in
+	 * the live tree at all (some other page issued a `save-settings`
+	 * action — treat as "go ahead", let the no-staged-widgets fallback
+	 * in saveSettings handle it). */
+	private isSaveButtonDisabled(): boolean {
+		const find = (el: LiveElement): LiveElement | null => {
+			if (el.getAttribute('data-action') === 'save-settings') return el;
+			for (const c of el.children) {
+				const found = find(c);
+				if (found) return found;
+			}
+			return null;
+		};
+		const btn = find(getLiveRoot());
+		return !!btn && btn.hasAttribute('disabled');
+	}
+
+	/** Walk the live root collecting every `[data-setting="<key>"]`
+	 * widget and return the staged value per key, clamped + coerced
+	 * to match `loadConfig`'s parser. Radios with the same key collapse
+	 * to the single checked one's value; unknown keys are dropped.
+	 * Numeric out-of-range inputs are clamped (not rejected) so a
+	 * type-in like `9999` in `wwwRenderChunkMs` saves as `1000`. */
+	private readStagedSettings(): Record<string, unknown> {
+		const out: Record<string, unknown> = {};
+		const visit = (el: LiveElement): void => {
+			const key = el.getAttribute('data-setting');
+			if (key) this.captureStaged(out, key, el);
+			for (const c of el.children) visit(c);
+		};
+		visit(getLiveRoot());
+		return out;
+	}
+
+	private captureStaged(out: Record<string, unknown>, key: string, el: LiveElement): void {
+		const tag = el.tagName;
+		const type = (el.getAttribute('type') ?? '').toLowerCase();
+		// Radio groups: only the checked one contributes. An
+		// already-recorded value for the same key (from an earlier
+		// sibling radio) wins, so the first checked radio in document
+		// order is the staged choice.
+		if (tag === 'INPUT' && type === 'radio') {
+			if (getInputChecked(el) && !(key in out)) out[key] = getInputValue(el);
+			return;
+		}
+		if (tag === 'INPUT' && type === 'checkbox') {
+			out[key] = getInputChecked(el);
+			return;
+		}
+		// Numeric inputs: parse + clamp to the same bounds loadConfig
+		// uses, so the on-disk value is always valid even if the user
+		// type-ins something outside the range.
+		if (tag === 'INPUT' && type === 'number') {
+			const raw = parseFloat(getInputValue(el));
+			if (!Number.isFinite(raw)) return;
+			const min = parseFloat(el.getAttribute('min') ?? '');
+			const max = parseFloat(el.getAttribute('max') ?? '');
+			let v = raw;
+			if (Number.isFinite(min)) v = Math.max(min, v);
+			if (Number.isFinite(max)) v = Math.min(max, v);
+			// maxHistory in particular must be an integer; trunc when
+			// the field exposes an integer-shaped range (min/max both
+			// integers and no step="0.xxx" overriding the default 1).
+			if (Number.isInteger(min) && Number.isInteger(max)) v = Math.trunc(v);
+			out[key] = v;
+			return;
+		}
+		// <select> + plain text inputs: pass the raw string through.
+		out[key] = getInputValue(el);
 	}
 
 	/** Load (or clear) the toolbar + keyboard background images

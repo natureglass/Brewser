@@ -1,6 +1,5 @@
 import { nxScreen } from '@switch-web/runtime';
 import {
-	CHROME_LAYOUT,
 	COMBO_BUTTONS,
 } from '../browser-config.js';
 import {
@@ -10,7 +9,7 @@ import {
 	setInternalLiveScrollY, setInternalLiveViewport,
 	type LiveElement, type LiveViewport,
 } from '../scripts/live-dom.js';
-import { getComputedLiveStyle, setPseudoActive } from '../scripts/live-css.js';
+import { getComputedLiveStyle } from '../scripts/live-css.js';
 import { handleFormTap, isFormWidget } from '../scripts/live-form.js';
 import {
 	setMouseChromeMode,
@@ -19,11 +18,20 @@ import {
 	type MouseTickResult,
 } from './page-mouse-forwarder.js';
 import { listMappedButtons, type ButtonAction } from './button-router.js';
-import { playClick } from '../audio/click-sound.js';
 import { getLayoutBox } from '../scripts/live-layout.js';
-import { findTapIntent, patchLiveDirtyRegions } from '../scripts/live-overlay.js';
+import { patchLiveDirtyRegions } from '../scripts/live-overlay.js';
 import { isKeyboardOpen } from '../scripts/live-paint-control.js';
 import { hitTestVideoControls, videoIsPaused } from '../scripts/live-video.js';
+import {
+	abortLivePress,
+	beginLivePress,
+	dispatchChromeTap,
+	endLivePress,
+	setChromeTapRegion,
+	setChromeTapStarEnabled,
+	setLiveInputIntentSink,
+	type LivePressHandle,
+} from './live-input-dispatch.js';
 
 const nativeSetTimeout = setTimeout.bind(globalThis);
 
@@ -202,6 +210,9 @@ export function setChromeRegion(y0: number, y1: number): void {
 	// Mirror into the mouse forwarder so it can fall-through B/ZR
 	// when the cursor is in the chrome strip on normal-mode pages.
 	setMouseChromeRegion(y0, y1);
+	// Mirror into the shared input dispatcher so engine-mouse + touch
+	// share one chrome-tap router.
+	setChromeTapRegion(y0, y1);
 }
 
 /** Whether the star (bookmark) button is currently shown + tappable.
@@ -211,6 +222,7 @@ export function setChromeRegion(y0: number, y1: number): void {
 let starEnabled = true;
 export function setStarEnabled(enabled: boolean): void {
 	starEnabled = enabled;
+	setChromeTapStarEnabled(enabled);
 }
 
 /**
@@ -385,6 +397,11 @@ interface LiveDragSession {
 	element: LiveElement;
 	startX: number;
 	startY: number;
+	/** Handle returned by `beginLivePress`. Held for the duration of
+	 * the drag so `touchend` can call `endLivePress` (intent + form-tap
+	 * dispatch + deferred :active clear) on the SAME handle that opened
+	 * the press. Cleared together with `liveDragSession`. */
+	pressHandle: LivePressHandle;
 }
 let liveDragSession: LiveDragSession | null = null;
 /** Vertical-scroll drag session — set if the touchstart landed inside
@@ -468,6 +485,14 @@ function findChromelessVideoAncestor(el: LiveElement): LiveElement | null {
 export function installCanvasTouch(): void {
 	if (touchListenerInstalled) return;
 	touchListenerInstalled = true;
+
+	// Register `pushInput` as the intent sink for the shared
+	// live-input-dispatch module. Both touch (this file) and engine-
+	// mouse (page-mouse-forwarder.ts) emit shell intents through the
+	// dispatcher, which routes them back through this sink so the
+	// existing `waitForControllerInput` poll loop picks them up
+	// identically regardless of input source.
+	setLiveInputIntentSink((intent) => pushInput(intent as ControllerInput));
 
 	const canvas = nxScreen();
 	canvas.addEventListener('touchstart', (event) => {
@@ -607,30 +632,15 @@ export function installCanvasTouch(): void {
 					// double-fired deltas.
 					pageScrollSession = { startY: y, lastY: y, moved: false };
 				}
-				const baseEvent = {
-					clientX: x, clientY: y,
-					pageX: x, pageY: y,
-					screenX: x, screenY: y,
-					button: 0, buttons: 1,
-					preventDefault: () => { /* no-op — already consumed */ },
-					stopPropagation: () => { /* no-op */ },
-				};
-				const touchObj = {
-					clientX: x, clientY: y,
-					pageX: x, pageY: y,
-					screenX: x, screenY: y,
-					identifier: 0,
-				};
-				liveDragSession = { element: liveHit, startX: x, startY: y };
-				// M2.2: set :active state on the pressed element.
-				setPseudoActive(liveHit, true);
-				liveHit.dispatchEvent({ type: 'mousedown', ...baseEvent });
-				liveHit.dispatchEvent({
-					type: 'touchstart',
-					touches: [touchObj], changedTouches: [touchObj], targetTouches: [touchObj],
-					preventDefault: baseEvent.preventDefault,
-					stopPropagation: baseEvent.stopPropagation,
-				});
+				// 2026-06-10: press dispatch + :active toggle + event
+				// emission unified in `live-input-dispatch.beginLivePress`.
+				// Touch and engine-mouse share the same lifecycle now so
+				// the visible-hold timer that defers the `:active` clear
+				// (so fast taps still flash a pressed visual) applies to
+				// both. `endLivePress` runs on touchend below to dispatch
+				// click + intent + handleFormTap.
+				const pressHandle = beginLivePress(liveHit, x, y, 'touch');
+				liveDragSession = { element: liveHit, startX: x, startY: y, pressHandle };
 				// M2.5: click + form-tap dispatch is DEFERRED to touchend
 				// so a scroll-drag swipe suppresses the trailing click.
 				// The touchend handler reads liveDragSession + liveScrollSession.moved
@@ -651,43 +661,14 @@ export function installCanvasTouch(): void {
 		// fullscreen-canvas mode.
 		if (browserMode !== 'normal') return;
 
-		if (y >= chromeY0 && y < chromeY1) {
-			// Every tap in the chrome y-strip lands on one of the
-			// toolbar buttons (back / forward / refresh / home / star
-			// / settings) or falls through to the URL bar — all are
-			// interactive, so play the click feedback unconditionally
-			// here. Gated by `config.json clickSounds` inside
-			// `playClick`.
-			playClick();
-			const backEnd = CHROME_LAYOUT.backX + CHROME_LAYOUT.backWidth;
-			const forwardEnd = CHROME_LAYOUT.forwardX + CHROME_LAYOUT.forwardWidth;
-			const refreshEnd = CHROME_LAYOUT.refreshX + CHROME_LAYOUT.refreshWidth;
-			const homeEnd = CHROME_LAYOUT.homeX + CHROME_LAYOUT.homeWidth;
-			const starEnd = CHROME_LAYOUT.starX + CHROME_LAYOUT.starWidth;
-			const settingsEnd = CHROME_LAYOUT.settingsX + CHROME_LAYOUT.settingsWidth;
-			if (x >= CHROME_LAYOUT.backX && x < backEnd) {
-				pushInput({ kind: 'back' });
-			} else if (x >= CHROME_LAYOUT.forwardX && x < forwardEnd) {
-				pushInput({ kind: 'forward' });
-			} else if (x >= CHROME_LAYOUT.refreshX && x < refreshEnd) {
-				// Refresh slot — reuses the existing `reload` input kind that
-				// the Y button rising-edge handler also fires.
-				pushInput({ kind: 'reload' });
-			} else if (x >= CHROME_LAYOUT.homeX && x < homeEnd) {
-				pushInput({ kind: 'home' });
-			} else if (starEnabled && x >= CHROME_LAYOUT.starX && x < starEnd) {
-				// Star tap only when the button is shown (bookmarkable
-				// http/https page). On local brewser:// pages the star is
-				// hidden and the URL occupies its slot, so the tap falls
-				// through to the address-bar branch below.
-				pushInput({ kind: 'star' });
-			} else if (x >= CHROME_LAYOUT.settingsX && x < settingsEnd) {
-				pushInput({ kind: 'settings' });
-			} else {
-				pushInput({ kind: 'address-bar' });
-			}
-			return;
-		}
+		// 2026-06-10: chrome-strip dispatch unified via
+		// `live-input-dispatch.dispatchChromeTap`. Touch and engine-mouse
+		// share one chrome router; the mouse forwarder used to synth-touch
+		// nxScreen to reach this branch and the same module is now called
+		// directly there. Plays the chrome click sound and pushes the
+		// shell intent via the registered sink (controller-shortcuts'
+		// `pushInput`).
+		if (dispatchChromeTap(x, y)) return;
 
 		// Below the chrome strip: no static-layout tap targets remain.
 		// Live-DOM hit-test above already handled any content tap that
@@ -835,101 +816,45 @@ export function installCanvasTouch(): void {
 		const wasDrag = (liveScrollSession?.moved === true)
 			|| (pageScrollSession?.moved === true)
 			|| (videoSwipeSession?.moved === true);
-		if (!wasDrag) {
+		if (wasDrag) {
+			// Drag suppresses click + intent. Skip the `endLivePress`
+			// event sequence too — only the deferred :active clear
+			// needs to run so the pressed element doesn't stay stuck.
+			// `abortLivePress` does exactly that.
+			abortLivePress(liveDragSession.pressHandle);
+		} else {
 			const target = liveDragSession.element;
-			target.dispatchEvent({ type: 'click', ...baseEvent });
-			// Walk up the live tree from the tapped element looking for
-			// navigation / button / summary intents. This is how
-			// <a href> / <button data-action> / <summary> taps reach
-			// the shell's navigation handlers.
-			const intent = findTapIntent(
-				target, x, y,
-				liveViewport.x, liveViewport.y, liveScrollY,
-			);
-			// Form widgets normally open the keyboard / cycle on tap. But
-			// a widget that opts into a shell action via `data-action`
-			// (e.g. the search `<input data-action="search">`) should
-			// fire that action instead of the default widget behaviour —
-			// otherwise both the keyboard AND the action would trigger.
-			const widgetHasAction = intent?.kind === 'button-action';
-			if (isFormWidget(target) && !widgetHasAction) {
-				// Pass the tap's screen-x so range sliders can compute
-				// the new value from the position; other widgets ignore it.
-				_touchDiag('  → route: handleFormTap <' + target.tagName + '>');
-				// Audible feedback for form-widget taps (buttons, inputs,
-				// summary, labels). Fires once per touchend — the
-				// equivalent call from the touchmove range-drag path
-				// stays silent, otherwise every slider drag tick would
-				// chirp.
-				playClick();
-				// `true`: we already dispatched `click` on `target` above, so
-				// handleFormTap must NOT re-fire it (avoids double-firing a
-				// <button>'s handler — which made Stop instantly re-Play).
-				void handleFormTap(target, x, true);
-			} else if (!widgetHasAction && isKeyboardOpen()) {
-				_touchDiag('  → route: generic-click patchLiveDirtyRegions <' + target.tagName + '>');
-				// Generic click target while the on-canvas keyboard is
-				// open — tapping outside a form widget should also
-				// close/redraw the keyboard region. In every OTHER
-				// case we skip this explicit patch call: clicks that
-				// actually mutate state already bump the live-tree
-				// version via `setPseudoActive` etc., which the
-				// onTick `treeVersionNow !== this.lastTickTreeVersion`
-				// branch picks up on the next tick and repaints
-				// then. The earlier "always patch on every tap"
-				// behaviour caused a visible FPS drop on every tap
-				// at body / div / text — the patch was either a
-				// no-op (slow) or escalated to a full rebuild for
-				// a tap that had mutated nothing.
-				patchLiveDirtyRegions();
+			// 2026-06-10: click + intent + form-tap + deferred
+			// :active clear unified in `endLivePress`. Returns the
+			// `video-frame-tap` / `dbltap-action` cases so the
+			// touch controller can apply single-vs-double-tap
+			// discrimination — those two require timer state only
+			// this file owns.
+			_touchDiag('  → endLivePress on <' + target.tagName + '>');
+			const unhandled = endLivePress(liveDragSession.pressHandle, x, y);
+			if (unhandled?.kind === 'video-frame-tap') {
+				_touchDiag('    → handleVideoFrameTap');
+				handleVideoFrameTap(unhandled.video);
+			} else if (unhandled?.kind === 'dbltap-action') {
+				_touchDiag('    → handleDoubleTapAction ' + unhandled.action);
+				handleDoubleTapAction(unhandled.el, unhandled.action);
 			}
-			_touchDiag('  → touchend on <' + target.tagName + '> intent=' +
-				(intent ? intent.kind : 'none'));
-			if (intent) {
-				// Audible feedback for every interactive activation —
-				// link navigation, button-action, summary toggle, video
-				// controls. Skipped for `dbltap-action` because the
-				// FIRST tap of a double-tap shouldn't fire a sound (it
-				// would chirp on every single tap even when the user
-				// intended a double-tap); the second tap path goes
-				// through `handleDoubleTapAction` which already gates
-				// on the timing window. Gated globally by the
-				// `clickSounds` config inside `playClick`.
-				if (intent.kind !== 'dbltap-action') playClick();
-				if (intent.kind === 'navigate') {
-					_touchDiag('    → pushInput(navigate ' + intent.href + ')');
-					pushInput({ kind: 'navigate', url: intent.href });
-				} else if (intent.kind === 'button-action') {
-					_touchDiag('    → pushInput(button-action ' + intent.action + ')');
-					pushInput({ kind: 'button-action', action: intent.action });
-				} else if (intent.kind === 'dbltap-action') {
-					_touchDiag('    → handleDoubleTapAction ' + intent.action);
-					handleDoubleTapAction(intent.el, intent.action);
-				} else if (intent.kind === 'summary') {
-					_touchDiag('    → pushInput(summary-toggle)');
-					pushInput({ kind: 'summary-toggle', summary: intent.summary });
-				} else if (intent.kind === 'video-control') {
-					const c = intent.control;
-					_touchDiag('    → pushInput(video-' + c.kind + ')');
-					if (c.kind === 'play') {
-						pushInput({ kind: 'video-play', video: intent.video });
-					} else if (c.kind === 'pause') {
-						pushInput({ kind: 'video-pause', video: intent.video });
-					} else if (c.kind === 'mute-toggle' || c.kind === 'unmute-toggle') {
-						pushInput({ kind: 'video-mute-toggle', video: intent.video });
-					} else if (c.kind === 'fullscreen-enter') {
-						pushInput({ kind: 'video-fullscreen-enter', video: intent.video });
-					} else if (c.kind === 'seek') {
-						pushInput({ kind: 'video-seek', video: intent.video, ratio: c.ratio });
-					}
-				} else if (intent.kind === 'video-frame-tap') {
-					handleVideoFrameTap(intent.video);
+			// Generic-tap-while-keyboard-open patch: tapping outside
+			// a form widget should also redraw the keyboard region
+			// (close affordance). `endLivePress` handled the
+			// form-widget case; we only run the patch for non-widget
+			// non-intent hits.
+			if (!unhandled && isKeyboardOpen()) {
+				let widgetTarget: LiveElement | null = null;
+				for (let n: LiveElement | null = target; n; n = n.parent) {
+					if (isFormWidget(n)) { widgetTarget = n; break; }
+				}
+				if (!widgetTarget) {
+					_touchDiag('  → keyboard-open generic-click patch');
+					patchLiveDirtyRegions();
 				}
 			}
 		}
-
-		// M2.2: clear :active on the element the drag opened on.
-		setPseudoActive(liveDragSession.element, false);
 		liveDragSession = null;
 		// M2.5: close the scroll-drag session.
 		liveScrollSession = null;
@@ -940,7 +865,14 @@ export function installCanvasTouch(): void {
 
 const _TOUCH_DIAG_PATH = 'sdmc:/switch/brewser/logs/shell-nav-diag.log';
 const _touchDiagStart = Date.now();
+let _touchDebugEnabled = false;
+/** Gate the controller-shortcuts touch diag log. Flipped on by
+ * `browser-shell.start()` from `config.json` -> `navDebug`. */
+export function setTouchDebugEnabled(enabled: boolean): void {
+	_touchDebugEnabled = enabled;
+}
 function _touchDiag(label: string): void {
+	if (!_touchDebugEnabled) return;
 	try {
 		const sw = (globalThis as { Switch?: { appendFileSync?: (p: string, d: string) => void } }).Switch;
 		if (sw?.appendFileSync) {

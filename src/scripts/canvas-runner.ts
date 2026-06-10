@@ -1254,6 +1254,20 @@ function liveSelectorPredicate(selector: string): ((el: LiveElement) => boolean)
 		const cls = sel.slice(1);
 		return (el) => (el.getAttribute('class') || '').split(/\s+/).indexOf(cls) >= 0;
 	}
+	// Bracket attribute selector — `[attr]` (existence) or
+	// `[attr="value"]` / `[attr=value]` (equality). Settings.html's
+	// inline script uses `[data-setting]` to walk every staged widget;
+	// without this branch querySelectorAll returned null and the Save
+	// button never enabled. Quoted and unquoted values both accepted.
+	const attrMatch = /^\[([a-zA-Z_][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]$/.exec(sel);
+	if (attrMatch) {
+		const name = attrMatch[1];
+		const value = attrMatch[2] ?? attrMatch[3] ?? attrMatch[4];
+		if (value === undefined) {
+			return (el) => el.hasAttribute(name);
+		}
+		return (el) => el.getAttribute(name) === value;
+	}
 	if (/^[a-z][a-z0-9-]*$/i.test(sel)) {
 		const want = sel.toUpperCase();
 		return (el) => el.tagName === want;

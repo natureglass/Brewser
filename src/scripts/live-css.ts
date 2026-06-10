@@ -29,8 +29,6 @@
 //     into descendants per CSS spec.
 //
 // Out of scope for M2.2 (handled later):
-//   - Adjacent sibling (+) / general sibling (~) combinators (lil-gui
-//     uses + once; visually low-stakes).
 //   - Vendor pseudo-elements (`::-webkit-*`).
 //   - `@font-face` (custom font loading — M2.6 substitutes Unicode
 //     glyphs for lil-gui's icon font).
@@ -78,7 +76,13 @@ interface Compound {
 	pseudos: SimplePseudo[];
 }
 
-type Combinator = ' ' | '>';
+// Selector combinators. `' '` = descendant, `'>'` = child, `'+'` =
+// adjacent sibling, `'~'` = general sibling. Sibling combinators were
+// added (2026-06-10) to support CSS-only radio-button tab UIs on the
+// internal apps page: `input:checked ~ .panels .panel[data-tab="X"]`
+// switches which panel is visible by reacting to the active tab's
+// `:checked` flip. See matchChain for the right-to-left walk logic.
+type Combinator = ' ' | '>' | '+' | '~';
 
 interface SelectorChain {
 	compounds: Compound[];
@@ -373,6 +377,14 @@ const computedCache = new WeakMap<LiveElement, ComputedLiveStyle>();
 /** Per-element pseudo-class state. */
 const activeElements = new WeakSet<LiveElement>();
 const focusElements = new WeakSet<LiveElement>();
+/** (2026-06-10) Engine-mouse hover state. Touch never sets this; only the
+ * page-mouse-forwarder's `updateHover` does. Tracks the LEAF element under
+ * the cursor — ancestor `:hover` rules are evaluated by the matcher via
+ * the optional virtual-pseudo path, but the source-of-truth set only
+ * contains the deepest hit. (Real browsers propagate `:hover` to all
+ * ancestors of the hovered element; we keep it leaf-only to match the
+ * existing `:active` convention in this file.) */
+const hoverElements = new WeakSet<LiveElement>();
 
 /** Phase 2.5.1 perf fix (2026-05-25): track which stylesheets contain
  * rules that reference :active / :focus / :checked pseudo-classes. When
@@ -390,8 +402,18 @@ const focusElements = new WeakSet<LiveElement>();
 const stylesheetsWithActive = new Set<LiveElement>();
 const stylesheetsWithFocus = new Set<LiveElement>();
 const stylesheetsWithChecked = new Set<LiveElement>();
+const stylesheetsWithHover = new Set<LiveElement>();
+/** (2026-06-10) Stylesheets containing at least one rule with a
+ * sibling combinator (`+` or `~`). A `:checked` flip on a radio button
+ * can change the cascade of LATER siblings (e.g. `input:checked ~
+ * .panel`); the radio-click fast path in live-form.ts patches only the
+ * radios themselves and would leave those panels stale. Pages with no
+ * sibling rules keep the fast path; pages with sibling rules pay the
+ * cost of a full rebuild on each radio click — acceptable since taps
+ * on tab UIs are rare. */
+const stylesheetsWithSibling = new Set<LiveElement>();
 
-function rulesUsePseudo(rules: ParsedRule[], kind: 'active' | 'focus' | 'checked'): boolean {
+function rulesUsePseudo(rules: ParsedRule[], kind: 'active' | 'focus' | 'checked' | 'hover'): boolean {
 	for (const rule of rules) {
 		for (const compound of rule.chain.compounds) {
 			for (const pseudo of compound.pseudos) {
@@ -405,7 +427,20 @@ function rulesUsePseudo(rules: ParsedRule[], kind: 'active' | 'focus' | 'checked
 	return false;
 }
 
-function chainUsesPseudo(chain: SelectorChain, kind: 'active' | 'focus' | 'checked'): boolean {
+/** True iff any rule's selector chain uses `+` or `~`. Used to gate
+ * the radio-click fast path: when the cascade depends on sibling
+ * traversal, a localised patch is insufficient and a full rebuild is
+ * required. */
+function rulesUseSibling(rules: ParsedRule[]): boolean {
+	for (const rule of rules) {
+		for (const c of rule.chain.combinators) {
+			if (c === '+' || c === '~') return true;
+		}
+	}
+	return false;
+}
+
+function chainUsesPseudo(chain: SelectorChain, kind: 'active' | 'focus' | 'checked' | 'hover'): boolean {
 	for (const compound of chain.compounds) {
 		for (const pseudo of compound.pseudos) {
 			if (pseudo.kind === kind) return true;
@@ -434,13 +469,27 @@ function chainUsesPseudo(chain: SelectorChain, kind: 'active' | 'focus' | 'check
  * full repaint" symptom on pages whose author CSS has a few
  * `:active` rules targeting specific classes.
  */
+// 2026-06-10 BUG FIX: these gate functions used to compare a forced-on
+// match against an "actual state" match (without override). That was
+// broken because the caller `setPseudoActive` / `setPseudoFocus` /
+// `setPseudoHover` mutated the underlying set (`activeElements.add(el)`
+// etc.) BEFORE invoking the gate, so the "actual state" check already
+// reflected the new value. The forced-on result then matched the now-
+// already-on actual state → the gate returned `false` → invalidation
+// skipped → cascade never re-resolved → press visual never painted.
+// (Same bug applied symmetrically on the off direction.)
+//
+// Fix: force the off side explicitly too, so the comparison is "would
+// rule X match the same in active=on vs active=off on `el`?" — fully
+// independent of the underlying set's current state. The mutation
+// order in the callers no longer matters.
 function someActiveRuleAffectsElement(el: LiveElement): boolean {
 	for (const rules of styleSheets.values()) {
 		for (const rule of rules) {
 			if (!chainUsesPseudo(rule.chain, 'active')) continue;
 			const withActive = matchChain(rule.chain, el, { activeOn: el });
-			const without = matchChain(rule.chain, el);
-			if (withActive !== without) return true;
+			const withoutActive = matchChain(rule.chain, el, { activeOff: el });
+			if (withActive !== withoutActive) return true;
 		}
 	}
 	return false;
@@ -451,8 +500,24 @@ function someFocusRuleAffectsElement(el: LiveElement): boolean {
 		for (const rule of rules) {
 			if (!chainUsesPseudo(rule.chain, 'focus')) continue;
 			const withFocus = matchChain(rule.chain, el, { focusOn: el });
-			const without = matchChain(rule.chain, el);
-			if (withFocus !== without) return true;
+			const withoutFocus = matchChain(rule.chain, el, { focusOff: el });
+			if (withFocus !== withoutFocus) return true;
+		}
+	}
+	return false;
+}
+
+/** Same shape as `someActiveRuleAffectsElement`/`...Focus...` — checks
+ * whether toggling `:hover` on `el` would change ANY rule's match result
+ * against `el`. Used by `setPseudoHover` to skip invalidation when the
+ * page's CSS doesn't react to hover on this element. */
+function someHoverRuleAffectsElement(el: LiveElement): boolean {
+	for (const rules of styleSheets.values()) {
+		for (const rule of rules) {
+			if (!chainUsesPseudo(rule.chain, 'hover')) continue;
+			const withHover = matchChain(rule.chain, el, { hoverOn: el });
+			const withoutHover = matchChain(rule.chain, el, { hoverOff: el });
+			if (withHover !== withoutHover) return true;
 		}
 	}
 	return false;
@@ -466,6 +531,8 @@ export function resetLiveCss(): void {
 	stylesheetsWithActive.clear();
 	stylesheetsWithFocus.clear();
 	stylesheetsWithChecked.clear();
+	stylesheetsWithHover.clear();
+	stylesheetsWithSibling.clear();
 	// WeakMap/WeakSet entries die with the LiveElements they referenced.
 }
 
@@ -483,6 +550,10 @@ export function registerStyleSheet(styleEl: LiveElement, cssText: string): void 
 	else stylesheetsWithFocus.delete(styleEl);
 	if (rulesUsePseudo(rules, 'checked')) stylesheetsWithChecked.add(styleEl);
 	else stylesheetsWithChecked.delete(styleEl);
+	if (rulesUsePseudo(rules, 'hover')) stylesheetsWithHover.add(styleEl);
+	else stylesheetsWithHover.delete(styleEl);
+	if (rulesUseSibling(rules)) stylesheetsWithSibling.add(styleEl);
+	else stylesheetsWithSibling.delete(styleEl);
 	// Whole cache invalid — any element's computed style could change.
 	computedCache.delete(styleEl);
 	clearComputedCache();
@@ -496,6 +567,8 @@ export function unregisterStyleSheet(styleEl: LiveElement): void {
 		stylesheetsWithActive.delete(styleEl);
 		stylesheetsWithFocus.delete(styleEl);
 		stylesheetsWithChecked.delete(styleEl);
+		stylesheetsWithHover.delete(styleEl);
+		stylesheetsWithSibling.delete(styleEl);
 		clearComputedCache();
 		bumpLiveTreeVersion();
 	}
@@ -507,6 +580,56 @@ export function unregisterStyleSheet(styleEl: LiveElement): void {
 export function someStylesheetUsesActive(): boolean { return stylesheetsWithActive.size > 0; }
 export function someStylesheetUsesFocus(): boolean { return stylesheetsWithFocus.size > 0; }
 export function someStylesheetUsesChecked(): boolean { return stylesheetsWithChecked.size > 0; }
+export function someStylesheetUsesHover(): boolean { return stylesheetsWithHover.size > 0; }
+/** True iff some registered stylesheet uses a `+` or `~` combinator.
+ * The radio-click fast path in live-form.ts consults this — when true,
+ * the cascade for sibling subtrees can change with the `:checked`
+ * flip, so a localised patch isn't enough and the caller must force a
+ * full rebuild. */
+export function someStylesheetUsesSibling(): boolean { return stylesheetsWithSibling.size > 0; }
+
+/** Invalidate the cascade across the entire document when a
+ * `:checked`/`:focus`/`:active` flip on `el` can change the match
+ * result of sibling-combinator rules elsewhere in the tree.
+ *
+ * The targeted `invalidateLiveStyle(el)` path only clears `el`'s own
+ * subtree — siblings (and their descendants) keep their cached
+ * `getComputedLiveStyle` result, AND their cached layout boxes /
+ * inline-flow atom lists. So a `input:checked ~ .panel` rule's flip
+ * wouldn't reach the panels or the tab labels (whose color depends on
+ * the rule), even though the radio attribute did change.
+ *
+ * Strategy: clear the WHOLE computed-style cache AND every cached
+ * layout box + inline-flow result, then bump the tree version. We do
+ * NOT mark the root dirty — the dirty-region patch is too narrow for
+ * this case (the radio is `display:none` so has no box; pinning
+ * `layoutFixedRoot` to body's old box keeps stale `inlineCache`
+ * entries for the labels even after re-layout). Instead we let the
+ * version bump trigger paintLiveOverlay's full-rebuild branch, which
+ * itself calls `resetLayoutCache()` + `layoutFixedRoot(root, 0, 0,
+ * viewportW, viewportH)` and rebuilds the paint-ops list from
+ * scratch — a guaranteed-correct refresh.
+ *
+ * Cheap-ish (O(touched-set-size) + clear caches); only paid when the
+ * page actually has sibling rules. */
+export function invalidateForSiblingCascade(_el: LiveElement): void {
+	if (stylesheetsWithSibling.size === 0) return;
+	clearComputedCache();
+	resetLayoutCachesForSiblingCascade();
+	bumpLiveTreeVersion();
+}
+
+// Layout cache lives in live-layout.ts but we need to clear it from
+// here. The setter is wired by live-layout.ts at module load so this
+// module doesn't have to import from layout (which would create a
+// cycle via live-css → live-layout → live-css).
+let layoutCacheResetFn: (() => void) | null = null;
+export function setLayoutCacheResetFn(fn: () => void): void {
+	layoutCacheResetFn = fn;
+}
+function resetLayoutCachesForSiblingCascade(): void {
+	if (layoutCacheResetFn) layoutCacheResetFn();
+}
 
 /** Invalidate the computed-style cache for one element (and its
  * descendants — they may have inherited from it). Cheap to call on
@@ -544,11 +667,30 @@ function clearComputedCache(): void {
 
 const touchedSinceClear = new Set<LiveElement>();
 
+/** Per-element press refcount. Bumped on each `setPseudoActive(el, true)`
+ * call and decremented on `setPseudoActive(el, false)`. The element
+ * appears in `activeElements` (and `:active` selectors match) while the
+ * count is > 0. Needed because beginLivePress propagates `:active` up
+ * the ancestor chain (so `.app-card:active` matches when the user taps
+ * an `<img>` inside the card) — two rapid taps on sibling leaves under
+ * the same ancestor would both set, then one timer would PREMATURELY
+ * clear the still-pressed shared ancestor without refcounting. */
+const activeRefcount = new WeakMap<LiveElement, number>();
 /** Pseudo-class state setters wired by the touch handler. Setting
  * also invalidates the element so the next paint walk re-resolves. */
 export function setPseudoActive(el: LiveElement | null, on: boolean): void {
 	if (!el) return;
-	if (on) activeElements.add(el);
+	const prev = activeRefcount.get(el) ?? 0;
+	const next = on ? prev + 1 : Math.max(0, prev - 1);
+	if (next === 0) activeRefcount.delete(el);
+	else activeRefcount.set(el, next);
+	// Mutate the source-of-truth WeakSet only on the 0↔1 transition;
+	// intermediate count changes don't flip the element's `:active`
+	// match state, so no cascade invalidation either.
+	const wasActive = prev > 0;
+	const isActive = next > 0;
+	if (wasActive === isActive) return;
+	if (isActive) activeElements.add(el);
 	else activeElements.delete(el);
 	// Per-element gate (2026-06-09): the previous gate was page-wide
 	// — "ANY stylesheet has ANY :active rule" — which fired
@@ -572,8 +714,22 @@ export function setPseudoFocus(el: LiveElement | null, on: boolean): void {
 		invalidateLiveStyle(el);
 	}
 }
+/** Engine-mouse hover sink. The page-mouse-forwarder calls this on hover
+ * transitions; touch never does. Same per-element guard as `setPseudoActive`
+ * — only invalidate when the page actually has a `:hover` rule whose match
+ * depends on this element's hover state, otherwise idle cursor motion over
+ * any non-styled element would force a cascade rebuild every frame. */
+export function setPseudoHover(el: LiveElement | null, on: boolean): void {
+	if (!el) return;
+	if (on) hoverElements.add(el);
+	else hoverElements.delete(el);
+	if (stylesheetsWithHover.size > 0 && someHoverRuleAffectsElement(el)) {
+		invalidateLiveStyle(el);
+	}
+}
 export function isPseudoActive(el: LiveElement): boolean { return activeElements.has(el); }
 export function isPseudoFocus(el: LiveElement): boolean { return focusElements.has(el); }
+export function isPseudoHover(el: LiveElement): boolean { return hoverElements.has(el); }
 
 // =========================================================================
 // UA default stylesheet
@@ -2941,12 +3097,9 @@ function parseSelectorChain(selector: Selector): SelectorChain | null {
 			}
 			case 'Combinator': {
 				const name = String(child.name);
-				if (name === ' ' || name === '>') {
+				if (name === ' ' || name === '>' || name === '+' || name === '~') {
 					flush();
 					combinators.push(name as Combinator);
-				} else if (name === '+' || name === '~') {
-					// M2.2 doesn't model sibling traversal yet. Drop.
-					aborted = true;
 				} else {
 					aborted = true;
 				}
@@ -3144,7 +3297,11 @@ function computeChainSpecificity(chain: SelectorChain): readonly [number, number
  * sets contain. */
 interface VirtualPseudoOverride {
 	activeOn?: LiveElement | null;
+	activeOff?: LiveElement | null;
 	focusOn?: LiveElement | null;
+	focusOff?: LiveElement | null;
+	hoverOn?: LiveElement | null;
+	hoverOff?: LiveElement | null;
 }
 
 function matchChain(chain: SelectorChain, el: LiveElement, vp?: VirtualPseudoOverride): boolean {
@@ -3159,6 +3316,28 @@ function matchChain(chain: SelectorChain, el: LiveElement, vp?: VirtualPseudoOve
 			const p: LiveElement | null = current?.parent ?? null;
 			if (!p || !matchCompound(left, p, vp)) return false;
 			current = p;
+		} else if (combinator === '+') {
+			// Adjacent sibling — left must be the immediately-preceding
+			// element sibling of current. Text nodes are skipped so the
+			// "adjacency" matches what authors mean by `A + B` in CSS.
+			const sib = prevElementSibling(current);
+			if (!sib || !matchCompound(left, sib, vp)) return false;
+			current = sib;
+		} else if (combinator === '~') {
+			// General sibling — left must be SOME prior element sibling
+			// of current. Walk back through the parent's children until
+			// we find a match or run out of earlier siblings.
+			let sib: LiveElement | null = prevElementSibling(current);
+			let matched = false;
+			while (sib) {
+				if (matchCompound(left, sib, vp)) {
+					matched = true;
+					current = sib;
+					break;
+				}
+				sib = prevElementSibling(sib);
+			}
+			if (!matched) return false;
 		} else {
 			// descendant
 			let a: LiveElement | null = current?.parent ?? null;
@@ -3175,6 +3354,22 @@ function matchChain(chain: SelectorChain, el: LiveElement, vp?: VirtualPseudoOve
 		}
 	}
 	return true;
+}
+
+/** Previous ELEMENT sibling of `el` (text nodes skipped). Used by the
+ * `+` / `~` matcher; `null` if `el` is the first element child or has
+ * no parent. */
+function prevElementSibling(el: LiveElement | null): LiveElement | null {
+	if (!el) return null;
+	const parent = el.parent;
+	if (!parent) return null;
+	const siblings = parent.children;
+	const idx = siblings.indexOf(el);
+	if (idx <= 0) return null;
+	for (let i = idx - 1; i >= 0; i--) {
+		if (siblings[i].tagName !== '#text') return siblings[i];
+	}
+	return null;
 }
 
 function matchCompound(compound: Compound, el: LiveElement, vp?: VirtualPseudoOverride): boolean {
@@ -3209,12 +3404,23 @@ function matchAttr(attr: AttrPredicate, el: LiveElement): boolean {
 function matchPseudo(pseudo: SimplePseudo, el: LiveElement, vp?: VirtualPseudoOverride): boolean {
 	switch (pseudo.kind) {
 		case 'active':
+			if (vp && vp.activeOff === el) return false;
 			if (vp && vp.activeOn === el) return true;
 			return activeElements.has(el);
 		case 'focus':
+			if (vp && vp.focusOff === el) return false;
 			if (vp && vp.focusOn === el) return true;
 			return focusElements.has(el);
-		case 'hover':    return false; // touch device
+		case 'hover':
+			// (2026-06-10) Engine-mouse hover sink. Touch never sets this;
+			// the page-mouse-forwarder writes the cursor's current leaf
+			// hit on every hover transition. `(hover:hover)` media query
+			// still reports `false` so lil-gui-style hover gating keeps
+			// working; only direct `:hover` selectors on engine-mouse
+			// hits resolve true here.
+			if (vp && vp.hoverOff === el) return false;
+			if (vp && vp.hoverOn === el) return true;
+			return hoverElements.has(el);
 		case 'disabled': return el.hasAttribute('disabled');
 		case 'checked': {
 			// `<input>` element with `checked` attribute or .checked

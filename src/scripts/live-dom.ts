@@ -139,15 +139,20 @@ function maybeLoadScriptElement(el: LiveElement): void {
 // nx.js's `Image` fetch resolves a relative URL against the runtime base
 // (`romfs:/`), NOT the page — so a page-authored relative path read the
 // BUNDLED romfs copy instead of the editable profile copy (and required a
-// full .nro rebuild + redeploy to update). `brewser://` URLs can't be
-// fetched by Image at all (its fetch's protocol registry has no browser
-// loader). The shell sets the active profile root here so `<img>` srcs that
-// use the profile-pages convention (`../pages/<rest>`, `brewser://<rest>`)
-// resolve to the absolute `<profile>/pages/<rest>` SD-card path, loading the
-// same file the rest of the browser serves — editable via a profile sync.
-let liveProfileRoot = '';
+// full .nro rebuild + redeploy to update).
+//
+// 2026-06-10: `brewser://` URLs now flow through unchanged. Previously
+// resolveLiveResourceUrl rewrote them to `sdmc:/...` because the old
+// nxjs Image fetched via its internal `./fetch/fetch` (which knows
+// sdmc:/ natively but not brewser://). After
+// `[[reference-nxjs-image-audio-page-url-base]]` (image.ts uses
+// globalThis.fetch), the runtime-fetch wrapper routes brewser:// through
+// BrowserResourceLoader, which serves the same on-disk file. So the
+// rewrite was both unnecessary AND broken — it produced an `sdmc:/` URL
+// that no loader in the runtime-fetch chain accepts → 403. The
+// `liveAppRoot` / `liveProfileRoot` vars + setters are gone; the brewser://
+// branch in resolveLiveResourceUrl now just returns the URL as-is.
 let livePageBase = '';
-export function setLiveProfileRoot(root: string): void { liveProfileRoot = root; }
 
 // =========================================================================
 // Animated-GIF ticker registry
@@ -471,16 +476,23 @@ export function clearBackgroundImageCache(): void {
 // Image-load diagnostic — appends every `<img>` load attempt + result to
 // `sdmc:/switch/brewser/logs/swb_img_diag.log` so we can
 // diagnose missing-image bugs on real hardware (where stdout/stderr aren't
-// easy to see). Capped so a broken page can't fill the SD card. Set
-// `IMG_DIAG` to `false` to silence.
+// easy to see). Capped so a broken page can't fill the SD card. Gated by
+// `config.json` -> `swbImgDebug`; flipped on at shell startup via
+// `setSwbImgDebugEnabled`. The cap stays in place even when enabled so
+// a runaway page can't write 100k entries.
 // =========================================================================
 
-const IMG_DIAG = true;
 const IMG_DIAG_PATH = 'sdmc:/switch/brewser/logs/swb_img_diag.log';
 const IMG_DIAG_CAP = 500;
+let _imgDiagEnabled = false;
 let _imgDiagCount = 0;
+/** Toggle the swb image-load diag log. Off by default; the shell flips
+ * it on at startup when `config.json`'s `swbImgDebug` key is `true`. */
+export function setSwbImgDebugEnabled(enabled: boolean): void {
+	_imgDiagEnabled = enabled;
+}
 function _imgDiag(msg: string): void {
-	if (!IMG_DIAG || _imgDiagCount >= IMG_DIAG_CAP) return;
+	if (!_imgDiagEnabled || _imgDiagCount >= IMG_DIAG_CAP) return;
 	_imgDiagCount++;
 	try {
 		const sw = (globalThis as { Switch?: { appendFileSync?: (p: string, d: string) => void } }).Switch;
@@ -603,15 +615,14 @@ function resolveAgainstBase(baseDir: string, rel: string): string {
 export function resolveLiveResourceUrl(src: string): string {
 	const s = src.trim();
 	if (!s) return s;
-	// Already a fetchable absolute scheme → use as-is.
-	if (/^(?:sdmc|romfs|file|data|blob|https?):/i.test(s)) return s;
-	// `brewser://<rest>` is an absolute browser URL → map to the profile
-	// pages path (Image can't fetch the `brewser:` scheme).
-	if (/^brewser:\/\//i.test(s)) {
-		if (!liveProfileRoot) return s;
-		const rel = s.replace(/^brewser:\/\//i, '').replace(/^pages\//, '');
-		return `${liveProfileRoot}pages/${rel}`;
-	}
+	// Already a fetchable absolute scheme → use as-is. `brewser://` is
+	// included here because nxjs Image + Audio now fetch via
+	// globalThis.fetch (per [[reference-nxjs-image-audio-page-url-base]]),
+	// which the brewser runtime wraps so BrowserResourceLoader serves
+	// brewser:// URLs from disk. No need to pre-rewrite to sdmc:/ — the
+	// runtime-fetch chain rejects bare sdmc:/ URLs with 403 (no loader
+	// claims them) and would silently break every catalog logo.
+	if (/^(?:sdmc|romfs|file|data|blob|brewser|https?):/i.test(s)) return s;
 	// Everything else is PAGE-relative — resolved against the page's own
 	// directory (`index.html` as the base), like a real browser. This is
 	// uniform across all pages; `./assets/x.png`, `assets/x.png` and
@@ -2219,6 +2230,13 @@ export function setInternalLiveViewport(v: LiveViewport): void {
 	internalLiveViewport = v;
 }
 function getLiveViewportInternal(): LiveViewport { return internalLiveViewport; }
+/** Public getter for the current live-DOM viewport (origin + size of the
+ * area where the page is painted, accounting for the chrome strip in
+ * normal mode and the full screen in fullscreen modes). Consumed by the
+ * page-mouse-forwarder so cursor hit-tests use the SAME viewport the
+ * touch path uses — without this they used a hardcoded full-screen
+ * viewport and clicked the wrong elements by the toolbar's y-offset. */
+export function getLiveViewport(): LiveViewport { return internalLiveViewport; }
 
 /** Module-internal page scroll offset, mirroring the painter's
  * `effectiveScrollY`. Set by the shell after each paintLiveOverlay so
