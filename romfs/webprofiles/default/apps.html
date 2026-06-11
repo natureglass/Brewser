@@ -100,6 +100,62 @@
   </div>
 </div>
 
+<!-- Check-for-Updates modal. Same overlay/card pattern as the
+     missing-app modal above — separate `updates-modal-*` ID prefix so
+     both modals can coexist in the page without selector collisions.
+     INLINE `style="position: fixed"` matches the sibling for the same
+     live-overlay.ts paint-cache reason; visibility flips via
+     `.updates-modal-overlay--open` (NOT `style.display`). -->
+<div id="updates-modal-overlay" class="app-modal-overlay updates-modal-overlay" style="position: fixed">
+  <div id="updates-modal-card" class="app-modal-card updates-modal-card">
+    <h2 class="app-modal-title updates-modal-title">Check for new Apps &amp; updates</h2>
+    <!-- Loading state: a CSS-animated indeterminate bar. Visible while
+         `.updates-modal-card` carries `updates-modal-card--loading`;
+         the JS removes that class after 3 s and the table slot below
+         takes over. -->
+    <div class="updates-modal-loading">
+      <div class="updates-modal-loading-bar"></div>
+    </div>
+    <!-- Results table. Scrolls vertically when its content exceeds
+         the card's max-height; the card itself is bounded so the OK
+         button row stays pinned at the bottom. Populated by JS once
+         the 3 s loading phase ends — empty rows mean no new apps and
+         no updates available. -->
+    <div id="updates-modal-results" class="updates-modal-results">
+      <div id="updates-modal-empty" class="updates-modal-empty">No new apps or updates available.</div>
+      <div id="updates-modal-new-section" class="updates-modal-section">
+        <h3 class="updates-modal-section-title">New apps</h3>
+        <div id="updates-modal-new" class="updates-modal-list"></div>
+      </div>
+      <div id="updates-modal-update-section" class="updates-modal-section">
+        <h3 class="updates-modal-section-title">Updates</h3>
+        <div id="updates-modal-update" class="updates-modal-list"></div>
+      </div>
+    </div>
+    <div class="app-modal-actions updates-modal-actions">
+      <div class="app-modal-actions-side">
+        <!-- Sync-complete status line. Hidden while the card carries
+             `--loading` so the message only surfaces once the 3 s
+             "check" finishes — pairs with the same gate that swaps
+             the loading bar for the results list. -->
+        <span class="updates-modal-status">Local Catalog is now synced!</span>
+      </div>
+      <div class="app-modal-actions-side">
+        <!-- Two action buttons share the right slot, one visible at a
+             time. During the 3 s check the RED "Cancel" button is
+             shown (lets the user abort mid-check); once the check
+             completes the GREEN "Close" button replaces it. Visibility
+             is class-driven via `--loading` on the card (same gate as
+             the loading bar / results swap) — both buttons stay in
+             the DOM and only their `display` toggles. -->
+        <button id="updates-modal-cancel" class="app-modal-btn app-modal-btn--download updates-modal-btn-cancel" type="button">Cancel</button>
+        <button id="updates-modal-close" class="app-modal-btn app-modal-btn--play updates-modal-btn-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="brewser://assets/missing-app-modal.js"></script>
+<script src="brewser://assets/updates-modal.js"></script>
 </body>
 </html>

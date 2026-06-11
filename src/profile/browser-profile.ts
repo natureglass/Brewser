@@ -170,6 +170,12 @@ const BUILTIN_ASSETS: readonly string[] = [
 	// (NOT `style.display` — that doesn't invalidate the live-DOM paint
 	// cache, leaving stale modal pixels on screen across opens).
 	'missing-app-modal.js',
+	// Page-side script driving the Check-for-Updates modal on apps.html.
+	// Loaded only by apps.html (the home page doesn't surface the
+	// `.apps-check-updates` button); seeded here so fresh profiles get
+	// the asset alongside the missing-app modal script. Same class-flip
+	// visibility pattern + B/L close handling as the sibling.
+	'updates-modal.js',
 	// Audio feedback for link/button presses. Played by the shell's
 	// click-sound module when `config.json clickSounds` is true.
 	'click.wav',

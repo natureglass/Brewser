@@ -805,6 +805,164 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
   border-color: #3d4f7a;
 }
 
+/* ---- Check-for-Updates modal -------------------------------------
+   Triggered by the `.apps-check-updates` button on apps.html. Reuses
+   the missing-app modal's overlay + card chrome (`.app-modal-overlay`,
+   `.app-modal-card`) so the two modals look the same family; only the
+   internals differ. The card is bounded by `max-height` and lays its
+   children out as a column so the OK action row stays pinned at the
+   bottom and `.updates-modal-results` scrolls inside the middle slot.
+
+   Loading vs results gating: the JS adds `updates-modal-card--loading`
+   on open and removes it after the 3 s setTimeout fires. The two
+   selectors below flip which slot is visible without touching
+   `style.display` from JS (which wouldn't invalidate the live-DOM
+   paint cache — same gotcha as the open/close class flip). */
+.updates-modal-card {
+  width: 760px;
+  max-width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 26px 20px;
+}
+
+.updates-modal-title {
+  flex: 0 0 auto;
+  margin: 0 0 16px;
+}
+
+/* Loading slot — visible only while the card carries `--loading`.
+   The bar is a fixed-height fill that pulses via opacity (the only
+   keyframe property live-css interpolates reliably for our needs —
+   transform-origin isn't supported so scaleX would expand from
+   center, and width keyframes aren't picked up either). */
+.updates-modal-loading {
+  flex: 0 0 auto;
+  display: none;
+  padding: 24px 0 32px;
+}
+.updates-modal-card--loading .updates-modal-loading { display: block; }
+.updates-modal-card--loading .updates-modal-results { display: none; }
+
+.updates-modal-loading-bar {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #ffd35e;
+  opacity: 0.4;
+  animation: updates-modal-pulse 1.2s linear infinite;
+}
+
+@keyframes updates-modal-pulse {
+  0%   { opacity: 0.35; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+/* Results slot — visible only when the card is NOT in loading state.
+   Flex column inside a bounded card height: `flex: 1 1 auto` claims
+   the leftover vertical space; `overflow-y: auto` lets the inner
+   list scroll when its content exceeds the slot. */
+.updates-modal-results {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  text-align: left;
+  margin-bottom: 16px;
+  padding-right: 4px;
+}
+
+.updates-modal-section { margin-bottom: 16px; }
+.updates-modal-section:last-child { margin-bottom: 0; }
+
+.updates-modal-section-title {
+  color: #7a8aa3;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+.updates-modal-list { display: block; }
+
+/* One row per entry — flex strip with app name flush left, version
+   info flush right. Same dark divider as `.app-modal-row` so the
+   visual rhythm matches the detail modal's row stack. */
+.updates-modal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px;
+  border-top: 1px solid #1f2c4d;
+  color: #e0e8f4;
+}
+.updates-modal-row:first-child { border-top: none; }
+
+.updates-modal-row-name {
+  flex: 1 1 auto;
+  font-weight: 700;
+  color: #eaf2ff;
+  word-break: break-word;
+}
+
+/* Version cell on the right edge of each row. For "New apps" it
+   holds a single `v1.0.0` token; for "Updates" it holds
+   `v1.0.0 [→] v1.0.1` where [→] is the same inline-SVG
+   `.upgrade-arrow` polygon the grid card / detail modal use. */
+.updates-modal-row-version {
+  flex: 0 0 auto;
+  color: #cdd9ee;
+  font-size: 0.95em;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+.updates-modal-row-version .upgrade-arrow {
+  margin: 0 6px;
+  vertical-align: middle;
+}
+
+/* Empty-state line shown when there are no new apps AND no
+   updates. The JS toggles visibility by adding `--has-rows` to the
+   results container so this rule and the section rules invert. */
+.updates-modal-empty {
+  display: none;
+  padding: 20px 0;
+  text-align: center;
+  color: #7a8aa3;
+}
+.updates-modal-results--empty .updates-modal-empty { display: block; }
+.updates-modal-results--empty .updates-modal-section { display: none; }
+/* Sections individually hide when their respective list is empty —
+   keyed by a class the JS toggles on the section element. */
+.updates-modal-section--empty { display: none; }
+
+/* OK button row stays pinned at the bottom — `flex: 0 0 auto` inside
+   the column-flex card, sibling to the scrollable results above. */
+.updates-modal-actions { flex: 0 0 auto; }
+
+/* Sync-complete status line on the LEFT side of the action row.
+   Green to read as "all good" (same palette family as the Play
+   button); hidden while the card is still in the loading state so
+   the message only appears once the check completes. */
+.updates-modal-status {
+  color: #7eda9f;
+  font-weight: 700;
+  font-size: 0.95em;
+}
+.updates-modal-card--loading .updates-modal-status { display: none; }
+
+/* Cancel/Close action gate. The red Cancel sits in the right action
+   slot while the card is in the loading state; once the 3 s check
+   finishes (class removed by the JS), Cancel hides and the green
+   Close takes its place. Higher specificity than `.app-modal-btn` so
+   the rule wins regardless of source order — same approach the
+   missing-app modal uses for its Play/Download swap. */
+.updates-modal-card--loading .updates-modal-btn-close { display: none; }
+.updates-modal-card:not(.updates-modal-card--loading) .updates-modal-btn-cancel { display: none; }
+
 /* ---- about.html ----------------------------------------------------
    Migrated from about.html's inline <style>. The 28px 48px text-heavy
    body padding now lives on the global `body` rule above. Gradients /
