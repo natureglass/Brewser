@@ -68,6 +68,58 @@ export function setKeyboardOpen(v: boolean): void {
 
 export function isKeyboardOpen(): boolean { return keyboardOpen; }
 
+// HTML-driven virtual keyboard root: a SECOND live-DOM root parsed
+// once at shell startup from `webprofiles/<active>/keyboard.html` and
+// painted below `KEYBOARD_LAYOUT.topY` while the keyboard is visible.
+// Kept separate from the host page's `getLiveRoot()` so the page's
+// DOM stays untouched while the keyboard is up.
+//
+// `keyboardLiveRoot` is the populated root (or `null` if the html file
+// failed to parse / wasn't seeded). `keyboardOverlayVisible` gates
+// whether the engine paints it on top of the host page each frame.
+// Checkpoint 1 drives the flag directly for parse + paint verification;
+// checkpoint 2 onward, `KeyboardOverlay.open()` flips it on/off as
+// part of the open/close lifecycle.
+let keyboardLiveRoot: LiveElement | null = null;
+let keyboardOverlayVisible = false;
+
+export function setKeyboardLiveRoot(root: LiveElement | null): void {
+	keyboardLiveRoot = root;
+}
+export function getKeyboardLiveRoot(): LiveElement | null { return keyboardLiveRoot; }
+
+export function setKeyboardOverlayVisible(v: boolean): void {
+	keyboardOverlayVisible = !!v;
+	if (!v) pendingFullRepaint = true;
+}
+export function isKeyboardOverlayVisible(): boolean { return keyboardOverlayVisible; }
+
+// Top edge of the keyboard panel in screen-space pixels. Computed at
+// boot from `config.json keyboardHeight` (panel height in px) and the
+// canvas height: topY = canvasH - keyboardHeight. Read by the engine
+// in three places: the kb paint pass viewport, the touch-routing branch
+// that decides above-vs-below-panel, and the gamepad A hit-test that
+// only fires when the cursor is over the panel area.
+//
+// Falls back to `KEYBOARD_LAYOUT.topY` (browser-config) for the very
+// first repaint before `setKeyboardTopY` lands, so the kb never
+// vanishes during boot due to an unset value.
+let keyboardTopY: number | null = null;
+export function setKeyboardTopY(v: number): void {
+	keyboardTopY = Number.isFinite(v) ? v : null;
+}
+export function getKeyboardTopY(): number {
+	// Imported via require-style only at runtime so this module stays
+	// import-cycle-free; the default lives in browser-config but we
+	// can't import constants from there at module-eval without dragging
+	// the whole config graph in.
+	return keyboardTopY ?? DEFAULT_KEYBOARD_TOP_Y;
+}
+/** Match `KEYBOARD_LAYOUT.topY` in browser-config (kept in sync as a
+ * loose default — the shell overrides via `setKeyboardTopY` once it
+ * loads `config.json keyboardHeight`). */
+const DEFAULT_KEYBOARD_TOP_Y = 320;
+
 export function requestFullRepaint(): void {
 	pendingFullRepaint = true;
 }

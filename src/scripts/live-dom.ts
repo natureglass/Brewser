@@ -2244,6 +2244,7 @@ export function getLiveViewport(): LiveViewport { return internalLiveViewport; }
  * screen coords. Default 0 keeps fullscreen-canvas / pre-paint paths
  * unaffected. */
 let internalLiveScrollY = 0;
+export function getInternalLiveScrollY(): number { return internalLiveScrollY; }
 export function setInternalLiveScrollY(v: number): void {
 	internalLiveScrollY = v;
 }

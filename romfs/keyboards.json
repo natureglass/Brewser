@@ -1,0 +1,6 @@
+[
+  { "title": "Dark", "path": "keyboards/Dark.html" },
+  { "title": "Light", "path": "keyboards/light.html" },
+  { "title": "Amber", "path": "keyboards/amber.html" },
+  { "title": "Neon", "path": "keyboards/neon.html" }
+]

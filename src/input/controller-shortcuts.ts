@@ -4,6 +4,7 @@ import {
 } from '../browser-config.js';
 import {
 	dispatchPageKeyEvent,
+	getInternalLiveScrollY,
 	getLiveRoot, getLiveWindow, hitTestLive,
 	pageHasListenerFor,
 	setInternalLiveScrollY, setInternalLiveViewport,
@@ -20,7 +21,7 @@ import {
 import { listMappedButtons, type ButtonAction } from './button-router.js';
 import { getLayoutBox } from '../scripts/live-layout.js';
 import { patchLiveDirtyRegions } from '../scripts/live-overlay.js';
-import { isKeyboardOpen } from '../scripts/live-paint-control.js';
+import { getKeyboardLiveRoot, getKeyboardTopY, isKeyboardOpen } from '../scripts/live-paint-control.js';
 import { hitTestVideoControls, videoIsPaused } from '../scripts/live-video.js';
 import {
 	abortLivePress,
@@ -438,6 +439,18 @@ let videoSwipeSession: {
 	moved: boolean;
 } | null = null;
 const VIDEO_SWIPE_THRESHOLD = 40;
+/** Above-keyboard-panel swipe session. Opened on a touchstart that
+ * lands at `y < KEYBOARD_LAYOUT.topY` while the keyboard is up.
+ * `touchmove` forwards each incremental dy to the keyboard's
+ * `onScroll` callback (so the user can scroll the page behind the
+ * keyboard); `touchend` cancels the keyboard if no swipe motion ever
+ * crossed `SWIPE_MOVE_THRESHOLD` (a pure tap means "close"; a drag
+ * means "scrolling, leave the kb up"). Cleared in touchend. */
+let kbSwipeSession: {
+	startY: number;
+	lastY: number;
+	moved: boolean;
+} | null = null;
 /** Move-threshold (px) before a touch is treated as a swipe instead of
  * a tap. Matches the `liveScrollSession.moved` threshold so both
  * page-level and element-level scrolls use the same gesture cutoff —
@@ -562,6 +575,68 @@ export function installCanvasTouch(): void {
 			return;
 		}
 
+		// HTML keyboard takes priority over EVERYTHING (host hit-test,
+		// chrome dispatch, content scroll) while it's open. Taps inside
+		// the kb panel area route to the kb root's live-DOM tree; taps
+		// above the panel cancel the keyboard (chrome strip dispatch
+		// also runs, so e.g. a Home-button tap both closes the kb AND
+		// navigates home in one gesture, matching the old canvas kb's
+		// behaviour).
+		if (isKeyboardOpen()) {
+			const kbRoot = getKeyboardLiveRoot();
+			const topY = getKeyboardTopY();
+			if (kbRoot && y >= topY) {
+				const screen = nxScreen();
+				const kbViewport: LiveViewport = {
+					x: 0, y: topY,
+					width: screen.width,
+					height: Math.max(0, screen.height - topY),
+				};
+				// `hitTestLive` subtracts the host page's scroll offset
+				// from every non-fixed candidate's screen-space box (the
+				// host's content sits in a scrolled viewport). The kb
+				// root doesn't scroll — its layout boxes are already in
+				// the kb-area frame at viewport.x/y. Zero the scroll
+				// around the hit-test so the kb math isn't off by the
+				// host's scrollY (was: kb keys "moved up" by the scroll
+				// amount, so user taps below the rendered position landed
+				// outside any key and nothing typed — most visible on
+				// settings.html where the user must scroll to reach the
+				// number inputs).
+				const savedScroll = getInternalLiveScrollY();
+				setInternalLiveScrollY(0);
+				let kbHit: LiveElement | null = null;
+				try {
+					kbHit = hitTestLive(kbRoot, x, y, kbViewport);
+				} finally {
+					setInternalLiveScrollY(savedScroll);
+				}
+				const globals = globalThis as {
+					__brewserKeyboardHandleTap?: (el: LiveElement) => void;
+				};
+				if (kbHit && globals.__brewserKeyboardHandleTap) {
+					globals.__brewserKeyboardHandleTap(kbHit);
+				}
+				// Whether or not a key was hit, the kb owns this tap —
+				// don't fall through to host hit-test / chrome / scroll.
+				return;
+			}
+			// Above-panel touch: open a swipe session. The touchmove handler
+			// forwards each incremental dy to the keyboard's onScroll callback
+			// (right-stick-Y has the same plumbing in the kb poll loop), and
+			// touchend cancels the keyboard ONLY if no swipe motion ever
+			// crossed `SWIPE_MOVE_THRESHOLD` — i.e. a pure tap above the
+			// panel still means "close the keyboard," but a finger-drag means
+			// "I'm reading the page, leave the kb up." Chrome strip dispatch
+			// still fires via the fall-through below, so a tap on Home /
+			// Settings / etc. both cancels the kb AND fires the chrome action
+			// in one gesture (same UX as the old canvas kb).
+			kbSwipeSession = { startY: y, lastY: y, moved: false };
+			// Fall through so chrome dispatch can fire for the same touch.
+			// Host hit-test is gated off by the `isKeyboardOpen() ? null`
+			// ternary at the live-DOM hit-test below.
+		}
+
 		// Live-DOM hit-test runs FIRST (before mode gates / chrome /
 		// content checks). position:fixed overlay elements sit on top
 		// of everything visually, so they should get the tap first.
@@ -683,6 +758,32 @@ export function installCanvasTouch(): void {
 	// opened the drag landed on a live-DOM element. Without this gate
 	// every page swipe would wake up listeners that don't apply.
 	canvas.addEventListener('touchmove', (event: TouchEvent) => {
+		// HTML keyboard swipe-to-scroll: forward incremental dy to the
+		// keyboard's onScroll callback (which routes to handleScroll on
+		// the shell). Runs BEFORE the `liveDragSession` early-return
+		// because the kb path doesn't open a drag session.
+		if (kbSwipeSession) {
+			const touchKb = event.touches[0] ?? event.changedTouches[0];
+			if (touchKb) {
+				const yKb = touchKb.clientY;
+				const incDy = yKb - kbSwipeSession.lastY;
+				kbSwipeSession.lastY = yKb;
+				if (Math.abs(yKb - kbSwipeSession.startY) > SWIPE_MOVE_THRESHOLD) {
+					kbSwipeSession.moved = true;
+				}
+				if (incDy !== 0) {
+					const globals = globalThis as {
+						__brewserKeyboardForwardScroll?: (d: number) => void;
+					};
+					// Sign convention matches `pageScrollSession`: finger DOWN
+					// (positive dy) reveals content above → scrollY decreases →
+					// dispatch negative delta to handleScroll.
+					if (globals.__brewserKeyboardForwardScroll) {
+						globals.__brewserKeyboardForwardScroll(-incDy);
+					}
+				}
+			}
+		}
 		if (!liveDragSession) return;
 		const touch = event.touches[0] ?? event.changedTouches[0];
 		if (!touch) return;
@@ -761,6 +862,20 @@ export function installCanvasTouch(): void {
 	});
 
 	canvas.addEventListener('touchend', (event: TouchEvent) => {
+		// HTML keyboard above-panel touchend: pure tap (no swipe motion
+		// past threshold) cancels the keyboard; a swipe just closes the
+		// session quietly so the trailing chrome dispatch (if any) doesn't
+		// also get hit with a stray cancel. Runs BEFORE the
+		// `liveDragSession` early-return because the kb path doesn't open
+		// a drag session.
+		if (kbSwipeSession) {
+			const wasSwipe = kbSwipeSession.moved;
+			kbSwipeSession = null;
+			if (!wasSwipe) {
+				const globals = globalThis as { __brewserKeyboardCancel?: () => void };
+				if (globals.__brewserKeyboardCancel) globals.__brewserKeyboardCancel();
+			}
+		}
 		if (!liveDragSession) return;
 		const touch = event.changedTouches[0] ?? event.touches[0];
 		const x = touch?.clientX ?? 0;

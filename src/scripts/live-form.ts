@@ -442,9 +442,19 @@ function paintTextField(
 	skipBg = false,
 ): void {
 	const color = cs.color || liveFormTheme.textFieldText;
+	// Honor `border-radius` — without this, every `<input type=text>` /
+	// `<textarea>` paints with square corners regardless of the cascade
+	// rule. Matches the rounded-corner treatment paintSelect / paintButton
+	// already give their backgrounds. `radius === 0` falls through to the
+	// flat-rect fast path so non-rounded fields cost no extra work.
+	const radius = formBorderRadius(cs, box.w, box.h);
 	if (!skipBg) {
 		ctx.fillStyle = resolveWidgetBg(cs.background) ?? liveFormTheme.textFieldBg;
-		ctx.fillRect(box.x, box.y, box.w, box.h);
+		if (radius > 0) {
+			fillRoundedRectPath(ctx, box.x, box.y, box.w, box.h, radius);
+		} else {
+			ctx.fillRect(box.x, box.y, box.w, box.h);
+		}
 		// Default: paint a 1 px border in the theme colour so the field
 		// is visible against a same-colour body bg (white field on
 		// white tier3 page). Author CSS can override the width and
@@ -460,7 +470,11 @@ function paintTextField(
 			ctx.strokeStyle = cs.borderTopColor ?? liveFormTheme.textFieldBorder;
 			ctx.lineWidth = borderWidth;
 			const off = borderWidth / 2;
-			ctx.strokeRect(box.x + off, box.y + off, box.w - borderWidth, box.h - borderWidth);
+			if (radius > 0) {
+				strokeRoundedRectPath(ctx, box.x + off, box.y + off, box.w - borderWidth, box.h - borderWidth, Math.max(0, radius - off));
+			} else {
+				ctx.strokeRect(box.x + off, box.y + off, box.w - borderWidth, box.h - borderWidth);
+			}
 		}
 	}
 	const value = getInputValue(el);

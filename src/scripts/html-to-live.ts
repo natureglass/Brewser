@@ -29,34 +29,74 @@ const SKIP_TAGS = new Set([
  * offscreens (created by `runPageScripts` from the parsed tree) into
  * the corresponding live elements. */
 export function populateLiveRoot(parsed: HtmlElement): Map<HtmlElement, LiveElement> {
-	const liveRoot = getLiveRoot();
+	return populateRootFromTree(getLiveRoot(), parsed);
+}
+
+/**
+ * Populate an arbitrary `LiveElement` root (not just the singleton
+ * `getLiveRoot()`) from a parsed HtmlElement tree. Mirrors
+ * {@link populateLiveRoot} but lets the caller own the target — the
+ * HTML-driven virtual keyboard (`brewser://.../keyboard.html`) parses
+ * into a SEPARATE root that the engine paints below
+ * `KEYBOARD_LAYOUT.topY` while the host page stays untouched.
+ *
+ * `scope` (optional) is a CSS scope class. When supplied, the target
+ * root gets `scope` added to its class list, AND every parsed `<style>`
+ * block has its selectors rewritten via {@link scopeCssToSelector} so
+ * its rules only match descendants of (or the root itself with class
+ * `scope`). This prevents the keyboard's CSS from bleeding into the
+ * host page's cascade (the kb's `body { … }` rule otherwise wins over
+ * the host's via source-order, since the kb style sheets register
+ * later).
+ */
+export function populateRootFromTree(
+	target: LiveElement,
+	parsed: HtmlElement,
+	scope?: string,
+): Map<HtmlElement, LiveElement> {
 	const byParsed = new Map<HtmlElement, LiveElement>();
+	if (scope) {
+		const existing = target.getAttribute('class') ?? '';
+		const tokens = existing.split(/\s+/).filter(Boolean);
+		if (!tokens.includes(scope)) {
+			target.setAttribute('class', existing ? existing + ' ' + scope : scope);
+		}
+	}
 	// Step 1: register every `<style>` block in the parsed tree, including
 	// any in `<head>`. The body walk below only reaches body's descendants,
 	// but real browsers register stylesheets from `<head>` and `<link
 	// rel=stylesheet>` too. Attach the style LiveElements as `display:none`
 	// children of the live root so their lifecycle matches the page (they
 	// get cleaned up when `resetLiveRoot` runs on the next navigation).
-	attachHeadStyles(parsed, liveRoot);
+	attachHeadStyles(parsed, target, scope);
 	const sourceBody = findBody(parsed);
 	if (sourceBody) {
 		// Apply the source <body>'s attrs to the existing live root so
 		// `body { ... }` rules in inline styles + `class="..."` /
-		// `style="..."` on body land correctly.
+		// `style="..."` on body land correctly. Merge `class` rather than
+		// overwrite when a scope class is in play so the scope survives.
 		for (const [name, value] of Object.entries(sourceBody.attrs)) {
-			liveRoot.setAttribute(name, value);
+			if (name === 'class' && scope) {
+				const existing = target.getAttribute('class') ?? '';
+				const merged = existing
+					? existing + (value ? ' ' + value : '')
+					: value;
+				target.setAttribute('class', merged);
+				continue;
+			}
+			target.setAttribute(name, value);
 		}
 		// Map the source body to the live root so canvas wiring can find
 		// it (rare — canvases are usually deeper, but harmless).
-		byParsed.set(sourceBody, liveRoot);
+		byParsed.set(sourceBody, target);
 		for (const child of sourceBody.children) {
-			appendConverted(liveRoot, child, byParsed);
+			appendConverted(target, child, byParsed);
 		}
 	} else {
 		// No <body> — append every non-skipped top-level child to the
 		// live root directly.
 		for (const child of parsed.children) {
-			appendConverted(liveRoot, child, byParsed);
+			appendConverted(target, child, byParsed);
 		}
 	}
 	return byParsed;
@@ -82,8 +122,12 @@ export function parseFragmentInto(target: LiveElement, html: string): void {
  * processed by the main converter) and register every `<style>` block
  * we find with the live cascade. Each style becomes a `display:none`
  * LiveElement child of the live root so `resetLiveRoot` on the next
- * navigation tears it down cleanly. */
-function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement): void {
+ * navigation tears it down cleanly.
+ *
+ * `scope` (optional) rewrites every selector so the rule only matches
+ * descendants of (or the scoped root itself). Used by the HTML-driven
+ * keyboard so its CSS doesn't bleed into the host page's cascade. */
+function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement, scope?: string): void {
 	const visit = (n: HtmlElement) => {
 		if (n.tag === 'body') return; // body styles register via the normal walk
 		if (n.tag === 'style') {
@@ -95,7 +139,7 @@ function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement): void {
 			const styleEl = new LiveElement('style');
 			styleEl.style.display = 'none';
 			liveRoot.appendChild(styleEl);
-			styleEl.textContent = cssText; // triggers registerStyleSheet
+			styleEl.textContent = scope ? scopeCssToSelector(cssText, scope) : cssText;
 			return;
 		}
 		for (const child of n.children) {
@@ -357,7 +401,7 @@ function attachIframeHeadStyles(node: HtmlElement, iframeEl: LiveElement, scope:
 			const styleEl = new LiveElement('style');
 			styleEl.style.display = 'none';
 			iframeEl.appendChild(styleEl);
-			styleEl.textContent = scopeIframeCss(cssText, scope);
+			styleEl.textContent = scopeCssToSelector(cssText, scope);
 			return;
 		}
 		for (const child of n.children) {
@@ -404,7 +448,7 @@ function convertIframeElement(
 		for (const child of source.children) {
 			if (child.type === 'text') cssText += child.text;
 		}
-		if (cssText) live.textContent = scopeIframeCss(cssText, scope);
+		if (cssText) live.textContent = scopeCssToSelector(cssText, scope);
 		return live;
 	}
 	for (const child of source.children) {
@@ -457,7 +501,7 @@ function rewriteIframeSelector(sel: string, scope: string): string {
 	return scopeSel + ' ' + sel;
 }
 
-function scopeIframeCss(cssText: string, scope: string): string {
+export function scopeCssToSelector(cssText: string, scope: string): string {
 	// Walk the text byte-by-byte respecting comments + at-rules + brace
 	// nesting so we only rewrite REAL selectors (the thing before each
 	// `{` that isn't inside an at-rule prelude or a comment).

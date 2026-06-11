@@ -1,6 +1,5 @@
 {
   "toolbar": {
-    "position": "top",
     "height": 56,
     "background": "#0d1426",
     "image": "",
@@ -26,21 +25,5 @@
     "background": "#0b1220",
     "topPadding": 12,
     "sidePadding": 48
-  },
-  "keyboard": {
-    "panelBorder": "#1f2c4d",
-    "panelBg": "#080d1a",
-    "image": "",
-    "transparency": 0,
-    "editBg": "#101a30",
-    "editText": "#e0e8f4",
-    "editCursor": "#7aa2ff",
-    "keyBg": "#162038",
-    "keyFocusBg": "#2a3a66",
-    "keyText": "#dbe5f4",
-    "keyActionBg": "#1a2c4a",
-    "keyActionFocusBg": "#3a5688",
-    "keyActionText": "#ffffff",
-    "helpText": "#7a8aa3"
   }
 }

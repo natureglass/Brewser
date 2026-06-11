@@ -20,7 +20,6 @@ export type ToolbarPosition = 'top' | 'bottom';
 
 export interface BrowserTemplate {
 	toolbar: {
-		position: ToolbarPosition;
 		height: number;
 		background: string;
 		/** Optional background image painted across the toolbar rect
@@ -84,7 +83,6 @@ export interface BrowserTemplate {
 
 export const DEFAULT_TEMPLATE: BrowserTemplate = {
 	toolbar: {
-		position: 'top',
 		height: 56,
 		background: '#0d1426',
 		image: '',
@@ -235,6 +233,32 @@ export interface BrowserConfig {
 	 * B=rightClick, X=forward, Y=reload, ZR=middleClick,
 	 * MINUS=screenshot, UP/DOWN=scroll). */
 	buttonMapping: Record<string, string>;
+	/** Height in CSS pixels of the on-screen virtual keyboard panel.
+	 * The keyboard root renders into this slice anchored at the BOTTOM
+	 * of the screen — y range `[canvasH - keyboardHeight, canvasH)` —
+	 * so larger values give the panel more vertical room (taller keys),
+	 * smaller values leave more of the host page visible above it. The
+	 * keyboard.html CSS lays out rows + keys with `flex-grow: 1` so the
+	 * whole panel scales to whatever this value is. Clamped to a sane
+	 * range at load time; default 400. */
+	keyboardHeight: number;
+	/** Active virtual-keyboard panel design. Path is relative to the
+	 * app-level root (e.g. `keyboards/default.html` →
+	 * `<appRoot>keyboards/default.html`); absolute schemes
+	 * (`sdmc:/…`, `romfs:/…`) pass through unchanged. Pairs with
+	 * `keyboards.json` — the registry the Settings page lists. Each
+	 * file is a full keyboard panel (scoped CSS + the same #urlInput /
+	 * #closeBtn / #clearBtn / .letter / .key contract `KeyboardOverlay`
+	 * relies on); selecting a new entry rewrites this field and the
+	 * shell re-parses + rebuilds the keyboard live root on the spot. */
+	keyboard: string;
+	/** Where the browser chrome strip sits on screen — `'top'` (above
+	 * page content) or `'bottom'` (below it). Hoisted out of
+	 * `BrowserTemplate.toolbar.position` on 2026-06-11 so the toggle
+	 * is a Settings-page preference instead of a per-template baked-in
+	 * value. The shell pushes this into BrowserUI on boot + on Save,
+	 * so the chrome flips position immediately on change. */
+	toolbarPosition: ToolbarPosition;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
@@ -251,6 +275,9 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	navDebug: false,
 	swbImgDebug: false,
 	buttonMapping: {},
+	keyboardHeight: 400,
+	keyboard: 'keyboards/default.html',
+	toolbarPosition: 'top',
 };
 
 /** Migrate legacy `Templates/<name>.json` (capital T, pre 2026-06-03)
@@ -334,6 +361,19 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			buttonMapping: parsed?.buttonMapping && typeof parsed.buttonMapping === 'object' && !Array.isArray(parsed.buttonMapping)
 				? parsed.buttonMapping as Record<string, string>
 				: {},
+			// Clamp to a sane band — too small and the keyboard becomes
+			// unusable, too tall and it would eat the chrome strip area.
+			// 120 px is roughly two rows; 700 px keeps a sliver of host
+			// page visible above on the 720 p canvas.
+			keyboardHeight: typeof parsed?.keyboardHeight === 'number' && Number.isFinite(parsed.keyboardHeight)
+				? Math.max(120, Math.min(700, Math.trunc(parsed.keyboardHeight)))
+				: DEFAULT_CONFIG.keyboardHeight,
+			keyboard: typeof parsed?.keyboard === 'string' && parsed.keyboard.length > 0
+				? parsed.keyboard
+				: DEFAULT_CONFIG.keyboard,
+			toolbarPosition: parsed?.toolbarPosition === 'top' || parsed?.toolbarPosition === 'bottom'
+				? parsed.toolbarPosition
+				: DEFAULT_CONFIG.toolbarPosition,
 		};
 	} catch (error) {
 		console.debug(`[brewser] config.json parse failed: ${error}`);
@@ -628,6 +668,30 @@ export function resolveSearchEngine(appRoot: string): SearchEngine {
 	const engines = loadSearchEngines(appRoot);
 	const selected = loadConfig(appRoot).searchEngine;
 	return engines.find((e) => e.title === selected) ?? engines[0] ?? DEFAULT_SEARCH_ENGINE;
+}
+
+/** Read `<appRoot>/keyboards.json` and return the validated entries
+ * in source order. Missing or malformed file → empty array. Same
+ * `{ title, path }` shape as the templates registry; `path` is
+ * resolved against the app root unless absolute. */
+export function loadKeyboardRegistry(appRoot: string): TemplateEntry[] {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${appRoot}keyboards.json`);
+	} catch (_) {
+		return [];
+	}
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((e): e is TemplateEntry =>
+			!!e && typeof e.title === 'string' && typeof e.path === 'string',
+		);
+	} catch (error) {
+		console.debug(`[brewser] keyboards.json parse failed: ${error}`);
+		return [];
+	}
 }
 
 /** Read `<profile>/templates.json` and return the validated entries

@@ -5,7 +5,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadSearchEngines, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
+import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
 
 /**
  * Serves the browser's built-in pages.
@@ -267,6 +267,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			() => this.renderTemplates(),
 		);
 		out = out.replace(
+			/<browser-keyboards(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-keyboards\s*>)?/gi,
+			() => this.renderKeyboards(),
+		);
+		out = out.replace(
 			/<browser-settings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-settings\s*>)?/gi,
 			() => this.renderSettings(),
 		);
@@ -369,6 +373,31 @@ export class BrowserResourceLoader implements ResourceLoader {
 		}).join('');
 	}
 
+	/** Render the keyboards registry as radio-style rows. Mirrors
+	 * `renderTemplates` — the currently-selected keyboard (per
+	 * `config.json`'s `keyboard` field) carries `.active` and has no
+	 * `data-action` so taps are inert; every other row carries
+	 * `<button data-action="select-keyboard:<path>">` whose tap the
+	 * shell intercepts via `selectKeyboard` to rewrite `config.json`
+	 * and rebuild the kb live root on the spot. */
+	private renderKeyboards(): string {
+		const entries = loadKeyboardRegistry(this.appRoot);
+		if (entries.length === 0) {
+			return '<p class="empty">No keyboards registered. Edit <code>keyboards.json</code> to add one.</p>';
+		}
+		const config = loadConfig(this.appRoot);
+		const indicator = '<span class="radio-indicator"><span class="radio-dot"></span></span>';
+		return entries.map((e) => {
+			const title = htmlEscape(e.title);
+			const path = htmlEscape(e.path);
+			const label = `<span class="template-label">${title} · <span class="path">${path}</span></span>`;
+			if (e.path === config.keyboard) {
+				return `<button class="template-row active" type="button">${indicator}${label}</button>`;
+			}
+			return `<button class="template-row" type="button" data-action="select-keyboard:${path}">${indicator}${label}</button>`;
+		}).join('');
+	}
+
 	/** Full settings form. Every editable `config.json` key is rendered as a
 	 * native form widget tagged with `data-setting="<key>"`. The Save
 	 * button (`data-action="save-settings"`, sticky bottom-right) is the
@@ -383,6 +412,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 		const config = loadConfig(this.appRoot);
 		const engines = loadSearchEngines(this.appRoot);
 		const templates = loadTemplateRegistry(this.appRoot);
+		const keyboards = loadKeyboardRegistry(this.appRoot);
 
 		const checked = (b: boolean) => b ? ' checked' : '';
 
@@ -399,12 +429,35 @@ export class BrowserResourceLoader implements ResourceLoader {
 				);
 			}).join('');
 
+		const keyboardRows = keyboards.length === 0
+			? '<p class="empty">No keyboards registered. Edit <code>keyboards.json</code> to add one.</p>'
+			: keyboards.map((e) => {
+				const path = htmlEscape(e.path);
+				const title = htmlEscape(e.title);
+				return (
+					'<label class="settings-radio">'
+					+ `<input type="radio" name="setting-keyboard" value="${path}" data-setting="keyboard"${checked(e.path === config.keyboard)}>`
+					+ `<span class="settings-radio-label">${title} <span class="path">${path}</span></span>`
+					+ '</label>'
+				);
+			}).join('');
+
 		const themeRow = (
 			'<div class="settings-row">'
 			+ '<span class="settings-label">Theme</span>'
 			+ '<div class="settings-radios">'
 			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="light" data-setting="theme"${checked(config.theme === 'light')}> <span>Light</span></label>`
 			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="dark" data-setting="theme"${checked(config.theme === 'dark')}> <span>Dark</span></label>`
+			+ '</div>'
+			+ '</div>'
+		);
+
+		const toolbarPositionRow = (
+			'<div class="settings-row">'
+			+ '<span class="settings-label">Toolbar position</span>'
+			+ '<div class="settings-radios">'
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-toolbarPosition" value="top" data-setting="toolbarPosition"${checked(config.toolbarPosition === 'top')}> <span>Top</span></label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-toolbarPosition" value="bottom" data-setting="toolbarPosition"${checked(config.toolbarPosition === 'bottom')}> <span>Bottom</span></label>`
 			+ '</div>'
 			+ '</div>'
 		);
@@ -426,12 +479,6 @@ export class BrowserResourceLoader implements ResourceLoader {
 					+ '</label>'
 				);
 			}).join('');
-		const searchRow = (
-			'<div class="settings-row">'
-			+ '<span class="settings-label">Search engine</span>'
-			+ '<div class="settings-templates">' + searchRows + '</div>'
-			+ '</div>'
-		);
 
 		const numberRow = (key: string, label: string, value: number, min: number, max: number, hint: string): string => (
 			'<div class="settings-row">'
@@ -451,15 +498,28 @@ export class BrowserResourceLoader implements ResourceLoader {
 
 		return (
 			'<div class="settings-form">'
+			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Template</legend>'
 			+ '<div class="settings-templates">' + templateRows + '</div>'
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
+			+ '<legend>Keyboard</legend>'
+			+ '<div class="settings-templates">' + keyboardRows + '</div>'
+			+ '</fieldset>'
+			+ '</div>'
+			+ '<div class="settings-row-pair">'
+			+ '<fieldset class="settings-group">'
 			+ '<legend>Appearance</legend>'
 			+ themeRow
-			+ searchRow
+			+ toolbarPositionRow
 			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Search engine</legend>'
+			+ '<div class="settings-templates">' + searchRows + '</div>'
+			+ '</fieldset>'
+			+ '</div>'
+			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Performance</legend>'
 			+ numberRow('wwwRenderChunkMs', 'External page render budget', config.wwwRenderChunkMs, 1, 1000, 'ms per frame while building http(s) pages (1–1000)')
@@ -473,6 +533,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ toggleRow('autoRotate', 'Auto-rotate canvas', config.autoRotate, 'reserved — no consumer wired up today, value round-trips through Save')
 			+ toggleRow('clickSounds', 'Click sounds', config.clickSounds, 'short click.wav on link / button / chrome activation')
 			+ '</fieldset>'
+			+ '</div>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Diagnostics</legend>'
 			+ toggleRow('navDebug', 'Navigation debug log', config.navDebug, 'writes shell-nav-diag.log on every navigation / shell input / touch')

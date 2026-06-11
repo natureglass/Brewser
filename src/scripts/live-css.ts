@@ -359,6 +359,16 @@ export interface ComputedLiveStyle {
 	afterStyle?: PseudoStyle;
 	/** Cascaded `--foo` declarations on THIS element. */
 	customProps?: Record<string, string>;
+	// SVG paint properties cascaded into computed style so authors can
+	// style inline `<svg>` icons via CSS rules instead of inline
+	// `fill="..."` / `stroke="..."` attributes. The svg-painter's
+	// LIVE_SVG_ADAPTER consults these as a fallback when no inline attr
+	// is set, and the inheritance pass below copies them down to
+	// descendants (paths under an svg inherit the svg's paint, matching
+	// the SVG spec).
+	fill?: string;
+	stroke?: string;
+	strokeWidth?: string;
 }
 
 // =========================================================================
@@ -743,7 +753,7 @@ export function isPseudoHover(el: LiveElement): boolean { return hoverElements.h
  * `<mark>` highlight bg, `<small>` smaller font. Anything author CSS sets
  * overrides these. Returned object is mutated into the per-call `computed`
  * accumulator. */
-function applyUaDefaults(computed: ComputedLiveStyle, tag: string): void {
+function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveElement): void {
 	// Text nodes participate in inline-formatting context.
 	if (tag === '#text') { computed.display = 'inline'; return; }
 	switch (tag) {
@@ -940,13 +950,30 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string): void {
 		// Author CSS still overrides via the normal cascade.
 		// `<input type=hidden>` zero-sizes itself in layoutLeaf so the
 		// margin doesn't push siblings around for hidden fields.
+		//
+		// SKIP when the parent is a flex container — there the widget
+		// is a flex item, not a block-level box, and the UA margin
+		// fights phase-3 cross-axis stretch (was: a `<input>` flex
+		// item in a row container ended up centered with crossSize
+		// reduced by `margin-top + margin-bottom = 6 px`, so the input
+		// rendered ~6 px shorter than its sibling DIVs even though the
+		// row's `align-items: stretch` was meant to give them all the
+		// same height). Author CSS can still set explicit margins for
+		// the flex case via the normal cascade.
 		case 'INPUT':
 		case 'BUTTON':
 		case 'SELECT':
-		case 'TEXTAREA':
+		case 'TEXTAREA': {
+			if (el.parent) {
+				const parentCs = getComputedLiveStyle(el.parent);
+				if (parentCs.display === 'flex' || parentCs.display === 'inline-flex') {
+					return;
+				}
+			}
 			computed.marginTop = 3;
 			computed.marginBottom = 3;
 			return;
+		}
 		// Non-rendered elements. STYLE is the load-bearing one — body-
 		// level `<style>` blocks were rendering their CSS source as
 		// visible text (Google's `/search` "Update je browser" page
@@ -1113,7 +1140,7 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 	//    stylesheets can override them. Spec-correct UA stylesheet would
 	//    use specificity 0 (matched-by-tag) — we model that by simply
 	//    layering defaults first and letting matched rules overwrite.
-	applyUaDefaults(computed, el.tagName);
+	applyUaDefaults(computed, el.tagName, el);
 	// 0a. Apply HTML presentational hints (`<img width=…>`, `<table
 	//    width=…%>`, `<input size=…>`, …). Per HTML5 these contribute at
 	//    UA-stylesheet specificity (lower than any author rule), so we
@@ -1274,6 +1301,13 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 		// to disc for `<ul ul>` but our showcase doesn't depend on that.)
 		if (computed.listStyleType === undefined && parentComputed.listStyleType !== undefined) computed.listStyleType = parentComputed.listStyleType;
 		if (computed.cursor === undefined && parentComputed.cursor !== undefined) computed.cursor = parentComputed.cursor;
+		// SVG paint properties cascade down the tree (path inherits from
+		// its parent svg / g) so authors can set `fill` / `stroke` on the
+		// outer `<svg>` (or even higher) and have the leaves pick it up.
+		// Matches the SVG spec's inheritance of presentation attributes.
+		if (computed.fill === undefined && parentComputed.fill !== undefined) computed.fill = parentComputed.fill;
+		if (computed.stroke === undefined && parentComputed.stroke !== undefined) computed.stroke = parentComputed.stroke;
+		if (computed.strokeWidth === undefined && parentComputed.strokeWidth !== undefined) computed.strokeWidth = parentComputed.strokeWidth;
 	}
 
 	// 5. Inline `--foo` custom properties (highest cascade priority —
@@ -1322,6 +1356,13 @@ function applyDeclToComputed(
 	}
 	switch (prop) {
 		case 'color': computed.color = value; return;
+		// SVG paint properties — passed through as raw resolved strings
+		// (var() refs already resolved by resolveVarRefs above). The
+		// svg-painter applies them at paint time via the cascade
+		// fallback in LIVE_SVG_ADAPTER.
+		case 'fill':         computed.fill = value;        return;
+		case 'stroke':       computed.stroke = value;      return;
+		case 'stroke-width': computed.strokeWidth = value; return;
 		case 'background':
 		case 'background-color': {
 			computed.background = value;

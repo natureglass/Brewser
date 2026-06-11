@@ -1,440 +1,39 @@
-import { nxScreen, type NxScreenCanvas } from '@switch-web/runtime';
+import { type BrowserTemplate } from '../profile/browser-template.js';
+import { COMBO_BUTTONS } from '../browser-config.js';
 import {
-	COMBO_BUTTONS,
-	DEFAULT_CANVAS_HEIGHT,
-	DEFAULT_CANVAS_WIDTH,
-	KEYBOARD_LAYOUT,
-} from '../browser-config.js';
-import { DEFAULT_TEMPLATE, type BrowserTemplate } from '../profile/browser-template.js';
-import { setKeyboardOpen } from '../scripts/live-paint-control.js';
+	getKeyboardLiveRoot,
+	getKeyboardTopY,
+	setKeyboardOpen,
+	setKeyboardOverlayVisible,
+} from '../scripts/live-paint-control.js';
+import { setInputValue } from '../scripts/live-form.js';
+import {
+	getInternalLiveScrollY,
+	hitTestLive,
+	setInternalLiveScrollY,
+	type LiveElement,
+} from '../scripts/live-dom.js';
+import { setPseudoActive } from '../scripts/live-css.js';
+import { nxScreen } from '@switch-web/runtime';
 import { playClick } from '../audio/click-sound.js';
-import {
-	getCursorPos,
-	tickCursorMovementOnly,
-} from './page-mouse-forwarder.js';
 import { getButtonIndexForAction } from './button-router.js';
+import { getCursorPos, tickCursorMovementOnly } from './page-mouse-forwarder.js';
 
 /** Callbacks the shell passes to `KeyboardOverlay.open()` so the page
- * behind the keyboard can be scrolled while it's up. Right-stick Y is
- * sampled in the keyboard's own poll loop (the shell's main controller
- * loop is suspended awaiting the keyboard's promise); touch swipes
- * above the panel are forwarded by the panel's own touch session. */
+ * behind the keyboard can be scrolled while it's up, and (for
+ * `<input type=number>` etc.) so the keyboard can gate Submit behind
+ * a validator. Same shape as the old canvas-keyboard's callbacks — the
+ * three URL-bar / search / live-form call sites pass through unchanged. */
 export interface KeyboardScrollCallbacks {
-	/** Positive delta = scroll content DOWN (matches handleScroll's
-	 * sign convention in browser-shell). */
 	onScroll?: (delta: number) => void;
-	/** Optional submit gate. When supplied, the Submit key (and the
-	 * `+` button shortcut) only fire when this returns `true` for the
-	 * current edit buffer. Used by `<input type="number">` to block
-	 * submission of letter-laden strings the same way real browsers
-	 * gray out their virtual-keyboard Enter for invalid form fields.
-	 * Undefined → submit is always allowed (URL bar, search bar). */
 	validate?: (value: string) => boolean;
 }
 
-interface Key {
-	/** Display label. */
-	label: string;
-	/** Special action this key performs. Undefined means insert `label`. */
-	action?: 'backspace' | 'space' | 'submit' | 'cancel';
-	/** Width in "units" (1 unit = one letter-key width). Defaults to 1. */
-	units?: number;
-}
-
-interface KeyRect {
-	key: Key;
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-}
-
-const ROWS: Key[][] = [
-	[
-		{ label: 'q' }, { label: 'w' }, { label: 'e' }, { label: 'r' }, { label: 't' },
-		{ label: 'y' }, { label: 'u' }, { label: 'i' }, { label: 'o' }, { label: 'p' },
-	],
-	[
-		{ label: 'a' }, { label: 's' }, { label: 'd' }, { label: 'f' }, { label: 'g' },
-		{ label: 'h' }, { label: 'j' }, { label: 'k' }, { label: 'l' },
-		{ label: '⌫', action: 'backspace' },
-	],
-	[
-		{ label: 'z' }, { label: 'x' }, { label: 'c' }, { label: 'v' }, { label: 'b' },
-		{ label: 'n' }, { label: 'm' }, { label: '.' }, { label: '/' }, { label: '-' },
-	],
-	[
-		{ label: '1' }, { label: '2' }, { label: '3' }, { label: '4' }, { label: '5' },
-		{ label: '6' }, { label: '7' }, { label: '8' }, { label: '9' }, { label: ':' },
-	],
-	[
-		{ label: 'Cancel', action: 'cancel', units: 3 },
-		{ label: 'Space',  action: 'space',  units: 4 },
-		{ label: 'Submit', action: 'submit', units: 3 },
-	],
-];
-
-// Colours come from `BrowserTemplate.keyboard` — see
-// `BrowserShell.run()` for the `setTemplate(...)` hand-off.
-
-interface LayoutMetrics {
-	rects: KeyRect[][];
-	panelTop: number;
-	editY: number;
-	editHeight: number;
-	helpY: number;
-}
-
-function computeLayout(canvasWidth: number, canvasHeight: number): LayoutMetrics {
-	const { topY, editPreviewHeight, rowHeight, rowGap, keyGap, sidePadding } = KEYBOARD_LAYOUT;
-	const usableWidth = canvasWidth - 2 * sidePadding;
-	const unit = (usableWidth - 9 * keyGap) / 10;
-	const keyboardTop = topY + editPreviewHeight;
-
-	const rects: KeyRect[][] = ROWS.map((row, rowIndex) => {
-		const rowY = keyboardTop + rowIndex * (rowHeight + rowGap);
-		const totalUnits = row.reduce((sum, key) => sum + (key.units ?? 1), 0);
-		const measuredWidth = totalUnits * unit + (row.length - 1) * keyGap;
-		let x = sidePadding + (usableWidth - measuredWidth) / 2;
-		return row.map((key) => {
-			const width = (key.units ?? 1) * unit + ((key.units ?? 1) - 1) * keyGap;
-			const rect: KeyRect = { key, x, y: rowY, width, height: rowHeight };
-			x += width + keyGap;
-			return rect;
-		});
-	});
-
-	const lastRow = rects[rects.length - 1];
-	const helpY = lastRow[0].y + lastRow[0].height + 8;
-	void canvasHeight; // currently unused but kept so the signature documents intent
-
-	return {
-		rects,
-		panelTop: topY,
-		editY: topY + 12,
-		editHeight: editPreviewHeight - 24,
-		helpY,
-	};
-}
-
-const HELP_TEXT = 'D-pad: move  ·  A: select  ·  Y: backspace  ·  B: cancel  ·  +: submit  ·  touch: tap';
-
-/**
- * Draw the standard backspace icon (`⌫` U+232B) as a canvas path
- * centered at (cx, cy). The Unicode glyph tofus in the Switch font
- * so we render it manually — same approach as the M2.4 form-widget
- * checkmark + dropdown chevron. Shape: a left-pointing pentagon
- * outline with an × inside.
- */
-function drawBackspaceIcon(
-	ctx: CanvasRenderingContext2D,
-	cx: number,
-	cy: number,
-	color: string,
-): void {
-	const w = 22, h = 16;
-	const halfW = w / 2, halfH = h / 2;
-	const tipX = cx - halfW;
-	const bodyLeft = cx - halfW + 6;
-	const bodyRight = cx + halfW;
-	ctx.save();
-	try {
-		ctx.strokeStyle = color;
-		ctx.lineWidth = 2;
-		ctx.lineCap = 'round';
-		ctx.lineJoin = 'round';
-		// Pentagon outline: triangle-pointing-left + rectangle.
-		ctx.beginPath();
-		ctx.moveTo(tipX, cy);
-		ctx.lineTo(bodyLeft, cy - halfH);
-		ctx.lineTo(bodyRight, cy - halfH);
-		ctx.lineTo(bodyRight, cy + halfH);
-		ctx.lineTo(bodyLeft, cy + halfH);
-		ctx.closePath();
-		ctx.stroke();
-		// × inside the rectangle portion.
-		const xPad = 3;
-		ctx.beginPath();
-		ctx.moveTo(bodyLeft + xPad, cy - halfH + xPad);
-		ctx.lineTo(bodyRight - xPad, cy + halfH - xPad);
-		ctx.moveTo(bodyLeft + xPad, cy + halfH - xPad);
-		ctx.lineTo(bodyRight - xPad, cy - halfH + xPad);
-		ctx.stroke();
-	} finally { ctx.restore(); }
-}
-
-function clamp01(n: number): number {
-	if (!Number.isFinite(n)) return 1;
-	return Math.max(0, Math.min(1, n));
-}
-
-/**
- * Custom on-canvas keyboard. Replaces the native nx.js `VirtualKeyboard`
- * because the system applet renders outside the app canvas (Citron can't
- * draw it correctly, and we can't constrain its geometry from JS). Drawn
- * entirely within the app's 1280×720 frame; positioned at the bottom half
- * of the screen with a typing preview above.
- *
- * Input model:
- *   - D-pad / left stick: move focused key
- *   - A: activate focused key
- *   - Y: backspace
- *   - B: cancel
- *   - +: submit
- *   - Touchscreen: tap a key rectangle to activate it
- */
-export class KeyboardOverlay {
-	private readonly canvas: NxScreenCanvas;
-	private readonly ctx: CanvasRenderingContext2D;
-	private readonly layout: LayoutMetrics;
-	private readonly flatRects: KeyRect[];
-	private template: BrowserTemplate = DEFAULT_TEMPLATE;
-	private panelBackground: Image | null = null;
-	/** Submit-gate validator for the in-flight session — set in `open`,
-	 * cleared on resolve. `render` reads it to paint the Submit key in
-	 * the disabled palette when the current buffer would be rejected,
-	 * which is the user-visible counterpart to the `activate`/`plus`
-	 * gates below. Undefined / `null` → Submit always renders enabled. */
-	private validate: ((value: string) => boolean) | null = null;
-
-	constructor() {
-		this.canvas = nxScreen();
-		this.ctx = this.canvas.getContext('2d');
-		const width = this.canvas.width || DEFAULT_CANVAS_WIDTH;
-		const height = this.canvas.height || DEFAULT_CANVAS_HEIGHT;
-		this.layout = computeLayout(width, height);
-		this.flatRects = this.layout.rects.flat();
-	}
-
-	/** Hand the shell-loaded template to the keyboard so its panel,
-	 * edit preview, keys, and help text take their colours from
-	 * `template.keyboard`. Until this is called the keyboard falls
-	 * back to `DEFAULT_TEMPLATE`. */
-	setTemplate(template: BrowserTemplate): void {
-		this.template = template;
-	}
-
-	/** Optional background image painted across the keyboard panel
-	 * (stretched). `null` (or never set) means draw the panelBg
-	 * fill alone. The image sits between the panelBg fill and the
-	 * keys/edit preview so transparency falls back to the colour. */
-	setPanelBackground(image: Image | null): void {
-		this.panelBackground = image;
-	}
-
-	async open(
-		initial = '',
-		callbacks: KeyboardScrollCallbacks = {},
-	): Promise<string | null> {
-		const state: KeyboardState = {
-			value: initial,
-			cursor: initial.length,
-			focusRow: 0,
-			focusCol: 0,
-		};
-		// Stash the session validator so `render` can paint the Submit
-		// key in disabled style without threading the callback through
-		// every notifyChange tick. Cleared in the resolve path below.
-		this.validate = callbacks.validate ?? null;
-		// Flag the paint pipeline that the keyboard owns the screen — the
-		// live-overlay's `paintLiveOverlay` early-returns on this flag so
-		// rAF/video ticks don't clobber the keyboard pixels. Cleared in
-		// the resolve path below so the next idle tick repaints the page.
-		// Note: live-form's `<input>` tap path used to do this in its own
-		// try/finally; that responsibility now lives here so both the URL
-		// bar path and the `<input>` path are gated uniformly.
-		setKeyboardOpen(true);
-		this.render(state);
-
-		return new Promise<string | null>((resolve) => {
-			const session = new KeyboardSession(
-				this.canvas,
-				this.layout.rects,
-				this.flatRects,
-				state,
-				(newState) => {
-					this.render(newState);
-				},
-				(value) => {
-					setKeyboardOpen(false);
-					this.validate = null;
-					resolve(value);
-				},
-				this.layout.panelTop,
-				callbacks,
-			);
-			session.start();
-		});
-	}
-
-	private render(state: KeyboardState): void {
-		const ctx = this.ctx;
-		const canvasW = this.canvas.width || DEFAULT_CANVAS_WIDTH;
-		const canvasH = this.canvas.height || DEFAULT_CANVAS_HEIGHT;
-		const kb = this.template.keyboard;
-
-		// Panel background with a top border. Bg fill goes down first
-		// as a fallback so any transparent area of the optional image
-		// still gets a solid colour. The image is stretched to fit
-		// the panel rect (below the 2px top border).
-		ctx.fillStyle = kb.panelBorder;
-		ctx.fillRect(0, this.layout.panelTop, canvasW, 2);
-		ctx.fillStyle = kb.panelBg;
-		const panelY = this.layout.panelTop + 2;
-		const panelH = canvasH - this.layout.panelTop - 2;
-		ctx.fillRect(0, panelY, canvasW, panelH);
-		if (this.panelBackground) {
-			ctx.drawImage(this.panelBackground, 0, panelY, canvasW, panelH);
-		}
-
-		// Edit preview with cursor.
-		ctx.fillStyle = kb.editBg;
-		ctx.fillRect(20, this.layout.editY, canvasW - 40, this.layout.editHeight);
-		ctx.fillStyle = kb.editText;
-		ctx.font = '28px system-ui';
-		ctx.textBaseline = 'middle';
-		ctx.textAlign = 'start';
-		const editPaddingX = 16;
-		const editCenterY = this.layout.editY + this.layout.editHeight / 2;
-		ctx.fillText(state.value, 20 + editPaddingX, editCenterY);
-		const cursorX = 20 + editPaddingX + ctx.measureText(state.value.slice(0, state.cursor)).width;
-		ctx.fillStyle = kb.editCursor;
-		ctx.fillRect(cursorX, this.layout.editY + 8, 2, this.layout.editHeight - 16);
-
-		// Keys. `transparency` (0 = opaque, 1 = invisible) is applied
-		// as `globalAlpha` for the whole key-drawing pass so both the
-		// rect fill and the label dim together — readable bg image
-		// shows through, but the panel bg + edit preview + help text
-		// outside this block stay fully opaque.
-		ctx.textAlign = 'center';
-		const keyAlpha = clamp01(1 - kb.transparency);
-		const prevAlpha = ctx.globalAlpha;
-		ctx.globalAlpha = keyAlpha;
-		// Pre-compute whether Submit should render in the disabled
-		// palette (validator rejects current buffer). Tied to the same
-		// gate `activate('submit')` + the pollLoop's `+`-press path read,
-		// so the user always sees the correct affordance before tapping.
-		const submitDisabled = !!this.validate && !this.validate(state.value);
-		for (let r = 0; r < this.layout.rects.length; r++) {
-			for (let c = 0; c < this.layout.rects[r].length; c++) {
-				const rect = this.layout.rects[r][c];
-				const focused = r === state.focusRow && c === state.focusCol;
-				const isAction = Boolean(rect.key.action);
-				const isSubmit = rect.key.action === 'submit';
-				if (isSubmit && submitDisabled) {
-					// Disabled Submit: muted bg (regular key colour, not
-					// the brighter action colour) + dimmed label, matching
-					// the .settings-save[disabled] treatment on the HTML
-					// settings page. Skip the focus highlight so a hover
-					// over the key doesn't suggest interactivity.
-					ctx.fillStyle = kb.keyBg;
-					ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-					ctx.fillStyle = kb.helpText;
-					ctx.font = '20px system-ui';
-					ctx.fillText(rect.key.label, rect.x + rect.width / 2, rect.y + rect.height / 2);
-					continue;
-				}
-				ctx.fillStyle = focused
-					? (isAction ? kb.keyActionFocusBg : kb.keyFocusBg)
-					: (isAction ? kb.keyActionBg : kb.keyBg);
-				ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-
-				ctx.fillStyle = isAction ? kb.keyActionText : kb.keyText;
-				if (rect.key.action === 'backspace') {
-					// Draw the backspace symbol as a canvas path — the
-					// Unicode `⌫` U+232B glyph tofus in the Switch font.
-					// Same approach used for checkbox ✓ + select chevron.
-					drawBackspaceIcon(ctx, rect.x + rect.width / 2, rect.y + rect.height / 2, kb.keyActionText);
-				} else {
-					ctx.font = isAction ? '20px system-ui' : '24px system-ui';
-					ctx.fillText(rect.key.label, rect.x + rect.width / 2, rect.y + rect.height / 2);
-				}
-			}
-		}
-		ctx.globalAlpha = prevAlpha;
-		ctx.textAlign = 'start';
-
-		// Help footer.
-		if (this.layout.helpY + 18 <= canvasH) {
-			ctx.fillStyle = kb.helpText;
-			ctx.font = '14px system-ui';
-			ctx.textBaseline = 'top';
-			ctx.fillText(HELP_TEXT, 24, this.layout.helpY);
-		}
-	}
-}
-
-interface KeyboardState {
-	value: string;
-	cursor: number;
-	focusRow: number;
-	focusCol: number;
-}
-
-interface ButtonSnapshot {
-	a: boolean;
-	b: boolean;
-	y: boolean;
-	plus: boolean;
-	left: boolean;
-	right: boolean;
-	up: boolean;
-	down: boolean;
-}
-
-const nativeSetTimeout = setTimeout.bind(globalThis);
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => nativeSetTimeout(resolve, ms));
-}
-
-function activePad(): Gamepad | null {
-	return navigator.getGamepads().find((gamepad) => gamepad && gamepad.connected) ?? null;
-}
-
-function readButtons(): ButtonSnapshot {
-	const pad = activePad();
-	const button = (i: number): boolean => Boolean(pad?.buttons[i]?.pressed);
-
-	// Keyboard interaction is mouse + touch ONLY. Both `a` (activate
-	// hovered key) and `b` (cancel) come from `config.json buttonMapping`
-	// via the button-router so the user's remaps stay consistent across
-	// the whole shell. Previously `b` was hardcoded to `COMBO_BUTTONS.b`,
-	// which collided with `leftClick="A"` (both resolve to the same
-	// gamepad index in this codebase's mapping) — pressing one physical
-	// button fired BOTH activation AND cancel. `+` (Plus) still submits.
-	const leftClickIdx = getButtonIndexForAction('leftClick');
-	const rightClickIdx = getButtonIndexForAction('rightClick');
-	return {
-		a: leftClickIdx >= 0 ? button(leftClickIdx) : false,
-		b: rightClickIdx >= 0 ? button(rightClickIdx) : false,
-		y: false,
-		plus: button(COMBO_BUTTONS.plus),
-		left: false,
-		right: false,
-		up: false,
-		down: false,
-	};
-}
-
-function rising(prev: ButtonSnapshot, next: ButtonSnapshot, name: keyof ButtonSnapshot): boolean {
-	return next[name] && !prev[name];
-}
-
-/** Move-threshold (px) past which a touch above the keyboard panel is
- * treated as a page-scroll swipe instead of a tap-to-cancel. Mirrors
- * the SWIPE_MOVE_THRESHOLD in controller-shortcuts.ts so the gesture
- * cutoff matches the rest of the browser. */
-const PAGE_SWIPE_MOVE_THRESHOLD = 6;
-
-/** Right-stick Y axis on the standard nx.js gamepad mapping (same
- * constant as controller-shortcuts.ts; duplicated here so the keyboard
- * doesn't reach into that module just for scroll). */
+/** Right-stick Y axis on the standard nx.js gamepad mapping. */
 const RIGHT_STICK_Y_AXIS = 3;
 const STICK_DEADZONE = 0.15;
 /** Max scroll px per pollLoop tick at full right-stick deflection.
- * Pollloop runs at ~16ms = ~60 Hz, so full deflection = ~600 px/s,
- * comparable to the shell's main-loop scroll cadence. */
+ * Poll loop runs at ~16 ms = ~60 Hz, so full deflection ≈ 600 px/s. */
 const MAX_SCROLL_PER_TICK = 10;
 
 function readStickScroll(pad: Gamepad | null): number {
@@ -445,261 +44,597 @@ function readStickScroll(pad: Gamepad | null): number {
 	return Math.sign(axis) * Math.round(normalized * normalized * MAX_SCROLL_PER_TICK);
 }
 
-/** Per-touch session for a swipe that started ABOVE the keyboard panel.
- * Opened on touchstart-outside-panel; drives onScroll deltas on
- * touchmove; resolved on touchend (cancel-keyboard if the gesture stayed
- * a tap, just close the session if it grew into a swipe). */
-interface PageSwipeSession {
-	startY: number;
-	lastY: number;
-	moved: boolean;
+function activePad(): Gamepad | null {
+	return navigator.getGamepads().find((g) => g && g.connected) ?? null;
 }
 
-class KeyboardSession {
-	private running = true;
-	private touchStartHandler?: (event: TouchEvent) => void;
-	private touchMoveHandler?: (event: TouchEvent) => void;
-	private touchEndHandler?: (event: TouchEvent) => void;
-	/** Swipe-tracking state for the current finger when it landed above
-	 * the panel. `null` means no outside-panel touch is in flight (the
-	 * touch either hit a key, or already lifted). */
-	private pageSwipe: PageSwipeSession | null = null;
+interface ButtonSnapshot {
+	a: boolean;
+	b: boolean;
+	plus: boolean;
+}
 
-	constructor(
-		private readonly canvas: NxScreenCanvas,
-		private readonly rects: KeyRect[][],
-		private readonly flatRects: KeyRect[],
-		private readonly state: KeyboardState,
-		private readonly notifyChange: (state: KeyboardState) => void,
-		private readonly resolve: (value: string | null) => void,
-		private readonly panelTop: number,
-		private readonly callbacks: KeyboardScrollCallbacks,
-	) {}
+function readButtons(): ButtonSnapshot {
+	const pad = activePad();
+	const button = (i: number): boolean => Boolean(pad?.buttons[i]?.pressed);
+	// `a` (activate hovered key) and `b` (cancel) follow `config.json buttonMapping`
+	// via the button router so the user's remaps apply uniformly. `+` (Plus)
+	// always submits; not user-remappable.
+	const leftClickIdx = getButtonIndexForAction('leftClick');
+	const rightClickIdx = getButtonIndexForAction('rightClick');
+	return {
+		a: leftClickIdx >= 0 ? button(leftClickIdx) : false,
+		b: rightClickIdx >= 0 ? button(rightClickIdx) : false,
+		plus: button(COMBO_BUTTONS.plus),
+	};
+}
 
-	start(): void {
-		this.installTouchHandler();
-		void this.pollLoop();
+function rising(prev: ButtonSnapshot, next: ButtonSnapshot, name: keyof ButtonSnapshot): boolean {
+	return next[name] && !prev[name];
+}
+
+/** Repaint callback the shell registers at startup. See JSDoc on
+ * `setKeyboardRepaintDriver` for the rationale — the shell's main
+ * loop is suspended on open()'s promise, so the keyboard ticks its
+ * own paints during the lifetime of a session. */
+let repaintDriver: (() => void) | null = null;
+export function setKeyboardRepaintDriver(cb: (() => void) | null): void {
+	repaintDriver = cb;
+}
+
+const nativeSetTimeout = setTimeout.bind(globalThis);
+
+// =========================================================================
+// Global hooks exposed during a session.
+//
+// `__brewserKeyboardSubmit(value)` / `__brewserKeyboardCancel()` end
+// the session with that result. Originally specified so the HTML
+// keyboard's own page-side script could call them from the Submit /
+// Cancel buttons; the page script is gone now (live-DOM doesn't model
+// selectionStart / focus), so the shell calls them from
+// `__brewserKeyboardHandleTap` instead. Kept on `globalThis` because
+// future page-side glue (or test fixtures) may want to drive the
+// keyboard programmatically.
+//
+// `__brewserKeyboardHandleTap(el)` is the entry point
+// `controller-shortcuts.ts` calls when a touch lands inside the
+// keyboard panel area (y >= KEYBOARD_LAYOUT.topY) and hit-test resolves
+// to a kb-root element. The function walks up to find the nearest
+// `.key` ancestor and processes its action (insert/backspace/etc.) or
+// commits on `#submitBtn`.
+//
+// All three are null when no session is in flight; controller-shortcuts
+// nullity-checks before calling.
+// =========================================================================
+interface KeyboardGlobals {
+	__brewserKeyboardSubmit?: (value: string) => void;
+	__brewserKeyboardCancel?: () => void;
+	__brewserKeyboardHandleTap?: (el: LiveElement) => void;
+	/** Above-panel swipe → onScroll forward. Registered by `open()`
+	 * during the session, called from controller-shortcuts touchmove
+	 * when a kb-swipe session is in flight. */
+	__brewserKeyboardForwardScroll?: (delta: number) => void;
+}
+
+/** Lowercase character → uppercase. Used for letter keys when Shift
+ * XOR Caps is on. Non-letter keys (numbers / punctuation) go through
+ * the shift-symbol map below. */
+function toUpper(ch: string): string {
+	if (/^[a-z]$/.test(ch)) return ch.toUpperCase();
+	return ch;
+}
+
+/** Original page-script's shift-symbol map. Mirrors a US QWERTY layout. */
+const SHIFT_SYMBOLS: Record<string, string> = {
+	'`': '~', '-': '_', '=': '+', '[': '{', ']': '}', '\\': '|',
+	';': ':', "'": '"', ',': '<', '.': '>', '/': '?',
+};
+function shiftSymbol(ch: string): string {
+	return SHIFT_SYMBOLS[ch] ?? ch;
+}
+
+/** Walk parent chain to find the nearest element with `class="key"`.
+ * Returns `null` if `el` isn't inside a key (e.g. tap landed on the
+ * `.kb` panel bg between keys). */
+function findKey(el: LiveElement | null): LiveElement | null {
+	for (let n: LiveElement | null = el; n; n = n.parent) {
+		const cls = n.getAttribute?.('class') ?? '';
+		if (cls.split(/\s+/).includes('key')) return n;
 	}
+	return null;
+}
 
-	private finish(value: string | null): void {
-		if (!this.running) return;
-		this.running = false;
-		if (this.touchStartHandler) {
-			this.canvas.removeEventListener('touchstart', this.touchStartHandler);
-			this.touchStartHandler = undefined;
+/** Pull the "base" character to insert for a non-action key. Numeric
+ * keys are `<div class="key num"><span class="sup">!</span>1</div>` —
+ * the displayed digit is the LAST text node. Plain letter / symbol
+ * keys hold their character as the only text child. `data-char` wins
+ * if present (used by the space bar so its visible glyph can be
+ * `&nbsp;` while the inserted char is a real space). */
+function readKeyChar(key: LiveElement): string {
+	const dataChar = key.getAttribute('data-char');
+	if (dataChar !== null && dataChar !== undefined) return dataChar;
+	// Walk children for the last text node — handles both the `.num`
+	// case (sup span + digit text) and plain letter keys (single text
+	// node).
+	for (let i = key.children.length - 1; i >= 0; i--) {
+		const child = key.children[i];
+		if (child.tagName === '#text') {
+			const t = (child as { data?: string }).data ?? '';
+			const trimmed = t.trim();
+			if (trimmed) return trimmed;
 		}
-		if (this.touchMoveHandler) {
-			this.canvas.removeEventListener('touchmove', this.touchMoveHandler);
-			this.touchMoveHandler = undefined;
-		}
-		if (this.touchEndHandler) {
-			this.canvas.removeEventListener('touchend', this.touchEndHandler);
-			this.touchEndHandler = undefined;
-		}
-		this.pageSwipe = null;
-		// Defer to the next macrotask so the navigation that consumes this
-		// value doesn't start *inside* the touch-event dispatch (Submit-by-tap)
-		// or the pollLoop's iteration (Submit-by-Plus). Without this, the
-		// page bundle that runs during navigation ends up evaluating while
-		// we're still unwinding the dispatch, which Citron handles poorly
-		// (frame loop stalls, FPS drops to 0).
-		nativeSetTimeout(() => this.resolve(value), 0);
 	}
+	return '';
+}
 
-	private activate(rect: KeyRect): void {
-		// Audible feedback for every virtual-keyboard key activation —
-		// covers touch (`touchStartHandler`) and mouse (`pollLoop` A on
-		// hovered rect) alike, since both routes call `activate()`. Gated
-		// globally by the `clickSounds` flag inside `playClick`.
-		playClick();
-		const action = rect.key.action;
-		if (action === 'submit') {
-			// Validator gate — when the caller (e.g. number-typed input)
-			// declares the current buffer unsubmittable, swallow the tap
-			// but keep the keyboard open. No state change, just the
-			// click feedback above, mirroring how real browsers paint a
-			// disabled Enter key.
-			if (this.callbacks.validate && !this.callbacks.validate(this.state.value)) {
-				return;
-			}
-			this.finish(this.state.value);
-			return;
-		}
-		if (action === 'cancel') {
-			this.finish(null);
-			return;
-		}
-		if (action === 'backspace') {
-			if (this.state.cursor > 0) {
-				this.state.value = this.state.value.slice(0, this.state.cursor - 1) + this.state.value.slice(this.state.cursor);
-				this.state.cursor -= 1;
-			}
-		} else if (action === 'space') {
-			this.state.value = `${this.state.value.slice(0, this.state.cursor)} ${this.state.value.slice(this.state.cursor)}`;
-			this.state.cursor += 1;
-		} else {
-			const inserted = rect.key.label;
-			this.state.value = `${this.state.value.slice(0, this.state.cursor)}${inserted}${this.state.value.slice(this.state.cursor)}`;
-			this.state.cursor += inserted.length;
-		}
-		this.notifyChange(this.state);
-	}
-
-	private moveFocus(dr: number, dc: number): void {
-		let r = this.state.focusRow + dr;
-		let c = this.state.focusCol + dc;
-		if (r < 0) r = 0;
-		if (r >= this.rects.length) r = this.rects.length - 1;
-		const rowLen = this.rects[r].length;
-		if (c < 0) c = 0;
-		if (c >= rowLen) c = rowLen - 1;
-		this.state.focusRow = r;
-		this.state.focusCol = c;
-		this.notifyChange(this.state);
-	}
-
-	private installTouchHandler(): void {
-		this.touchStartHandler = (event: TouchEvent) => {
-			const touch = event.touches[0] ?? event.changedTouches[0];
-			if (!touch) return;
-			// Activate the hit key (shared mouse/touch path — see
-			// `activateAt`). If the tap landed on a key, we're done.
-			if (this.activateAt(touch.clientX, touch.clientY)) return;
-			// Touch outside the keyboard panel. Open a swipe session: the
-			// touchend handler will cancel the keyboard if the gesture
-			// stayed a tap, but a swipe past PAGE_SWIPE_MOVE_THRESHOLD
-			// becomes a page scroll (driven by onScroll) and the cancel is
-			// suppressed. The main canvas's own touch handler also fires
-			// for this event (registered first) — its live-DOM hit-test
-			// is gated off while the keyboard is open so a tap on content
-			// won't queue a stray `click` (e.g. on the welcome page where
-			// bookmark cards extend behind the panel), but the chrome
-			// strip's static dispatch still runs so a tap on the back /
-			// forward / star buttons both cancels the keyboard AND fires
-			// the chrome action in one gesture.
-			if (touch.clientY < this.panelTop) {
-				this.pageSwipe = { startY: touch.clientY, lastY: touch.clientY, moved: false };
-			}
-		};
-		this.touchMoveHandler = (event: TouchEvent) => {
-			if (!this.pageSwipe) return;
-			const touch = event.touches[0] ?? event.changedTouches[0];
-			if (!touch) return;
-			const y = touch.clientY;
-			// Incremental delta since the last touchmove — pass to the shell
-			// as a scroll delta with the same sign convention as page-level
-			// swipes elsewhere: finger DOWN reveals content above → scrollY
-			// decreases → negative delta. The main canvas's pageScrollSession
-			// route is gated off while the keyboard is open, so this is the
-			// sole driver for swipe-to-scroll-page during keyboard input.
-			const incDy = y - this.pageSwipe.lastY;
-			this.pageSwipe.lastY = y;
-			if (Math.abs(y - this.pageSwipe.startY) > PAGE_SWIPE_MOVE_THRESHOLD) {
-				this.pageSwipe.moved = true;
-			}
-			if (incDy !== 0 && this.callbacks.onScroll) {
-				this.callbacks.onScroll(-incDy);
-			}
-		};
-		this.touchEndHandler = () => {
-			if (!this.pageSwipe) return;
-			const wasSwipe = this.pageSwipe.moved;
-			this.pageSwipe = null;
-			// Tap (no movement past the threshold) above the panel cancels
-			// the keyboard — same UX as before this change. The chrome /
-			// content link listeners already fired for this touch in the
-			// main canvas dispatcher; their queued input takes precedence
-			// over a plain cancel (peekPendingInput check in the shell).
-			if (!wasSwipe) this.finish(null);
-		};
-		this.canvas.addEventListener('touchstart', this.touchStartHandler);
-		this.canvas.addEventListener('touchmove', this.touchMoveHandler);
-		this.canvas.addEventListener('touchend', this.touchEndHandler);
-	}
-
-	private async pollLoop(): Promise<void> {
-		// Interaction model while the keyboard is up: MOUSE + TOUCH ONLY.
-		// D-pad navigation, A-on-focused-key, and Y-backspace are
-		// intentionally absent — `readButtons` returns `false` for those
-		// inputs. `a` here is the user's leftClick button (router-resolved)
-		// and only activates the keyboard key the cursor is hovering over;
-		// presses with the cursor outside any rect are ignored.
-		//
-		// Delay tracks the shell's `waitForControllerInput` cadence:
-		// `0` while the stick is moving the cursor so it doesn't visibly
-		// drag, `16` ms otherwise.
-		let prev = readButtons();
-		while (this.running) {
-			if (!this.running) return;
-			const next = readButtons();
-
-			if (rising(prev, next, 'a')) {
-				const { x, y } = getCursorPos();
-				this.activateAt(x, y);
-			}
-			if (rising(prev, next, 'b')) {
-				this.finish(null);
-				return;
-			}
-			if (rising(prev, next, 'plus')) {
-				// Mirror the Submit-key gate so the `+` shortcut also
-				// honors validator rejection. Without this, an invalid
-				// buffer the user can't tap-Submit could still be plus-
-				// submitted, defeating the disabled-Submit affordance.
-				// Swallow the press silently — falling through to the
-				// scroll + cursor tick path keeps `prev` updated so the
-				// next plus-rising is detected correctly.
-				const allow = !this.callbacks.validate || this.callbacks.validate(this.state.value);
-				if (allow) {
-					this.finish(this.state.value);
-					return;
+/** Shift super-script for `.num` keys (the `<span class="sup">` child).
+ * Returns the sup char, or null if none. */
+function readKeySup(key: LiveElement): string | null {
+	for (const child of key.children) {
+		const cls = child.getAttribute?.('class') ?? '';
+		if (cls.split(/\s+/).includes('sup')) {
+			for (const grand of child.children) {
+				if (grand.tagName === '#text') {
+					const t = (grand as { data?: string }).data ?? '';
+					const trimmed = t.trim();
+					if (trimmed) return trimmed;
 				}
 			}
-
-			// Right-stick Y → page scroll behind the keyboard. The shell's
-			// main loop is suspended awaiting this keyboard's promise, so
-			// its onScroll path doesn't fire; we sample the axis here and
-			// forward to the callback. handleScroll() in the shell does the
-			// clip-to-panelTop repaint when isKeyboardOpen() is true.
-			if (this.callbacks.onScroll) {
-				const stickDelta = readStickScroll(activePad());
-				if (stickDelta !== 0) this.callbacks.onScroll(stickDelta);
-			}
-
-			// Keep the software cursor alive while the keyboard owns the
-			// loop. Movement-only variant — A is hit-tested here against
-			// the keyboard rects above, so the cursor module must NOT
-			// dispatch A as a regular page mousedown/click. Return value
-			// drives the active-poll cadence below.
-			const cursorMoved = tickCursorMovementOnly();
-
-			prev = next;
-			await delay(cursorMoved ? 0 : 16);
 		}
 	}
+	return null;
+}
 
-	/** Hit-test (x, y) against the keyboard rects; if the point lands on
-	 * a key, set focus to that row/col (drives the "pressed" visual via
-	 * the `focused` check in `render`) and call `activate`. Returns the
-	 * activated rect, or null if (x, y) missed the panel. Shared by the
-	 * mouse path (`pollLoop` A-rising with cursor coords) and the touch
-	 * path (`touchStartHandler`), so both routes produce the same visible
-	 * key-press flash + audible click. */
-	private activateAt(x: number, y: number): KeyRect | null {
-		for (let r = 0; r < this.rects.length; r++) {
-			for (let c = 0; c < this.rects[r].length; c++) {
-				const rect = this.rects[r][c];
-				if (
-					x >= rect.x && x <= rect.x + rect.width &&
-					y >= rect.y && y <= rect.y + rect.height
-				) {
-					this.state.focusRow = r;
-					this.state.focusCol = c;
-					this.activate(rect);
-					return rect;
-				}
-			}
+/** Locate the `<input id="urlInput">` inside the keyboard root so we
+ * can mirror typed input there via `setInputValue`. Returns null if
+ * the kb root is missing the field (defensive — the seeded
+ * keyboard.html always has it). */
+function findUrlInput(root: LiveElement): LiveElement | null {
+	const visit = (n: LiveElement): LiveElement | null => {
+		if (n.getAttribute?.('id') === 'urlInput') return n;
+		for (const c of n.children) {
+			const f = visit(c);
+			if (f) return f;
 		}
 		return null;
+	};
+	return visit(root);
+}
+
+/** Walk the kb tree collecting every `<div class="key letter">` so the
+ * case-rewrite pass can flip them all in one go on shift / caps
+ * toggles. Cheap (~26 elements) and only runs at session start. */
+function findLetterKeys(root: LiveElement): LiveElement[] {
+	const out: LiveElement[] = [];
+	const visit = (n: LiveElement): void => {
+		const cls = n.getAttribute?.('class') ?? '';
+		const tokens = cls.split(/\s+/);
+		if (tokens.includes('key') && tokens.includes('letter')) {
+			out.push(n);
+		}
+		for (const c of n.children) visit(c);
+	};
+	visit(root);
+	return out;
+}
+
+/** Find the action key by `data-action` value (e.g. `'caps'` or
+ * `'shift'`). Used to toggle the `held` class so the user can see
+ * latch state. */
+function findActionKey(root: LiveElement, action: string): LiveElement | null {
+	const visit = (n: LiveElement): LiveElement | null => {
+		if (n.getAttribute?.('data-action') === action) return n;
+		for (const c of n.children) {
+			const f = visit(c);
+			if (f) return f;
+		}
+		return null;
+	};
+	return visit(root);
+}
+
+/** Locate the FIRST `#text` descendant of `key` whose data is a single
+ * a-z (or A-Z) letter — that's the displayed character. Returns null
+ * if the key's content is something else (e.g. action keys whose only
+ * child is `<svg>`). */
+function findLetterTextNode(key: LiveElement): LiveElement | null {
+	const visit = (n: LiveElement): LiveElement | null => {
+		if (n.tagName === '#text') {
+			const t = ((n as { data?: string }).data ?? '').trim();
+			if (t.length === 1 && /^[a-zA-Z]$/.test(t)) return n;
+		}
+		for (const c of n.children) {
+			const f = visit(c);
+			if (f) return f;
+		}
+		return null;
+	};
+	return visit(key);
+}
+
+/** Apply the current case (shift XOR caps) to every letter key in
+ * `letterKeys`. Pure text-node mutation — no class toggle, no CSS rule
+ * dependency. Called whenever shift or caps changes, and on session
+ * open() to sync with the initial state. */
+function applyLetterCase(letterKeys: LiveElement[], upper: boolean): void {
+	for (const key of letterKeys) {
+		const tn = findLetterTextNode(key);
+		if (!tn) continue;
+		const cur = ((tn as { data?: string }).data ?? '');
+		const next = upper ? cur.toUpperCase() : cur.toLowerCase();
+		if (next !== cur) {
+			(tn as { data: string }).data = next;
+		}
+	}
+}
+
+/**
+ * HTML-driven virtual keyboard. Replaces the on-canvas keyboard that
+ * lived in this file pre-2026-06-11. The keyboard's visible markup
+ * lives in `webprofiles/<active>/keyboard.html` and is parsed into a
+ * SECOND live-DOM root at shell startup (see
+ * `BrowserShell.loadHtmlKeyboard` / `paintKeyboardOverlay`).
+ *
+ * Open/close lifecycle:
+ *   - `open()` flips `setKeyboardOpen(true)` (input-dispatch gate) +
+ *     `setKeyboardOverlayVisible(true)` (paint gate), seeds the
+ *     `<input>` with `initial`, registers the global submit/cancel/tap
+ *     hooks, and starts an internal repaint tick.
+ *   - Touch lands inside the kb panel area → controller-shortcuts
+ *     calls `globalThis.__brewserKeyboardHandleTap(el)`. The handler
+ *     processes the key (insert / backspace / nav / shift / caps /
+ *     submit / etc.) and updates the visible `<input>` text via
+ *     `setInputValue`.
+ *   - Submit (tap `#submitBtn`, or external `__brewserKeyboardSubmit`)
+ *     resolves with the typed value. Cancel (tap above panel, or
+ *     external `__brewserKeyboardCancel`) resolves with `null`.
+ */
+export class KeyboardOverlay {
+	private template: BrowserTemplate | null = null;
+	private panelBackground: Image | null = null;
+
+	setTemplate(template: BrowserTemplate): void {
+		this.template = template;
+	}
+
+	setPanelBackground(image: Image | null): void {
+		this.panelBackground = image;
+	}
+
+	async open(
+		initial = '',
+		callbacks: KeyboardScrollCallbacks = {},
+	): Promise<string | null> {
+		void this.template;
+		void this.panelBackground;
+
+		const root = getKeyboardLiveRoot();
+		// Defensive: if the kb root failed to load (file missing or
+		// parse error at boot), fall back to returning the initial
+		// value so the caller doesn't deadlock waiting for input we
+		// can't accept. Surface in the diag log so it's debuggable.
+		if (!root) {
+			console.debug('[keyboard-overlay] open() called but kb live root is null — returning initial value');
+			return initial;
+		}
+
+		const onScroll = callbacks.onScroll;
+		const validate = callbacks.validate;
+		/** Submit is allowed when no validator is supplied or the
+		 * validator accepts the current buffer. Gates the Return key
+		 * action, the `+` gamepad shortcut, and the external
+		 * `__brewserKeyboardSubmit` hook so all three honor the same
+		 * rule (mirrors the old canvas kb's spec: a `<input type=number>`
+		 * with letter junk in the buffer can't be Submitted). */
+		const isSubmittable = (v: string): boolean => !validate || validate(v);
+
+		// Per-session state. Lives in the closure so `__brewserKeyboardHandleTap`
+		// and the resolve path see the same value.
+		const state = {
+			value: initial,
+			shift: false,
+			caps: false,
+		};
+		const urlInput = findUrlInput(root);
+		if (urlInput) setInputValue(urlInput, state.value);
+		// Cache the latch keys + letter-key list once per session so
+		// shift / caps toggles + case-rewrite passes don't re-walk the
+		// tree on every keypress.
+		const capsKey = findActionKey(root, 'caps');
+		const shiftKey = findActionKey(root, 'shift');
+		const letterKeys = findLetterKeys(root);
+		// Sync visual case to the initial state (both flags are false
+		// so this lowercases anything that drifted from a prior session
+		// — defensive; mutations from a prior session would have been
+		// reset when the kb root was re-populated on navigation).
+		applyLetterCase(letterKeys, false);
+		if (capsKey) capsKey.classList.toggle('held', false);
+		if (shiftKey) shiftKey.classList.toggle('held', false);
+
+		setKeyboardOpen(true);
+		setKeyboardOverlayVisible(true);
+		if (repaintDriver) repaintDriver();
+
+		return new Promise<string | null>((resolve) => {
+			let settled = false;
+			let running = true;
+			const globals = globalThis as KeyboardGlobals;
+
+			const finish = (result: string | null): void => {
+				if (settled) return;
+				settled = true;
+				running = false;
+				setKeyboardOpen(false);
+				setKeyboardOverlayVisible(false);
+				// Clear hooks so a stray external caller after close
+				// doesn't reach into a stale closure.
+				globals.__brewserKeyboardSubmit = undefined;
+				globals.__brewserKeyboardCancel = undefined;
+				globals.__brewserKeyboardHandleTap = undefined;
+				globals.__brewserKeyboardForwardScroll = undefined;
+				if (repaintDriver) repaintDriver();
+				// Defer the resolve by a macrotask — the same trick the
+				// old canvas keyboard used so navigation that runs
+				// against the typed value doesn't start INSIDE the
+				// touch-event dispatch frame.
+				nativeSetTimeout(() => resolve(result), 0);
+			};
+
+			const refreshUrlInput = (): void => {
+				if (urlInput) setInputValue(urlInput, state.value);
+			};
+
+			const insertChar = (ch: string): void => {
+				state.value += ch;
+				if (state.shift) state.shift = false;
+				refreshUrlInput();
+			};
+
+			const backspace = (): void => {
+				if (state.value.length === 0) return;
+				state.value = state.value.slice(0, -1);
+				refreshUrlInput();
+			};
+
+			globals.__brewserKeyboardSubmit = (v: string): void => {
+				// Honor the validator gate even when an external caller
+				// drives the submit (e.g. future keyboard-driver.js page
+				// glue, or a test fixture). Without the gate a number-
+				// only input could commit letter junk via the back door.
+				if (!isSubmittable(v)) return;
+				finish(v);
+			};
+			globals.__brewserKeyboardCancel = (): void => {
+				finish(null);
+			};
+			// Above-panel swipes forward dy here. Set by the kb-routing
+			// branch in `controller-shortcuts.ts` once a kb-swipe session
+			// opens (touchstart above topY); the touchmove handler calls
+			// this on every move event, and onScroll forwards to the
+			// shell's handleScroll. Untouched when no callback is wired
+			// — the URL bar / search paths supply one, the live-form
+			// input path doesn't (it locks the page during edit).
+			globals.__brewserKeyboardForwardScroll = (delta: number): void => {
+				if (onScroll && delta !== 0) onScroll(delta);
+			};
+			/** Briefly flash :active on a key so the user sees the tap
+			 * register even though there's no real touchstart/touchend
+			 * dispatch flowing through `live-input-dispatch` for kb
+			 * keys (we own dispatch directly). 120 ms is short enough
+			 * not to fight rapid typing but long enough that a single
+			 * frame paint always lands inside the window.
+			 *
+			 * The clear must run even AFTER the session resolves —
+			 * otherwise a tap that ends the session (Close, Submit) leaves
+			 * its key permanently `:active`, and since the kb root
+			 * persists across sessions (rebuilt only on navigation), the
+			 * stuck highlight reappears on the next open. `setPseudoActive`
+			 * is safe to call on a since-detached element so the
+			 * always-fire is harmless when the session has already moved
+			 * on. */
+			const flashKey = (key: LiveElement): void => {
+				setPseudoActive(key, true);
+				nativeSetTimeout(() => {
+					setPseudoActive(key, false);
+				}, 120);
+			};
+
+			/** Recompute "is this typing upper-case?" and sync the
+			 * visual case across every letter key + the held state
+			 * of the shift/caps keys. Called whenever shift or caps
+			 * changes. */
+			const syncCaseAndLatch = (): void => {
+				const upper = state.shift !== state.caps;
+				applyLetterCase(letterKeys, upper);
+				if (capsKey) capsKey.classList.toggle('held', state.caps);
+				if (shiftKey) shiftKey.classList.toggle('held', state.shift);
+			};
+
+			globals.__brewserKeyboardHandleTap = (target: LiveElement): void => {
+				if (!running) return;
+				// Top-row dedicated affordances:
+				//   - Close (id=closeBtn): dismiss the kb without
+				//     committing — same outcome as the gamepad B button
+				//     and the above-panel tap-cancel gesture.
+				//   - Clear (id=clearBtn): wipe the current buffer but
+				//     keep the kb open so the user can keep typing.
+				// Submission still lives on the Return key + gamepad `+`,
+				// both validator-gated so a number-only input can't be
+				// committed with letter junk.
+				let walker: LiveElement | null = target;
+				let topRowBtn: LiveElement | null = null;
+				let topRowBtnId: string | null = null;
+				while (walker) {
+					const id = walker.getAttribute?.('id');
+					if (id === 'closeBtn' || id === 'clearBtn') {
+						topRowBtn = walker;
+						topRowBtnId = id;
+						break;
+					}
+					walker = walker.parent;
+				}
+				if (topRowBtn && topRowBtnId === 'closeBtn') {
+					flashKey(topRowBtn);
+					playClick();
+					finish(null);
+					return;
+				}
+				if (topRowBtn && topRowBtnId === 'clearBtn') {
+					flashKey(topRowBtn);
+					playClick();
+					state.value = '';
+					refreshUrlInput();
+					return;
+				}
+				const key = findKey(target);
+				if (!key) return; // tap on .kb panel bg between keys — ignore
+				flashKey(key);
+				playClick();
+				const action = key.getAttribute('data-action');
+				if (action) {
+					switch (action) {
+						case 'backspace': backspace(); return;
+						case 'tab':       insertChar('\t'); break;
+						case 'return':
+							// Same validator gate as `+` / __brewserKeyboardSubmit:
+							// a non-submittable buffer (e.g. letters in a
+							// number-only input) silently swallows the press
+							// so the user can't escape the type constraint
+							// via Return.
+							if (isSubmittable(state.value)) finish(state.value);
+							return;
+						case 'left':      return; // single-line: no caret nav for now
+						case 'right':     return;
+						case 'up':        return;
+						case 'caps':
+							state.caps = !state.caps;
+							syncCaseAndLatch();
+							return;
+						case 'shift':
+							state.shift = !state.shift;
+							syncCaseAndLatch();
+							return;
+					}
+					// Insert actions (tab) need the post-insert shift
+					// clear-down — fall through to the same path the
+					// character branch uses.
+				} else {
+					// Character key. .num keys carry both base + sup; letter
+					// keys carry a single char; data-char keys (space) carry
+					// the explicit insert char.
+					const cls = key.getAttribute('class') ?? '';
+					const isNum = cls.split(/\s+/).includes('num');
+					const isLetter = cls.split(/\s+/).includes('letter');
+					let ch = readKeyChar(key);
+					if (!ch) return;
+					if (isNum && state.shift) {
+						const sup = readKeySup(key);
+						if (sup) ch = sup;
+					} else if (isLetter) {
+						if (state.shift !== state.caps) ch = toUpper(ch);
+					} else if (state.shift) {
+						ch = shiftSymbol(ch);
+					}
+					insertChar(ch);
+				}
+				// `insertChar` flips shift back to false (one-shot). When
+				// shift was actually consumed by this key, re-sync visual
+				// case + clear the shift key's held style so the user
+				// sees the next letter return to lowercase.
+				if (!state.shift) {
+					syncCaseAndLatch();
+				}
+			};
+
+			// Internal poll loop. Drives repaints AND samples the
+			// gamepad each tick — the shell's main `waitForControllerInput`
+			// loop is suspended on this promise so its own A/B/+ polling
+			// doesn't fire. Mirrors the old canvas keyboard's pollLoop
+			// shape (mouse + touch only; no D-pad nav).
+			let prev = readButtons();
+			const tick = (): void => {
+				if (!running) return;
+				const next = readButtons();
+				// B (rightClick) — cancel. Rising edge so a held B from a
+				// prior screen doesn't auto-cancel on first tick.
+				if (rising(prev, next, 'b')) {
+					prev = next;
+					finish(null);
+					return;
+				}
+				// + (Plus) — submit, validator-gated. Swallowed silently
+				// when the buffer is unsubmittable so an invalid value
+				// the user can't tap-Return can't be Plus-submitted
+				// either (matches the same affordance promise the
+				// disabled-Submit UI used to give in the canvas era).
+				if (rising(prev, next, 'plus')) {
+					if (isSubmittable(state.value)) {
+						prev = next;
+						finish(state.value);
+						return;
+					}
+				}
+				// A (leftClick) — hit-test cursor position against kb
+				// root, dispatch tap on the key under the cursor. Same
+				// code path as a touch — handleTap handles the click
+				// sound, :active flash, and state mutation.
+				if (rising(prev, next, 'a')) {
+					const { x, y } = getCursorPos();
+					// Only act when the cursor lies over the kb panel area;
+					// outside-panel A-presses don't cancel (use B for that)
+					// so a user mousing around above the panel doesn't lose
+					// their typed buffer to a stray A.
+					if (y >= getKeyboardTopY() && globals.__brewserKeyboardHandleTap) {
+						const hit = hitTestKbAt(root, x, y);
+						if (hit) globals.__brewserKeyboardHandleTap(hit);
+					}
+				}
+				// Right-stick Y → page scroll behind the keyboard. The
+				// shell's main-loop scroll handler is suspended on this
+				// promise, so we sample here and forward to onScroll.
+				if (onScroll) {
+					const delta = readStickScroll(activePad());
+					if (delta !== 0) onScroll(delta);
+				}
+				// Keep the software cursor alive while we own the loop —
+				// movement-only variant since A is hit-tested above as a
+				// keyboard activation, not dispatched as a page click.
+				const cursorMoved = tickCursorMovementOnly();
+
+				if (repaintDriver) repaintDriver();
+				prev = next;
+				// Drop the delay to 0 when the cursor moved this tick so
+				// stick-driven cursor motion doesn't visibly drag (matches
+				// the old canvas kb's cadence).
+				nativeSetTimeout(tick, cursorMoved ? 0 : 16);
+			};
+			nativeSetTimeout(tick, 16);
+		});
+	}
+}
+
+/** Module-local hit-test against the kb root. Used by the gamepad A
+ * path inside the poll loop. Mirrors the touch path in
+ * `controller-shortcuts.ts` (zero out the host scroll so the kb's
+ * non-scrolling boxes hit-test correctly), but kept here so the
+ * keyboard module owns the gamepad-side dispatch end-to-end. */
+function hitTestKbAt(root: LiveElement, x: number, y: number): LiveElement | null {
+	const screen = nxScreen();
+	const topY = getKeyboardTopY();
+	const viewport = {
+		x: 0, y: topY,
+		width: screen.width,
+		height: Math.max(0, screen.height - topY),
+	};
+	// Same scroll-zero trick as the touch path — hitTestLive subtracts
+	// the host's scroll from non-fixed candidates, but the kb root
+	// doesn't scroll. See the checkpoint-3 fix in controller-shortcuts
+	// for the longer explanation.
+	const saved = getInternalLiveScrollY();
+	setInternalLiveScrollY(0);
+	try {
+		return hitTestLive(root, x, y, viewport);
+	} finally {
+		setInternalLiveScrollY(saved);
 	}
 }

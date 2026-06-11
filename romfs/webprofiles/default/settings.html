@@ -43,15 +43,27 @@
         return el.value != null ? String(el.value) : '';
       }
 
-      var widgets = document.querySelectorAll('[data-setting]');
-      var baseline = [];
-      for (var i = 0; i < widgets.length; i++) baseline.push(readValue(widgets[i]));
+      // Re-query the widget list on every comparison and snapshot a
+      // single string keyed by index + value. Re-querying (instead of
+      // capturing once at script-run time) survives any DOM rebuild
+      // between script-run and event-fire — the original capture went
+      // stale on the later sections (Behaviour / Diagnostics
+      // checkboxes), missing their change events. String compare keeps
+      // radio groups correct (each radio contributes its own slot,
+      // unlike a map keyed by `data-setting` which would record only
+      // the first radio per group).
+      function snapshot() {
+        var widgets = document.querySelectorAll('[data-setting]');
+        var parts = [];
+        for (var i = 0; i < widgets.length; i++) {
+          parts.push(i + '=' + readValue(widgets[i]));
+        }
+        return parts.join('|');
+      }
+      var baseline = snapshot();
 
       function recompute() {
-        var dirty = false;
-        for (var i = 0; i < widgets.length; i++) {
-          if (readValue(widgets[i]) !== baseline[i]) { dirty = true; break; }
-        }
+        var dirty = snapshot() !== baseline;
         if (dirty) {
           saveBtn.removeAttribute('disabled');
           if (status) status.textContent = 'Unsaved changes.';
@@ -61,10 +73,18 @@
         }
       }
 
-      for (var j = 0; j < widgets.length; j++) {
-        widgets[j].addEventListener('input', recompute);
-        widgets[j].addEventListener('change', recompute);
-      }
+      // Event delegation on document.body for the common case. Most
+      // widget taps bubble a `change` event up here and recompute fires
+      // immediately. Pair with a polling tick (below) as a fallback —
+      // checkbox dispatches in the live-form engine weren't reliably
+      // reaching the body listener in practice, leaving the Save button
+      // disabled after a toggle. 200 ms polling is imperceptible to the
+      // user but guarantees the diff is re-evaluated within a few
+      // animation frames of any state mutation, regardless of which
+      // event path the widget took.
+      document.body.addEventListener('change', recompute);
+      document.body.addEventListener('input', recompute);
+      setInterval(recompute, 200);
     })();
   </script>
 </body>

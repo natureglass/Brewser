@@ -29,7 +29,6 @@ import {
 	DEFAULT_CANVAS_HEIGHT,
 	DEFAULT_CANVAS_WIDTH,
 	DEFAULT_HOME_URL,
-	KEYBOARD_LAYOUT,
 } from './browser-config.js';
 import { BrowserUI } from './browser-ui.js';
 import {
@@ -42,7 +41,7 @@ import {
 	tickAnimationFrames,
 	type PageScriptContext,
 } from './scripts/canvas-runner.js';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLivePageBase, setSwbImgDebugEnabled, type LiveElement } from './scripts/live-dom.js';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLivePageBase, setSwbImgDebugEnabled } from './scripts/live-dom.js';
 import { setMediaColorScheme } from './scripts/live-css.js';
 import { setCssViewport } from './scripts/inline-css.js';
 import { getInputChecked, getInputValue, openKeyboardAndApply, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
@@ -64,18 +63,24 @@ import {
 } from './scripts/live-video.js';
 import {
 	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
-	overlayLiveAnimatedCanvases, paintLiveOverlay, patchLiveDirtyRegions,
-	resetLiveOverlayCache, setLiveBuildChunkMs, setLiveScrollChunkMs,
+	overlayLiveAnimatedCanvases, paintKeyboardOverlay, paintLiveOverlay,
+	patchLiveDirtyRegions, resetLiveOverlayCache, setLiveBuildChunkMs,
+	setLiveScrollChunkMs,
 } from './scripts/live-overlay.js';
 import {
 	clearPageHasCanvas2dActivity,
 	consumeFullRepaintRequest,
+	getKeyboardLiveRoot,
+	getKeyboardTopY,
 	hasPageCanvas2dActivity,
 	isKeyboardOpen,
+	isKeyboardOverlayVisible,
 	requestFullRepaint,
+	setKeyboardLiveRoot,
+	setKeyboardTopY,
 } from './scripts/live-paint-control.js';
 import { getLayoutBox } from './scripts/live-layout.js';
-import { isExternalCssLoading, loadHeadLinkStylesheetsWithFlag, populateLiveRoot } from './scripts/html-to-live.js';
+import { isExternalCssLoading, loadHeadLinkStylesheetsWithFlag, populateLiveRoot, populateRootFromTree } from './scripts/html-to-live.js';
 import { extractTitle, parseHtml, type HtmlElement } from './html/html-parser.js';
 import { AddressBarInput } from './input/address-bar-input.js';
 import {
@@ -92,7 +97,7 @@ import {
 	waitForControllerInput,
 	type BrowserMode,
 } from './input/controller-shortcuts.js';
-import { KeyboardOverlay } from './input/keyboard-overlay.js';
+import { KeyboardOverlay, setKeyboardRepaintDriver } from './input/keyboard-overlay.js';
 import { installPageTouchForwarder } from './input/page-touch-forwarder.js';
 import {
 	installPageMouseForwarder,
@@ -110,7 +115,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from './network/network-probe.js';
 import { BrowserPermissionPolicy } from './permissions/browser-permission-policy.js';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_TEMPLATE, loadConfig, loadTemplate, resolveSearchEngine, type BrowserTemplate } from './profile/browser-template.js';
+import { DEFAULT_CONFIG, DEFAULT_TEMPLATE, loadConfig, loadTemplate, resolveSearchEngine, type BrowserTemplate, type ToolbarPosition } from './profile/browser-template.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -146,6 +151,13 @@ export class BrowserShell {
 	 * `wwwRenderChunkMs` in `run()`. */
 	private wwwRenderChunkMs: number = 12;
 
+	/** Parsed HtmlElement tree for `keyboard.html`, loaded once at
+	 * shell startup. Re-populated into a fresh `LiveElement('body')`
+	 * after every host navigation reset (since `resetLiveRoot` wipes
+	 * the cascade and the keyboard's `<style>` registrations along
+	 * with it). `null` until {@link loadHtmlKeyboard} runs. */
+	private keyboardParsedTree: HtmlElement | null = null;
+
 	/** Public read-only accessor for the current page URL. Used by
 	 * storage modules (local-storage, indexed-db) to route writes to a
 	 * `dev/` sub-namespace when the active page is under `brewser://dev/`,
@@ -153,6 +165,27 @@ export class BrowserShell {
 	getCurrentPageUrl(): string { return this.currentPageUrl; }
 	private mode: BrowserMode = 'normal';
 	private template: BrowserTemplate = DEFAULT_TEMPLATE;
+	/** Active toolbar position. Sourced from `config.json` (not the
+	 * template) since 2026-06-11 so the user can flip it from Settings
+	 * without re-skinning. Pushed into BrowserUI on every change so
+	 * the next paint flips chrome to the new edge. */
+	private toolbarPosition: ToolbarPosition = DEFAULT_CONFIG.toolbarPosition;
+	/** Last-applied resolved chrome icon paths. Used to gate template-
+	 * change icon reloads: when the new template's icon paths match the
+	 * already-loaded set, we keep the existing `Image` references on
+	 * BrowserUI rather than fetching the same URLs again. Re-fetching
+	 * the same icon URL during a Settings-page Save flow was painting
+	 * the toolbar with broken/partial Image data on the next chrome
+	 * tick (the Image objects from the first load are still in use by
+	 * the chrome paint; replacing them mid-flight with a second
+	 * concurrent load races the renderer). Initialised lazily on first
+	 * apply. */
+	private lastResolvedIconPaths: string | null = null;
+	/** Last-applied resolved toolbar/keyboard background image paths.
+	 * Same race-avoidance rationale as `lastResolvedIconPaths` — when
+	 * the new template's image paths match the already-applied ones,
+	 * skip the re-fetch. */
+	private lastResolvedBackgroundPaths: string | null = null;
 	/** Wall-clock duration (ms) of the most recent content present.
 	 * Surfaced on `__scrollStats` for the benchmark page. */
 	private lastCpuPresentMs = 0;
@@ -513,6 +546,15 @@ export class BrowserShell {
 		await this.profile.seedBuiltinDevPages();
 		await this.profile.seedBuiltinAssets();
 		await this.profile.seedTemplates();
+		await this.profile.seedKeyboards();
+		// HTML-driven keyboard: parse `keyboard.html` once into a second
+		// live-DOM root. Painted below `KEYBOARD_LAYOUT.topY` when
+		// `KeyboardOverlay.open()` flips the overlay-visible flag on.
+		await this.loadHtmlKeyboard();
+		// Keyboard's open() ticks repaints via this driver since the
+		// main shell loop is suspended on its promise. Single-arg
+		// arrow keeps `this` bound to the shell.
+		setKeyboardRepaintDriver(() => this.repaintContent());
 		// Apply shell-level preferences from config.json. Done before
 		// loadTemplate so any future config-driven template overrides
 		// can layer on top, and before scanForAutoplayVideos runs (it
@@ -527,14 +569,25 @@ export class BrowserShell {
 		setLiveBuildChunkMs(shellConfig.wwwRenderChunkMs);
 		setLiveScrollChunkMs(shellConfig.scrollChunkMs);
 		setCursorIdleMs(shellConfig.mouseIdleMs);
+		// Config-driven keyboard panel height. The kb paint pass, the
+		// touch-routing branch in controller-shortcuts, and the gamepad
+		// A path in keyboard-overlay all read this via getKeyboardTopY().
+		// Anchor at canvas height so the panel sits flush at the bottom
+		// regardless of any future canvas-size change.
+		setKeyboardTopY(nxScreen().height - shellConfig.keyboardHeight);
 		// Load the design template + push it into the UI, keyboard,
 		// and touch dispatcher so the very first chrome paint already
 		// reflects the user's customisations.
 		this.template = loadTemplate(this.profile.appRoot);
 		this.ui.setTemplate(this.template);
 		this.keyboard.setTemplate(this.template);
+		// Toolbar position lives in `config.json` (not the template)
+		// since 2026-06-11 — cache it on the shell + push into the UI
+		// so chrome paints on the correct edge from the first frame.
+		this.toolbarPosition = shellConfig.toolbarPosition;
+		this.ui.setToolbarPosition(this.toolbarPosition);
 		this.publishChromeRegion();
-		this.ui.setIcons(await loadChromeIcons(this.resolveIconPaths()));
+		await this.refreshChromeIcons();
 		await this.refreshTemplateBackgrounds();
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
@@ -978,10 +1031,12 @@ export class BrowserShell {
 		if (next === this.currentScrollY) return;
 		const t0 = performance.now();
 		this.currentScrollY = next;
-		// On-canvas keyboard is up: paint only the page area above the
-		// keyboard panel via the clipped path so the keyboard's pixels
-		// stay intact. The normal repaintContent path early-returns on
-		// `isKeyboardOpen()` and would otherwise no-op the scroll.
+		// HTML keyboard is up: route through the clipped-to-above-topY
+		// path so the engine doesn't repaint the kb panel slice this
+		// tick (the kb cache stays warm, the scroll just moves content
+		// above topY). The normal path would also work — `paintKeyboardOverlay`
+		// re-blits the kb cache on top — but `behindKeyboard` saves the
+		// content fillRect + paintLiveOverlay walk over the kb area.
 		if (isKeyboardOpen()) {
 			this.repaintContent({ behindKeyboard: true });
 		} else {
@@ -1000,7 +1055,7 @@ export class BrowserShell {
 	 * below chrome), 0 when the toolbar is at the bottom.
 	 */
 	private layoutTopInset(): number {
-		return this.template.toolbar.position === 'top' ? this.template.toolbar.height : 0;
+		return this.toolbarPosition === 'top' ? this.template.toolbar.height : 0;
 	}
 
 	/**
@@ -1123,6 +1178,12 @@ export class BrowserShell {
 		_shellInputDiag('handleHtmlResponseLive url=' + url);
 		resetLiveOverlayCache();
 		resetLiveRoot();
+		// Rebuild the HTML-driven keyboard's live root so its `<style>`
+		// blocks re-register with the now-cleared cascade. The kb root
+		// is otherwise orthogonal to the host page — its tree is small,
+		// re-population is cheap, and the keyboard panel reads the same
+		// across navigations.
+		this.rebuildKeyboardLiveRoot();
 		// App-context tracking: if this page is under `brewser://apps/<group>/<id>/...`,
 		// pick up the app's `manifest.json buttonMapping` as a button-router
 		// overlay (so e.g. `"exit": "B"` rebinds B from rightClick to the
@@ -1348,7 +1409,7 @@ export class BrowserShell {
 		// which is the right behaviour for video / fullscreen-canvas /
 		// fullscreen-page shots.
 		const chromeHeight = this.template.toolbar.height;
-		const isBottomToolbar = this.template.toolbar.position === 'bottom';
+		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const topInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const bottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
 		const flashH = canvas.height - topInset - bottomInset;
@@ -1384,21 +1445,15 @@ export class BrowserShell {
 	 * on the Three.js cube demo. Reclaim is open work.
 	 */
 	private repaintContent(opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean } = {}): void {
-		// On-canvas keyboard is modal — its panel is drawn directly to
-		// the screen by `KeyboardOverlay.render` and owns the screen
-		// while open. The shell's content + overlay repaint paths would
-		// stomp those pixels every frame (rAF heartbeat / scroll tick
-		// / animated-canvas overlay all fire while the keyboard is up).
-		// Gate the WHOLE repaint here so the keyboard stays on top of
-		// everything. When the keyboard closes, `setKeyboardOpen(false)`
-		// auto-flags `requestFullRepaint()` so the next call clears the
-		// keyboard pixels by re-painting the page underneath.
-		//
-		// `behindKeyboard` opts in to the scroll-behind-keyboard path:
-		// the page is re-blitted under a clip rect that ends at the
-		// keyboard panel's top edge so the panel pixels stay intact
-		// while content scrolls underneath. See the branch below.
-		if (isKeyboardOpen() && !opts.behindKeyboard) return;
+		// Old canvas-keyboard era: this returned early on
+		// `isKeyboardOpen()` because the keyboard owned the screen and
+		// any host repaint would clobber its pixels. The HTML keyboard
+		// (`paintHtmlKeyboardIfVisible` at the tail of `repaintContentInner`)
+		// paints AFTER the host page each frame, so the host stays
+		// animated underneath instead — no gate needed. `behindKeyboard`
+		// still routes to the clipped-to-above-topY path below since
+		// `handleScroll` uses it to skip repainting the kb panel slice
+		// during a page-scroll-under-keyboard gesture.
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
 		this.repaintContentInner(ctx, canvas, opts);
@@ -1442,7 +1497,7 @@ export class BrowserShell {
 			return;
 		}
 		const chromeHeight = this.template.toolbar.height;
-		const isBottomToolbar = this.template.toolbar.position === 'bottom';
+		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
 		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
@@ -1510,10 +1565,38 @@ export class BrowserShell {
 		if (isExternalCssLoading()) {
 			this.paintCssLoadingOverlay(ctx, viewport);
 		}
+		// HTML-driven virtual keyboard — painted ON TOP of the host page's
+		// content (and the CSS-loading overlay above) so it stays modal.
+		// `KEYBOARD_LAYOUT.topY` is the contract the existing canvas
+		// keyboard already advertised: pages keep the area above it, and
+		// the panel owns the area below. See `paintKeyboardOverlay` JSDoc
+		// for cache + vh/vw scoping notes.
+		this.paintHtmlKeyboardIfVisible(ctx, canvas.width, canvas.height);
 		setLiveViewport(viewport, effectiveScrollY);
 		this.lastCpuPresentMs = performance.now() - t0;
 		this.cpuPresentCallCount++;
 		this.lastRepaintedScrollY = effectiveScrollY;
+	}
+
+	/** Paint the HTML keyboard root below `KEYBOARD_LAYOUT.topY` when
+	 * `isKeyboardOverlayVisible()` is true and the root is populated.
+	 * Defensively no-op if either is false so callers don't need to
+	 * branch. */
+	private paintHtmlKeyboardIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isKeyboardOverlayVisible()) return;
+		const kbRoot = getKeyboardLiveRoot();
+		if (!kbRoot) return;
+		const topY = getKeyboardTopY();
+		paintKeyboardOverlay(ctx, kbRoot, {
+			x: 0,
+			y: topY,
+			width: canvasW,
+			height: Math.max(0, canvasH - topY),
+		});
 	}
 
 	/** Opaque black overlay + centred rotating-arc spinner painted
@@ -1679,7 +1762,7 @@ export class BrowserShell {
 		canvasHeight: number,
 	): void {
 		const chromeHeight = this.template.toolbar.height;
-		const isBottomToolbar = this.template.toolbar.position === 'bottom';
+		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
 		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
@@ -1694,7 +1777,7 @@ export class BrowserShell {
 			width: canvasWidth,
 			height: canvasHeight - paintTopInset - paintBottomInset,
 		};
-		const panelTop = KEYBOARD_LAYOUT.topY;
+		const panelTop = getKeyboardTopY();
 		const clipBottom = Math.min(panelTop, viewport.y + viewport.height);
 		if (clipBottom <= viewport.y) return;
 		const t0 = performance.now();
@@ -1733,6 +1816,10 @@ export class BrowserShell {
 	private async dispatchButtonAction(action: string): Promise<void> {
 		if (action.startsWith('select-template:')) {
 			await this.selectTemplate(action.slice('select-template:'.length));
+			return;
+		}
+		if (action.startsWith('select-keyboard:')) {
+			await this.selectKeyboard(action.slice('select-keyboard:'.length));
 			return;
 		}
 		switch (action) {
@@ -1852,12 +1939,51 @@ export class BrowserShell {
 		this.keyboard.setTemplate(this.template);
 		this.publishChromeRegion();
 		// Icons may have changed paths between templates — refresh them
-		// before the next chrome render.
-		this.ui.setIcons(await loadChromeIcons(this.resolveIconPaths()));
+		// before the next chrome render. Gated on path change so the
+		// shared-icon case skips the re-fetch.
+		await this.refreshChromeIcons();
 		await this.refreshTemplateBackgrounds();
 		// Reload the current page: re-runs the resource loader (so the
 		// new active template row shows) and re-paints with the new
 		// colours / padding.
+		await this.runNavigation(() => this.navigation.reload());
+	}
+
+	/** Settings-page keyboard switcher. Writes the new keyboard panel
+	 * path into `<appRoot>/config.json`, re-reads + parses the new
+	 * panel HTML, and rebuilds the keyboard live root so the new
+	 * design is active immediately (next time the overlay opens).
+	 * Mirrors `selectTemplate`'s write shape — spread the existing
+	 * config forward so unknown user-edited keys survive, then write.
+	 * Reloads the current page so the Settings page's
+	 * `<browser-keyboards>` expansion re-runs against the new active
+	 * row. */
+	private async selectKeyboard(path: string): Promise<void> {
+		const configPath = `${this.profile.appRoot}config.json`;
+		try {
+			let next: Record<string, unknown> = { keyboard: path };
+			try {
+				const raw = Switch.readFileSync(configPath);
+				if (raw) {
+					const parsed = JSON.parse(new TextDecoder().decode(raw));
+					if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+						next = { ...(parsed as Record<string, unknown>), keyboard: path };
+					}
+				}
+			} catch (_) {
+				next = { ...loadConfig(this.profile.appRoot), keyboard: path };
+			}
+			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
+		} catch (error) {
+			console.debug(`[brewser] write config.json failed: ${error}`);
+			return;
+		}
+		// Re-read + re-parse the new panel into a fresh live root. The
+		// keyboard tree is parsed in-process (no fetch round-trip), so
+		// the next overlay open paints with the new design.
+		await this.loadHtmlKeyboard();
+		// Reload the current page so the Settings page's
+		// `<browser-keyboards>` expansion picks up the new active row.
 		await this.runNavigation(() => this.navigation.reload());
 	}
 
@@ -1964,8 +2090,23 @@ export class BrowserShell {
 			this.ui.setTemplate(this.template);
 			this.keyboard.setTemplate(this.template);
 			this.publishChromeRegion();
-			this.ui.setIcons(await loadChromeIcons(this.resolveIconPaths()));
+			await this.refreshChromeIcons();
 			await this.refreshTemplateBackgrounds();
+		}
+		// Keyboard panel HTML is parsed in-process at boot; on change,
+		// re-read + re-parse from the new path and rebuild the kb live
+		// root so the next overlay open paints with the new design.
+		if ('keyboard' in staged && staged.keyboard !== prior.keyboard) {
+			await this.loadHtmlKeyboard();
+		}
+		// Toolbar position: cache on the shell + push to UI so the
+		// chrome strip flips edge on the next paint. layoutTopInset +
+		// the isBottomToolbar reads in the shell all read from
+		// this.toolbarPosition, so updating both fields here is enough.
+		if ('toolbarPosition' in staged && staged.toolbarPosition !== prior.toolbarPosition) {
+			this.toolbarPosition = fresh.toolbarPosition;
+			this.ui.setToolbarPosition(this.toolbarPosition);
+			this.publishChromeRegion();
 		}
 
 		// Reload the page so the form re-renders against the persisted
@@ -2054,12 +2195,95 @@ export class BrowserShell {
 	 * keyboard. Empty / missing / failed paths come back as `null`,
 	 * which the painters treat as "no image — bg colour only". */
 	private async refreshTemplateBackgrounds(): Promise<void> {
+		const toolbarSrc = this.resolveAssetPath(this.template.toolbar.image);
+		const keyboardSrc = this.resolveAssetPath(this.template.keyboard.image);
+		// Same paths as last apply — Image objects are already mounted
+		// on BrowserUI/keyboard, and re-fetching the same URL races the
+		// chrome/keyboard paint while the in-flight Image swap settles.
+		// Cf. `lastResolvedIconPaths` for the matching gate on the icon
+		// PNGs. Empty paths still get cached so a template switching
+		// from "no image" → "no image" stays a no-op.
+		const key = `${toolbarSrc}|${keyboardSrc}`;
+		if (this.lastResolvedBackgroundPaths === key) return;
 		const [toolbarBg, keyboardBg] = await Promise.all([
-			loadOptionalImage(this.resolveAssetPath(this.template.toolbar.image)),
-			loadOptionalImage(this.resolveAssetPath(this.template.keyboard.image)),
+			loadOptionalImage(toolbarSrc),
+			loadOptionalImage(keyboardSrc),
 		]);
 		this.ui.setToolbarBackground(toolbarBg);
 		this.keyboard.setPanelBackground(keyboardBg);
+		this.lastResolvedBackgroundPaths = key;
+	}
+
+	/** Resolve the active template's icon paths and, if any path
+	 * differs from the last applied set, reload the `Image` objects
+	 * and push them into the UI. When every path matches the previous
+	 * apply (the common case across template switches — every shipped
+	 * template uses the same `assets/<name>.png` PNGs) the existing
+	 * icon `Image` objects on BrowserUI stay in place, avoiding the
+	 * re-fetch race that was painting broken icons during the Save
+	 * flow on the Settings page. */
+	private async refreshChromeIcons(): Promise<void> {
+		const paths = this.resolveIconPaths();
+		const key = [
+			paths.left, paths.right, paths.refresh, paths.home,
+			paths.settings, paths.bookmarkTrue, paths.bookmarkFalse,
+		].join('|');
+		if (this.lastResolvedIconPaths === key) return;
+		this.ui.setIcons(await loadChromeIcons(paths));
+		this.lastResolvedIconPaths = key;
+	}
+
+	/** Read + parse the active keyboard panel HTML (per `config.json`'s
+	 * `keyboard` field, e.g. `keyboards/default.html`) once at boot and
+	 * stash the parsed tree on `this.keyboardParsedTree`. Also runs the
+	 * first population into a fresh live root so the kb panel is
+	 * available the moment the debug flag (checkpoint 1) or
+	 * `KeyboardOverlay.open` (checkpoint 2+) flips visibility on.
+	 *
+	 * Failure (file missing despite seeding, parse exception) leaves the
+	 * tree null + the kb root null — the paint pass early-returns, and
+	 * the existing canvas keyboard stays the only visual. Non-fatal.
+	 *
+	 * Called again from `selectKeyboard` after the user picks a new
+	 * panel from the Settings page — re-reads from the new path and
+	 * rebuilds the live root in place. */
+	private async loadHtmlKeyboard(): Promise<void> {
+		const rel = loadConfig(this.profile.appRoot).keyboard;
+		const path = this.profile.keyboardPath(rel);
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.keyboardParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load keyboard '${rel}' failed: ${error}`);
+			return;
+		}
+		this.rebuildKeyboardLiveRoot();
+	}
+
+	/** (Re)build the keyboard live root from the cached parsed tree.
+	 * Called once after the initial parse and again from
+	 * `handleHtmlResponseLive` after every navigation `resetLiveRoot`
+	 * — the host reset clears the global cascade (`resetLiveCss`), so
+	 * the keyboard's `<style>` registrations need to be replayed in the
+	 * fresh cascade. Rebuilds a brand-new `LiveElement('body')` each
+	 * time and registers it via `setKeyboardLiveRoot`; the old root is
+	 * dropped (GC handles it). Scope class `__brewser-kb-root` keeps
+	 * the keyboard's CSS from leaking into the host page's cascade. */
+	private rebuildKeyboardLiveRoot(): void {
+		if (!this.keyboardParsedTree) return;
+		// Tag is `div`, not `body`, so the host page's generic
+		// `body { … }` rules (margin / padding / background / font, etc.)
+		// don't match the keyboard root via tag selectors and bleed
+		// host styling into the kb panel. The kb's own CSS is class-
+		// scoped via `populateRootFromTree`'s rewrite (every selector
+		// gets prefixed with `.__brewser-kb-root`), so a non-body tag
+		// here doesn't break the kb's own cascade.
+		const kbRoot = new LiveElement('div');
+		kbRoot.attached = true;
+		populateRootFromTree(kbRoot, this.keyboardParsedTree, '__brewser-kb-root');
+		setKeyboardLiveRoot(kbRoot);
 	}
 
 	/** Resolve a template-supplied asset path against the profile
@@ -2104,7 +2328,7 @@ export class BrowserShell {
 		if (!box || box.w <= 0 || box.h <= 0) return;
 		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
 		const chromeHeight = this.template.toolbar.height;
-		const isBottomToolbar = this.template.toolbar.position === 'bottom';
+		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const screenX = box.x;
 		const screenY = box.y + paintTopInset - effectiveScrollY;
@@ -2306,7 +2530,7 @@ export class BrowserShell {
 	private publishChromeRegion(): void {
 		const canvas = nxScreen();
 		const chromeHeight = this.template.toolbar.height;
-		if (this.template.toolbar.position === 'top') {
+		if (this.toolbarPosition === 'top') {
 			setChromeRegion(0, chromeHeight);
 		} else {
 			setChromeRegion(canvas.height - chromeHeight, canvas.height);

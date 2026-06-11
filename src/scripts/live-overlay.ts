@@ -40,7 +40,7 @@
 //     element's bbox if the element has explicit width/height; no
 //     wrapping (M2.3 layout pass).
 
-import { isBoldWeight, isItalicStyle, isPercent, quoteFontFamily, resolveCanvasFont, resolveLength } from './inline-css.js';
+import { getCssViewport, isBoldWeight, isItalicStyle, isPercent, quoteFontFamily, resolveCanvasFont, setCssViewport, resolveLength } from './inline-css.js';
 import { getComputedLiveStyle, getKeyframes, someStylesheetUsesSibling, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
 import { ensureCssAnimation, getBackgroundImage, getCssAnimState, getLiveTreeVersion, type LiveElement } from './live-dom.js';
 import { buildFormSubmitUrl, findEnclosingForm, paintFormWidget } from './live-form.js';
@@ -58,7 +58,7 @@ import {
 	type InlineAtom, type InlineLayout, type LayoutBox,
 } from './live-layout.js';
 import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
-import { clearLiveDirty, drainLiveDirty, isKeyboardOpen, requestFullRepaint } from './live-paint-control.js';
+import { clearLiveDirty, drainLiveDirty, requestFullRepaint } from './live-paint-control.js';
 
 /** Viewport rectangle for the live overlay. `x` / `y` are the
  * top-left offset into the screen surface; `width` / `height` are
@@ -110,7 +110,11 @@ export function patchLiveCacheRegion(el: LiveElement): void {
 	cacheCtx.save();
 	try {
 		setLayoutMeasureCtx(cacheCtx);
-		const rect: DirtyRect = { x: box.x, y: box.y, w: box.w, h: box.h };
+		// Same pixel-alignment + 1 px inflation as `patchLiveDirtyRegions`
+		// — see `pixelAlignRect` JSDoc. Without it, a radio/checkbox/range
+		// tap leaves a 1 px ghost of the prior `:active` border colour on
+		// the left edge of the widget after release.
+		const rect: DirtyRect = pixelAlignRect({ x: box.x, y: box.y, w: box.w, h: box.h });
 		cacheCtx.beginPath();
 		cacheCtx.rect(rect.x, rect.y, rect.w, rect.h);
 		cacheCtx.clip();
@@ -189,12 +193,15 @@ export function patchLiveCacheRegions(els: LiveElement[]): void {
 	const cacheCtx = liveCacheOffscreen.getContext('2d');
 	if (!cacheCtx) return;
 	// Build rects from cached layout boxes. Elements with no box
-	// (detached, display:none, etc.) drop out silently.
+	// (detached, display:none, etc.) drop out silently. Each rect goes
+	// through `pixelAlignRect` for the same reason as the singular
+	// patch above — anti-aliased edges + sub-pixel boxes leave 1 px
+	// ghosts when clearRect lands at a fractional x/y.
 	const rects: DirtyRect[] = [];
 	for (const el of els) {
 		const box = getLayoutBox(el);
 		if (!box || box.w <= 0 || box.h <= 0) continue;
-		rects.push({ x: box.x, y: box.y, w: box.w, h: box.h });
+		rects.push(pixelAlignRect({ x: box.x, y: box.y, w: box.w, h: box.h }));
 	}
 	if (rects.length === 0) return;
 	const root = lastPaintedRoot;
@@ -307,6 +314,64 @@ function rectsIntersect(a: DirtyRect, b: DirtyRect): boolean {
 	return a.x < b.x + b.w && a.x + a.w > b.x
 		&& a.y < b.y + b.h && a.y + a.h > b.y;
 }
+
+/**
+ * Snap a dirty rect to integer pixel boundaries and inflate it by 1 px
+ * on every side. Two artifacts go away as a result:
+ *
+ *   1. Sub-pixel anti-aliasing residue on element edges. A `:active`
+ *      class flip on a button changes `border-color`; the patch then
+ *      `clearRect(x, y, w, h)` + repaints inside the cached border-box.
+ *      But fillStyle borders that paint at fractional x (e.g. button.x
+ *      = 320.5) leave partial coverage in column 320 — a clearRect at
+ *      x = 320.5 only fully clears column 321 onwards. After the patch,
+ *      a 1-pixel-wide ghost of the previous `:active` border colour
+ *      survives on the left edge. Rounding x to floor + adding 1 px of
+ *      padding clears the whole column.
+ *
+ *   2. Fixed-element close (modal overlay → display: none). The cached
+ *      old box is the full viewport; expanding it 1 px makes no
+ *      visible difference there. But the same rect-pass is used to
+ *      drive `pendingScreenWipeRects` below, and a 1-pixel-padded rect
+ *      means the screen-side fillRect at the dirty rect always covers
+ *      the entire previously-painted area, with no fractional-pixel
+ *      column left behind on the modal card's rounded-corner border.
+ *
+ * Pure widening — never shrinks. Negative coords stay negative (floor),
+ * past-canvas extents stay past-canvas (ceil). Callers clip against the
+ * cache / viewport, so painting outside the surface is a no-op.
+ */
+function pixelAlignRect(r: DirtyRect): DirtyRect {
+	const x = Math.floor(r.x) - 1;
+	const y = Math.floor(r.y) - 1;
+	const right = Math.ceil(r.x + r.w) + 1;
+	const bottom = Math.ceil(r.y + r.h) + 1;
+	return { x, y, w: right - x, h: bottom - y };
+}
+
+/**
+ * Rects (in body-cache coordinates) that the most recent successful
+ * `patchLiveDirtyRegions` call touched. Drained by `paintLiveOverlay`
+ * after the cache blit to do a targeted screen-side fillRect over the
+ * portion of each rect that lives BELOW the cache's vertical extent.
+ *
+ * Background: the body cache offscreen is sized to the body's intrinsic
+ * content height (capped at `LIVE_CACHE_MAX_H`). When the page content
+ * is shorter than the viewport (e.g. the Apps page with two cards) and
+ * a fixed-position overlay extends below the body's content, closing
+ * the overlay leaves stale screen pixels in the area BELOW the cache's
+ * bottom edge — the cache blit only covers `liveCacheH` worth of
+ * pixels, and `repaintContent`'s viewport-wide `fillRect` paints the
+ * body bg color over the area before the cache blit, but on a fast
+ * patch-then-blit tick (no full rebuild fired) the cache blit can run
+ * without the preceding viewport fillRect. This list captures the
+ * rect bounds so the screen-side wipe pass can clean the residue.
+ *
+ * Module-level (not threaded through the return value) so existing
+ * `patchLiveDirtyRegions(): boolean` callers (live-form.ts) don't have
+ * to change. Drained each frame so a tick where no patch fired has
+ * zero overhead. */
+let pendingScreenWipeRects: DirtyRect[] = [];
 
 // TEMPORARY diagnostic (2026-05-28): trace why a tap patches vs full-
 // rebuilds. Writes to sdmc:/swb_partial.log. Remove once partial repaint
@@ -491,6 +556,16 @@ export function patchLiveDirtyRegions(): boolean {
 	let _painted = 0;
 	const bodyCs = getComputedLiveStyle(root);
 	const bodyBox = getLayoutBox(root);
+
+	// Snap every rect to integer pixel bounds + 1 px padding so the
+	// clearRect / fillRect below covers anti-aliased edges that started
+	// at fractional x/y (button border ghosts, modal card rounded
+	// corners). See `pixelAlignRect` JSDoc for full reasoning.
+	for (let i = 0; i < rects.length; i++) rects[i] = pixelAlignRect(rects[i]);
+	// Hand the (now pixel-aligned) rects to the post-blit screen-wipe
+	// pass in `paintLiveOverlay`. Copy so a later in-place mutation
+	// here can't change what the screen pass sees.
+	pendingScreenWipeRects = rects.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h }));
 
 	cacheCtx.save();
 	try {
@@ -772,12 +847,12 @@ export interface PaintLiveOverlayOptions {
 	 * fullscreen-canvas mode where the WebGL canvas should fill the
 	 * screen instead of the page content. */
 	skipFlow?: boolean;
-	/** Bypass the `isKeyboardOpen()` early-return so the page can be
-	 * painted UNDERNEATH the on-canvas keyboard. The shell uses this in
-	 * its scroll-behind-keyboard path; it sets up a clip rect that ends
-	 * at the keyboard panel's top edge so the keyboard pixels aren't
-	 * touched. Off in every other path so rAF/video heartbeats can't
-	 * stomp the keyboard while it's modal. */
+	/** Vestigial — the old canvas keyboard used this to bypass the
+	 * `isKeyboardOpen()` early-return. The HTML keyboard paints AFTER
+	 * `paintLiveOverlay`, so the gate is gone and this flag is a no-op.
+	 * Retained on the option type so the scroll-behind-keyboard call
+	 * site in `repaintBehindKeyboard` keeps compiling without a churn
+	 * pass; remove next cleanup cycle if no new caller emerges. */
 	paintBehindKeyboard?: boolean;
 }
 
@@ -788,14 +863,18 @@ export function paintLiveOverlay(
 	scrollY: number = 0,
 	options: PaintLiveOverlayOptions = {},
 ): void {
-	// Stand down while the on-canvas keyboard owns the screen — the
-	// keyboard is modal and lives in a higher visual layer than the
-	// live overlay. Without this gate the rAF heartbeat would draw
-	// widgets / status canvases on top of the keyboard panel. The
-	// shell's scroll-behind-keyboard path opts in via
-	// `paintBehindKeyboard` and supplies its own clip rect so we paint
-	// the page area above the panel without disturbing the panel pixels.
-	if (isKeyboardOpen() && !options.paintBehindKeyboard) return;
+	// Old canvas-keyboard era: this function returned early on
+	// `isKeyboardOpen()` because the keyboard owned the screen and
+	// rAF/video ticks would otherwise clobber its pixels. The HTML
+	// keyboard paints AFTER `paintLiveOverlay` (via
+	// `paintKeyboardOverlay` from the shell) so it sits on top of a
+	// freshly-painted host page each frame instead — the gate would
+	// just freeze the content underneath the kb panel for no benefit.
+	// `paintBehindKeyboard` is retained as an unused option for API
+	// stability; the scroll-behind-keyboard path
+	// (`repaintBehindKeyboard`) still calls in with it set, but the
+	// distinguishing clip rect lives at the call site, not here.
+	void options.paintBehindKeyboard;
 	// Hand the measurement context to the layout pass so it can use
 	// measureText for intrinsic widths.
 	setLayoutMeasureCtx(ctx);
@@ -1048,9 +1127,11 @@ export function paintLiveOverlay(
 		// Blit cache to screen at the current scroll offset (partial or
 		// complete — partial paints show the body bg below the painted
 		// chunks so the page doesn't look broken during build).
+		let cacheBlitVisibleH = 0;
 		if (liveCacheOffscreen) {
 			const srcY = Math.max(0, Math.min(scrollY, liveCacheH));
 			const visibleH = Math.min(viewport.height, liveCacheH - srcY);
+			cacheBlitVisibleH = visibleH;
 			if (visibleH > 0) {
 				ctx.save();
 				try {
@@ -1062,6 +1143,50 @@ export function paintLiveOverlay(
 						0, srcY, viewport.width, visibleH,
 						viewport.x, viewport.y, viewport.width, visibleH,
 					);
+				} finally { ctx.restore(); }
+			}
+		}
+
+		// Screen-side wipe pass — drains `pendingScreenWipeRects` from
+		// the most recent `patchLiveDirtyRegions` call. The cache blit
+		// above only covers the body's intrinsic content height
+		// (`liveCacheH`); a fixed-position overlay (modal, lil-gui
+		// panel) extending below that height leaves its previous-frame
+		// pixels on screen below the cache when it closes, because the
+		// cache patch repaints inside the cache but the cache surface
+		// itself can't reach past its declared height. Solution: where
+		// a patched rect extends below the cache's bottom on screen,
+		// fillRect the leftover slice with the body bg colour so the
+		// closed overlay's pixels disappear. Cost: one (typically zero
+		// or one) fillRect per `patchLiveDirtyRegions` call — only
+		// pays its way for the modal-close case; the overwhelmingly
+		// common case (taps inside the cache area) hits the
+		// `screenBottomOfRect <= cacheScreenBottom` early-skip.
+		if (pendingScreenWipeRects.length > 0) {
+			const wipeRects = pendingScreenWipeRects;
+			pendingScreenWipeRects = [];
+			const cacheScreenBottom = viewport.y + cacheBlitVisibleH;
+			const wipeRoot = lastPaintedRoot ?? root;
+			const wipeBg = getComputedLiveStyle(wipeRoot).background;
+			if (wipeBg) {
+				ctx.save();
+				try {
+					ctx.beginPath();
+					ctx.rect(viewport.x, viewport.y, viewport.width, viewport.height);
+					ctx.clip();
+					ctx.fillStyle = wipeBg;
+					for (const r of wipeRects) {
+						// Body-cache coords → screen coords. The cache is
+						// blitted at (viewport.x, viewport.y - 0) for scrollY
+						// = 0 of the source slice (`srcY` clamp), so the same
+						// translation lands every rect at its on-screen home.
+						const sx = viewport.x + r.x;
+						const sy = viewport.y + r.y - scrollY;
+						const sBottom = sy + r.h;
+						if (sBottom <= cacheScreenBottom) continue; // fully covered by cache blit
+						const startY = Math.max(sy, cacheScreenBottom);
+						ctx.fillRect(sx, startY, r.w, sBottom - startY);
+					}
 				} finally { ctx.restore(); }
 			}
 		}
@@ -1235,6 +1360,155 @@ export function paintLiveOverlay(
 			ctx.restore();
 		}
 	}
+}
+
+// =========================================================================
+// HTML-driven virtual keyboard — second-root paint pass.
+//
+// Painted on top of `paintLiveOverlay`'s host-page output, clipped to
+// (viewport.x, viewport.y) → (viewport.x+viewport.width, viewport.y+
+// viewport.height). The keyboard's LiveElement tree is built by the
+// shell once at startup from `keyboard.html` (and re-populated after
+// every navigation reset, since `resetLiveRoot` nukes the cascade).
+//
+// Independent cache from `liveCacheOffscreen` — the keyboard root is
+// usually static (no scrollables, no fixed-pos descendants, no chunked
+// build) so a simple synchronous layout + paint into a dedicated
+// OffscreenCanvas works. Cache invalidates on viewport-size change,
+// root identity change, or global tree-version change (the keyboard's
+// own mutations bump that version too; cheap to over-rebuild on host
+// mutations since the kb tree is small).
+//
+// `vh` / `vw` resolution: the keyboard's CSS uses `min-height: 100vh`
+// for its body; resolving that against the host's full content viewport
+// would overflow the cache canvas. So we save/restore `cssVpW`/`cssVpH`
+// around the build, scoping it to the keyboard's actual paint area.
+// =========================================================================
+let kbCacheOffscreen: OffscreenCanvas | null = null;
+let kbCacheW = 0;
+let kbCacheH = 0;
+let kbCacheRoot: LiveElement | null = null;
+let kbCacheVersion = -1;
+
+/** Painter for the HTML-driven keyboard. The shell calls this AFTER
+ * `paintLiveOverlay` (so the host page's pixels are already on the
+ * screen ctx) when `isKeyboardOverlayVisible()` is true. `viewport`
+ * is the target rect on the screen — typically `{x:0, y:topY,
+ * width:canvasW, height:canvasH-topY}`. */
+export function paintKeyboardOverlay(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	root: LiveElement,
+	viewport: LiveViewport,
+): void {
+	const w = Math.max(1, Math.floor(viewport.width));
+	const h = Math.max(1, Math.floor(viewport.height));
+	const version = getLiveTreeVersion();
+	const needsBuild =
+		!kbCacheOffscreen
+		|| kbCacheW !== w
+		|| kbCacheH !== h
+		|| kbCacheRoot !== root
+		|| kbCacheVersion !== version;
+	if (needsBuild) {
+		kbCacheOffscreen = new OffscreenCanvas(w, h);
+		kbCacheW = w;
+		kbCacheH = h;
+		kbCacheRoot = root;
+		kbCacheVersion = version;
+		const cctx = kbCacheOffscreen.getContext('2d');
+		if (cctx) {
+			cctx.clearRect(0, 0, w, h);
+			// Scope `vh`/`vw` resolution to the keyboard area so the
+			// keyboard CSS's `min-height: 100vh` lays out inside the
+			// cache canvas instead of overflowing it.
+			const prevVp = getCssViewport();
+			setCssViewport(w, h);
+			// The keyboard root + its descendants share the global layout
+			// cache with the host page. The host's next paint will call
+			// `resetLayoutCache()` which evicts our boxes — that's fine,
+			// we lay out + paint fully into the cache offscreen NOW and
+			// just blit on subsequent frames until the version invalidates.
+			cctx.save();
+			try {
+				setLayoutMeasureCtx(cctx);
+				const bodyBox = layoutFixedRoot(root, 0, 0, w, h);
+				// Layout absolutely-positioned descendants against their
+				// nearest positioned ancestor (or the body), same shape as
+				// the body-flow pass in `paintLiveOverlay`.
+				for (const abs of collectAbsolutes(root)) {
+					const cb = findAbsoluteContainingBlock(abs, root);
+					const cbBox = getLayoutBox(cb);
+					if (!cbBox) continue;
+					layoutAbsoluteRoot(abs, cbBox.x, cbBox.y, cbBox.w, cbBox.h);
+				}
+				// Paint body bg first so any transparent gaps in children
+				// fall back to the keyboard's intended bg instead of
+				// showing through to the host page.
+				const bodyCs = getComputedLiveStyle(root);
+				if (bodyCs.background) {
+					cctx.fillStyle = bodyCs.background;
+					cctx.fillRect(0, 0, w, h);
+				}
+				if (bodyBox) {
+					paintBoxedElement(cctx, root, bodyCs, bodyBox);
+				}
+				// Single-pass synchronous paint of the op list. The
+				// keyboard tree is small (~80 elements) so chunking buys
+				// nothing here.
+				const ops: PaintOp[] = [];
+				collectPaintOps(root, ops, /* skipBgOfRoot */ true);
+				for (const op of ops) {
+					try {
+						if (op.kind === 'bg' && op.cs && op.box) {
+							paintBoxedElement(cctx, op.el, op.cs, op.box);
+						} else if (op.kind === 'atom' && op.atom) {
+							paintOneInlineAtom(cctx, op.atom);
+						} else if (op.kind === 'clip-push' && op.box) {
+							cctx.save();
+							cctx.beginPath();
+							cctx.rect(op.box.contentX, op.box.contentY, op.box.contentW, op.box.contentH);
+							cctx.clip();
+						} else if (op.kind === 'clip-pop') {
+							cctx.restore();
+						}
+					} catch (err) {
+						console.debug('[live-overlay] kb paint op threw, skipping', op.kind, err);
+					}
+				}
+			} finally {
+				cctx.restore();
+				setLayoutMeasureCtx(ctx);
+				setCssViewport(prevVp.w, prevVp.h);
+			}
+		}
+	}
+	if (kbCacheOffscreen) {
+		ctx.save();
+		try {
+			ctx.beginPath();
+			ctx.rect(viewport.x, viewport.y, w, h);
+			ctx.clip();
+			ctx.drawImage(
+				kbCacheOffscreen as unknown as CanvasImageSource,
+				0, 0, w, h,
+				viewport.x, viewport.y, w, h,
+			);
+		} finally {
+			ctx.restore();
+		}
+	}
+}
+
+/** Discard the keyboard cache. Called when the html source changes
+ * (template-switch reload, future hot-reload). Not normally needed —
+ * the version-keyed invalidation in `paintKeyboardOverlay` covers the
+ * routine cases. */
+export function resetKeyboardOverlayCache(): void {
+	kbCacheOffscreen = null;
+	kbCacheW = 0;
+	kbCacheH = 0;
+	kbCacheRoot = null;
+	kbCacheVersion = -1;
 }
 
 // 2026-06-07 pvzge investigation: counter + log throttle for
@@ -2392,7 +2666,20 @@ const LIVE_SVG_ADAPTER: SvgNodeAdapter<LiveElement> = {
 		// LiveElement attribute lookup is case-sensitive in our model;
 		// SVG authors typically write `viewBox`, so try that AND lower.
 		const raw = n.getAttribute(name) ?? n.getAttribute(name.toLowerCase());
-		return raw === null ? undefined : raw;
+		if (raw !== null) return raw;
+		// Cascade fallback for SVG paint properties so authors can
+		// style icons with regular CSS rules (e.g.
+		// `.kb .key svg { fill: var(--icon-color) }`). Inline `fill="…"`
+		// / `stroke="…"` attributes still win (returned above) — this
+		// only fires when the attribute is absent. Matches how real
+		// browsers treat SVG presentation attributes as cascade props.
+		if (name === 'fill' || name === 'stroke' || name === 'stroke-width') {
+			const cs = getComputedLiveStyle(n);
+			if (name === 'fill') return cs.fill;
+			if (name === 'stroke') return cs.stroke;
+			return cs.strokeWidth;
+		}
+		return undefined;
 	},
 	children: (n) => n.children,
 };

@@ -1,7 +1,9 @@
 {
-  "template": "templates/default.json",
+  "template": "templates/dark.json",
+  "keyboard": "keyboards/dark.html",
   "theme": "light",
   "toolbarHeight": 64,
+  "toolbarPosition": "top",
   "searchEngine": "DuckDuckGo",
   "videoNVTEGRA": true,
   "wwwRenderChunkMs": 512,
@@ -10,6 +12,7 @@
   "autoRotate": true,
   "clickSounds": true,
   "mouseIdleMs": 3000,
+  "keyboardHeight": 300,
   "navDebug": false,
   "swbImgDebug": false,
   "buttonMapping": {

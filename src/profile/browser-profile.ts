@@ -27,6 +27,9 @@ const BUILTIN_PAGES: readonly string[] = [
 	'settings.html',
 	'apps.html',
 	'bookmarks.html',
+	// `keyboard.html` was hoisted to app-level `keyboards/<name>.html`
+	// on 2026-06-11 so multiple panel designs can ship + be picked
+	// from Settings. See BUILTIN_KEYBOARD_FILES + seedKeyboards.
 ];
 
 /** Dev / test-fixture pages seeded from `romfs:/dev/` into the
@@ -179,6 +182,12 @@ const BUILTIN_ASSETS: readonly string[] = [
 	// Audio feedback for link/button presses. Played by the shell's
 	// click-sound module when `config.json clickSounds` is true.
 	'click.wav',
+	// Reserved entry point for any future page-side glue the HTML
+	// keyboard might want to expose. Currently a placeholder — the
+	// keyboard's live-DOM tree is parsed with `<script>` blocks stripped
+	// and the key-tap dispatch lives in the shell. See the file header
+	// for the upgrade path.
+	'keyboard-driver.js',
 ];
 
 /** Design-config + template files seeded from `romfs:/` into the
@@ -203,6 +212,22 @@ const BUILTIN_TEMPLATE_FILES: readonly string[] = [
 	'templates/light.json',
 	'templates/bottom-bar.json',
 	'templates/amber.json',
+];
+
+/** Virtual-keyboard panel files seeded from `romfs:/keyboards/` into
+ * `<appRoot>keyboards/` on first run. Each file is a full keyboard
+ * panel (scoped CSS + the #urlInput / #closeBtn / #clearBtn / .letter /
+ * .key contract `KeyboardOverlay.open()` relies on). `config.json`'s
+ * `keyboard` field names the active file; `keyboards.json` is the
+ * Settings-page registry the user picks from. Same never-overwrite
+ * semantics as the page + asset + template seeders — user edits
+ * persist, deleting a file restores it next launch. */
+const BUILTIN_KEYBOARD_FILES: readonly string[] = [
+	'keyboards.json',
+	'keyboards/default.html',
+	'keyboards/light.html',
+	'keyboards/dark.html',
+	'keyboards/red.html',
 ];
 
 export class BrowserProfile {
@@ -254,6 +279,7 @@ export class BrowserProfile {
 		try { Switch.mkdirSync(this.appRoot); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}templates/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}keyboards/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
 		// `apps/` itself is intentionally NOT pre-created here. Apps live
 		// in arbitrary subtrees (e.g. `apps/<channel>/<reverse-dns>/...`)
@@ -294,12 +320,42 @@ export class BrowserProfile {
 		return `${this.appRoot}templates.json`;
 	}
 
+	/** Absolute SD-card path to a seeded keyboard panel file. Resolves
+	 * the `keyboard` field from `config.json` (`keyboards/<file>.html`)
+	 * against the app-level root. Absolute schemes (`sdmc:/…`,
+	 * `romfs:/…`) pass through unchanged so a user can point at a
+	 * keyboard living anywhere on disk. */
+	keyboardPath(rel: string): string {
+		if (/^(?:sdmc:|romfs:)\/\//.test(rel)) return rel;
+		return `${this.appRoot}${rel}`;
+	}
+
 	/** Copy the templates registry + every shipped template JSON
 	 * (`romfs:/templates.json`, `romfs:/templates/<name>.json`) into the
 	 * app-level dir if the targets are missing. Same never-overwrite
 	 * semantics as the page + asset seeders. */
 	async seedTemplates(): Promise<void> {
 		for (const rel of BUILTIN_TEMPLATE_FILES) {
+			const target = `${this.appRoot}${rel}`;
+			if (fileExists(target)) continue;
+			try {
+				const response = await fetch(`romfs:/${rel}`);
+				if (!response.ok) continue;
+				const text = await response.text();
+				Switch.writeFileSync(target, text);
+			} catch (error) {
+				console.debug(`[brewser] seed ${rel} failed: ${error}`);
+			}
+		}
+	}
+
+	/** Copy the keyboards registry + every shipped keyboard panel HTML
+	 * (`romfs:/keyboards.json`, `romfs:/keyboards/<name>.html`) into the
+	 * app-level dir if the targets are missing. Same never-overwrite
+	 * semantics as the page + asset + template seeders — users can edit
+	 * a keyboard in place, deleting one restores it next launch. */
+	async seedKeyboards(): Promise<void> {
+		for (const rel of BUILTIN_KEYBOARD_FILES) {
 			const target = `${this.appRoot}${rel}`;
 			if (fileExists(target)) continue;
 			try {

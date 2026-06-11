@@ -1,16 +1,16 @@
 {
   "toolbar": {
     "height": 56,
-    "background": "#1a0e00",
+    "background": "#161826",
     "image": "",
-    "border": "#3d2300",
-    "divider": "#2a1700",
-    "urlText": "#ffd35e",
-    "hintText": "#a07000",
+    "border": "#00e5ff",
+    "divider": "#00e5ff",
+    "urlText": "#e8faff",
+    "hintText": "#7a8a99",
     "hint": "",
-    "glyphActive": "#ffd35e",
-    "glyphInactive": "#7a5400",
-    "starActive": "#ff8a00"
+    "glyphActive": "#00e5ff",
+    "glyphInactive": "#5a6b7a",
+    "starActive": "#ff2bd6"
   },
   "icons": {
     "back": "assets/left.png",
@@ -22,7 +22,7 @@
     "bookmarkFalse": "assets/bookmark_false.png"
   },
   "page": {
-    "background": "#0f0700",
+    "background": "#0a0b14",
     "topPadding": 12,
     "sidePadding": 48
   }

@@ -698,6 +698,14 @@ export function setCssViewport(w: number, h: number): void {
 	cssVpW = w;
 	cssVpH = h;
 }
+/** Read the current `vh` / `vw` basis. Used by the HTML-driven
+ * keyboard's paint pass to save/restore the global viewport around
+ * its scoped layout — its `min-height: 100vh` etc. need to resolve
+ * against the keyboard-area height, not the host page's full
+ * content viewport. */
+export function getCssViewport(): { w: number; h: number } {
+	return { w: cssVpW, h: cssVpH };
+}
 
 function parsePxOrNum(s: string): number | undefined {
 	const t = s.trim();

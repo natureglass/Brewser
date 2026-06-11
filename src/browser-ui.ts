@@ -1,7 +1,7 @@
 import { nxScreen } from '@switch-web/runtime';
 import { CHROME_LAYOUT } from './browser-config.js';
-import type { BrowserTemplate } from './profile/browser-template.js';
-import { DEFAULT_TEMPLATE } from './profile/browser-template.js';
+import type { BrowserTemplate, ToolbarPosition } from './profile/browser-template.js';
+import { DEFAULT_CONFIG, DEFAULT_TEMPLATE } from './profile/browser-template.js';
 import type { ChromeIcons } from './resources/chrome-icons.js';
 
 const PADDING_X = 24;
@@ -45,6 +45,7 @@ export interface AddressBarState {
 export class BrowserUI {
 	private icons: ChromeIcons | null = null;
 	private template: BrowserTemplate = DEFAULT_TEMPLATE;
+	private toolbarPosition: ToolbarPosition = DEFAULT_CONFIG.toolbarPosition;
 	private toolbarBackground: Image | null = null;
 
 	setIcons(icons: ChromeIcons): void {
@@ -53,6 +54,14 @@ export class BrowserUI {
 
 	setTemplate(template: BrowserTemplate): void {
 		this.template = template;
+	}
+
+	/** Push the active `config.json` `toolbarPosition` onto the UI.
+	 * Called at boot from the shell and again from `saveSettings` when
+	 * the user flips the radio so the chrome strip jumps to the new
+	 * edge on the next paint. */
+	setToolbarPosition(position: ToolbarPosition): void {
+		this.toolbarPosition = position;
 	}
 
 	/** Background image for the toolbar strip. `null` (or never set)
@@ -68,7 +77,7 @@ export class BrowserUI {
 		const ctx = canvas.getContext('2d');
 		const tb = this.template.toolbar;
 		const chromeHeight = tb.height;
-		const chromeY = tb.position === 'bottom' ? canvas.height - chromeHeight : 0;
+		const chromeY = this.toolbarPosition === 'bottom' ? canvas.height - chromeHeight : 0;
 		const hintText = hint ?? tb.hint;
 
 		ctx.save();
@@ -90,7 +99,7 @@ export class BrowserUI {
 			ctx.drawImage(this.toolbarBackground, 0, 0, canvas.width, chromeHeight);
 		}
 		ctx.fillStyle = tb.border;
-		if (tb.position === 'top') {
+		if (this.toolbarPosition === 'top') {
 			ctx.fillRect(0, chromeHeight - 2, canvas.width, 2);
 		} else {
 			ctx.fillRect(0, 0, canvas.width, 2);

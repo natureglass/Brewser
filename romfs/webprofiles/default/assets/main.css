@@ -1092,13 +1092,12 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 /* ---- settings.html / <browser-settings> ----------------------------
    The loader emits `.settings-form` with one `.settings-group`
    `<fieldset>` per section (Template, Appearance, Performance,
-   Behaviour, Diagnostics) and a `.settings-savebar` strip at the
-   bottom whose Save button is the only commit point. Every input is
-   tagged with `data-setting="<key>"` so the shell's `save-settings`
-   handler can walk the live root and read staged values back. Bottom
-   padding on `.settings-page` makes room for the sticky save bar so
-   the last fieldset doesn't end up hidden under it. */
-.settings-page { padding-bottom: 96px; }
+   Behaviour, Diagnostics) and a `.settings-savebar` row at the bottom
+   whose Save button is the only commit point. Every input is tagged
+   with `data-setting="<key>"` so the shell's `save-settings` handler
+   can walk the live root and read staged values back. The savebar
+   flows inline at the end of the form (no fixed positioning) so a
+   scroll-to-bottom is the natural way to commit edits. */
 
 .settings-form {
   display: flex;
@@ -1111,7 +1110,14 @@ fieldset.settings-group {
   background-color: #14202d;
   border: 1px solid #314672;
   border-radius: 12px;
-  padding: 14px 18px 18px;
+  /* Extra bottom padding (28px vs the 14px top) absorbs the
+     border-box-vs-content-box discrepancy on fixed-height inputs —
+     live-layout's intrinsicContentHeight returns just `cs.height`
+     for explicit-height inputs (44px), without adding the 2px border,
+     so each `.settings-row` underreports by ~2-4px and the cumulative
+     deficit pushes the last number input through the fieldset's
+     bottom border. */
+  padding: 14px 18px 28px;
   margin: 0;
 }
 
@@ -1205,6 +1211,20 @@ fieldset.settings-group legend {
   flex-direction: column;
 }
 
+/* Side-by-side fieldset pair (Template + Keyboard) on the Settings
+   page. Each child fieldset claims an equal share of the row width
+   so the two pickers sit shoulder to shoulder rather than stacking.
+   Uses the same 18px gap as `.settings-form` keeps between vertical
+   sections so the rhythm matches the rest of the form. */
+.settings-row-pair {
+  display: flex;
+  gap: 18px;
+}
+
+.settings-row-pair > fieldset.settings-group {
+  flex: 1;
+}
+
 /* Checkbox toggle rows. Live-form.ts paints the checkmark inside the
    box; we make the box noticeably larger than the default 20×20 so
    the checkmark stroke (~12% of box width) reads from a normal
@@ -1242,16 +1262,10 @@ fieldset.settings-group legend {
    it the bar stretches to viewport width and the 999px radius paints
    the whole content area as one giant ellipse. */
 .settings-savebar {
-  position: fixed;
-  right: 24px;
-  bottom: 18px;
-  width: 300px;
-  height: 60px;
-  z-index: 10;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 12px 16px;
   background: #14202d;
   border: 1px solid #314672;
   border-radius: 14px;
@@ -1291,4 +1305,279 @@ fieldset.settings-group legend {
   background: #2a3a66;
   color: #6a7c95;
   cursor: default;
+}
+
+/* ===================================================================
+   Light theme overrides
+   -------------------------------------------------------------------
+   Active when the user's `theme` config is `light` (Settings →
+   Appearance → Theme). The shell pushes the choice via
+   `setMediaColorScheme()` so `@media (prefers-color-scheme: light)`
+   matches; the rules below override only the colour tokens that
+   need to flip vs. the dark defaults above. Cascade order makes the
+   light overrides win when the query matches; when it doesn't (dark
+   theme), nothing here applies and the original dark palette stays.
+
+   Palette:
+     - Page bg            #f4f6fa
+     - Card surface       #ffffff
+     - Subtle/sunken bg   #f1f4f9
+     - Inactive row bg    #eef2f7
+     - Border (major)     #cbd5e1
+     - Border (strong)    #1d4ed8  (focus / active)
+     - Border (subtle)    #e5e7eb  (dividers)
+     - Text (primary)     #1a1a1f
+     - Text (secondary)   #4b5563
+     - Text (muted)       #6b7280
+     - Heading amber      #b45309
+     - Heading navy       #1d4ed8
+     - Link green         #15803d
+     - Code teal          #0369a1
+     - Destructive bg     #fee2e2
+     - Destructive border #fca5a5
+     - Destructive text   #b91c1c
+     - Accent yellow      #ffd35e  (preserved — Save, tab-active)
+   =================================================================== */
+
+@media (prefers-color-scheme: light) {
+
+  body {
+    background: #f4f6fa;
+    color: #1a1a1f;
+  }
+
+  h1 { color: #b45309; }
+  h2 { color: #1d4ed8; }
+  a  { color: #15803d; }
+
+  .lead { color: #4b5563; }
+  .empty { color: #6b7280; }
+
+  .app-grid .empty {
+    background-color: #ffffff;
+    border-left-color: #1d4ed8;
+    color: #4b5563;
+  }
+
+  code, kbd { color: #0369a1; }
+
+  /* Pill nav (.munch-link) */
+  .munch-link {
+    color: #1a1a1f;
+    background: #ffffff;
+    border-color: #cbd5e1;
+  }
+  .munch-link:focus-visible { outline-color: #15803d; }
+  .clickable .munch-link:active {
+    background: #eef2f7;
+    border-color: #1d4ed8;
+  }
+
+  /* Destructive pill */
+  .clear-btn {
+    color: #b91c1c;
+    background: #fee2e2;
+    border-color: #fca5a5;
+  }
+  .clear-btn:active {
+    background: #fecaca;
+    border-color: #b91c1c;
+  }
+
+  /* Search bar */
+  .search-form {
+    background: #ffffff;
+    border-color: #cbd5e1;
+  }
+  .search-input { color: #1a1a1f; }
+  .search-input::placeholder { color: #9ca3af; }
+  .search-button:hover,
+  .search-button:focus-visible { background: #16a34a; color: #ffffff; }
+  .search-button:active { background: #15803d; color: #ffffff; }
+
+  /* Apps page tabs */
+  .tab-label {
+    color: #4b5563;
+    background: #eef2f7;
+    border-color: #cbd5e1;
+  }
+  .tab-label:active {
+    color: #0b1220;
+    background: #fef3c7;
+    border-color: #1d4ed8;
+  }
+  /* Active tab keeps the yellow palette — dark text on yellow reads
+     fine against the light page bg too. */
+
+  /* App / Featured grid cards */
+  .app-card {
+    color: #1a1a1f;
+    background: #ffffff;
+    border-color: #cbd5e1;
+  }
+  .app-card strong { color: #1d4ed8; }
+  .app-card span { color: #4b5563; }
+  .clickable .app-card:active {
+    background: #eef2f7;
+    border-color: #1d4ed8;
+  }
+  .app-card--missing strong { color: #6b7280; }
+  .app-card--upgrade {
+    background: #fef9e7;
+    border-color: #f59e0b;
+  }
+
+  /* Card meta chips */
+  .app-meta__version {
+    color: #1d4ed8;
+    background: #eaf0ff;
+    border-color: #cbd5e1;
+  }
+  .app-meta__license {
+    color: #064e3b;
+    background: #d1fae5;
+    border-color: #16a34a;
+  }
+  /* Upgrade chip keeps its bright-yellow callout — same readability
+     story as the Save button + active tab. */
+
+  /* Settings list rows (Developer section, history.html, bookmarks.html) */
+  ul.settings-list li {
+    background-color: #ffffff;
+    border-left-color: #1d4ed8;
+  }
+  ul.settings-list a { color: #1d4ed8; }
+  ul.settings-list .url { color: #6b7280; }
+  ul.settings-list .desc { color: #6b7280; }
+  ul.settings-list a:active,
+  ul.settings-list li:active { background-color: #eef2f7; }
+
+  /* Template rows (legacy <browser-templates>) */
+  button.template-row {
+    background-color: #eef2f7;
+    color: #1a1a1f;
+    border-color: #cbd5e1;
+  }
+  button.template-row.active {
+    background-color: #ffffff;
+    border-color: #1d4ed8;
+  }
+  button.template-row .path { color: #6b7280; }
+  button.template-row .radio-indicator { border-color: #1d4ed8; }
+  button.template-row.active .radio-dot { background-color: #1d4ed8; }
+  button.template-row[data-action]:active {
+    background-color: #f1f4f9;
+    border-color: #15803d;
+  }
+
+  /* App-modal */
+  .app-modal-overlay { background: rgba(15, 23, 42, 0.45); }
+  .app-modal-card {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #1a1a1f;
+  }
+  .app-modal-title { color: #1d4ed8; }
+  .app-modal-description { color: #4b5563; }
+  .app-modal-row { border-top-color: #e5e7eb; }
+  .app-modal-row-label { color: #6b7280; }
+  .app-modal-row-value { color: #1a1a1f; }
+  .app-modal-btn {
+    background: #eef2f7;
+    color: #1a1a1f;
+    border-color: #cbd5e1;
+  }
+  .app-modal-btn:active {
+    background: #f1f4f9;
+    border-color: #15803d;
+  }
+  /* Play / Download buttons keep their saturated green / red so the
+     primary CTA stays loud against the white card. */
+  a.app-modal-btn { color: #1a1a1f; }
+
+  /* Check-for-Updates modal */
+  .updates-modal-section-title { color: #6b7280; }
+  .updates-modal-row {
+    border-top-color: #e5e7eb;
+    color: #1a1a1f;
+  }
+  .updates-modal-row-name { color: #1a1a1f; }
+  .updates-modal-row-version { color: #4b5563; }
+  .updates-modal-empty { color: #6b7280; }
+  .updates-modal-status { color: #15803d; }
+
+  /* about.html */
+  .about-badge {
+    color: #0369a1;
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+  }
+  .about-card {
+    background: #ffffff;
+    border-color: #cbd5e1;
+  }
+  .about-card p { color: #4b5563; }
+  .about-meta article {
+    background-color: #ffffff;
+    border-left-color: #1d4ed8;
+  }
+  .about-meta strong { color: #1d4ed8; }
+  .about-meta span { color: #4b5563; }
+  .about-footer-note {
+    border-top-color: #e5e7eb;
+    color: #6b7280;
+  }
+
+  /* settings.html / <browser-settings> */
+  fieldset.settings-group {
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+  }
+  fieldset.settings-group legend { color: #1d4ed8; }
+  .settings-label { color: #1a1a1f; }
+  .settings-hint { color: #6b7280; }
+  .path { color: #6b7280; }
+
+  .settings-form input[type="number"],
+  .settings-form input[type="text"] {
+    background: #ffffff;
+    color: #1a1a1f;
+    border-color: #cbd5e1;
+  }
+
+  .settings-radio {
+    background: #f1f4f9;
+    border-color: #cbd5e1;
+    color: #1a1a1f;
+  }
+  /* paintRadio reads `cs.color` for the inner dot. Without this
+     override the dot inherits `#1a1a1f` from `.settings-radio` above
+     and reads as near-black against the painter's default dark
+     `#2c3e50` radio backdrop — invisible. Pin to white so the dot
+     pops on the dark inner fill. */
+  .settings-radio input[type="radio"] {
+    color: #ffffff;
+  }
+  .settings-toggle {
+    background: #f1f4f9;
+    border-color: #cbd5e1;
+  }
+  .settings-toggle input[type="checkbox"] {
+    background: #ffffff;
+    color: #16a34a;
+    border-color: #1d4ed8;
+  }
+
+  .settings-savebar {
+    background: #ffffff;
+    border-color: #cbd5e1;
+  }
+  .settings-status { color: #6b7280; }
+  /* Save button keeps its yellow CTA palette — already readable on
+     both surfaces; the disabled state needs a light-friendly swap. */
+  .settings-save:active { background: #16a34a; color: #ffffff; }
+  .settings-save[disabled] {
+    background: #e5e7eb;
+    color: #9ca3af;
+  }
 }
