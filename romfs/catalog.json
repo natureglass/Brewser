@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-09T21:33:12Z",
+  "generated": "2026-06-10T20:02:22Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -25,6 +25,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/feed.json",
         "assets/suggestions.json",
@@ -57,6 +60,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/unity_logo.png",
         "index.html",
@@ -87,6 +93,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "GPL-3.0",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "ATTRIBUTION.md",
         "LICENSE",
@@ -7375,6 +7384,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/audioplayer_logo.png",
         "assets/left-chevron.png",
@@ -7417,6 +7429,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/config.json",
         "assets/twitch_logo.png",
@@ -7450,6 +7465,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/config.json",
         "assets/itchio_logo.png",
@@ -7484,6 +7502,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/battery.png",
         "assets/compass.png",
@@ -7527,6 +7548,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/speedtest_logo.png",
         "index.html",
@@ -7558,6 +7582,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/threejsdemos_logo.png",
         "geometry-cube/assets/crate.png",
@@ -7756,6 +7783,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/logo.png",
         "assets/main.js",
@@ -7784,6 +7814,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
       "files": [
         "assets/logo.png",
         "assets/main.js",

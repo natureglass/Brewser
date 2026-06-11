@@ -237,6 +237,31 @@ input[name="apps-tab"] { display: none; }
   display: block;
 }
 
+.communityApps {
+  color: #0b1220;
+  background: #ffd35e;
+  border-color: #ffd35e;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  min-height: 46px;
+  padding: 11px 20px;
+  overflow: hidden;
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+}
+
+.communityApps:active,
+.communityApps[aria-pressed="true"] {
+  background: #f2c13d;
+  border-color: #f2c13d;
+  color: #0b1220;
+}
+
 .tab-label:active {
   background: #0a1220;
   border-color: #7aa2ff;
@@ -254,10 +279,20 @@ input[name="apps-tab"] { display: none; }
 
 .app-card {
   position: relative;
+  /* Block layout (not flex) so the existing painters center the logo
+     under the parent's `text-align: center`, and the `<strong>` title
+     + `<span>` description blocks stretch full-width with their own
+     `text-align: left` for readable copy. The meta strip on top
+     handles its left-right chip layout via its own internal flex. */
   display: block;
   overflow: hidden;
-  padding: 20px 18px 18px;
-  min-height: 156px;
+  padding: 14px 18px 18px;
+  /* Description is clamped to 3 lines, version + license chips sit in
+     a small strip on top, so the card's natural height is bounded.
+     min-height keeps short-description cards from collapsing too
+     aggressively — grid rows equalize to the tallest card, but a too-
+     low floor would let an entire row of short-desc cards stay puny. */
+  min-height: 240px;
   text-align: center;
   color: #eaf2ff;
   text-decoration: none;
@@ -268,8 +303,8 @@ input[name="apps-tab"] { display: none; }
 
 .app-logo {
   display: block;
-  width: 64px;
-  height: 64px;
+  width: 80px;
+  height: 80px;
   object-fit: contain;
   margin-bottom: 14px;
 }
@@ -282,11 +317,79 @@ input[name="apps-tab"] { display: none; }
   text-align: left;
 }
 
+/* Description text — clamped to three lines max so cards stay uniform
+   no matter how chatty the catalog blurb is. `max-height` is set just
+   above `3 × line-height` (4.5em vs the bare-min 4.05em) so descender
+   ink on the third line — gpqy etc. — paints in full instead of being
+   cut by the baseline. `overflow: hidden` still chops a fourth line.
+   (Brewser's painter doesn't honor `-webkit-line-clamp` / `text-
+   overflow: ellipsis`, so the cut is a hard clip — fine for catalog
+   copy that already favors short blurbs.) */
 .app-card span {
   display: block;
   color: #9bb1d6;
   line-height: 1.35;
+  max-height: 4.5em;
+  overflow: hidden;
   text-align: left;
+}
+
+/* Version + license footer pinned to the card's bottom edge. The
+   parent `.app-card` already carries `position: relative`, so absolute
+   positioning anchors to its content box. A thin top border separates
+   the meta strip from the description above; version sits flush left
+   (subdued blue chip), license flush right (accent green chip). When
+   only one of the two is present the surviving chip sits at its own
+   side and the other slot stays empty — no centering rebalance, on
+   purpose, so the chip placement stays predictable across cards. The
+   overrides on `display: inline-flex` / `text-align: center` undo the
+   generic `.app-card span { display: block; text-align: left }` rule
+   above (which is what the description text inherits). */
+/* Renderer emits `<div class="app-card__meta">` with two chip `<div>`s
+   inside. The strip flows after the description text instead of being
+   absolutely-anchored to the card bottom — brewser's `layoutAbsoluteRoot`
+   path turned out unreliable for this case (shrink-to-fit absolutes
+   with only `bottom:` set don't measure children correctly). The card's
+   `min-height` keeps cards uniform-looking even when descriptions are
+   short. */
+/* Top-of-card meta strip — version chip flush left, license chip
+   flush right. `width: 100%` so the row spans the card's content area
+   even though the parent flex axis is `align-items: center` (which
+   would otherwise shrink the row to its content width and center it,
+   defeating the corner-anchor look the user asked for). */
+.app-card__meta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.app-meta__version,
+.app-meta__license {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 22px;
+  text-align: center;
+  white-space: nowrap;
+  flex-grow: 0;
+}
+
+.app-meta__version {
+  color: #c2e0ff;
+  background: #1a2740;
+  border: 1px solid #28365c;
+}
+
+.app-meta__license {
+  color: #0b1220;
+  background: #7eda9f;
+  border: 1px solid #4ea670;
 }
 
 /* Settings-list rows — used by settings.html (Developer section),
@@ -412,6 +515,150 @@ ul.settings-list a:active,
 ul.settings-list li:active {
   background-color: #0e1830;
 }
+
+/* ---- Missing-app modal -------------------------------------------
+   Shared by apps.html (full catalog) and home.html (Featured Apps).
+   The catalog loader stamps `data-missing="true" data-app-detail="…"`
+   on every card whose `apps/<group>/<id>/<entry>` file isn't on disk
+   (see browser-template.ts `loadCatalogGroup`). The page-side script at
+   `brewser://assets/missing-app-modal.js` intercepts taps on those
+   cards and toggles `.app-modal-overlay--open` to show the centered
+   detail panel.
+
+   IMPORTANT: visibility is driven by a class flip, NOT
+   `style.display`. The InlineStyle setters on LiveElement.style are
+   plain field writes that don't run through `invalidateLiveStyle` —
+   they leave the live-DOM paint cache holding the previous frame's
+   pixels (= second open layers a fresh modal on top of the stale one).
+   classList.add/remove routes through `LiveTokenList.notify` which
+   calls invalidateLiveStyle + bumpLiveTreeVersion + markLiveDirty, so
+   the dirty-region pass actually erases the closed modal on the next
+   onTick repaint. */
+.app-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(8, 13, 26, 0.78);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.app-modal-overlay.app-modal-overlay--open { display: flex; }
+
+.app-modal-card {
+  width: 760px;
+  max-width: 100%;
+  background: #14202d;
+  border: 1px solid #314672;
+  border-radius: 16px;
+  padding: 24px 26px 20px;
+  color: #eaf2ff;
+  text-align: center;
+}
+
+/* Meta strip — same flush-left version / flush-right license chip
+   layout the grid card uses (`.app-card__meta`). Reuses the
+   `.app-meta__version` / `.app-meta__license` pill rules already in
+   this sheet so the chips look identical to the card's. The script
+   leaves the inner divs empty when the catalog entry omits the
+   field; the empty pills disappear visually because their content
+   is zero-width but they still occupy a flex slot. */
+.app-modal-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+  min-height: 22px;
+}
+.app-modal-meta .app-meta__version:empty,
+.app-modal-meta .app-meta__license:empty { display: none; }
+
+.app-modal-logo {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  margin: 0 auto 14px;
+}
+
+.app-modal-title {
+  color: #ffd35e;
+  font-size: 1.5em;
+  margin: 0 0 8px;
+}
+
+.app-modal-description {
+  color: #cdd9ee;
+  margin: 0 0 16px;
+  text-align: left;
+}
+.app-modal-description:empty { display: none; }
+
+.app-modal-body { margin-bottom: 18px; text-align: left; }
+
+.app-modal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #1f2c4d;
+}
+.app-modal-row:first-child { border-top: none; }
+
+.app-modal-row-label {
+  /* 160px fits the longest label we currently emit ("Allowed origins")
+     on a single line at the 0.9em uppercase scale. `nowrap` is the
+     belt to the suspenders — a future label slightly longer than the
+     basis would otherwise wrap and visually merge into the row below,
+     which is what bit us when "Allowed origins" + a 110px column
+     stacked atop "Developer". */
+  flex: 0 0 160px;
+  color: #7a8aa3;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.app-modal-row-value {
+  flex: 1;
+  color: #e0e8f4;
+  word-break: break-word;
+}
+
+.app-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.app-modal-btn {
+  background: #1f2c4d;
+  color: #e0e8f4;
+  border: 1px solid #2a3a66;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.app-modal-btn--primary {
+  background: #2a3a66;
+  border-color: #7aa2ff;
+  color: #ffffff;
+}
+
+.app-modal-btn:active {
+  background: #0e1830;
+  border-color: #7eda9f;
+}
+
+/* Missing-card title styles muted relative to live apps so the
+   catalog-vs-installed distinction is visible at a glance. */
+.app-card--missing strong { color: #cdd9ee; }
 
 /* ---- about.html ----------------------------------------------------
    Migrated from about.html's inline <style>. The 28px 48px text-heavy

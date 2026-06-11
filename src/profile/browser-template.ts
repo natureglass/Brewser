@@ -349,10 +349,55 @@ export function loadConfig(appRoot: string): BrowserConfig {
  * is rewritten to an absolute `brewser://` URL for the card link
  * (see `renderAppCards`). */
 export interface AppEntry {
+	/** Reverse-DNS folder name (`catalog.json`'s `id`). Surfaced so the
+	 * renderer can stamp it onto the card markup — the missing-app modal
+	 * keys its `data-app-detail` payload on this. */
+	id: string;
+	/** Catalog group this entry came from (`featured` / `community` /
+	 * `experimental`). Surfaced for the same modal-payload reason as
+	 * `id`. */
+	group: CatalogGroup;
 	title: string;
 	description: string;
 	logo: string;
 	url: string;
+	/** Semantic version string from `catalog.json`'s `version` field
+	 * (e.g. `"1.0.0"`). Empty string when the entry omits it — the
+	 * renderer suppresses the version chip in that case rather than
+	 * showing a blank pill. */
+	version: string;
+	/** SPDX-ish license identifier from `catalog.json`'s `license`
+	 * field (e.g. `"MIT"`, `"Apache-2.0"`). Empty string when absent;
+	 * the renderer treats empty the same as a missing version. */
+	license: string;
+	/** Free-form category from `catalog.json` (`"app"`, `"game"`, …).
+	 * Empty string when absent. Surfaced for the missing-app modal. */
+	category: string;
+	/** Developer / author display name from `catalog.json`. Empty when
+	 * absent. Surfaced for the missing-app modal. */
+	developer: string;
+	/** Upstream source URL (typically a Git repo) from `catalog.json`.
+	 * Empty when absent. Surfaced for the missing-app modal. */
+	source: string;
+	/** Capability flags from the manifest, comma-joined for direct
+	 * display (`"video, controller"`). Empty when the catalog entry
+	 * omits the array or has no entries. Surfaced for the missing-app
+	 * modal. */
+	features: string;
+	/** Declared permissions, comma-joined (`"network, storage"`).
+	 * Empty same as `features`. */
+	permissions: string;
+	/** Allowed third-party fetch origins, comma-joined. Empty same as
+	 * `features`. The modal renders an empty value as the em-dash
+	 * placeholder so the row reads intentionally-empty rather than
+	 * accidentally-missing. */
+	allowedOrigins: string;
+	/** True when the catalog references this entry but its launcher file
+	 * (`apps/<group>/<id>/<entry>`) isn't present on disk. The renderer
+	 * swaps the card's logo for the generic download.png and the
+	 * launcher page intercepts taps to open the missing-app modal
+	 * instead of navigating to a guaranteed 404. */
+	missing: boolean;
 }
 
 /** Catalog group name — every entry in `catalog.json` lives under one
@@ -387,7 +432,29 @@ interface RawCatalogEntry {
 	description?: string;
 	logo: string;
 	entry: string;
+	version?: string;
+	license?: string;
+	category?: string;
+	developer?: string;
+	source?: string;
+	/** Capability flags from the manifest (`["video", "controller", …]`).
+	 * Free-form strings — the missing-app modal renders them comma-
+	 * separated; no validation against an enum. */
+	features?: string[];
+	/** Permissions the app declares it needs (`["network", "storage", …]`).
+	 * Same shape + rendering as `features`. */
+	permissions?: string[];
+	/** Allowed third-party origins the app may fetch from
+	 * (`["https://api.example.com", …]`). Empty array displays as `—`
+	 * in the modal. */
+	allowed_origins?: string[];
 }
+
+/** URL of the generic "download" logo painted on cards whose backing
+ * app folder isn't on disk. Lives in `<storageRoot>assets/` so it's
+ * seeded once per profile via `BUILTIN_ASSETS` and served through the
+ * normal `brewser://assets/...` route. */
+const MISSING_APP_LOGO_URL = 'brewser://assets/download.png';
 
 /** Read + validate `<profile>/catalog.json` and return the entries for
  * the requested group, mapped to `AppEntry` cards. Missing / malformed
@@ -399,12 +466,51 @@ interface RawCatalogEntry {
  * (sdmc vs. romfs) hidden from the page. */
 export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry[] {
 	const raw = readCatalogGroup(appRoot, group);
-	return raw.map((e) => ({
-		title: e.name,
-		description: e.description ?? '',
-		logo: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.logo)}`,
-		url: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.entry)}`,
-	}));
+	return raw.map((e) => {
+		const entryRel = stripLeadingSlashes(e.entry);
+		// "Missing" = the launcher file the card would navigate to isn't
+		// present on disk. We probe via `Switch.readFileSync` (the same
+		// call the resource loader uses) so the check matches what the
+		// real navigation would see — sdmc override files, robocopy'd
+		// app folders, etc. Any thrown error counts as missing too: it's
+		// the same outcome the user would see (a 404 / blank page).
+		let missing = false;
+		try {
+			const data = Switch.readFileSync(`${appRoot}apps/${group}/${e.id}/${entryRel}`);
+			if (!data) missing = true;
+		} catch (_) {
+			missing = true;
+		}
+		const logo = missing
+			? MISSING_APP_LOGO_URL
+			: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.logo)}`;
+		return {
+			id: e.id,
+			group,
+			title: e.name,
+			description: e.description ?? '',
+			logo,
+			url: `brewser://apps/${group}/${e.id}/${entryRel}`,
+			version: typeof e.version === 'string' ? e.version : '',
+			license: typeof e.license === 'string' ? e.license : '',
+			category: typeof e.category === 'string' ? e.category : '',
+			developer: typeof e.developer === 'string' ? e.developer : '',
+			source: typeof e.source === 'string' ? e.source : '',
+			features: joinStringArray(e.features),
+			permissions: joinStringArray(e.permissions),
+			allowedOrigins: joinStringArray(e.allowed_origins),
+			missing,
+		};
+	});
+}
+
+/** Coerce a catalog `features` / `permissions` / `allowed_origins`
+ * field to a flat display string. Non-arrays + non-string entries are
+ * dropped silently so a malformed manifest produces an empty cell
+ * instead of `[object Object]`. */
+function joinStringArray(arr: unknown): string {
+	if (!Array.isArray(arr)) return '';
+	return arr.filter((s): s is string => typeof s === 'string' && s.length > 0).join(', ');
 }
 
 function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry[] {

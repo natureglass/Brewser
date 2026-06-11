@@ -160,6 +160,16 @@ const BUILTIN_ASSETS: readonly string[] = [
 	'toolbar_back.png',
 	'keyboard_back.png',
 	'main.css',
+	// Generic "download" glyph the apps launcher paints on cards whose
+	// app folder isn't on disk yet. Served at
+	// `brewser://assets/download.png` once seeded into `<storageRoot>assets/`.
+	'download.png',
+	// Page-side script driving the missing-app detail modal. Shared by
+	// apps.html and home.html via `<script src="brewser://assets/missing-app-modal.js">`,
+	// so it only ships in one place. Toggles `.app-modal-overlay--open`
+	// (NOT `style.display` — that doesn't invalidate the live-DOM paint
+	// cache, leaving stale modal pixels on screen across opens).
+	'missing-app-modal.js',
 	// Audio feedback for link/button presses. Played by the shell's
 	// click-sound module when `config.json clickSounds` is true.
 	'click.wav',

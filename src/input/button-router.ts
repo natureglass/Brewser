@@ -139,13 +139,31 @@ const ALL_LABELS: SwitchButtonLabel[] = [
 	'LEFT_SL', 'LEFT_SR', 'RIGHT_SL', 'RIGHT_SR',
 ];
 
-// Active mapping. Defaults applied on module load; replaced by
-// `setButtonMapping` once the shell has loaded config.json.
+// Active (effective) mapping — what consumers read via getActionForButton
+// etc. Defaults applied on module load; rebuilt by setButtonMapping (base)
+// and setAppButtonOverlay (per-app overlay).
 const mapping: Record<SwitchButtonLabel, ButtonAction> = (() => {
 	const m: Record<SwitchButtonLabel, ButtonAction> = {} as Record<SwitchButtonLabel, ButtonAction>;
 	for (const label of ALL_LABELS) m[label] = DEFAULT_ACTIONS[label] ?? '';
 	return m;
 })();
+
+// Snapshot of the BASE mapping — `DEFAULT_ACTIONS` overlaid with the
+// user's `config.json buttonMapping`. The effective `mapping` starts
+// here and then has the active app's manifest overlay applied on top.
+// Restored when an app is unloaded so we revert cleanly to shell-global
+// behaviour on the launcher / settings / etc.
+const baseMapping: Record<SwitchButtonLabel, ButtonAction> = (() => {
+	const m: Record<SwitchButtonLabel, ButtonAction> = {} as Record<SwitchButtonLabel, ButtonAction>;
+	for (const label of ALL_LABELS) m[label] = DEFAULT_ACTIONS[label] ?? '';
+	return m;
+})();
+
+/** Currently-active app's action-keyed button mapping (parsed from its
+ * `manifest.json`'s `buttonMapping` object), or `null` when no app is
+ * active. Stored raw so the same overlay survives a base change (e.g.
+ * the user editing `config.json` while an app is open). */
+let appOverlayActionKeyed: Record<string, unknown> | null = null;
 
 /** Reverse index for quick "which physical button serves action X?" lookups. */
 const actionToLabel = new Map<ButtonAction, SwitchButtonLabel>();
@@ -188,8 +206,42 @@ export function setButtonMapping(userMapping: Record<string, unknown> | null | u
 	if (userMapping && typeof userMapping === 'object') {
 		applyActionKeyed(userMapping);
 	}
+	// Snapshot the post-user-config state as the new base; any active
+	// app overlay layers on top of this snapshot below.
+	for (const label of ALL_LABELS) baseMapping[label] = mapping[label];
+	if (appOverlayActionKeyed) applyActionKeyed(appOverlayActionKeyed);
 	rebuildActionToLabelIndex();
 	console.debug('[button-router] mapping=' + JSON.stringify(mapping));
+}
+
+/** Layer an action-keyed mapping (as authored in an app's
+ * `manifest.json buttonMapping`) on top of the base shell mapping.
+ * Called by the shell when navigating into an `brewser://apps/<group>/<id>/...`
+ * page so the app gets its declared per-button semantics for the
+ * duration of the navigation. Passing `null` is equivalent to
+ * `clearAppButtonOverlay`. Same parser as the global config — see
+ * `setButtonMapping` for the schema. */
+export function setAppButtonOverlay(overlay: Record<string, unknown> | null | undefined): void {
+	appOverlayActionKeyed = (overlay && typeof overlay === 'object' && !Array.isArray(overlay))
+		? overlay as Record<string, unknown>
+		: null;
+	rebuildEffective();
+}
+
+/** Drop the active app overlay and revert to the base shell mapping.
+ * Called when navigating away from an app page (back to the launcher,
+ * settings, etc.). No-op when no overlay is active. */
+export function clearAppButtonOverlay(): void {
+	if (!appOverlayActionKeyed) return;
+	appOverlayActionKeyed = null;
+	rebuildEffective();
+}
+
+function rebuildEffective(): void {
+	for (const label of ALL_LABELS) mapping[label] = baseMapping[label];
+	if (appOverlayActionKeyed) applyActionKeyed(appOverlayActionKeyed);
+	rebuildActionToLabelIndex();
+	console.debug('[button-router] mapping(effective)=' + JSON.stringify(mapping));
 }
 
 function applyActionKeyed(userMapping: Record<string, unknown>): void {

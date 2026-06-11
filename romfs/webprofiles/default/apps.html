@@ -8,30 +8,18 @@
 </style>
 </head>
 <body>
-<!-- CSS-only tabs: each radio drives one panel via the `~` (general
-     sibling) combinator. The radios MUST be direct children of <body>
-     so they're siblings of `.page-shell` (where the panels live).
-     They're hidden via `display:none` in main.css; the labels inside
-     `.tab-bar` forward taps via `for=`. The radio engine in live-form.ts
-     mirrors `checked` to the attribute so the `:checked` selector
-     picks up the new state on the next paint.
-     `apps-tab-featured` carries the default `checked` attribute. -->
-<input type="radio" id="apps-tab-featured" name="apps-tab" checked>
-<input type="radio" id="apps-tab-community" name="apps-tab">
+
+<input type="radio" id="apps-tab-community" name="apps-tab" checked>
 <input type="radio" id="apps-tab-experimental" name="apps-tab">
+<input type="radio" id="apps-tab-featured" name="apps-tab">
 
 <div class="page-shell">
   <nav class="tab-bar" aria-label="App catalog groups">
-    <label for="apps-tab-featured" class="tab-label">Featured</label>
     <label for="apps-tab-community" class="tab-label">Community</label>
     <label for="apps-tab-experimental" class="tab-label">Experimental</label>
+    <label for="apps-tab-featured" class="tab-label">Featured</label>
   </nav>
   <div class="tab-panels clickable">
-    <section class="tab-panel" data-tab="featured" aria-label="Featured apps">
-      <div class="app-grid">
-        <browser-featured></browser-featured>
-      </div>
-    </section>
     <section class="tab-panel" data-tab="community" aria-label="Community apps">
       <div class="app-grid">
         <browser-community></browser-community>
@@ -42,7 +30,52 @@
         <browser-experimental></browser-experimental>
       </div>
     </section>
+    <section class="tab-panel" data-tab="featured" aria-label="Featured apps">
+      <div class="app-grid">
+        <browser-featured></browser-featured>
+      </div>
+    </section>
   </div>
 </div>
+
+<!-- Missing-app detail modal. Hidden by default (.app-modal-overlay
+     defaults to `display: none` in main.css); the shared script flips
+     `.app-modal-overlay--open` to show the centered card and reverts
+     on Cancel / B-button / L-back. The modal HTML is shared verbatim
+     with home.html (Featured Apps grid renders missing cards too) —
+     keep the two in sync if either side changes.
+
+     INLINE `style="position: fixed"` is intentional: live-overlay.ts's
+     static-cache builder (`collectPaintOps`) uses the INLINE
+     `el.style.position` to decide whether to exclude an element from
+     the cache, NOT the computed cascade value. Without this, a
+     stylesheet-only `position: fixed` overlay gets BAKED into the body
+     cache on open. Closing then opening again leaves the prior bake's
+     pixels behind the fresh per-frame fixed-pass repaint — the
+     "second modal stacked behind the first" bug. With the inline
+     hint, only the per-frame fixed-element pass paints the modal,
+     and `display:none` on close means it stops painting entirely. -->
+<div id="app-modal-overlay" class="app-modal-overlay" style="position: fixed">
+  <div class="app-modal-card">
+    <!-- Meta strip mirrors the `.app-card__meta` strip on grid cards:
+         version chip flush left, license chip flush right, both in a
+         row above the logo. The strip is rendered conditionally by
+         the script (hidden when both fields are empty). -->
+    <div id="app-modal-meta" class="app-modal-meta">
+      <div id="app-modal-version" class="app-meta__version"></div>
+      <div id="app-modal-license" class="app-meta__license"></div>
+    </div>
+    <img id="app-modal-logo" class="app-modal-logo" src="brewser://assets/download.png" alt="App logo">
+    <h2 id="app-modal-title" class="app-modal-title">App</h2>
+    <p id="app-modal-description" class="app-modal-description"></p>
+    <div id="app-modal-body" class="app-modal-body"></div>
+    <div class="app-modal-actions">
+      <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+      <button id="app-modal-download" class="app-modal-btn app-modal-btn--primary" type="button">Download</button>
+    </div>
+  </div>
+</div>
+
+<script src="brewser://assets/missing-app-modal.js"></script>
 </body>
 </html>

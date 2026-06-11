@@ -98,7 +98,7 @@ import {
 	installPageMouseForwarder,
 	setCursorIdleMs,
 } from './input/page-mouse-forwarder.js';
-import { setButtonMapping } from './input/button-router.js';
+import { clearAppButtonOverlay, setAppButtonOverlay, setButtonMapping } from './input/button-router.js';
 import {
 	preloadClickSound,
 	setClickSoundEnabled,
@@ -167,6 +167,22 @@ export class BrowserShell {
 	 * page scripts, so the page kept all its state and its own RAF loop
 	 * adapts to the new size. Exit must likewise skip the rerun. */
 	private fullscreenCanvasLive = false;
+	/** A page script that calls `canvas.requestFullscreen()` from its
+	 * top-level body runs BEFORE `this.scriptCtx` is wired up (the
+	 * assignment is `this.scriptCtx = await runPageScripts(...)`, so the
+	 * field is still `null` while scripts execute). `toggleFullscreenCanvas`
+	 * needs `scriptCtx` to look up the target canvas + rerun, so the
+	 * request would otherwise be silently dropped. This field stores the
+	 * Promise resolver for the pending request; it is drained immediately
+	 * after `scriptCtx` is assigned. Cleared on each new page load. */
+	private pendingFullscreenCanvasRequest: (() => void) | null = null;
+	/** When the active page is an app (URL under `brewser://apps/<group>/<id>/...`),
+	 * the on-disk dir prefix `apps/<group>/<id>/` of that app — used to
+	 * make `exit`-action behaviour context-aware (in an app, "exit" means
+	 * back to the launcher; on the shell, it means quit Brewser) and to
+	 * key the active button-router overlay. `null` when the current page
+	 * is anything else (launcher, settings, home, external WWW page). */
+	private currentAppDir: string | null = null;
 	/** The focused `<video>` element while `mode === 'video-fullscreen'`,
 	 * `null` otherwise. Drives `overlayLiveAnimatedCanvases`'s
 	 * fullscreen-video paint branch. */
@@ -427,12 +443,36 @@ export class BrowserShell {
 		(globalThis as { __swbRequestFullscreenCanvas?: () => Promise<void> })
 			.__swbRequestFullscreenCanvas = async () => {
 			if (this.mode === 'fullscreen-canvas') return;
+			// Top-level page-script case: the script body that called
+			// canvas.requestFullscreen() is itself running INSIDE
+			// `runPageScripts`, so `this.scriptCtx` is still null and
+			// `toggleFullscreenCanvas`'s `if (!this.scriptCtx) return;`
+			// would silently swallow the request. Queue it; the loader
+			// drains the queue right after assigning scriptCtx.
+			if (!this.scriptCtx) {
+				return new Promise<void>((resolve) => {
+					this.pendingFullscreenCanvasRequest = () => {
+						void this.toggleFullscreenCanvas().then(resolve, resolve);
+					};
+				});
+			}
 			await this.toggleFullscreenCanvas();
 		};
 		(globalThis as { __swbExitFullscreen?: () => Promise<void> })
 			.__swbExitFullscreen = async () => {
 			if (this.mode === 'normal') return;
 			await this.exitFullscreen();
+		};
+		// Page-script-callable "go back to the page that launched this
+		// one" — exits any fullscreen mode first (so we don't try to
+		// navigate while the canvas is mid-fullscreen-resize) then walks
+		// one step back in nav history. Apps like the WebGL demos poll
+		// the joycon B button and call this on rising edge so the user
+		// gets a one-press exit from fullscreen-canvas to the launcher.
+		(globalThis as { __swbNavigateBack?: () => Promise<void> })
+			.__swbNavigateBack = async () => {
+			if (this.mode !== 'normal') await this.exitFullscreen();
+			await this.runNavigation(() => this.navigation.goBack());
 		};
 	}
 
@@ -689,6 +729,17 @@ export class BrowserShell {
 					(input.kind === 'navigate' ? ' url=' + input.url : ''));
 				switch (input.kind) {
 					case 'exit':
+						// Context-aware. While an app page is active (URL
+						// under `brewser://apps/<group>/<id>/...`), "exit"
+						// means EXIT THE APP — close any fullscreen-canvas
+						// then walk one nav step back to the launcher. On
+						// any non-app page, the historical shell-quit
+						// semantic holds and we return from the input loop.
+						if (this.currentAppDir) {
+							if (this.mode !== 'normal') await this.exitFullscreen();
+							await this.runNavigation(() => this.navigation.goBack());
+							break;
+						}
 						return;
 					case 'address-bar':
 						await this.promptAndNavigate();
@@ -1016,6 +1067,40 @@ export class BrowserShell {
 		return htmlExists ? `${root}${parentDir}` : `${root}${stripped}/`;
 	}
 
+	/** If `url` points inside an installed app — i.e. matches
+	 * `brewser://apps/<group>/<id>/...` — return the `apps/<group>/<id>/`
+	 * dir prefix. Otherwise `null`. Used to gate the per-app button-router
+	 * overlay + the context-aware `exit` action. */
+	private extractAppDirFromUrl(url: string): string | null {
+		if (!/^brewser:\/\//i.test(url)) return null;
+		const stripped = url.replace(/^brewser:\/\//i, '')
+			.split('?')[0].split('#')[0].replace(/^\/+/, '');
+		if (!stripped.startsWith('apps/')) return null;
+		const parts = stripped.split('/');
+		// Need at least `apps/<group>/<id>/...` — three segments + a tail.
+		if (parts.length < 4 || !parts[1] || !parts[2]) return null;
+		return `apps/${parts[1]}/${parts[2]}/`;
+	}
+
+	/** Read `<appRoot><appDir>manifest.json` and return its parsed
+	 * `buttonMapping` object (or `null` when absent / malformed). Other
+	 * manifest fields are ignored here — they belong to the launcher's
+	 * catalog rendering, which goes through `catalog.json` instead. */
+	private loadAppManifestButtonMapping(appDir: string): Record<string, unknown> | null {
+		try {
+			const path = `${this.profile.appRoot}${appDir}manifest.json`;
+			const raw = (globalThis as { Switch?: { readFileSync?: (p: string) => ArrayBuffer | null } })
+				.Switch?.readFileSync?.(path);
+			if (!raw) return null;
+			const parsed = JSON.parse(new TextDecoder().decode(raw));
+			const bm = parsed?.buttonMapping;
+			if (!bm || typeof bm !== 'object' || Array.isArray(bm)) return null;
+			return bm as Record<string, unknown>;
+		} catch (_) {
+			return null;
+		}
+	}
+
 	/**
 	 * onHtmlResponse implementation. Resets the live root + cascade,
 	 * populates it from the parsed tree, runs page scripts with
@@ -1038,6 +1123,22 @@ export class BrowserShell {
 		_shellInputDiag('handleHtmlResponseLive url=' + url);
 		resetLiveOverlayCache();
 		resetLiveRoot();
+		// App-context tracking: if this page is under `brewser://apps/<group>/<id>/...`,
+		// pick up the app's `manifest.json buttonMapping` as a button-router
+		// overlay (so e.g. `"exit": "B"` rebinds B from rightClick to the
+		// app-exit action for the lifetime of this navigation). On any
+		// non-app navigation, drop the overlay so the launcher / settings /
+		// home pages get the unmodified shell mapping. Done BEFORE scripts
+		// run so the very first gamepad poll inside the app sees the new
+		// mapping.
+		const appDir = this.extractAppDirFromUrl(url);
+		this.currentAppDir = appDir;
+		if (appDir) {
+			const appButtonMapping = this.loadAppManifestButtonMapping(appDir);
+			setAppButtonOverlay(appButtonMapping);
+		} else {
+			clearAppButtonOverlay();
+		}
 		// Page-relative `<img>` base: the SD-card directory of THIS page, so
 		// `./assets/x.png` resolves like a browser would (index.html as base).
 		setLivePageBase(this.computeLivePageBase(url));
@@ -1080,6 +1181,19 @@ export class BrowserShell {
 		}
 
 		const allowScripts = url.startsWith('brewser://');
+		// A queued fullscreen request from any prior page should never
+		// leak across navigations — the new page's scripts will queue
+		// their own if they want it.
+		this.pendingFullscreenCanvasRequest = null;
+		// Clear scriptCtx BEFORE running the new page's scripts. Otherwise
+		// it still points at the PREVIOUS page's context throughout the new
+		// page's script execution — and `__swbRequestFullscreenCanvas`'s
+		// `if (!this.scriptCtx)` queue-and-defer branch would never fire,
+		// so a top-level `canvas.requestFullscreen()` call would route to
+		// the stale `toggleFullscreenCanvas` (which would either target the
+		// old page's canvas or no-op via firstCanvas() === null) instead of
+		// being deferred to run against the freshly-loaded page.
+		this.scriptCtx = null;
 		this.scriptCtx = await runPageScripts(tree, {
 			allowScripts,
 			pageUrl: url,
@@ -1102,6 +1216,17 @@ export class BrowserShell {
 		this.fullscreenCanvasLive = false;
 		this.currentPageUrl = url;
 		this.currentScrollY = 0;
+
+		// Drain a fullscreen request queued by a top-level script body
+		// (e.g. apps/com.natureglass.webgl1demo/index.html that calls
+		// `canvas.requestFullscreen()` synchronously at load). Done after
+		// scriptCtx is wired up AND the per-nav fullscreen-canvas state
+		// fields above are reset to their defaults — otherwise those
+		// resets would clobber the mode/state that toggleFullscreenCanvas
+		// just established.
+		const pendingFullscreen = this.pendingFullscreenCanvasRequest;
+		this.pendingFullscreenCanvasRequest = null;
+		if (pendingFullscreen) pendingFullscreen();
 
 		// Page padding is the page's responsibility — the engine no longer
 		// injects template-defined body insets. The previous behaviour

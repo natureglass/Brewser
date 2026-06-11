@@ -574,15 +574,90 @@ function renderBookmarkCards(
  * so this only emits structural markup (mirrors `renderBookmarkCards`).
  * The `logo` path is used verbatim as the img src (resolved like the
  * welcome page's relative asset paths); `url` is rewritten to an
- * absolute `brewser://` link the resource loader can serve. */
+ * absolute `brewser://` link the resource loader can serve.
+ *
+ * MISSING ENTRIES (`e.missing === true`): the launcher file isn't on
+ * disk so tapping the card would 404. We render the SAME `<a>` shell
+ * for layout consistency but strip the `href` (no navigation) and
+ * stamp `data-missing="true"` plus a `data-app-detail` JSON payload
+ * with the full catalog entry. `apps.html`'s inline script delegates
+ * a click listener that finds the closest `.app-card[data-missing]`
+ * ancestor and opens the missing-app modal. The renderer-side
+ * `e.logo` already points at the generic `download.png` for missing
+ * entries (see `loadCatalogGroup`), so no further branching is
+ * needed here. */
 function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 	return entries.map((e) => {
-		const href = htmlEscape(appUrlToBrowserHref(e.url));
+		const isMissing = e.missing === true;
+		const hrefAttr = isMissing ? '' : ` href="${htmlEscape(appUrlToBrowserHref(e.url))}"`;
 		const logo = htmlEscape(e.logo);
 		const alt = htmlEscape(`${e.title} logo`);
 		const title = htmlEscape(e.title);
 		const desc = e.description ? `<span>${htmlEscape(e.description)}</span>` : '';
-		return `<a class="app-card" href="${href}"><img class="app-logo" src="${logo}" alt="${alt}"><strong>${title}</strong>${desc}</a>`;
+		// `data-app-detail` is read by the launcher's inline script
+		// to populate the modal. We pack the fields the script
+		// renders (id / name / version / license / category /
+		// developer / source / description) so the modal doesn't
+		// need a second round-trip through the loader. JSON is
+		// HTML-attribute-escaped via htmlEscape — the script does
+		// `JSON.parse(card.getAttribute('data-app-detail'))` to
+		// recover the structure.
+		const detailAttrs = isMissing
+			? ` data-missing="true" data-app-detail="${htmlEscape(JSON.stringify({
+				id: e.id,
+				group: e.group,
+				name: e.title,
+				description: e.description,
+				// `logo` carries the brewser:// URL the script
+				// stamps into the modal header. For a missing entry
+				// this is `MISSING_APP_LOGO_URL` (= the generic
+				// download.png) since the per-app logo file isn't
+				// on disk — the manifest path would 404 — but
+				// passing the resolved URL keeps the modal's <img>
+				// generic so a future "downloaded but cached" flow
+				// can hand it a real path without script changes.
+				logo: e.logo,
+				version: e.version,
+				license: e.license,
+				category: e.category,
+				features: e.features,
+				permissions: e.permissions,
+				allowedOrigins: e.allowedOrigins,
+				developer: e.developer,
+				source: e.source,
+			}))}"`
+			: '';
+		const missingClass = isMissing ? ' app-card--missing' : '';
+		// Version + license sit in a small footer strip pinned to the
+		// card's bottom edge — `v1.0.0` chip flush left, `MIT` chip
+		// flush right (see `.app-card__meta` in main.css). Either field
+		// may be empty (entry omitted it in `catalog.json`); we just
+		// skip the chip in that case so a card with neither metadatum
+		// renders identically to the pre-version layout.
+		//
+		// `<div>` (not `<span>`) is deliberate: the existing `.app-card
+		// span` rule in main.css forces `display: block; text-align:
+		// left` so the description text line-wraps left-aligned, and the
+		// extra specificity we'd need to override that for chips inside
+		// an absolutely-positioned flex row was brittle (and brewser's
+		// layout treats inline `<span>` heights inconsistently even
+		// after `display: flex`). Switching the strip + chips to `<div>`
+		// sidesteps both problems — generic-tag rule doesn't match, and
+		// `<div>` is block-level by default so `height:` always applies.
+		const versionChip = e.version
+			? `<div class="app-meta__version">v${htmlEscape(e.version)}</div>`
+			: '';
+		const licenseChip = e.license
+			? `<div class="app-meta__license">${htmlEscape(e.license)}</div>`
+			: '';
+		// Meta strip sits at the TOP of the card now: version chip flush
+		// left, license chip flush right, logo + title + description
+		// stacked below. Rendered first in document order so column-flex
+		// places it as the topmost row without needing any pinning.
+		const meta = (versionChip || licenseChip)
+			? `<div class="app-card__meta">${versionChip}${licenseChip}</div>`
+			: '';
+		return `<a class="app-card${missingClass}"${hrefAttr}${detailAttrs}>${meta}<img class="app-logo" src="${logo}" alt="${alt}"><strong>${title}</strong>${desc}</a>`;
 	}).join('');
 }
 

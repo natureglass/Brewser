@@ -1,0 +1,13 @@
+{
+    "Permissions": {
+        "network": {
+            "warning": "Allows Brewser to read and write files in the app's storage."
+        },
+        "storage":{
+            "warning": "Allows Brewser to read and write files in the app's storage."
+        },
+        "system": {
+            "warning": "Allows Brewser to read and write files anywhere in the console storage."
+        }
+    }
+}
