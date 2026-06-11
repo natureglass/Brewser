@@ -118,7 +118,7 @@ code, kbd { color: #c2e0ff; }
   font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
-  background: #2a151a;
+  background: #2a1515;
   border: 1px solid #7a3338;
   border-radius: 999px;
 }
@@ -198,6 +198,21 @@ input[name="apps-tab"] { display: none; }
   margin-bottom: 22px;
   flex-wrap: wrap;
 }
+
+/* Apps page top toolbar — tab strip flush left, action buttons (today
+   just "Check for Updates") flush right. The toolbar owns the bottom
+   margin so the inner `.tab-bar` can drop its own (otherwise both
+   stack and the row sits 44px above the grid instead of 22px). */
+.apps-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.apps-toolbar .tab-bar { margin-bottom: 0; }
+.apps-check-updates { cursor: pointer; font: inherit; }
 
 .tab-label {
   position: relative;
@@ -384,6 +399,72 @@ input[name="apps-tab"] { display: none; }
   color: #c2e0ff;
   background: #1a2740;
   border: 1px solid #28365c;
+}
+
+/* Upgrade-available chip — the renderer emits this when the on-disk
+   manifest.json's version disagrees with the catalog.json's. Bright
+   yellow to read as "do something about this"; same palette as page
+   h1s + active tab + search button. The chip text grows to fit
+   "v1.0.0 [→] v1.0.1" so we widen the padding a touch and let the
+   chip shrink naturally — `flex-grow: 0` from the shared rule above
+   keeps it from stretching across the meta strip. */
+.app-meta__version--upgrade {
+  color: #0b1220;
+  background: #ffd35e;
+  border: 1px solid #ffd35e;
+  padding: 0 14px;
+  /* The chip sits inside the `.app-card__meta` flex strip. The shared
+     `.app-meta__version` rule above only sets `flex-grow: 0`, so the
+     default `flex-shrink: 1` lets the parent squeeze the chip below
+     its intrinsic width when the row gets cramped — and on a narrow
+     4-col card that pinched the yellow pill background down while the
+     `white-space: nowrap` version text spilled past it. Pinning
+     `flex-shrink: 0` keeps the chip at its content width. Switching
+     to `inline-flex` makes the chip self-size around its
+     `<span>v1.0.0</span><svg/><span>v1.0.7</span>` children with
+     proper vertical alignment so the arrow + text sit on the same
+     baseline without relying on `vertical-align: middle` quirks. */
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Reset the generic `.app-card span { display: block; color: #9bb1d6;
+   line-height: 1.35; text-align: left; ... }` rule above so the version
+   chip's inline `<span>v1.0.0</span><svg/><span>v1.0.7</span>` markup
+   actually flows on ONE line — without this override the spans paint
+   as block elements and stack vertically with the arrow stranded in
+   between (the same gotcha the meta-chip refactor called out for
+   `<div>`-vs-`<span>`).
+   Color is hardcoded `#0b1220` to match the chip's text color: the
+   parent `.app-meta__version--upgrade` sets that color, but `color:
+   inherit` on the span doesn't resolve through live-css the way the
+   spec implies — it ends up yellow (same as the chip bg, see the
+   "letters invisible" repro) instead of dark. Hardcoding sidesteps
+   the inherit-resolution question entirely.
+   Same specificity as `.app-card span`; later in source order so this
+   wins the tiebreak. */
+.app-meta__version--upgrade span {
+  display: inline;
+  color: #0b1220;
+  line-height: 22px;
+  max-height: none;
+  overflow: visible;
+  text-align: center;
+}
+
+/* Inline arrow drawn between the installed + catalog versions inside
+   `.app-meta__version--upgrade`. The SVG carries width/height attrs
+   (14×10) so live-layout reserves the right inline-box; the CSS here
+   just nudges it vertically into line with the surrounding text and
+   adds breathing room either side. No painter or layout cost beyond
+   one polygon fill per chip. */
+.upgrade-arrow {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  margin: 0 6px;
+  vertical-align: middle;
 }
 
 .app-meta__license {
@@ -628,9 +709,22 @@ ul.settings-list li:active {
   word-break: break-word;
 }
 
+/* Two-slot action row. The left slot holds the upgrade-install button
+   (visible only when the catalog version > installed version); the
+   right slot holds Cancel + Play / Download. `space-between` keeps
+   the right group glued to the modal's right edge even when the left
+   slot is empty (display: flex on the empty wrapper still occupies a
+   0-width position-1 slot, which is exactly what we want — the
+   right group sits at position-2 / end). */
 .app-modal-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-modal-actions-side {
+  display: flex;
   gap: 10px;
 }
 
@@ -645,9 +739,21 @@ ul.settings-list li:active {
   cursor: pointer;
 }
 
-.app-modal-btn--primary {
-  background: #2a3a66;
-  border-color: #7aa2ff;
+/* Play (installed app) — green pill matching the license-chip palette
+   (#7eda9f), reading as "confirm / go". Dark text so the label stays
+   legible on the bright fill. */
+.app-modal-btn--play {
+  background: #228B22;
+  border-color: #355E3B;
+  color: #ffffff;
+}
+
+/* Download (missing app) — red pill matching the .clear-btn palette,
+   reading as "this is a fresh-install action, takes a moment". Same
+   warm-tone family used elsewhere for state-changing actions. */
+.app-modal-btn--download {
+  background: #ff0000;
+  border-color: #7a3338;
   color: #ffffff;
 }
 
@@ -655,10 +761,49 @@ ul.settings-list li:active {
   background: #0e1830;
   border-color: #7eda9f;
 }
+.app-modal-btn--play:active {
+  background: #355E3B;
+  border-color: #228B22;
+  color: #ffffff;
+}
+.app-modal-btn--download:active {
+  background: #7a3338;
+  border-color: #ff0000;
+  color: #ffb8b8;
+}
+
+/* Action buttons whose role is gated by `detail.missing`. The script
+   toggles this class on Play vs Download so only the appropriate
+   button is visible. Higher specificity than `.app-modal-btn` so the
+   class wins regardless of source order. */
+.app-modal-btn.app-modal-btn--hidden { display: none; }
+
+/* Play is an `<a role="button">` so the chrome looks identical to
+   the surrounding `<button>` siblings (`<a>`'s default text-decoration
+   + link color would otherwise leak through the `.app-modal-btn`
+   palette). */
+a.app-modal-btn {
+  display: inline-block;
+  text-decoration: none;
+  color: #e0e8f4;
+}
+a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 /* Missing-card title styles muted relative to live apps so the
    catalog-vs-installed distinction is visible at a glance. */
 .app-card--missing strong { color: #cdd9ee; }
+
+/* Upgrade-available card — lighter background + slightly warmer
+   border so the row reads as a call-to-action next to the standard
+   #14202d cards. Pairs with the yellow `.app-meta__version--upgrade`
+   chip the renderer pins to the top of the card; the chip palette
+   stays loud against the slightly-lighter fill since the new bg keeps
+   the same blue family. The `.clickable .app-card:active` rule
+   already in this sheet overrides on press. */
+.app-card--upgrade {
+  background: #1c2840;
+  border-color: #3d4f7a;
+}
 
 /* ---- about.html ----------------------------------------------------
    Migrated from about.html's inline <style>. The 28px 48px text-heavy

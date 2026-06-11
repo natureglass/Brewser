@@ -124,6 +124,19 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	pvr: { mime: 'application/octet-stream', binary: true },
 };
 
+/** Inline right-pointing arrow painted between the installed + catalog
+ * versions in the upgrade chip. Drawn as a single polygon (shaft +
+ * arrowhead silhouette) inside a 14×10 viewBox; `live-overlay.ts`
+ * paintLiveSvg scales the viewBox into the SVG element's layout box
+ * each frame. Hardcoded fill matches the chip's `#0b1220` text color
+ * so the arrow tracks visually with the surrounding "v1.0.0" /
+ * "v1.0.1" labels. Kept module-level so the same markup is reused by
+ * every upgrade card without re-stringifying. */
+const UPGRADE_ARROW_SVG =
+	'<svg class="upgrade-arrow" viewBox="0 0 14 10" width="14" height="10">'
+	+ '<polygon points="0,4 8,4 8,1 14,5 8,9 8,6 0,6" fill="#0b1220"/>'
+	+ '</svg>';
+
 export interface BrowserResourceLoaderOptions {
 	/** Per-profile root for `pages/` lookups. */
 	storageRoot: string;
@@ -574,60 +587,72 @@ function renderBookmarkCards(
  * so this only emits structural markup (mirrors `renderBookmarkCards`).
  * The `logo` path is used verbatim as the img src (resolved like the
  * welcome page's relative asset paths); `url` is rewritten to an
- * absolute `brewser://` link the resource loader can serve.
+ * absolute `brewser://` link the launcher's modal hands to its Play
+ * button when the entry is installed.
  *
- * MISSING ENTRIES (`e.missing === true`): the launcher file isn't on
- * disk so tapping the card would 404. We render the SAME `<a>` shell
- * for layout consistency but strip the `href` (no navigation) and
- * stamp `data-missing="true"` plus a `data-app-detail` JSON payload
- * with the full catalog entry. `apps.html`'s inline script delegates
- * a click listener that finds the closest `.app-card[data-missing]`
- * ancestor and opens the missing-app modal. The renderer-side
- * `e.logo` already points at the generic `download.png` for missing
- * entries (see `loadCatalogGroup`), so no further branching is
- * needed here. */
+ * Every card — installed AND missing — carries `data-app-detail` and
+ * NO `href`, so every tap routes through the launcher's modal script
+ * instead of navigating directly. The modal branches on
+ * `detail.missing`: installed entries show a Play button (an `<a>`
+ * whose href the script stamps from `detail.url` at open time);
+ * missing entries show Download (stub for now). Missing entries also
+ * carry `data-missing="true"` and the `app-card--missing` class so
+ * the card visuals still distinguish at a glance. */
 function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 	return entries.map((e) => {
 		const isMissing = e.missing === true;
-		const hrefAttr = isMissing ? '' : ` href="${htmlEscape(appUrlToBrowserHref(e.url))}"`;
 		const logo = htmlEscape(e.logo);
 		const alt = htmlEscape(`${e.title} logo`);
 		const title = htmlEscape(e.title);
 		const desc = e.description ? `<span>${htmlEscape(e.description)}</span>` : '';
-		// `data-app-detail` is read by the launcher's inline script
-		// to populate the modal. We pack the fields the script
-		// renders (id / name / version / license / category /
-		// developer / source / description) so the modal doesn't
-		// need a second round-trip through the loader. JSON is
-		// HTML-attribute-escaped via htmlEscape — the script does
-		// `JSON.parse(card.getAttribute('data-app-detail'))` to
+		// `data-app-detail` is read by the launcher's modal script.
+		// Emitted on EVERY card now (installed + missing) so taps on
+		// any card route through the modal instead of navigating
+		// directly. The script branches on `missing` to swap the
+		// modal's action button (Download for missing, Play for
+		// installed) and reads `url` for the Play button's href.
+		// JSON is HTML-attribute-escaped via htmlEscape; the script
+		// does `JSON.parse(card.getAttribute('data-app-detail'))` to
 		// recover the structure.
-		const detailAttrs = isMissing
-			? ` data-missing="true" data-app-detail="${htmlEscape(JSON.stringify({
-				id: e.id,
-				group: e.group,
-				name: e.title,
-				description: e.description,
-				// `logo` carries the brewser:// URL the script
-				// stamps into the modal header. For a missing entry
-				// this is `MISSING_APP_LOGO_URL` (= the generic
-				// download.png) since the per-app logo file isn't
-				// on disk — the manifest path would 404 — but
-				// passing the resolved URL keeps the modal's <img>
-				// generic so a future "downloaded but cached" flow
-				// can hand it a real path without script changes.
-				logo: e.logo,
-				version: e.version,
-				license: e.license,
-				category: e.category,
-				features: e.features,
-				permissions: e.permissions,
-				allowedOrigins: e.allowedOrigins,
-				developer: e.developer,
-				source: e.source,
-			}))}"`
-			: '';
+		const detailAttrs = ` data-app-detail="${htmlEscape(JSON.stringify({
+			id: e.id,
+			group: e.group,
+			name: e.title,
+			description: e.description,
+			// `logo` carries the brewser:// URL the script stamps
+			// into the modal header. Installed entries get the
+			// real `brewser://apps/.../<logo>` path; missing
+			// entries get `MISSING_APP_LOGO_URL` (= the generic
+			// download.png) — both already resolved by
+			// `loadCatalogGroup`.
+			logo: e.logo,
+			// `url` is the per-app launcher URL the Play button
+			// navigates to. Always supplied; only consumed by the
+			// modal when `missing === false`.
+			url: appUrlToBrowserHref(e.url),
+			missing: isMissing,
+			version: e.version,
+			// On-disk manifest version when it differs from `version`
+			// above. Empty in every "no upgrade signal" case. The
+			// modal script keys the yellow chip ("v1.0.0 -> v1.0.7")
+			// on this being non-empty — mirrors the grid card's
+			// upgrade chip exactly so the two stay visually consistent.
+			installedVersion: e.installedVersion,
+			license: e.license,
+			category: e.category,
+			features: e.features,
+			permissions: e.permissions,
+			allowedOrigins: e.allowedOrigins,
+			developer: e.developer,
+			source: e.source,
+		}))}"`;
+		const missingAttr = isMissing ? ' data-missing="true"' : '';
 		const missingClass = isMissing ? ' app-card--missing' : '';
+		// Cards with a pending upgrade get a subtly-lighter background so
+		// the upgrade-yellow chip on top has more room to breathe and the
+		// row reads as "different from the rest" at a glance. Keyed on
+		// `installedVersion` being set — same gate as the yellow chip.
+		const upgradeClass = (e.installedVersion && e.version) ? ' app-card--upgrade' : '';
 		// Version + license sit in a small footer strip pinned to the
 		// card's bottom edge — `v1.0.0` chip flush left, `MIT` chip
 		// flush right (see `.app-card__meta` in main.css). Either field
@@ -644,9 +669,26 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// after `display: flex`). Switching the strip + chips to `<div>`
 		// sidesteps both problems — generic-tag rule doesn't match, and
 		// `<div>` is block-level by default so `height:` always applies.
-		const versionChip = e.version
-			? `<div class="app-meta__version">v${htmlEscape(e.version)}</div>`
-			: '';
+		// Upgrade chip: when `installedVersion` is non-empty, the
+		// on-disk manifest's version differs from the catalog's. Paint
+		// the chip as `v1.0.0 [→] v1.0.1` with the bright-yellow
+		// palette (same #ffd35e as the page titles + tab-active fill)
+		// so it reads as a call-to-action. Falls back to the normal
+		// chip (catalog version only) when the on-disk version matches
+		// OR the app isn't installed.
+		//
+		// The arrow is an inline `<svg><polygon>` — same approach
+		// live-form.ts paintSelect took for the dropdown chevron after
+		// the U+25BC `▼` glyph tofu'd. live-overlay.ts's paintLiveSvg
+		// scales the viewBox into the layout box; one filled polygon
+		// per upgrade card, so paint cost is negligible. Hardcoded
+		// fill (`#0b1220`, the chip's text color) avoids any
+		// `currentColor` resolution questions in the SVG painter.
+		const versionChip = e.installedVersion && e.version
+			? `<div class="app-meta__version app-meta__version--upgrade"><span>v${htmlEscape(e.installedVersion)}</span>${UPGRADE_ARROW_SVG}<span>v${htmlEscape(e.version)}</span></div>`
+			: e.version
+				? `<div class="app-meta__version">v${htmlEscape(e.version)}</div>`
+				: '';
 		const licenseChip = e.license
 			? `<div class="app-meta__license">${htmlEscape(e.license)}</div>`
 			: '';
@@ -657,7 +699,7 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		const meta = (versionChip || licenseChip)
 			? `<div class="app-card__meta">${versionChip}${licenseChip}</div>`
 			: '';
-		return `<a class="app-card${missingClass}"${hrefAttr}${detailAttrs}>${meta}<img class="app-logo" src="${logo}" alt="${alt}"><strong>${title}</strong>${desc}</a>`;
+		return `<a class="app-card${missingClass}${upgradeClass}"${missingAttr}${detailAttrs}>${meta}<img class="app-logo" src="${logo}" alt="${alt}"><strong>${title}</strong>${desc}</a>`;
 	}).join('');
 }
 

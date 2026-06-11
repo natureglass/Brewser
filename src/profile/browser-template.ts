@@ -379,6 +379,15 @@ export interface AppEntry {
 	/** Upstream source URL (typically a Git repo) from `catalog.json`.
 	 * Empty when absent. Surfaced for the missing-app modal. */
 	source: string;
+	/** Version reported by the on-disk `apps/<group>/<id>/manifest.json`
+	 * when it differs from the catalog's `version`. Empty when the app
+	 * is missing, when the manifest can't be read/parsed, when the
+	 * manifest has no `version`, or when the versions match. The
+	 * renderer keys the upgrade-chip ("`1.0.0 → 1.0.1`", yellow
+	 * background) on this field being non-empty — so a non-empty
+	 * `installedVersion` implies "an upgrade is available on the
+	 * catalog side." */
+	installedVersion: string;
 	/** Capability flags from the manifest, comma-joined for direct
 	 * display (`"video, controller"`). Empty when the catalog entry
 	 * omits the array or has no entries. Surfaced for the missing-app
@@ -484,6 +493,15 @@ export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry
 		const logo = missing
 			? MISSING_APP_LOGO_URL
 			: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.logo)}`;
+		const catalogVersion = typeof e.version === 'string' ? e.version : '';
+		// Cross-reference the on-disk manifest's version with the
+		// catalog. Only meaningful when the app is installed (missing
+		// = no manifest to read), and only worth surfacing when both
+		// sides have a version AND they differ — otherwise we leave
+		// the field empty so the renderer paints the normal chip.
+		const installedVersion = missing
+			? ''
+			: readInstalledVersionIfChanged(appRoot, group, e.id, catalogVersion);
 		return {
 			id: e.id,
 			group,
@@ -491,7 +509,7 @@ export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry
 			description: e.description ?? '',
 			logo,
 			url: `brewser://apps/${group}/${e.id}/${entryRel}`,
-			version: typeof e.version === 'string' ? e.version : '',
+			version: catalogVersion,
 			license: typeof e.license === 'string' ? e.license : '',
 			category: typeof e.category === 'string' ? e.category : '',
 			developer: typeof e.developer === 'string' ? e.developer : '',
@@ -499,9 +517,41 @@ export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry
 			features: joinStringArray(e.features),
 			permissions: joinStringArray(e.permissions),
 			allowedOrigins: joinStringArray(e.allowed_origins),
+			installedVersion,
 			missing,
 		};
 	});
+}
+
+/** Read `apps/<group>/<id>/manifest.json` and return its `version`
+ * field iff that field differs from `catalogVersion`. Empty string in
+ * every other case — manifest absent, malformed, missing version, or
+ * matching version. This is the "an upgrade is available" signal the
+ * grid renderer keys the yellow chip on; the comparison is a strict
+ * string match (no semver parsing — catalog authors decide what
+ * counts as a change). */
+function readInstalledVersionIfChanged(
+	appRoot: string,
+	group: CatalogGroup,
+	id: string,
+	catalogVersion: string,
+): string {
+	if (!catalogVersion) return '';
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${appRoot}apps/${group}/${id}/manifest.json`);
+	} catch (_) {
+		return '';
+	}
+	if (!raw) return '';
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		const installed = typeof parsed?.version === 'string' ? parsed.version : '';
+		if (!installed || installed === catalogVersion) return '';
+		return installed;
+	} catch (_) {
+		return '';
+	}
 }
 
 /** Coerce a catalog `features` / `permissions` / `allowed_origins`

@@ -25,8 +25,14 @@
   var descEl = document.getElementById('app-modal-description');
   var bodyEl = document.getElementById('app-modal-body');
   var cancelBtn = document.getElementById('app-modal-cancel');
+  var playBtn = document.getElementById('app-modal-play');
   var downloadBtn = document.getElementById('app-modal-download');
-  if (!overlay || !titleEl || !bodyEl || !cancelBtn || !downloadBtn) return;
+  // Update lives in the LEFT action slot; visually identical to
+  // Download (same red palette) but conceptually "install over an
+  // existing app to bring it to the catalog version." Stubbed for now
+  // alongside Download until the actual install flow lands.
+  var updateBtn = document.getElementById('app-modal-update');
+  if (!overlay || !titleEl || !bodyEl || !cancelBtn || !downloadBtn || !playBtn || !updateBtn) return;
 
   var modalOpen = false;
   var currentDetail = null;
@@ -35,6 +41,15 @@
   // a logo URL we can resolve (or carries the placeholder we already
   // emit for missing entries). Same asset the grid card paints.
   var DEFAULT_LOGO_URL = 'brewser://assets/download.png';
+
+  // Right-pointing arrow painted between the installed + catalog
+  // versions in the upgrade chip. Same `<svg><polygon>` markup the
+  // grid renderer emits — kept in sync so the chip looks identical
+  // in the modal and on the card. live-overlay.ts paintLiveSvg
+  // handles viewBox scaling per frame.
+  var UPGRADE_ARROW_SVG = '<svg class="upgrade-arrow" viewBox="0 0 14 10" width="14" height="10">'
+    + '<polygon points="0,4 8,4 8,1 14,5 8,9 8,6 0,6" fill="#0b1220"/>'
+    + '</svg>';
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -77,8 +92,23 @@
     // Meta strip chips. Mirror the grid card's `v1.0.0` / `MIT`
     // shape exactly — `:empty` rules in main.css hide the slot when
     // the catalog omits one. textContent stays empty so the empty-
-    // selector matches.
-    if (versionEl) versionEl.textContent = currentDetail.version ? 'v' + currentDetail.version : '';
+    // selector matches. When `installedVersion` is set, render the
+    // upgrade variant (yellow `--upgrade` chip with installed +
+    // catalog versions split by an inline-SVG arrow) — same markup
+    // shape as the grid card's chip so the two stay visually
+    // consistent. innerHTML routes through the live-DOM HTML parser
+    // so the SVG subtree paints via paintLiveSvg.
+    if (versionEl) {
+      if (currentDetail.installedVersion && currentDetail.version) {
+        versionEl.innerHTML = '<span>v' + esc(currentDetail.installedVersion) + '</span>'
+          + UPGRADE_ARROW_SVG
+          + '<span>v' + esc(currentDetail.version) + '</span>';
+        versionEl.classList.add('app-meta__version--upgrade');
+      } else {
+        versionEl.textContent = currentDetail.version ? 'v' + currentDetail.version : '';
+        versionEl.classList.remove('app-meta__version--upgrade');
+      }
+    }
     if (licenseEl) licenseEl.textContent = currentDetail.license || '';
 
     titleEl.textContent = currentDetail.name || currentDetail.id || 'Unknown app';
@@ -109,6 +139,36 @@
     if (currentDetail.source) rows.push(row('Source', currentDetail.source));
     bodyEl.innerHTML = rows.join('');
 
+    // Action button branch (3-way):
+    //   - missing                         → right Download
+    //   - installed, version up-to-date   → right Play
+    //   - installed, upgrade available    → LEFT Update + right Play
+    // The right-side Download stays hidden for installed apps because
+    // the upgrade-install button lives on the LEFT for that case, by
+    // design (gives the user a visual hint that "the download here
+    // means 'replace', not 'install fresh'"). All three are toggled
+    // via classList so the live-DOM cache invalidates correctly (same
+    // reason as the overlay open/close).
+    var hasUpgrade = !!(currentDetail.installedVersion && currentDetail.version);
+    if (currentDetail.missing) {
+      playBtn.classList.add('app-modal-btn--hidden');
+      playBtn.removeAttribute('href');
+      downloadBtn.classList.remove('app-modal-btn--hidden');
+      updateBtn.classList.add('app-modal-btn--hidden');
+    } else {
+      // findTapIntent walks ancestors for an <a href>; setting href
+      // here means the next tap fires a navigate intent the shell
+      // resolves via the standard navigateTo path.
+      playBtn.setAttribute('href', currentDetail.url || '');
+      playBtn.classList.remove('app-modal-btn--hidden');
+      downloadBtn.classList.add('app-modal-btn--hidden');
+      if (hasUpgrade) {
+        updateBtn.classList.remove('app-modal-btn--hidden');
+      } else {
+        updateBtn.classList.add('app-modal-btn--hidden');
+      }
+    }
+
     overlay.classList.add('app-modal-overlay--open');
     modalOpen = true;
   }
@@ -119,7 +179,11 @@
     currentDetail = null;
   }
 
-  var cards = document.querySelectorAll('[data-missing]');
+  // Every catalog card (installed AND missing) carries data-app-detail
+  // now — the modal is the universal tap target. Selecting on
+  // `[data-app-detail]` keeps the same delegation shape regardless of
+  // missing state; the branch is `currentDetail.missing` inside show().
+  var cards = document.querySelectorAll('[data-app-detail]');
   for (var i = 0; i < cards.length; i++) {
     (function (card) {
       card.addEventListener('click', function (e) {
@@ -140,11 +204,17 @@
     if (e && e.stopPropagation) e.stopPropagation();
   });
 
-  // Stubbed for now — actual download flow lands in a later turn. The
-  // console.debug surfaces in `nxjs-debug.log` so we can confirm taps
-  // are landing while wiring it up.
+  // Stubbed for now — actual download / update flow lands in a later
+  // turn. The console.debug surfaces in `nxjs-debug.log` so we can
+  // confirm taps are landing while wiring it up.
   downloadBtn.addEventListener('click', function (e) {
     console.debug('[apps] download stub for ' + (currentDetail && currentDetail.id));
+    if (e && e.stopPropagation) e.stopPropagation();
+  });
+  updateBtn.addEventListener('click', function (e) {
+    console.debug('[apps] update stub for ' + (currentDetail && currentDetail.id)
+      + ' installed=' + (currentDetail && currentDetail.installedVersion)
+      + ' catalog=' + (currentDetail && currentDetail.version));
     if (e && e.stopPropagation) e.stopPropagation();
   });
 

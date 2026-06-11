@@ -14,11 +14,18 @@
 <input type="radio" id="apps-tab-featured" name="apps-tab">
 
 <div class="page-shell">
-  <nav class="tab-bar" aria-label="App catalog groups">
-    <label for="apps-tab-community" class="tab-label">Community</label>
-    <label for="apps-tab-experimental" class="tab-label">Experimental</label>
-    <label for="apps-tab-featured" class="tab-label">Featured</label>
-  </nav>
+  <!-- Top toolbar: tab strip flush left, action buttons flush right.
+       Keeps `.tab-bar` a descendant of `.page-shell` so the
+       `:checked ~ .page-shell .tab-label[for=…]` cascade still
+       resolves the active tab without any selector change. -->
+  <div class="apps-toolbar clickable">
+    <nav class="tab-bar" aria-label="App catalog groups">
+      <label for="apps-tab-community" class="tab-label">Community</label>
+      <label for="apps-tab-experimental" class="tab-label">Experimental</label>
+      <label for="apps-tab-featured" class="tab-label">Featured</label>
+    </nav>
+    <button type="button" class="munch-link apps-check-updates">Check for Updates</button>
+  </div>
   <div class="tab-panels clickable">
     <section class="tab-panel" data-tab="community" aria-label="Community apps">
       <div class="app-grid">
@@ -69,9 +76,26 @@
     <h2 id="app-modal-title" class="app-modal-title">App</h2>
     <p id="app-modal-description" class="app-modal-description"></p>
     <div id="app-modal-body" class="app-modal-body"></div>
+    <!-- Two-slot action row. LEFT holds the upgrade-install button
+         (only visible when the installed manifest's version differs
+         from the catalog's — i.e. `installedVersion && version`).
+         RIGHT holds Cancel + Play (installed apps) or Cancel +
+         Download (missing apps). Play is an `<a>` so its tap fires
+         findTapIntent → navigate intent in the shell (no new
+         shell-side action wiring needed); the script stamps the href
+         from `detail.url` at open time. Visibility of each button is
+         toggled via `app-modal-btn--hidden` so only the right set is
+         shown for the current detail.missing / detail.installedVersion
+         combination. -->
     <div class="app-modal-actions">
-      <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
-      <button id="app-modal-download" class="app-modal-btn app-modal-btn--primary" type="button">Download</button>
+      <div class="app-modal-actions-side">
+        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
+      </div>
+      <div class="app-modal-actions-side">
+        <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Play</a>
+        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
+      </div>
     </div>
   </div>
 </div>

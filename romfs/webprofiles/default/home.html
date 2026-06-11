@@ -65,9 +65,16 @@
     <h2 id="app-modal-title" class="app-modal-title">App</h2>
     <p id="app-modal-description" class="app-modal-description"></p>
     <div id="app-modal-body" class="app-modal-body"></div>
+    <!-- Two-slot action row (see apps.html for the rationale). -->
     <div class="app-modal-actions">
-      <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
-      <button id="app-modal-download" class="app-modal-btn app-modal-btn--primary" type="button">Download</button>
+      <div class="app-modal-actions-side">
+        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
+      </div>
+      <div class="app-modal-actions-side">
+        <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Play</a>
+        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
+      </div>
     </div>
   </div>
 </div>
