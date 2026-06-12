@@ -271,7 +271,8 @@ function applyLetterCase(letterKeys: LiveElement[], upper: boolean): void {
 /**
  * HTML-driven virtual keyboard. Replaces the on-canvas keyboard that
  * lived in this file pre-2026-06-11. The keyboard's visible markup
- * lives in `webprofiles/<active>/keyboard.html` and is parsed into a
+ * lives in the file named by `config.json`'s `keyboard` field
+ * (`keyboards/<file>.html` relative to the app root) and is parsed into a
  * SECOND live-DOM root at shell startup (see
  * `BrowserShell.loadHtmlKeyboard` / `paintKeyboardOverlay`).
  *

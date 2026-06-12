@@ -120,6 +120,7 @@ import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js'
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
 import { loadChromeIcons, loadOptionalImage } from './resources/chrome-icons.js';
+import { LocalSchemeFetchLoader } from './resources/local-scheme-fetch-loader.js';
 import { SwitchUaFetchLoader } from './resources/switch-ua-fetch-loader.js';
 
 /**
@@ -276,7 +277,7 @@ export class BrowserShell {
 		this.profile.ensure();
 		// Read config.json upfront so the HistoryStore is constructed with
 		// the user's `maxHistory` cap (loadConfig falls back to DEFAULT_CONFIG
-		// on first run before seedTemplates has copied the romfs default in;
+		// on first run before seedRomfs has copied the romfs default in;
 		// either way maxHistory ends up at the same value).
 		const startupConfig = loadConfig(this.profile.appRoot);
 		// Wire the user-editable joycon button mapping. Empty values in
@@ -440,6 +441,18 @@ export class BrowserShell {
 						bookmarksStore: this.bookmarksStore,
 						historyStore: this.historyStore,
 					}),
+					// Claim `sdmc:`, `romfs:`, `file:` URLs BEFORE the
+					// runtime's auto-appended `NativeFetchLoader` does —
+					// otherwise the permission policy (which only allows
+					// http(s)/blob/data) 403s every local-scheme `Image.src`
+					// inside a WebView session, e.g. when the user picks a
+					// new template on the Settings page and the shell calls
+					// `refreshChromeIcons` against the new icon paths. The
+					// captured native fetch reads the bytes straight off the
+					// SD card / romfs partition via `fetchFile`, which is
+					// what the policy is sitting on top of anyway. Local
+					// reads don't touch the network gate.
+					new LocalSchemeFetchLoader(captureNativeFetch()),
 				],
 			},
 			delegate,
@@ -542,12 +555,7 @@ export class BrowserShell {
 		// from romfs into the profile dir. Cheap on every launch
 		// (existence check + skip for files that already exist) so the
 		// user's edits survive but a deleted file is restored next run.
-		await this.profile.seedBuiltinPages();
-		await this.profile.seedBuiltinDevPages();
-		await this.profile.seedBuiltinAssets();
-		await this.profile.seedTemplates();
-		await this.profile.seedKeyboards();
-		await this.profile.seedStyles();
+		await this.profile.seedRomfs();
 		// HTML-driven keyboard: parse `keyboard.html` once into a second
 		// live-DOM root. Painted below `KEYBOARD_LAYOUT.topY` when
 		// `KeyboardOverlay.open()` flips the overlay-visible flag on.
@@ -2508,7 +2516,7 @@ export class BrowserShell {
 	/** Resolve each `template.icons.X` path against the profile root
 	 * unless the user supplied an absolute scheme. Lets a custom
 	 * template point at icons elsewhere (e.g.
-	 * `romfs:/webprofiles/default/assets/...`, `sdmc:/themes/.../home.png`). */
+	 * `romfs:/shell/assets/...`, `sdmc:/themes/.../home.png`). */
 	private resolveIconPaths() {
 		const root = this.profile.storageRoot;
 		const resolve = (rel: string) => /^(?:https?:|sdmc:|romfs:)\/\//.test(rel) ? rel : `${root}${rel}`;
@@ -2551,7 +2559,7 @@ export class BrowserShell {
 		const ctx = canvas.getContext('2d');
 		ctx.fillStyle = '#00010a';
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		const logo = await loadOptionalImage('romfs:/webprofiles/default/assets/Brewser_logo.png');
+		const logo = await loadOptionalImage('romfs:/shell/assets/Brewser_logo.png');
 		const li = logo as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
 		const lw = li ? (li.naturalWidth || li.width || 0) : 0;
 		const lh = li ? (li.naturalHeight || li.height || 0) : 0;

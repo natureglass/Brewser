@@ -83,7 +83,7 @@ described below and stores the resulting layout for scroll repaints.
 +-----------------------------------------------------------------+
 | BrowserProfile         (src/profile/browser-profile.ts)         |
 |   ensures sdmc:/switch/brewser/ (appRoot) +                     |
-|   sdmc:/switch/brewser/webprofiles/default/ (storageRoot);      |
+|   sdmc:/switch/brewser/shell/ (storageRoot);                    |
 |   owns history + bookmarks paths                                |
 +-----------------------------------------------------------------+
 | BrowserPermissionPolicy (src/permissions/...)                   |
@@ -457,8 +457,8 @@ fundamental constraint that shaped C2–C5 development.
 Workaround: develop and validate the entire HTML + CSS pipeline
 against on-disk fixtures served by `BrowserResourceLoader` with
 `Content-Type: text/html`. Fixtures live as real HTML files under
-`sdmc:/switch/brewser/webprofiles/default/` (seeded from
-`romfs:/webprofiles/default/` on first launch by `BrowserProfile.seedBuiltinPages`);
+`sdmc:/switch/brewser/shell/` (seeded from
+`romfs:/shell/` on first launch by `BrowserProfile.seedBuiltinPages`);
 the loader maps `brewser://X/Y/.../` to `<storageRoot>pages/X/Y/....html`.
 Available pages:
 

@@ -1,9 +1,9 @@
 /* Unified Brewser per-profile page stylesheet. Linked from each page
-   under webprofiles/default/ via
+   under shell/ via
    <link rel="stylesheet" href="brewser://assets/main.css">. Resource
    loader resolves that to <storageRoot>assets/main.css (assets/ does
    not match the apps/ or dev/ routing prefixes). Seeded from
-   romfs:/webprofiles/default/assets/main.css by seedBuiltinAssets on
+   romfs:/shell/assets/main.css by seedBuiltinAssets on
    first run; user-edits on disk persist (missing-only seeder).
 
    Body padding is now global (28px 48px on the `body` rule below); the

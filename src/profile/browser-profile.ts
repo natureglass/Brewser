@@ -7,243 +7,31 @@ import { BREWSER_APP_ROOT, DEFAULT_PROFILE_ROOT } from '../browser-config.js';
  * built-in HTML pages the shell serves at `brewser://` URLs.
  *
  * `ensure()` creates the profile directory tree if missing.
- * `seedBuiltinPages()` copies the romfs page defaults into the profile
- * directory on first run, but never overwrites — user edits persist.
+ * `seedRomfs()` recursively mirrors the romfs tree into the SD-card
+ * dir on first run, but never overwrites — user edits persist.
  */
 
-/** Page files seeded from `romfs:/webprofiles/default/` into the
- * profile on first run. Each entry is a path under the romfs source's
- * per-profile template dir, so `'home.html'` maps from
- * `romfs:/webprofiles/default/home.html` to `<storageRoot>home.html`.
- * After the 2026-06-04 mirror refactor the romfs source layout now
- * mirrors the SD-card runtime layout 1:1 — every romfs path maps to
- * the same relative path under `brewser/` at runtime. Dev-only
- * fixtures + the Khronos conformance corpus live separately under
- * `BUILTIN_DEV_PAGES` (app-root `dev/`). */
-const BUILTIN_PAGES: readonly string[] = [
-	'home.html',
-	'about.html',
-	'error.html',
-	'settings.html',
-	'apps.html',
-	'bookmarks.html',
-	// `keyboard.html` was hoisted to app-level `keyboards/<name>.html`
-	// on 2026-06-11 so multiple panel designs can ship + be picked
-	// from Settings. See BUILTIN_KEYBOARD_FILES + seedKeyboards.
-];
+/** Filenames at the romfs root that the seeder must NEVER mirror to
+ * the SD card. `main.js` + `main.js.map` are the runtime bundle — they
+ * live INSIDE the NRO and are read by nxjs at boot, not by the resource
+ * loader, so copying them to sdmc would just produce a stale duplicate. */
+const SEED_SKIP_ROOT_FILES: ReadonlySet<string> = new Set([
+	'main.js',
+	'main.js.map',
+]);
 
-/** Dev / test-fixture pages seeded from `romfs:/dev/` into the
- * app-level `dev/` tree (shared across profiles). Each entry is a
- * path relative to `romfs:/dev/` and mirrors to `<appRoot>dev/<rel>`.
- * Moved here from BUILTIN_PAGES 2026-06-02 — the surface formerly
- * lived under `webprofiles/default/html-experiments/`; the `html-
- * experiments` segment was dropped during the hoist so URLs are
- * `brewser://dev/<page>` instead of the older
- * `brewser://html-experiments/<page>`. Same never-overwrite semantics
- * as the other seeders. Khronos conformance test corpora live in
- * romfs only (read on demand via `romfs:/dev/full-webgl{1,2}-
- * conformance/...`), so the ~860 individual test files don't need
- * seeding — only the runner shell + its assets do. */
-const BUILTIN_DEV_PAGES: readonly string[] = [
-	// Dev-fixtures launcher page (formerly `web-experiments.html` at
-	// the per-profile root; relocated 2026-06-02 so `brewser://dev/`
-	// lands on it). Lists every test fixture under dev/.
-	'index.html',
-	// Full WebGL 1 conformance runner page. The Khronos test corpus
-	// itself (sdk/tests/{conformance,js}/...) lives in romfs and is
-	// fetched at runtime via `romfs:/dev/full-webgl1-conformance/...`,
-	// so the ~860 individual test files don't need to be seeded into
-	// the app dir. Only the runner shell + its assets do.
-	'full-webgl1-conformance/index.html',
-	'full-webgl1-conformance/assets/runner.js',
-	'full-webgl1-conformance/assets/tests.json',
-	'two.html',
-	'images.html',
-	'pre.html',
-	'css.html',
-	'external-css.html',
-	'inherit.html',
-	'selectors.html',
-	'align.html',
-	'display-none.html',
-	'line-height.html',
-	'list-style.html',
-	'border.html',
-	'canvas.html',
-	'canvas-script.html',
-	'canvas-responsive.html',
-	'canvas-webgl.html',
-	'benchmark.html',
-	'widgets.html',
-	// Diagnostic ladder for CSS-only tab UIs (2026-06-10). Four
-	// progressive variations isolate which layer breaks: bare radio
-	// routing → `~` sibling combinator → `+` adjacent sibling →
-	// inline-flex pill labels (the apps.html shape). Each variation
-	// uses different colors so the broken layer is obvious at a glance.
-	'tabs.html',
-	'tables.html',
-	'svg.html',
-	'rounded.html',
-	'perf-image-stress.html',
-	'perf-latency-probe.html',
-	'perf-img-dom-stress.html',
-	// API surface probe page + its TTF for the @font-face sub-test.
-	// The font is loaded via @font-face url(sdmc:/switch/brewser/dev/
-	// api-probe-font.ttf), so the file must be seeded next to the page.
-	'api-probe.html',
-	'api-probe-font.ttf',
-	// Web Audio Tier-1 verification — exercises the AudioContext +
-	// Oscillator + Gain + BufferSource + decodeAudioData wrappers shipped
-	// in nxjs-source/packages/runtime/src/web-audio.ts. Audible test
-	// page; reuses brewser://assets/click.wav for decodeAudioData.
-	'web-audio-tone.html',
-	// First "real game" smoke test — Breakout that exercises every Web
-	// API shipped this week (Canvas 2D, Web Audio multi-voice,
-	// localStorage high score, @keyframes title pulse, @font-face,
-	// requestAnimationFrame, tap input). Heavy diagnostic logging to
-	// logs/demo-breakout.log so any issue is debuggable from the trace.
-	'demo-breakout.html',
-	// Tier-0 Web Workers verification — spawns a real OS-thread worker,
-	// sends a few `postMessage` strings, expects echoes back. Validates
-	// the QuickJS-in-pthread foundation before committing to Tier-1.
-	// See [[project-swb-web-workers-milestone]].
-	'workers-tier0.html',
-	// Helper script loaded by workers-tier0.html via importScripts() to
-	// verify Tier-1 Pass C. Defines `self.__importedAdd` + sentinel.
-	'workers-helper.js',
-	// Self-running worker script loaded by `new Worker(url)` in the
-	// Pass D test. Validates that sdmc:/ and brewser:// URL constructor
-	// paths work, and that messages posted before the async fetch
-	// resolves get buffered + delivered in order.
-	'workers-pass-d.js',
-	// Worker source for the Pass E (fetch proxy) test. Handles 'fetch',
-	// 'parallel', 'mixed', and 'echo' commands; reports results via
-	// kind-tagged postMessage payloads.
-	'workers-pass-e.js',
-	// Worker source for the Pass F (ArrayBuffer transfer) test. Handles
-	// 'inspect', 'inspectMixed', 'echoTransfer', 'multi' commands; the
-	// fixture verifies sender-side detach + receiver-side bytes intact.
-	'workers-pass-f.js',
-	// WebAssembly probe (itch.io compat roadmap A1). 9 slices verifying
-	// instantiate / instantiateStreaming / Memory / Table / imports +
-	// exports reflection against the MDN simple.wasm fixture below.
-	'wasm-probe.html',
-	// MutationObserver probe (itch.io compat roadmap A2). 10 slices
-	// verifying childList / attributes / characterData / subtree /
-	// attributeFilter / disconnect / takeRecords / async delivery.
-	'mutation-observer-probe.html',
-	// CSS variables + calc() probe (itch.io compat roadmap A3). 10
-	// slices verifying :root cascade, var() resolution + fallback,
-	// inheritance, calc() arithmetic, calc(var()), inline-style var(),
-	// el.style.setProperty/getPropertyValue for --foo, getComputedStyle.
-	'css-vars-probe.html',
-	// Binary WASM fixture — 78 bytes, exports `exported_func()` which
-	// calls imported `imports.imported_func(42)`. Copy of nx.js's
-	// apps/wasm/src/simple.wasm; corresponds to the .wat at
-	// https://github.com/mdn/webassembly-examples/blob/main/js-api-examples/simple.wat
-	'wasm-probe.wasm',
-];
-
-/** Chrome-toolbar icons + the unified per-profile-page stylesheet
- * seeded from `romfs:/webprofiles/default/assets/` into
- * `<storageRoot>assets/`. Mirrors
- * `BUILTIN_PAGES` exactly: copy on first run, never overwrite,
- * deleting restores the default next launch. The browser loads icons
- * from sdmc so the user can swap a PNG in place to re-skin the
- * toolbar; `main.css` is loaded by each built-in page via
- * `<link rel="stylesheet" href="brewser://assets/main.css">`. */
-const BUILTIN_ASSETS: readonly string[] = [
-	'home.png',
-	'refresh.png',
-	'settings.png',
-	'left.png',
-	'right.png',
-	'bookmark_true.png',
-	'bookmark_false.png',
-	'toolbar_back.png',
-	'keyboard_back.png',
-	'main.css',
-	// Generic "download" glyph the apps launcher paints on cards whose
-	// app folder isn't on disk yet. Served at
-	// `brewser://assets/download.png` once seeded into `<storageRoot>assets/`.
-	'download.png',
-	// Page-side script driving the missing-app detail modal. Shared by
-	// apps.html and home.html via `<script src="brewser://assets/missing-app-modal.js">`,
-	// so it only ships in one place. Toggles `.app-modal-overlay--open`
-	// (NOT `style.display` — that doesn't invalidate the live-DOM paint
-	// cache, leaving stale modal pixels on screen across opens).
-	'missing-app-modal.js',
-	// Page-side script driving the Check-for-Updates modal on apps.html.
-	// Loaded only by apps.html (the home page doesn't surface the
-	// `.apps-check-updates` button); seeded here so fresh profiles get
-	// the asset alongside the missing-app modal script. Same class-flip
-	// visibility pattern + B/L close handling as the sibling.
-	'updates-modal.js',
-	// Audio feedback for link/button presses. Played by the shell's
-	// click-sound module when `config.json clickSounds` is true.
-	'click.wav',
-	// Reserved entry point for any future page-side glue the HTML
-	// keyboard might want to expose. Currently a placeholder — the
-	// keyboard's live-DOM tree is parsed with `<script>` blocks stripped
-	// and the key-tap dispatch lives in the shell. See the file header
-	// for the upgrade path.
-	'keyboard-driver.js',
-];
-
-/** Design-config + template files seeded from `romfs:/` into the
- * profile root. `config.json` names the active template; `templates.json`
- * is the catalog the Settings page lists; each `templates/<name>.json`
- * is one named theme. Users add their own by dropping a new JSON in
- * `templates/`, listing it in `templates.json`, and pointing
- * `config.json`'s `template` field at it. (Lowercase `templates/`
- * since the 2026-06-03 rename — existing installs with the old
- * `Templates/` dir auto-migrate via `loadConfig` normalization; the
- * legacy folder can be deleted manually.) */
-const BUILTIN_TEMPLATE_FILES: readonly string[] = [
-	'config.json',
-	'templates.json',
-	'search_engines.json',
-	// Unified app catalog (2026-06-10) — replaced apps.json + featured.json.
-	// Three top-level arrays (featured / community / experimental); each
-	// drives one tab on apps.html, and `featured` also seeds home.html's
-	// Featured Apps grid. See `loadCatalogGroup` in browser-template.ts.
-	'catalog.json',
-	'templates/default.json',
-	'templates/light.json',
-	'templates/bottom-bar.json',
-	'templates/amber.json',
-];
-
-/** Virtual-keyboard panel files seeded from `romfs:/keyboards/` into
- * `<appRoot>keyboards/` on first run. Each file is a full keyboard
- * panel (scoped CSS + the #urlInput / #closeBtn / #clearBtn / .letter /
- * .key contract `KeyboardOverlay.open()` relies on). `config.json`'s
- * `keyboard` field names the active file; `keyboards.json` is the
- * Settings-page registry the user picks from. Same never-overwrite
- * semantics as the page + asset + template seeders — user edits
- * persist, deleting a file restores it next launch. */
-const BUILTIN_KEYBOARD_FILES: readonly string[] = [
-	'keyboards.json',
-	'keyboards/default.html',
-	'keyboards/light.html',
-	'keyboards/dark.html',
-	'keyboards/red.html',
-];
-
-/** Visual style sheets seeded from `romfs:/styles/` into `<appRoot>styles/`
- * on first run, plus the `styles.json` registry at the app-level root.
- * `config.json`'s `brewserStyle` field names the active file; the
- * resource loader serves that file's bytes when a page requests
- * `brewser://assets/main.css`. Same never-overwrite semantics as the
- * page + asset + template + keyboard seeders — user edits persist,
- * deleting a file restores it next launch. */
-const BUILTIN_STYLE_FILES: readonly string[] = [
-	'styles.json',
-	'styles/dark.css',
-	'styles/light.css',
-	'styles/amber.css',
-	'styles/neon.css',
-];
+/** Romfs subtrees the seeder must NOT recurse into. Each entry is a
+ * directory path relative to `romfs:/` with a trailing slash. The
+ * Khronos WebGL conformance test corpora (~2350 files each) live
+ * under `romfs:/dev/full-webgl{1,2}-conformance/sdk/` and are read
+ * on-demand by the runner from romfs at runtime, so seeding them to
+ * sdmc would be slow + wasteful (and quietly fills the SD card with
+ * test-vector duplicates). Anything else under `dev/` is small enough
+ * to seed normally. */
+const SEED_SKIP_DIRS: ReadonlySet<string> = new Set([
+	'dev/full-webgl1-conformance/sdk/',
+	'dev/full-webgl2-conformance/sdk/',
+]);
 
 export class BrowserProfile {
 	readonly name: string;
@@ -255,7 +43,7 @@ export class BrowserProfile {
 	 * `screenshots/`, `history.jsonl`, `bookmarks.json`. */
 	readonly appRoot: string;
 
-	constructor(name = 'default', profileRoot = DEFAULT_PROFILE_ROOT, appRoot = BREWSER_APP_ROOT) {
+	constructor(name = 'shell', profileRoot = DEFAULT_PROFILE_ROOT, appRoot = BREWSER_APP_ROOT) {
 		this.name = name;
 		this.storageRoot = `${profileRoot}${name}/`;
 		this.appRoot = appRoot;
@@ -302,7 +90,10 @@ export class BrowserProfile {
 		// that are deployed via robocopy; the structure changes over time
 		// and the shell must not assume any particular shape.
 		// App-level dev surface: HTML/CSS/canvas/WebGL test fixtures +
-		// Khronos conformance corpora. Mirrors `BUILTIN_DEV_PAGES`.
+		// Khronos conformance corpora. The walker creates these on its
+		// own, but pre-creating them keeps the dir tree intact even when
+		// `dev/` is empty in romfs (defensive — pages that fetch
+		// `sdmc:/switch/brewser/dev/...` expect the dir to exist).
 		try { Switch.mkdirSync(`${this.appRoot}dev/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/assets/`); } catch (_) { /* exists */ }
@@ -317,7 +108,7 @@ export class BrowserProfile {
 
 	/** Absolute SD-card path to a seeded dev/test-fixture page or
 	 * asset. Dev pages live at the (app-level) `dev/` dir, shared
-	 * across profiles — see BUILTIN_DEV_PAGES. */
+	 * across profiles, mirrored from `romfs:/dev/` by `seedRomfs`. */
 	devPagePath(filename: string): string {
 		return `${this.appRoot}dev/${filename}`;
 	}
@@ -356,137 +147,90 @@ export class BrowserProfile {
 		return `${this.appRoot}${rel}`;
 	}
 
-	/** Copy the templates registry + every shipped template JSON
-	 * (`romfs:/templates.json`, `romfs:/templates/<name>.json`) into the
-	 * app-level dir if the targets are missing. Same never-overwrite
-	 * semantics as the page + asset seeders. */
-	async seedTemplates(): Promise<void> {
-		for (const rel of BUILTIN_TEMPLATE_FILES) {
-			const target = `${this.appRoot}${rel}`;
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/${rel}`);
-				if (!response.ok) continue;
-				const text = await response.text();
-				Switch.writeFileSync(target, text);
-			} catch (error) {
-				console.debug(`[brewser] seed ${rel} failed: ${error}`);
-			}
-		}
-	}
-
-	/** Copy the keyboards registry + every shipped keyboard panel HTML
-	 * (`romfs:/keyboards.json`, `romfs:/keyboards/<name>.html`) into the
-	 * app-level dir if the targets are missing. Same never-overwrite
-	 * semantics as the page + asset + template seeders — users can edit
-	 * a keyboard in place, deleting one restores it next launch. */
-	async seedKeyboards(): Promise<void> {
-		for (const rel of BUILTIN_KEYBOARD_FILES) {
-			const target = `${this.appRoot}${rel}`;
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/${rel}`);
-				if (!response.ok) continue;
-				const text = await response.text();
-				Switch.writeFileSync(target, text);
-			} catch (error) {
-				console.debug(`[brewser] seed ${rel} failed: ${error}`);
-			}
-		}
-	}
-
-	/** Copy the styles registry + every shipped style sheet
-	 * (`romfs:/styles.json`, `romfs:/styles/<name>.css`) into the
-	 * app-level dir if the targets are missing. Same never-overwrite
-	 * semantics as the page + asset + template + keyboard seeders —
-	 * users can edit a style in place, deleting one restores it next
-	 * launch. The active sheet (per `config.json brewserStyle`) is
-	 * served by the resource loader at `brewser://assets/main.css`. */
-	async seedStyles(): Promise<void> {
-		for (const rel of BUILTIN_STYLE_FILES) {
-			const target = `${this.appRoot}${rel}`;
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/${rel}`);
-				if (!response.ok) continue;
-				const text = await response.text();
-				Switch.writeFileSync(target, text);
-			} catch (error) {
-				console.debug(`[brewser] seed ${rel} failed: ${error}`);
-			}
-		}
-	}
-
 	/**
-	 * Copy each `romfs:/webprofiles/default/<rel>` into
-	 * `<storageRoot><rel>` if the target file is missing. After the
-	 * 2026-06-04 mirror refactor the romfs source layout matches the
-	 * SD-card runtime 1:1: pages live in romfs at the same relative
-	 * path they'll occupy on the SD card. Never overwrites — once
-	 * seeded, the user's edits on disk are authoritative. Deleting a
-	 * file restores it next launch (lets the user "reset" a page).
-	 * Reads bytes so binary page assets survive the round-trip; text
-	 * files are preserved bit-exact since we never re-encode them.
+	 * Recursively mirror everything under `romfs:/` to `<appRoot>` on the
+	 * SD card. Replaced the half-dozen per-dir allowlist seeders (BUILTIN_PAGES,
+	 * BUILTIN_DEV_PAGES, BUILTIN_ASSETS, BUILTIN_TEMPLATE_FILES,
+	 * BUILTIN_KEYBOARD_FILES, BUILTIN_STYLE_FILES) on 2026-06-12 because
+	 * those lists kept drifting from the actual romfs contents — any new
+	 * file added to romfs needed a matching allowlist edit or it'd silently
+	 * fail to seed (history.html, keyboard panels, etc.). The walker
+	 * picks them up automatically.
+	 *
+	 * Same never-overwrite semantics as before: each per-file write is
+	 * gated by `fileExists`, so user edits + per-origin state live in
+	 * place across launches, and deleting a file restores the default
+	 * next launch. PNG / WASM / TTF binaries survive the round-trip
+	 * because we always go through `ArrayBuffer`.
+	 *
+	 * Skips:
+	 *   - `main.js` + `main.js.map` at the romfs root — the runtime bundle,
+	 *     read by nxjs from INSIDE the NRO, never from sdmc.
+	 *   - The Khronos test corpora under `dev/full-webgl{1,2}-conformance/sdk/`
+	 *     — ~2350 files each, read on-demand from romfs by the conformance
+	 *     runner at runtime. Seeding them would saturate the SD card with
+	 *     read-mostly duplicates for ~hundreds of MB of test vectors.
+	 *
+	 * Note this also seeds the romfs `shell/` subtree into `<appRoot>shell/`
+	 * — which IS the per-profile `storageRoot`, since `DEFAULT_PROFILE_ROOT`
+	 * collapsed to match `BREWSER_APP_ROOT` 2026-06-12 (see browser-config.ts).
+	 * So one walker covers both the per-profile chrome pages AND the
+	 * app-level templates / keyboards / styles / dev fixtures in one pass.
 	 */
-	async seedBuiltinPages(): Promise<void> {
-		for (const rel of BUILTIN_PAGES) {
-			const target = this.pagePath(rel);
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/webprofiles/default/${rel}`);
-				if (!response.ok) continue;
-				const bytes = new Uint8Array(await response.arrayBuffer());
-				Switch.writeFileSync(target, bytes);
-			} catch (error) {
-				console.debug(`[brewser] seed ${rel} failed: ${error}`);
-			}
-		}
+	async seedRomfs(): Promise<void> {
+		await this.seedRomfsDir('');
 	}
 
-	/** Copy each `romfs:/dev/<rel>` into `<appRoot>dev/<rel>` if the
-	 * target file is missing. Dev/test pages live at the app-level
-	 * root, shared across profiles; seeding semantics otherwise match
-	 * `seedBuiltinPages`. */
-	async seedBuiltinDevPages(): Promise<void> {
-		for (const rel of BUILTIN_DEV_PAGES) {
-			const target = this.devPagePath(rel);
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/dev/${rel}`);
-				if (!response.ok) continue;
-				const bytes = new Uint8Array(await response.arrayBuffer());
-				Switch.writeFileSync(target, bytes);
-			} catch (error) {
-				console.debug(`[brewser] seed dev ${rel} failed: ${error}`);
+	/** Recursive worker for `seedRomfs`. `rel` is the path under `romfs:/`
+	 * (no leading slash, trailing slash for non-root directories — the empty
+	 * string is the romfs root). Each file write goes through
+	 * `<appRoot><rel><filename>`, and each child directory recurses one
+	 * level deeper. */
+	private async seedRomfsDir(rel: string): Promise<void> {
+		const src = `romfs:/${rel}`;
+		const dst = `${this.appRoot}${rel}`;
+		try { Switch.mkdirSync(dst); } catch (_) { /* exists */ }
+		let iteratorErr: unknown = null;
+		try {
+			for await (const entry of Switch.readDir(src)) {
+				if (entry.isDirectory) {
+					const childRel = `${rel}${entry.name}/`;
+					if (SEED_SKIP_DIRS.has(childRel)) continue;
+					await this.seedRomfsDir(childRel);
+				} else if (entry.isFile) {
+					if (rel === '' && SEED_SKIP_ROOT_FILES.has(entry.name)) continue;
+					const childRel = `${rel}${entry.name}`;
+					const target = `${this.appRoot}${childRel}`;
+					if (fileExists(target)) continue;
+					try {
+						const response = await fetch(`romfs:/${childRel}`);
+						if (!response.ok) continue;
+						const bytes = new Uint8Array(await response.arrayBuffer());
+						Switch.writeFileSync(target, bytes);
+					} catch (error) {
+						console.debug(`[brewser] seed ${childRel} failed: ${error}`);
+					}
+				}
+				// `isSymlink` (and any other DirEntry kind) is ignored —
+				// the bundled romfs has no symlinks.
 			}
+		} catch (error) {
+			iteratorErr = error;
 		}
-	}
-
-	/** Copy each `romfs:/webprofiles/default/assets/<rel>` into
-	 * `<storageRoot>assets/<rel>` if the target file is missing. Same
-	 * never-overwrite semantics as the page seeder. PNG bodies are
-	 * binary, so we read as `ArrayBuffer` and write the bytes back
-	 * directly. */
-	async seedBuiltinAssets(): Promise<void> {
-		for (const rel of BUILTIN_ASSETS) {
-			const target = this.assetPath(rel);
-			if (fileExists(target)) continue;
-			try {
-				const response = await fetch(`romfs:/webprofiles/default/assets/${rel}`);
-				if (!response.ok) continue;
-				const bytes = new Uint8Array(await response.arrayBuffer());
-				Switch.writeFileSync(target, bytes);
-			} catch (error) {
-				console.debug(`[brewser] seed asset ${rel} failed: ${error}`);
-			}
+		if (iteratorErr) {
+			console.debug(`[brewser] seed readDir ${src} failed: ${iteratorErr}`);
 		}
 	}
 }
 
 function fileExists(path: string): boolean {
 	try {
-		Switch.readFileSync(path);
-		return true;
+		// `Switch.readFileSync` returns `ArrayBuffer | null` — it does NOT
+		// throw on a missing file, it returns `null`. Check the return value
+		// so a missing target isn't mistaken for "already seeded" (which
+		// would silently skip every fetch for an empty profile dir).
+		const data = Switch.readFileSync(path);
+		return data !== null;
 	} catch (_) {
 		return false;
 	}

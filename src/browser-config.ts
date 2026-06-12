@@ -4,19 +4,22 @@ export const DEFAULT_CANVAS_HEIGHT = 720;
 
 /** Built-in URL the browser opens on launch (and the toolbar Home
  * button targets). The HTML lives on the SD card at
- * `sdmc:/switch/brewser/webprofiles/default/home.html` (seeded from
- * romfs on first run) so the user can customise it. Renamed from
+ * `sdmc:/switch/brewser/shell/home.html` (seeded from romfs on first
+ * run) so the user can customise it. Renamed from
  * `brewser://welcome/` (welcome.html) 2026-06-02. */
 export const DEFAULT_HOME_URL = 'brewser://home/';
 
 /** Logical origin used by the runtime resource/permission layers for built-in pages. */
 export const BROWSER_INTERNAL_ORIGIN = 'brewser://internal/';
 
-/** Profile root on the SD card. Per-origin storage is created under
- * `<DEFAULT_PROFILE_ROOT><profile-name>/` (today only `default/` exists)
- * and holds profile-scoped data: `pages/`, `assets/`, future per-origin
- * cookies / local-storage. */
-export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/brewser/webprofiles/';
+/** Profile root on the SD card. The storageRoot is constructed as
+ * `<DEFAULT_PROFILE_ROOT><profile-name>/`; today the only profile is
+ * named `shell`, so storageRoot resolves to `sdmc:/switch/brewser/shell/`
+ * and holds the seeded chrome pages + their assets plus future per-origin
+ * cookies / local-storage. The historical `webprofiles/` intermediate
+ * segment was dropped 2026-06-12 alongside the romfs-source rename — the
+ * multi-profile design it anticipated was never built. */
+export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/brewser/';
 
 /** App-level root on the SD card. Holds data shared across profiles:
  * `config.json`, `templates.json`, `catalog.json`, `search_engines.json`,

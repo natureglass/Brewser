@@ -11,7 +11,7 @@ import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKey
  * Serves the browser's built-in pages.
  *
  * All `brewser://` pages live on disk under the profile directory and
- * the loader reads them on demand — see `BrowserProfile.seedBuiltinPages()`
+ * the loader reads them on demand — see `BrowserProfile.seedRomfs()`
  * for how they get there.
  *
  * Two URL shapes are recognised:

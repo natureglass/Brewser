@@ -590,7 +590,7 @@ function clearPendingImageCompletions(): void {
 }
 
 /** SD-card directory of the page currently loaded (e.g.
- * `sdmc:/switch/brewser/apps/mediaplayer/` for app pages, or `sdmc:/switch/brewser/webprofiles/default/<rest>/` for per-profile pages). Set by
+ * `sdmc:/switch/brewser/apps/mediaplayer/` for app pages, or `sdmc:/switch/brewser/shell/<rest>/` for per-profile pages). Set by
  * the shell per navigation; used to resolve PAGE-relative `<img>` srcs
  * (`./assets/x.png`) so `index.html` acts as the base, like a real browser. */
 export function setLivePageBase(dir: string): void { livePageBase = dir; }

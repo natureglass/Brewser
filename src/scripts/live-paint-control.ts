@@ -69,7 +69,9 @@ export function setKeyboardOpen(v: boolean): void {
 export function isKeyboardOpen(): boolean { return keyboardOpen; }
 
 // HTML-driven virtual keyboard root: a SECOND live-DOM root parsed
-// once at shell startup from `webprofiles/<active>/keyboard.html` and
+// once at shell startup from the file named by `config.json`'s
+// `keyboard` field (a `keyboards/<file>.html` path relative to the
+// app root, hoisted out of the per-profile dir 2026-06-11) and
 // painted below `KEYBOARD_LAYOUT.topY` while the keyboard is visible.
 // Kept separate from the host page's `getLiveRoot()` so the page's
 // DOM stays untouched while the keyboard is up.

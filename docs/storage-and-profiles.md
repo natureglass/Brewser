@@ -23,10 +23,11 @@ Configured in `src/browser-config.ts`:
 
 ```ts
 export const BREWSER_APP_ROOT   = 'sdmc:/switch/brewser/';
-export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/brewser/webprofiles/';
+export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/brewser/';
 ```
 
-The default profile is `default`, so storage paths look like:
+The default profile is `shell` (the seeded chrome pages live there), so
+storage paths look like:
 
 ```text
 sdmc:/switch/brewser/                        ← appRoot
@@ -59,20 +60,19 @@ sdmc:/switch/brewser/                        ← appRoot
     full-webgl2-conformance/
     nxjs-webgl-demo/
     nxjs-webgl2-demo/
-  webprofiles/
-    default/                                 ← storageRoot (flat)
-      home.html                              ← renamed from welcome.html 2026-06-02
-      about.html
-      apps.html
-      assets/
-        home.png
-        google_logo.png
-        ...
-      example.com/                           ← per-origin (stub)
-        cookies.json
-        local-storage.json
-        cache/
-          <hash>.bin
+  shell/                                     ← storageRoot (flat; renamed from webprofiles/default/ 2026-06-12)
+    home.html                                ← renamed from welcome.html 2026-06-02
+    about.html
+    apps.html
+    assets/
+      home.png
+      google_logo.png
+      ...
+    example.com/                             ← per-origin (stub)
+      cookies.json
+      local-storage.json
+      cache/
+        <hash>.bin
 ```
 
 `brewser://X/Y/` URLs map to `<storageRoot>X/Y.html` (no `pages/` prefix

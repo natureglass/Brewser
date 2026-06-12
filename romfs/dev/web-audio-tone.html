@@ -237,7 +237,7 @@
       // scripts have direct Switch.* access). The bytes go straight
       // into decodeAudioData, same final test of the audio path.
       // Switch.readFileSync returns ArrayBuffer | null per $.ts:298.
-      const ab = Switch.readFileSync('romfs:/webprofiles/default/assets/click.wav');
+      const ab = Switch.readFileSync('romfs:/shell/assets/click.wav');
       if (!ab) { setStatus('decode', 'FAIL', 'Switch.readFileSync returned null'); return; }
       log('[decode] read click.wav via Switch.readFileSync, bytes=' + ab.byteLength);
       const buf = await ctx.decodeAudioData(ab);

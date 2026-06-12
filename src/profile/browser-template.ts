@@ -190,7 +190,7 @@ export interface BrowserConfig {
 	/** Play a short `click.wav` when the user activates a link,
 	 * button, or chrome-strip control. Audio feedback only — the
 	 * shell still works identically with sounds off. File is seeded
-	 * from `romfs:/webprofiles/default/assets/click.wav` into
+	 * from `romfs:/shell/assets/click.wav` into
 	 * `<storageRoot>assets/click.wav` on first run. */
 	clickSounds: boolean;
 	/** Milliseconds of stick-idle (no left-stick motion past the
@@ -258,7 +258,7 @@ export interface BrowserConfig {
 	 * `romfs:/…`) pass through unchanged. Pairs with `styles.json` —
 	 * the registry the Settings page lists. The resource loader reads
 	 * the configured file and serves its bytes in place of the baked
-	 * `webprofiles/default/assets/main.css`, so every built-in page's
+	 * `shell/assets/main.css`, so every built-in page's
 	 * `<link rel="stylesheet" href="brewser://assets/main.css">` ends
 	 * up loading the picked style. Missing / unreadable falls back to
 	 * the baked default so a broken pointer can't blank the chrome. */
@@ -516,7 +516,8 @@ interface RawCatalogEntry {
 
 /** URL of the generic "download" logo painted on cards whose backing
  * app folder isn't on disk. Lives in `<storageRoot>assets/` so it's
- * seeded once per profile via `BUILTIN_ASSETS` and served through the
+ * mirrored from `romfs:/shell/assets/` into the per-profile storageRoot
+ * by `seedRomfs` and served through the
  * normal `brewser://assets/...` route. */
 const MISSING_APP_LOGO_URL = 'brewser://assets/download.png';
 

@@ -1,5 +1,5 @@
 // Click-sound playback for interactive feedback. Plays a short
-// `click.wav` (seeded from `romfs:/webprofiles/default/assets/click.wav`
+// `click.wav` (seeded from `romfs:/shell/assets/click.wav`
 // into `<storageRoot>assets/click.wav` by the profile seeder) whenever
 // the user activates a link, button, chrome-strip control, or other
 // interactive target.

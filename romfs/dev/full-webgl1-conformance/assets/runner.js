@@ -143,8 +143,7 @@ const DIAG_SDMC_DIR = 'sdmc:/switch/brewser/logs/';
 const DIAG_PATH_EARLY = DIAG_SDMC_DIR + 'runner-diag.log';
 try { Switch.mkdirSync('sdmc:/switch/'); } catch (_) {}
 try { Switch.mkdirSync('sdmc:/switch/brewser/'); } catch (_) {}
-try { Switch.mkdirSync('sdmc:/switch/brewser/webprofiles/'); } catch (_) {}
-try { Switch.mkdirSync('sdmc:/switch/brewser/webprofiles/default/'); } catch (_) {}
+try { Switch.mkdirSync('sdmc:/switch/brewser/shell/'); } catch (_) {}
 try { Switch.mkdirSync(DIAG_SDMC_DIR); } catch (_) {}
 const diagStart = Date.now();
 // Truncate the diag log once at startup so each run starts fresh,
