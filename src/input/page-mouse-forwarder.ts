@@ -282,6 +282,47 @@ let lastDrawnPxY = -1;
  * of the idle 16 ms, otherwise the cursor visibly drags compared with
  * the non-modal case.
  */
+/** Resync `prevButtons` to the CURRENT physical button state and clear
+ * any per-cursor tracked button bookkeeping. Called by the on-screen
+ * keyboard's `finish()` path so the FIRST `tickMouseInput` call after
+ * the kb closes doesn't dispatch spurious rising / falling edges for
+ * buttons that the user pressed during the kb's lifetime (the shell's
+ * `waitForControllerInput` loop — which is what drives `tickMouseInput`
+ * — is suspended on the kb promise, so `prevButtons` doesn't see those
+ * presses and would otherwise compare a stale `false` against a held
+ * `true` on the first post-kb tick).
+ *
+ * Concrete bug this prevents: user opens kb, presses B to close it
+ * while the cursor sits over an app card; without this sync, the
+ * shell's resumed loop sees `bRising=true` and dispatches
+ * `mousedown(right)+mouseup(right)+contextmenu(right)` on the card. The
+ * same class of bug also triggers a spurious `aRising` + later
+ * `aFalling` if A is held during kb close → `beginLivePress` /
+ * `endLivePress` → synthesized `click` on the card → unwanted modal
+ * open. Resetting `cursor.buttonsDown` belt-and-suspenders prevents the
+ * aFalling fallback branch (no `activeMousePress`) from also firing a
+ * stray click. Aborting any leaked `activeMousePress` guards against a
+ * press handle held across the kb open (shouldn't normally happen
+ * because `endLivePress` clears it before the kb opens, but cheap to
+ * defend against). */
+export function syncMouseButtonsToCurrent(): void {
+	const pad = activePad();
+	const leftIdx = getButtonIndexForAction('leftClick');
+	const rightIdx = getButtonIndexForAction('rightClick');
+	const middleIdx = getButtonIndexForAction('middleClick');
+	const aDown = leftIdx >= 0 ? isButtonPressed(pad, leftIdx) : false;
+	const bDown = rightIdx >= 0 ? isButtonPressed(pad, rightIdx) : false;
+	const zrDown = middleIdx >= 0 ? isButtonPressed(pad, middleIdx) : false;
+	prevButtons = { a: aDown, b: bDown, zr: zrDown };
+	cursor.buttonsDown.left = false;
+	cursor.buttonsDown.right = false;
+	cursor.buttonsDown.middle = false;
+	if (activeMousePress) {
+		abortLivePress(activeMousePress);
+		activeMousePress = null;
+	}
+}
+
 export function tickCursorMovementOnly(): boolean {
 	const pad = activePad();
 	const now = performance.now();
@@ -445,6 +486,18 @@ export function tickMouseInput(): MouseTickResult {
 		consumedA = true;
 		cursorChanged = true;
 	} else if (aFalling) {
+		// Capture BEFORE clearing — the fallback else branch below
+		// only fires `mouseup+click` when we actually dispatched a
+		// `mousedown` on the rising edge. Without this gate, an
+		// `aFalling` whose matching `aRising` never ran through
+		// `tickMouseInput` (e.g., A was already held when the function
+		// resumed after `syncMouseButtonsToCurrent` cleared `prevButtons`
+		// + `cursor.buttonsDown` on kb close) would synthesize a `click`
+		// on whatever sits under the cursor — exactly the "card modal
+		// opens after closing kb with B while a finger fumbled A" bug.
+		// The `activeMousePress` branch above is already safe (it only
+		// runs when a press was opened earlier inside this function).
+		const wasLeftDown = cursor.buttonsDown.left;
 		cursor.buttonsDown.left = false;
 		if (activeMousePress) {
 			const hit = hitElementUnderCursor();
@@ -483,9 +536,10 @@ export function tickMouseInput(): MouseTickResult {
 		} else if (cursorInChromeZone()) {
 			// Chrome dispatch already fired on the rising edge; nothing
 			// to do on falling.
-		} else {
+		} else if (wasLeftDown) {
 			// No press was open (e.g., page-canvas-only mode). Mirror
-			// the legacy dispatch path.
+			// the legacy dispatch path. Gated on `wasLeftDown` so a
+			// rising edge we never saw can't generate a fallback click.
 			dispatchMouseButton('mouseup', MOUSE_BUTTON_LEFT);
 			dispatchMouseButton('click', MOUSE_BUTTON_LEFT);
 		}

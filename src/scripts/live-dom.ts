@@ -235,6 +235,23 @@ export function ensureCssAnimation(
 	const start = performance.now();
 	let cancelled = false;
 	let tid: ReturnType<typeof setTimeout> | null = null;
+	// Gate the per-tick paint cost on whether the element is actually
+	// being rendered. Infinite animations on elements that later get
+	// hidden (e.g. updates-modal's loading-bar pulse, the parent
+	// `.updates-modal-loading` flips to `display:none` once the
+	// fetch settles) would otherwise force a full-repaint every 33 ms
+	// FOREVER — `requestFullRepaint()` flips the consume-once flag
+	// the shell reads each frame to bypass the fast cache-blit path.
+	// One stuck infinite ticker pegs the paint pump at ~30 Hz and
+	// drags the engine mouse from 60 FPS to ~10 FPS until the page
+	// navigates away (which calls `clearCssAnimations`). The setTimeout
+	// keeps firing so the animation state stays correct for when the
+	// element becomes visible again, but we skip the patch + repaint
+	// when there's nothing on screen to update.
+	const elementHasPaintedBox = (): boolean => {
+		const box = getLayoutBox(el);
+		return !!box && box.w > 0 && box.h > 0;
+	};
 	const tick = (): void => {
 		if (cancelled) return;
 		const elapsed = performance.now() - start;
@@ -242,8 +259,10 @@ export function ensureCssAnimation(
 		if (spec.iterationCount !== 'infinite') {
 			if (t >= spec.iterationCount) {
 				cssAnimStateByEl.set(el, sampleStops(stops, 1));
-				patchLiveCacheRegion(el);
-				requestFullRepaint();
+				if (elementHasPaintedBox()) {
+					patchLiveCacheRegion(el);
+					requestFullRepaint();
+				}
 				activeCssAnimations.delete(ticker);
 				cssAnimTickerByEl.delete(el);
 				return;
@@ -251,8 +270,10 @@ export function ensureCssAnimation(
 		}
 		t = t - Math.floor(t);
 		cssAnimStateByEl.set(el, sampleStops(stops, t));
-		patchLiveCacheRegion(el);
-		requestFullRepaint();
+		if (elementHasPaintedBox()) {
+			patchLiveCacheRegion(el);
+			requestFullRepaint();
+		}
 		tid = setTimeout(tick, 33);
 	};
 	const ticker = {

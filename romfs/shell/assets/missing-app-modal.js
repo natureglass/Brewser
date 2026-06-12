@@ -32,6 +32,13 @@
   // existing app to bring it to the catalog version." Stubbed for now
   // alongside Download until the actual install flow lands.
   var updateBtn = document.getElementById('app-modal-update');
+  // Install-size chip. Populated from `detail.sizeBytes` (catalogue.json
+  // → loadCatalogGroup → renderAppCards stamps it onto the card's
+  // data-app-detail JSON). Lives in the LEFT action slot so it sits
+  // alongside the Update button (upgrade case) or alone in that slot
+  // (missing / installed-current). Optional element — `null` if the
+  // page hasn't been redeployed since the markup was added.
+  var sizeEl = document.getElementById('app-modal-size');
   if (!overlay || !titleEl || !bodyEl || !cancelBtn || !downloadBtn || !playBtn || !updateBtn) return;
 
   var modalOpen = false;
@@ -75,6 +82,19 @@
     if (value == null) return '';
     var s = String(value).trim();
     return row(label, s.length > 0 ? s : '—');
+  }
+
+  // Format a byte count as a megabyte string. Two decimal places —
+  // enough resolution to distinguish a 0.05 MB icon-only test app
+  // from a 0.50 MB demo and a 50.00 MB full app. Returns an empty
+  // string when the input isn't a positive finite number so the
+  // caller can branch on that to hide the chip entirely (catalog
+  // entries that omit `sizeBytes` round-trip through the renderer
+  // as 0).
+  function formatSizeMB(bytes) {
+    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes <= 0) return '';
+    var mb = bytes / (1024 * 1024);
+    return mb.toFixed(2) + ' MB';
   }
 
   function show(detail) {
@@ -132,7 +152,7 @@
     // empty string — show the row with an em-dash in that case so
     // the modal still surfaces the field instead of silently dropping
     // it. Callers that genuinely want the row hidden can omit the
-    // field from catalog.json entirely (renderer drops null/undefined
+    // field from catalogue.json entirely (renderer drops null/undefined
     // before stringifying).
     rows.push(rowOrDash('Allowed origins', currentDetail.allowedOrigins));
     if (currentDetail.developer) rows.push(row('Developer', currentDetail.developer));
@@ -149,6 +169,23 @@
     // means 'replace', not 'install fresh'"). All three are toggled
     // via classList so the live-DOM cache invalidates correctly (same
     // reason as the overlay open/close).
+    // Install-size chip (LEFT slot). Populated from `detail.sizeBytes`
+    // (catalogue.json). Visibility-toggled via the `--visible` class so
+    // the empty-state collapse matches the surrounding button toggles
+    // (textContent + a hide-when-empty CSS gate would work, but the
+    // class flip keeps the rule self-documenting and lets the cascade
+    // gate the flex gap when the chip is hidden).
+    if (sizeEl) {
+      var sizeText = formatSizeMB(currentDetail.sizeBytes);
+      if (sizeText) {
+        sizeEl.textContent = sizeText;
+        sizeEl.classList.add('app-modal-size--visible');
+      } else {
+        sizeEl.textContent = '';
+        sizeEl.classList.remove('app-modal-size--visible');
+      }
+    }
+
     var hasUpgrade = !!(currentDetail.installedVersion && currentDetail.version);
     if (currentDetail.missing) {
       playBtn.classList.add('app-modal-btn--hidden');
@@ -204,17 +241,37 @@
     if (e && e.stopPropagation) e.stopPropagation();
   });
 
-  // Stubbed for now — actual download / update flow lands in a later
-  // turn. The console.debug surfaces in `nxjs-debug.log` so we can
-  // confirm taps are landing while wiring it up.
+  // Hand off to download-modal.js — it owns the artifact-manifest
+  // fetch + per-file download loop and surfaces progress / errors in
+  // its own overlay. We close this modal first so the two cards
+  // don't stack visually. `data-catalogue-url` + `data-artifacts-url`
+  // are stamped on the buttons server-side from `config.json` via
+  // the `<browser-config-catalogue/>` + `<browser-config-artifacts/>`
+  // tags.
+  function openDownload(mode) {
+    var detail = currentDetail;
+    var opener = globalThis.__brewserOpenDownloadModal;
+    if (typeof opener !== 'function') {
+      console.debug('[apps] download-modal not loaded; skipping ' + mode);
+      return;
+    }
+    var btn = mode === 'update' ? updateBtn : downloadBtn;
+    var catalogueUrl = (btn && btn.getAttribute && btn.getAttribute('data-catalogue-url')) || '';
+    var artifactsUrl = (btn && btn.getAttribute && btn.getAttribute('data-artifacts-url')) || '';
+    close();
+    opener(detail || {}, {
+      mode: mode,
+      catalogueUrl: catalogueUrl,
+      artifactsUrl: artifactsUrl,
+    });
+  }
+
   downloadBtn.addEventListener('click', function (e) {
-    console.debug('[apps] download stub for ' + (currentDetail && currentDetail.id));
+    openDownload('download');
     if (e && e.stopPropagation) e.stopPropagation();
   });
   updateBtn.addEventListener('click', function (e) {
-    console.debug('[apps] update stub for ' + (currentDetail && currentDetail.id)
-      + ' installed=' + (currentDetail && currentDetail.installedVersion)
-      + ' catalog=' + (currentDetail && currentDetail.version));
+    openDownload('update');
     if (e && e.stopPropagation) e.stopPropagation();
   });
 

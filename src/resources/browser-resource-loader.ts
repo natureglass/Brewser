@@ -36,9 +36,9 @@ import { type AppEntry, CATALOG_GROUPS, type CatalogGroup, loadCatalogGroup, loa
  *   `<browser-bookmarks limit="N">` → most-recently-added bookmarks
  *   `<browser-history   limit="N">` → most-recent visits
  *   `<browser-toolbars>`            → entries from `toolbars.json`
- *   `<browser-featured>`            → cards from `catalog.json`'s `featured`
- *   `<browser-community>`           → cards from `catalog.json`'s `community`
- *   `<browser-experimental>`        → cards from `catalog.json`'s `experimental`
+ *   `<browser-featured>`            → cards from `catalogue.json`'s `featured`
+ *   `<browser-community>`           → cards from `catalogue.json`'s `community`
+ *   `<browser-experimental>`        → cards from `catalogue.json`'s `experimental`
  *   `<browser-search>`              → search bar for the active engine
  * Substitution is a plain text replace, so authors can place the tags
  * anywhere in the document, wrap them in containers, or restyle the
@@ -327,6 +327,17 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-catalogue(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-catalogue\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).catalogue),
 		);
+		// `<browser-config-artifacts>` — expands to the active
+		// `config.json` `artifacts` URL (GitHub Contents API listing of
+		// per-app artifact manifests). HTML-escaped, same shape as
+		// `<browser-config-catalogue>`. Empty when no URL is configured;
+		// the download-modal then skips the optional sanity check and
+		// goes straight to the artifact-URL fetch (the artifact 404 is
+		// the canonical "unknown app" signal anyway).
+		out = out.replace(
+			/<browser-config-artifacts(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-artifacts\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).artifacts),
+		);
 		// `<browser-home-apps>` — renders the catalog group named by
 		// `config.json` `homeSection` (featured / community /
 		// experimental). The home page has no tab strip, so this is
@@ -350,7 +361,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 
 	/** Render one catalog group's cards (`.app-card` links — logo on
 	 * top, then title + description) styled by main.css's `.app-grid`
-	 * + `.app-card` rules. Each entry comes from `catalog.json`'s
+	 * + `.app-card` rules. Each entry comes from `catalogue.json`'s
 	 * `featured` / `community` / `experimental` array; `loadCatalogGroup`
 	 * builds the `brewser://apps/<group>/<id>/...` paths used for both
 	 * the logo `<img src>` and the card's `href`. Empty / missing group
@@ -358,7 +369,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 	private renderGroup(group: CatalogGroup): string {
 		const entries = loadCatalogGroup(this.appRoot, group);
 		if (entries.length === 0) {
-			return `<p class="empty">No ${group} apps yet. Add entries to <code>catalog.json</code>'s <code>${group}</code> array.</p>`;
+			return `<p class="empty">No ${group} apps yet. Add entries to <code>catalogue.json</code>'s <code>${group}</code> array.</p>`;
 		}
 		return renderAppCards(entries);
 	}
@@ -799,6 +810,18 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 			allowedOrigins: e.allowedOrigins,
 			developer: e.developer,
 			source: e.source,
+			// Relative launcher path (typically `index.html`). Used by
+			// the download-modal so it can reorder the entry file to
+			// last in the install loop — an interrupted download then
+			// leaves the card flagged as missing and a re-tap retries
+			// cleanly.
+			entry: e.entry,
+			// Total install size in bytes. Surfaced by the missing-app
+			// modal as a megabyte chip in the action row so the user
+			// sees the download footprint before tapping Download /
+			// Update. Zero when the catalog entry omits the field —
+			// the modal hides the chip in that case.
+			sizeBytes: e.sizeBytes,
 		}))}"`;
 		const missingAttr = isMissing ? ' data-missing="true"' : '';
 		const missingClass = isMissing ? ' app-card--missing' : '';
@@ -810,7 +833,7 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// Version + license sit in a small footer strip pinned to the
 		// card's bottom edge — `v1.0.0` chip flush left, `MIT` chip
 		// flush right (see `.app-card__meta` in main.css). Either field
-		// may be empty (entry omitted it in `catalog.json`); we just
+		// may be empty (entry omitted it in `catalogue.json`); we just
 		// skip the chip in that case so a card with neither metadatum
 		// renders identically to the pre-version layout.
 		//

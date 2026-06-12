@@ -522,7 +522,7 @@ export class BrowserShell {
 		};
 		// Page-script-callable reload — exits any fullscreen mode then
 		// re-runs the current navigation. Used by updates-modal.js after
-		// it writes a fresh `catalog.json` so the apps grid re-renders
+		// it writes a fresh `catalogue.json` so the apps grid re-renders
 		// with the new versions / new entries. CanvasShim's
 		// `location.reload()` is a no-op (see canvas-runner.ts), so
 		// pages have no way to trigger this without an explicit shell
@@ -1178,7 +1178,7 @@ export class BrowserShell {
 	/** Read `<appRoot><appDir>manifest.json` and return its parsed
 	 * `buttonMapping` object (or `null` when absent / malformed). Other
 	 * manifest fields are ignored here — they belong to the launcher's
-	 * catalog rendering, which goes through `catalog.json` instead. */
+	 * catalog rendering, which goes through `catalogue.json` instead. */
 	private loadAppManifestButtonMapping(appDir: string): Record<string, unknown> | null {
 		try {
 			const path = `${this.profile.appRoot}${appDir}manifest.json`;

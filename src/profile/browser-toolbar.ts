@@ -294,14 +294,23 @@ export interface BrowserConfig {
 	 * expansions at home.html render time. */
 	homeSection: CatalogGroup;
 	/** Remote URL the apps.html "Check for Updates" button fetches when
-	 * the user wants to refresh their on-disk `catalog.json`. The fetched
-	 * bytes are written verbatim to `<appRoot>catalog.json` after a 2xx
+	 * the user wants to refresh their on-disk `catalogue.json`. The fetched
+	 * bytes are written verbatim to `<appRoot>catalogue.json` after a 2xx
 	 * + JSON-parse check; failure shows an error in the modal. Empty
 	 * string disables the button (the modal opens but the fetch is
 	 * skipped and an error is shown). Routes through SwitchUaFetchLoader
 	 * so the request carries the Switch UA, same as any other http(s)
 	 * fetch the shell makes. */
 	catalogue: string;
+	/** Optional GitHub Contents API endpoint listing every per-app
+	 * artifact manifest (`<id>.json`) the catalog ships. The
+	 * Download / Update flow can fetch this once and verify the tapped
+	 * app has a matching entry before kicking off the per-file download;
+	 * it's a sanity check only — the artifact-URL fetch already 404s
+	 * for unknown apps so callers may skip this. Surfaced to the page
+	 * via the `<browser-config-artifacts>` custom tag. Empty string is
+	 * treated as "no listing available, skip the sanity check". */
+	artifacts: string;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
@@ -324,6 +333,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	toolbarPosition: 'top',
 	homeSection: 'featured',
 	catalogue: '',
+	artifacts: '',
 };
 
 /** Legacy `config.json` key for the active toolbar path. Read by
@@ -460,6 +470,9 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			catalogue: typeof parsed?.catalogue === 'string'
 				? parsed.catalogue
 				: DEFAULT_CONFIG.catalogue,
+			artifacts: typeof parsed?.artifacts === 'string'
+				? parsed.artifacts
+				: DEFAULT_CONFIG.artifacts,
 		};
 	} catch (error) {
 		console.debug(`[brewser] config.json parse failed: ${error}`);
@@ -469,13 +482,13 @@ export function loadConfig(appRoot: string): BrowserConfig {
 
 /** One rendered card on the Apps / Featured page. The shape is shared
  * between every catalog group — `loadCatalogGroup` constructs these
- * from the unified `catalog.json` schema (id + name + entry + logo)
+ * from the unified `catalogue.json` schema (id + name + entry + logo)
  * and the rendering code in `browser-resource-loader.ts` just emits
  * `.app-card` markup. `logo` is used verbatim as an `<img src>`; `url`
  * is rewritten to an absolute `brewser://` URL for the card link
  * (see `renderAppCards`). */
 export interface AppEntry {
-	/** Reverse-DNS folder name (`catalog.json`'s `id`). Surfaced so the
+	/** Reverse-DNS folder name (`catalogue.json`'s `id`). Surfaced so the
 	 * renderer can stamp it onto the card markup — the missing-app modal
 	 * keys its `data-app-detail` payload on this. */
 	id: string;
@@ -487,22 +500,22 @@ export interface AppEntry {
 	description: string;
 	logo: string;
 	url: string;
-	/** Semantic version string from `catalog.json`'s `version` field
+	/** Semantic version string from `catalogue.json`'s `version` field
 	 * (e.g. `"1.0.0"`). Empty string when the entry omits it — the
 	 * renderer suppresses the version chip in that case rather than
 	 * showing a blank pill. */
 	version: string;
-	/** SPDX-ish license identifier from `catalog.json`'s `license`
+	/** SPDX-ish license identifier from `catalogue.json`'s `license`
 	 * field (e.g. `"MIT"`, `"Apache-2.0"`). Empty string when absent;
 	 * the renderer treats empty the same as a missing version. */
 	license: string;
-	/** Free-form category from `catalog.json` (`"app"`, `"game"`, …).
+	/** Free-form category from `catalogue.json` (`"app"`, `"game"`, …).
 	 * Empty string when absent. Surfaced for the missing-app modal. */
 	category: string;
-	/** Developer / author display name from `catalog.json`. Empty when
+	/** Developer / author display name from `catalogue.json`. Empty when
 	 * absent. Surfaced for the missing-app modal. */
 	developer: string;
-	/** Upstream source URL (typically a Git repo) from `catalog.json`.
+	/** Upstream source URL (typically a Git repo) from `catalogue.json`.
 	 * Empty when absent. Surfaced for the missing-app modal. */
 	source: string;
 	/** Version reported by the on-disk `apps/<group>/<id>/manifest.json`
@@ -533,16 +546,27 @@ export interface AppEntry {
 	 * launcher page intercepts taps to open the missing-app modal
 	 * instead of navigating to a guaranteed 404. */
 	missing: boolean;
+	/** Relative path to the launcher file (`catalogue.json`'s `entry`,
+	 * typically `index.html`). Already embedded in `url` as the final
+	 * path segment, but surfaced separately so the download-modal can
+	 * reorder it to last in the install loop without re-parsing the URL.
+	 * Leading slashes stripped. */
+	entry: string;
+	/** Total download size in bytes from `catalogue.json`'s `sizeBytes`.
+	 * Zero when the entry omits the field — the missing-app modal
+	 * suppresses the size chip when this is zero so a catalog without
+	 * size data renders the same as the pre-`sizeBytes` layout. */
+	sizeBytes: number;
 }
 
-/** Catalog group name — every entry in `catalog.json` lives under one
+/** Catalog group name — every entry in `catalogue.json` lives under one
  * of these three top-level arrays. The Apps page renders each group
  * in its own tab; the welcome page renders only `featured`. */
 export type CatalogGroup = 'featured' | 'community' | 'experimental';
 
 export const CATALOG_GROUPS: readonly CatalogGroup[] = ['featured', 'community', 'experimental'];
 
-/** One entry as authored in `catalog.json`. The catalog is the single
+/** One entry as authored in `catalogue.json`. The catalog is the single
  * source of truth — apps are grouped under three top-level arrays
  * (`featured`, `community`, `experimental`), and each entry carries
  * everything needed to render a card AND to find the app on disk:
@@ -583,6 +607,11 @@ interface RawCatalogEntry {
 	 * (`["https://api.example.com", …]`). Empty array displays as `—`
 	 * in the modal. */
 	allowed_origins?: string[];
+	/** Total download size in bytes (sum of every file in the app's
+	 * artifact manifest). Surfaced in the missing-app modal as a
+	 * megabyte figure so the user sees the install footprint before
+	 * tapping Download/Update. Omitted entries display no size chip. */
+	sizeBytes?: number;
 }
 
 /** URL of the generic "download" logo painted on cards whose backing
@@ -592,7 +621,7 @@ interface RawCatalogEntry {
  * normal `brewser://assets/...` route. */
 const MISSING_APP_LOGO_URL = 'brewser://assets/download.png';
 
-/** Read + validate `<profile>/catalog.json` and return the entries for
+/** Read + validate `<profile>/catalogue.json` and return the entries for
  * the requested group, mapped to `AppEntry` cards. Missing / malformed
  * file → empty list; entries missing any required field are dropped.
  *
@@ -655,6 +684,10 @@ export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry
 			allowedOrigins: joinStringArray(e.allowed_origins),
 			installedVersion,
 			missing,
+			entry: entryRel,
+			sizeBytes: typeof e.sizeBytes === 'number' && Number.isFinite(e.sizeBytes) && e.sizeBytes > 0
+				? e.sizeBytes
+				: 0,
 		};
 	});
 }
@@ -702,7 +735,7 @@ function joinStringArray(arr: unknown): string {
 function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${appRoot}catalog.json`);
+		raw = Switch.readFileSync(`${appRoot}catalogue.json`);
 	} catch (_) {
 		return [];
 	}
@@ -721,7 +754,7 @@ function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry
 				|| typeof (e as RawCatalogEntry).description === 'undefined'),
 		);
 	} catch (error) {
-		console.debug(`[brewser] catalog.json parse failed: ${error}`);
+		console.debug(`[brewser] catalogue.json parse failed: ${error}`);
 		return [];
 	}
 }

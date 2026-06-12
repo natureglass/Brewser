@@ -17,7 +17,7 @@
   "navDebug": false,
   "swbImgDebug": false,
   "homeSection": "featured",
-  "catalogue": "https://raw.githubusercontent.com/natureglass/Brewser-apps/refs/heads/main/catalog.json",
+  "catalogue": "https://raw.githubusercontent.com/natureglass/Brewser-apps/refs/heads/main/catalogue.json",
   "artifacts": "https://api.github.com/repos/natureglass/Brewser-apps/contents/artifacts",
   "buttonMapping": {
     "leftClick": "A",

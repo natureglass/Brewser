@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-12T13:44:50Z",
+  "generated": "2026-06-12T20:16:18Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -27,7 +27,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 50488
     },
     {
       "id": "com.natureglass.playdock",
@@ -55,7 +56,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 8217
     },
     {
       "id": "com.natureglass.pvzge",
@@ -83,7 +85,8 @@
       "license": "GPL-3.0",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 1180370478
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -111,7 +114,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 112963
     },
     {
       "id": "com.natureglass.streamcast",
@@ -140,7 +144,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 46036
     }
   ],
   "experimental": [
@@ -170,7 +175,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 47824
     },
     {
       "id": "com.natureglass.sensors",
@@ -201,7 +207,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 60319
     },
     {
       "id": "com.natureglass.speedtest",
@@ -230,7 +237,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 30679
     },
     {
       "id": "com.natureglass.threejsdemos",
@@ -259,7 +267,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 28454370
     }
   ],
   "community": [
@@ -286,7 +295,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 70666
     },
     {
       "id": "com.natureglass.webgl2demo",
@@ -311,7 +321,8 @@
       "license": "MIT",
       "buttonMapping": {
         "exit": "B"
-      }
+      },
+      "sizeBytes": 61951
     }
   ]
 }

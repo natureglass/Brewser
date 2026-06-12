@@ -17,7 +17,7 @@ import { setPseudoActive } from '../scripts/live-css.js';
 import { nxScreen } from '@switch-web/runtime';
 import { playClick } from '../audio/click-sound.js';
 import { getButtonIndexForAction } from './button-router.js';
-import { getCursorPos, tickCursorMovementOnly } from './page-mouse-forwarder.js';
+import { getCursorPos, syncMouseButtonsToCurrent, tickCursorMovementOnly } from './page-mouse-forwarder.js';
 
 /** Callbacks the shell passes to `KeyboardOverlay.open()` so the page
  * behind the keyboard can be scrolled while it's up, and (for
@@ -367,6 +367,18 @@ export class KeyboardOverlay {
 				running = false;
 				setKeyboardOpen(false);
 				setKeyboardOverlayVisible(false);
+				// Sync the mouse forwarder's `prevButtons` to the CURRENT
+				// physical button state before the shell loop resumes. The
+				// shell's `tickMouseInput` last sampled buttons BEFORE the
+				// kb opened, so without this sync, any button held at the
+				// moment of close (typically B itself, which the user just
+				// pressed to cancel) would appear as a spurious rising
+				// edge on the next post-kb tick and dispatch
+				// mousedown/contextmenu (or click via `endLivePress` if
+				// the held button was A) on whatever sits under the
+				// cursor — e.g. an app card → modal opens. See
+				// `syncMouseButtonsToCurrent` JSDoc.
+				syncMouseButtonsToCurrent();
 				// Clear hooks so a stray external caller after close
 				// doesn't reach into a stale closure.
 				globals.__brewserKeyboardSubmit = undefined;

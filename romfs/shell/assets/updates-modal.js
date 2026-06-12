@@ -2,7 +2,7 @@
 // on apps.html. Opens a centered modal that shows a pulsing loading
 // bar while a real http(s) fetch of the configured catalog URL is in
 // flight, then either:
-//   - Success: rewrites `sdmc:/switch/brewser/catalog.json` with the
+//   - Success: rewrites `sdmc:/switch/brewser/catalogue.json` with the
 //     fetched bytes, then walks the new catalog vs. each installed
 //     app's `manifest.json` on disk to produce the "New apps" /
 //     "Updates" diff lists in the modal. The page is NOT reloaded —
@@ -74,11 +74,11 @@
   console.debug('[updates-modal] wired');
 
   // Where the fetched bytes are written. Matches the on-disk path
-  // `loadCatalogGroup` reads via `Switch.readFileSync(`${appRoot}catalog.json`)`
+  // `loadCatalogGroup` reads via `Switch.readFileSync(`${appRoot}catalogue.json`)`
   // — `appRoot` is `sdmc:/switch/brewser/` on real hardware (see
   // `BREWSER_APP_ROOT` in src/browser-config.ts).
   var APP_ROOT = 'sdmc:/switch/brewser/';
-  var CATALOG_PATH = APP_ROOT + 'catalog.json';
+  var CATALOG_PATH = APP_ROOT + 'catalogue.json';
   // The three catalog groups walked when computing the diff. Mirror
   // `CATALOG_GROUPS` in src/profile/browser-toolbar.ts — keep in sync
   // if a new group is ever added on the engine side.
@@ -132,7 +132,7 @@
   }
 
   // Strip the final URL path segment to get a base directory URL with
-  // a trailing slash. The catalogue URL points at `catalog.json` (or
+  // a trailing slash. The catalogue URL points at `catalogue.json` (or
   // whatever the user named it); the per-app asset URLs live alongside
   // it, so the base is "catalog URL minus the filename". Falls back to
   // the input unchanged when there's no `/` to strip (defensive — a

@@ -118,7 +118,7 @@ code, kbd { color: #ffe2a8; }
   font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
-  background: #2a1515;
+  background: #4c2626;
   border: 1px solid #7a3338;
   border-radius: 999px;
 }
@@ -252,6 +252,7 @@ input[name="apps-tab"] { display: none; }
   display: block;
 }
 
+.apps-check-updates,
 .communityApps {
   color: #1a1206;
   background: #ffbf00;
@@ -270,6 +271,8 @@ input[name="apps-tab"] { display: none; }
   border-radius: 999px;
 }
 
+.apps-check-updates:active,
+.apps-check-updates[aria-pressed="true"],
 .communityApps:active,
 .communityApps[aria-pressed="true"] {
   background: #e0a800;
@@ -307,7 +310,7 @@ input[name="apps-tab"] { display: none; }
      localized relayout collapsing short-content cards on `:active`).
      280 px fits the meta strip + logo + title + 3-line description
      cap with margin to spare; `overflow: hidden` clips outliers. */
-  height: 240px;
+  height: 250px;
   text-align: center;
   color: #fff4d6;
   text-decoration: none;
@@ -318,8 +321,8 @@ input[name="apps-tab"] { display: none; }
 
 .app-logo {
   display: block;
-  width: 80px;
-  height: 80px;
+  width: 88px;
+  height: 88px;
   object-fit: contain;
   margin-bottom: 14px;
 }
@@ -402,7 +405,7 @@ input[name="apps-tab"] { display: none; }
 }
 
 /* Upgrade-available chip — the renderer emits this when the on-disk
-   manifest.json's version disagrees with the catalog.json's. Bright
+   manifest.json's version disagrees with the catalogue.json's. Bright
    yellow to read as "do something about this"; same palette as page
    h1s + active tab + search button. The chip text grows to fit
    "v1.0.0 [→] v1.0.1" so we widen the padding a touch and let the
@@ -738,7 +741,20 @@ ul.settings-list li:active {
 .app-modal-actions-side {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
+
+/* Install-size chip in the LEFT action slot. See main.css for full
+   rationale. Amber-tinted muted palette so it reads as metadata. */
+.app-modal-size {
+  display: none;
+  font-weight: 700;
+  font-size: 0.95em;
+  color: #c9b489;
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+.app-modal-size.app-modal-size--visible { display: inline-block; }
 
 .app-modal-btn {
   background: #3a2c10;
@@ -978,6 +994,81 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
    missing-app modal uses for its Play/Download swap. */
 .updates-modal-card--loading .updates-modal-btn-close { display: none; }
 .updates-modal-card:not(.updates-modal-card--loading) .updates-modal-btn-cancel { display: none; }
+
+/* ---- Download / Update progress modal ----------------------------
+   Amber palette — warm-bronze track + amber fill while loading, swap
+   to green on success and red on error to match the Check-for-Updates
+   modal's status colours. */
+.download-modal-card {
+  width: 520px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 26px 20px;
+}
+
+.download-modal-title {
+  flex: 0 0 auto;
+  margin: 0 0 32px;
+}
+
+.download-modal-progress {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px 0 16px;
+}
+.download-modal-card--error .download-modal-progress { display: none; }
+
+.download-modal-progress-track {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: #3a2c10;
+  overflow: hidden;
+}
+
+.download-modal-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #ffbf00;
+  width: 0%;
+}
+.download-modal-card--success .download-modal-progress-fill { background: #f2b705; }
+
+.download-modal-counter {
+  margin-top: 8px;
+  text-align: right;
+  color: #f0e0c0;
+  font-weight: 700;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-modal-error {
+  display: none;
+  padding: 16px 0 8px;
+  text-align: center;
+  color: #ff8676;
+  font-weight: 700;
+  word-break: break-word;
+}
+.download-modal-card--error .download-modal-error { display: block; }
+
+.download-modal-actions { flex: 0 0 auto; }
+
+.download-modal-status {
+  color: #f0e0c0;
+  font-weight: 700;
+  font-size: 0.95em;
+  word-break: break-word;
+}
+.download-modal-card--success .download-modal-status { color: #f2b705; }
+.download-modal-card--error .download-modal-status { color: #ff8676; }
+
+.download-modal-card--loading .download-modal-btn-close { display: none; }
+.download-modal-card:not(.download-modal-card--loading) .download-modal-btn-cancel { display: none; }
 
 /* ---- about.html ----------------------------------------------------
    Migrated from about.html's inline <style>. The 28px 48px text-heavy
@@ -1514,6 +1605,7 @@ fieldset.settings-group legend {
   /* Play / Download buttons keep their saturated green / red so the
      primary CTA stays loud against the white card. */
   a.app-modal-btn { color: #2a1d08; }
+  .app-modal-size { color: #6b5320; }
 
   /* Check-for-Updates modal */
   .updates-modal-section-title { color: #8a7340; }
@@ -1525,6 +1617,14 @@ fieldset.settings-group legend {
   .updates-modal-row-version { color: #6b5320; }
   .updates-modal-empty { color: #8a7340; }
   .updates-modal-status { color: #9a7300; }
+
+  /* Download / Update progress modal */
+  .download-modal-progress-track { background: #ecdfc0; }
+  .download-modal-counter { color: #2a1d08; }
+  .download-modal-status { color: #2a1d08; }
+  .download-modal-card--success .download-modal-status { color: #9a7300; }
+  .download-modal-card--error .download-modal-status { color: #b91c1c; }
+  .download-modal-card--error .download-modal-error { color: #b91c1c; }
 
   /* about.html */
   .about-badge {
