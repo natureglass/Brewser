@@ -1,6 +1,7 @@
 {
-  "template": "templates/dark.json",
-  "keyboard": "keyboards/dark.html",
+  "template": "templates/amber.json",
+  "keyboard": "keyboards/amber.html",
+  "brewserStyle": "styles/amber.css",
   "theme": "light",
   "toolbarHeight": 64,
   "toolbarPosition": "top",

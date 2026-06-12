@@ -547,6 +547,7 @@ export class BrowserShell {
 		await this.profile.seedBuiltinAssets();
 		await this.profile.seedTemplates();
 		await this.profile.seedKeyboards();
+		await this.profile.seedStyles();
 		// HTML-driven keyboard: parse `keyboard.html` once into a second
 		// live-DOM root. Painted below `KEYBOARD_LAYOUT.topY` when
 		// `KeyboardOverlay.open()` flips the overlay-visible flag on.

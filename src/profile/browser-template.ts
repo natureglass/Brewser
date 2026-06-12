@@ -252,6 +252,17 @@ export interface BrowserConfig {
 	 * relies on); selecting a new entry rewrites this field and the
 	 * shell re-parses + rebuilds the keyboard live root on the spot. */
 	keyboard: string;
+	/** Active visual style sheet served at `brewser://assets/main.css`.
+	 * Path is relative to the app-level root (e.g. `styles/dark.css` →
+	 * `<appRoot>styles/dark.css`); absolute schemes (`sdmc:/…`,
+	 * `romfs:/…`) pass through unchanged. Pairs with `styles.json` —
+	 * the registry the Settings page lists. The resource loader reads
+	 * the configured file and serves its bytes in place of the baked
+	 * `webprofiles/default/assets/main.css`, so every built-in page's
+	 * `<link rel="stylesheet" href="brewser://assets/main.css">` ends
+	 * up loading the picked style. Missing / unreadable falls back to
+	 * the baked default so a broken pointer can't blank the chrome. */
+	brewserStyle: string;
 	/** Where the browser chrome strip sits on screen — `'top'` (above
 	 * page content) or `'bottom'` (below it). Hoisted out of
 	 * `BrowserTemplate.toolbar.position` on 2026-06-11 so the toggle
@@ -277,6 +288,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	buttonMapping: {},
 	keyboardHeight: 400,
 	keyboard: 'keyboards/default.html',
+	brewserStyle: 'styles/dark.css',
 	toolbarPosition: 'top',
 };
 
@@ -371,6 +383,9 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			keyboard: typeof parsed?.keyboard === 'string' && parsed.keyboard.length > 0
 				? parsed.keyboard
 				: DEFAULT_CONFIG.keyboard,
+			brewserStyle: typeof parsed?.brewserStyle === 'string' && parsed.brewserStyle.length > 0
+				? parsed.brewserStyle
+				: DEFAULT_CONFIG.brewserStyle,
 			toolbarPosition: parsed?.toolbarPosition === 'top' || parsed?.toolbarPosition === 'bottom'
 				? parsed.toolbarPosition
 				: DEFAULT_CONFIG.toolbarPosition,
@@ -690,6 +705,34 @@ export function loadKeyboardRegistry(appRoot: string): TemplateEntry[] {
 		);
 	} catch (error) {
 		console.debug(`[brewser] keyboards.json parse failed: ${error}`);
+		return [];
+	}
+}
+
+/** Read `<appRoot>/styles.json` and return the validated entries in
+ * source order. Missing or malformed file → empty array. Same
+ * `{ title, path }` shape as the templates + keyboards registries;
+ * `path` is resolved against the app root unless absolute. Drives the
+ * Settings page's Style picker AND the resource loader's
+ * `brewser://assets/main.css` redirect — the active path from
+ * `config.brewserStyle` is read at request time and its bytes served
+ * in place of the baked default. */
+export function loadStyleRegistry(appRoot: string): TemplateEntry[] {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${appRoot}styles.json`);
+	} catch (_) {
+		return [];
+	}
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((e): e is TemplateEntry =>
+			!!e && typeof e.title === 'string' && typeof e.path === 'string',
+		);
+	} catch (error) {
+		console.debug(`[brewser] styles.json parse failed: ${error}`);
 		return [];
 	}
 }

@@ -5,7 +5,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
+import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
 
 /**
  * Serves the browser's built-in pages.
@@ -191,6 +191,34 @@ export class BrowserResourceLoader implements ResourceLoader {
 		}
 
 		if (classification?.kind === 'static') {
+			// Style picker: serve the file named by `config.brewserStyle`
+			// (e.g. `<appRoot>styles/dark.css`) in place of the baked
+			// `<storageRoot>assets/main.css` so every built-in page's
+			// `<link rel="stylesheet" href="brewser://assets/main.css">`
+			// loads the chosen sheet. Missing / unreadable falls back to
+			// the seeded asset path below — a broken style pointer can't
+			// blank the chrome.
+			if (classification.relPath === 'assets/main.css') {
+				const styleRel = loadConfig(this.appRoot).brewserStyle;
+				if (styleRel) {
+					const stylePath = /^(?:sdmc:|romfs:)\/\//.test(styleRel)
+						? styleRel
+						: `${this.appRoot}${styleRel}`;
+					try {
+						const styleData = Switch.readFileSync(stylePath);
+						if (styleData) {
+							return new Response(decoder.decode(styleData), {
+								status: 200,
+								headers: { 'content-type': classification.mime },
+							});
+						}
+					} catch (_) {
+						// Configured path missing — fall through to the baked
+						// `<storageRoot>assets/main.css` so the page still has
+						// SOME stylesheet.
+					}
+				}
+			}
 			try {
 				const resolvedPath = this.resolveContentPath(classification.relPath);
 				if (isPng) {
@@ -413,6 +441,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 		const engines = loadSearchEngines(this.appRoot);
 		const templates = loadTemplateRegistry(this.appRoot);
 		const keyboards = loadKeyboardRegistry(this.appRoot);
+		const styles = loadStyleRegistry(this.appRoot);
 
 		const checked = (b: boolean) => b ? ' checked' : '';
 
@@ -424,7 +453,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-template" value="${path}" data-setting="template"${checked(e.path === config.template)}>`
-					+ `<span class="settings-radio-label">${title} <span class="path">${path}</span></span>`
+					+ `<span class="settings-radio-label">${title}</span>`
 					+ '</label>'
 				);
 			}).join('');
@@ -437,7 +466,20 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-keyboard" value="${path}" data-setting="keyboard"${checked(e.path === config.keyboard)}>`
-					+ `<span class="settings-radio-label">${title} <span class="path">${path}</span></span>`
+					+ `<span class="settings-radio-label">${title}</span>`
+					+ '</label>'
+				);
+			}).join('');
+
+		const styleRows = styles.length === 0
+			? '<p class="empty">No styles registered. Edit <code>styles.json</code> to add one.</p>'
+			: styles.map((e) => {
+				const path = htmlEscape(e.path);
+				const title = htmlEscape(e.title);
+				return (
+					'<label class="settings-radio">'
+					+ `<input type="radio" name="setting-brewserStyle" value="${path}" data-setting="brewserStyle"${checked(e.path === config.brewserStyle)}>`
+					+ `<span class="settings-radio-label">${title}</span>`
 					+ '</label>'
 				);
 			}).join('');
@@ -506,6 +548,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Keyboard</legend>'
 			+ '<div class="settings-templates">' + keyboardRows + '</div>'
+			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Style</legend>'
+			+ '<div class="settings-templates">' + styleRows + '</div>'
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'

@@ -230,6 +230,21 @@ const BUILTIN_KEYBOARD_FILES: readonly string[] = [
 	'keyboards/red.html',
 ];
 
+/** Visual style sheets seeded from `romfs:/styles/` into `<appRoot>styles/`
+ * on first run, plus the `styles.json` registry at the app-level root.
+ * `config.json`'s `brewserStyle` field names the active file; the
+ * resource loader serves that file's bytes when a page requests
+ * `brewser://assets/main.css`. Same never-overwrite semantics as the
+ * page + asset + template + keyboard seeders — user edits persist,
+ * deleting a file restores it next launch. */
+const BUILTIN_STYLE_FILES: readonly string[] = [
+	'styles.json',
+	'styles/dark.css',
+	'styles/light.css',
+	'styles/amber.css',
+	'styles/neon.css',
+];
+
 export class BrowserProfile {
 	readonly name: string;
 	/** Per-profile storage: seeded pages (home.html etc.) sit flat
@@ -280,6 +295,7 @@ export class BrowserProfile {
 		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}templates/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}keyboards/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}styles/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
 		// `apps/` itself is intentionally NOT pre-created here. Apps live
 		// in arbitrary subtrees (e.g. `apps/<channel>/<reverse-dns>/...`)
@@ -330,6 +346,16 @@ export class BrowserProfile {
 		return `${this.appRoot}${rel}`;
 	}
 
+	/** Absolute SD-card path to a seeded style sheet. Resolves the
+	 * `brewserStyle` field from `config.json` (`styles/<file>.css`)
+	 * against the app-level root. Absolute schemes (`sdmc:/…`,
+	 * `romfs:/…`) pass through unchanged so a user can point at a
+	 * sheet living anywhere on disk. */
+	stylePath(rel: string): string {
+		if (/^(?:sdmc:|romfs:)\/\//.test(rel)) return rel;
+		return `${this.appRoot}${rel}`;
+	}
+
 	/** Copy the templates registry + every shipped template JSON
 	 * (`romfs:/templates.json`, `romfs:/templates/<name>.json`) into the
 	 * app-level dir if the targets are missing. Same never-overwrite
@@ -356,6 +382,28 @@ export class BrowserProfile {
 	 * a keyboard in place, deleting one restores it next launch. */
 	async seedKeyboards(): Promise<void> {
 		for (const rel of BUILTIN_KEYBOARD_FILES) {
+			const target = `${this.appRoot}${rel}`;
+			if (fileExists(target)) continue;
+			try {
+				const response = await fetch(`romfs:/${rel}`);
+				if (!response.ok) continue;
+				const text = await response.text();
+				Switch.writeFileSync(target, text);
+			} catch (error) {
+				console.debug(`[brewser] seed ${rel} failed: ${error}`);
+			}
+		}
+	}
+
+	/** Copy the styles registry + every shipped style sheet
+	 * (`romfs:/styles.json`, `romfs:/styles/<name>.css`) into the
+	 * app-level dir if the targets are missing. Same never-overwrite
+	 * semantics as the page + asset + template + keyboard seeders —
+	 * users can edit a style in place, deleting one restores it next
+	 * launch. The active sheet (per `config.json brewserStyle`) is
+	 * served by the resource loader at `brewser://assets/main.css`. */
+	async seedStyles(): Promise<void> {
+		for (const rel of BUILTIN_STYLE_FILES) {
 			const target = `${this.appRoot}${rel}`;
 			if (fileExists(target)) continue;
 			try {
