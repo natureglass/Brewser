@@ -755,6 +755,18 @@ ul.settings-list li:active {
   padding: 0 4px;
 }
 .app-modal-size.app-modal-size--visible { display: inline-block; }
+/* Insufficient free space — neon palette uses the saturated pink/red
+   warning colour that matches the destructive pill family. */
+.app-modal-size.app-modal-size--warn { color: #ff5577; }
+/* Disabled install button — muted purple so the button reads as
+   "not actionable" but stays in the neon palette. */
+.app-modal-btn[disabled],
+.app-modal-btn.app-modal-btn--disabled {
+  background: #160d2e;
+  color: #4a4a5a;
+  border-color: #160d2e;
+  cursor: default;
+}
 
 .app-modal-btn {
   background: #160d2e;
@@ -1036,8 +1048,25 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 .download-modal-card--success .download-modal-progress-fill { background: #00ff88; }
 
-.download-modal-counter {
+/* Two-up indicator row — remaining MB on the LEFT, file counter on
+   the RIGHT. See main.css for full rationale. */
+.download-modal-progress-row {
   margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.download-modal-remaining {
+  text-align: left;
+  color: #e8f7ff;
+  font-weight: 700;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-modal-counter {
   text-align: right;
   color: #e8f7ff;
   font-weight: 700;
@@ -1605,6 +1634,13 @@ fieldset.settings-group legend {
      primary CTA stays loud against the white card. */
   a.app-modal-btn { color: #15151c; }
   .app-modal-size { color: #4a4a5a; }
+  .app-modal-size.app-modal-size--warn { color: #b91c1c; }
+  .app-modal-btn[disabled],
+  .app-modal-btn.app-modal-btn--disabled {
+    background: #e6e6f0;
+    color: #9a9aa5;
+    border-color: #e6e6f0;
+  }
 
   /* Check-for-Updates modal */
   .updates-modal-section-title { color: #6a6a7a; }
@@ -1620,6 +1656,7 @@ fieldset.settings-group legend {
   /* Download / Update progress modal */
   .download-modal-progress-track { background: #e6e6f0; }
   .download-modal-counter { color: #15151c; }
+  .download-modal-remaining { color: #15151c; }
   .download-modal-status { color: #15151c; }
   .download-modal-card--success .download-modal-status { color: #00a352; }
   .download-modal-card--error .download-modal-status { color: #b91c1c; }

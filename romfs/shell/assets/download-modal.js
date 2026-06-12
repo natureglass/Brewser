@@ -31,6 +31,11 @@
   var titleEl = document.getElementById('download-modal-title');
   var statusEl = document.getElementById('download-modal-status');
   var counterEl = document.getElementById('download-modal-counter');
+  // Remaining-megabytes cell on the LEFT of the progress row. Driven
+  // by actual bytes pulled off the wire (cumulative `buf.byteLength`)
+  // subtracted from the catalog's `sizeBytes`. Optional element —
+  // `null` if a page hasn't been redeployed since the markup was added.
+  var remainingEl = document.getElementById('download-modal-remaining');
   var progressFill = document.getElementById('download-modal-progress-fill');
   var errorEl = document.getElementById('download-modal-error');
   var cancelBtn = document.getElementById('download-modal-cancel');
@@ -60,6 +65,18 @@
 
   var modalOpen = false;
   var inFlight = false;
+  // Cancellation flag. `close()` sets it so the in-flight install
+  // loop bails out at the next await boundary. Without this, tapping
+  // Cancel during a download of a multi-GB app (e.g. pvzge ~1.2 GB)
+  // leaves the loop running in the background — each iteration still
+  // does a `Switch.writeFileSync` (SYNCHRONOUS, blocks the JS thread
+  // for tens of MB) and a `setProgress` (DOM mutation that dirties
+  // the live-DOM cache → repaint). User-visible symptom: mouse
+  // cursor lags and FPS drops below 20 until every remaining file
+  // has been fetched + written. `runInstall` resets this back to
+  // false at the start of each install so a re-tapped Download
+  // after a cancel starts fresh.
+  var cancelled = false;
 
   function escapeHtml(s) {
     return String(s == null ? '' : s)
@@ -114,7 +131,18 @@
     statusEl.innerHTML = escapeHtml(message);
   }
 
-  function setProgress(done, total) {
+  // Format a megabyte figure with two decimals. Shared by the
+  // remaining-MB cell whether we're showing "Remaining" (catalog
+  // sizeBytes known) or "Downloaded" (catalog omitted size, falls
+  // back to cumulative downloaded). Two decimals matches the
+  // missing-app modal's size chip so the two figures read the same.
+  function formatMB(bytes) {
+    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return '0.00 MB';
+    var mb = bytes / (1024 * 1024);
+    return mb.toFixed(2) + ' MB';
+  }
+
+  function setProgress(done, total, downloadedBytes, totalBytes) {
     counterEl.textContent = done + '/' + total;
     var pct = total > 0 ? Math.max(0, Math.min(100, (done / total) * 100)) : 0;
     // Width as % — live-css's transition support is unreliable, so the
@@ -122,6 +150,26 @@
     // as a filling bar because the per-file delay between writes is
     // long enough that each snap is perceptible.
     progressFill.style.width = pct + '%';
+    // MB readout. Two modes:
+    //   - Catalog `sizeBytes` known (`totalBytes > 0`): show how
+    //     many MB are LEFT to pull. `Math.max(0, …)` clamps the
+    //     case where the catalog under-reports (e.g. logo
+    //     resize'd post-publish) so the cell can't read negative.
+    //   - Catalog omitted size (`totalBytes <= 0`): show how many
+    //     MB we've ALREADY downloaded — still useful progress info,
+    //     just without the target figure.
+    if (remainingEl) {
+      var dl = typeof downloadedBytes === 'number' && isFinite(downloadedBytes)
+        ? downloadedBytes : 0;
+      var tot = typeof totalBytes === 'number' && isFinite(totalBytes) && totalBytes > 0
+        ? totalBytes : 0;
+      if (tot > 0) {
+        var remaining = Math.max(0, tot - dl);
+        remainingEl.textContent = 'Remaining: ' + formatMB(remaining);
+      } else {
+        remainingEl.textContent = formatMB(dl) + ' downloaded';
+      }
+    }
   }
 
   // Recursive descendant-by-class lookup — LiveElement doesn't ship a
@@ -331,16 +379,30 @@
     var ordered = reorderEntryLast(rawList, detail.entry || 'index.html');
     var total = ordered.length;
     var done = 0;
-    setProgress(0, total);
+    // Cumulative bytes pulled off the wire. Summed from each file's
+    // actual `buf.byteLength` so the figure reflects real progress
+    // instead of an (totalBytes/totalFiles)*doneFiles estimate (which
+    // would lie for catalogs with mixed file sizes — typical for
+    // any non-trivial app where the entry HTML is tiny and the
+    // asset PNGs / audio dominate). Total comes from the catalog's
+    // `detail.sizeBytes`; 0 when the catalog omits it, in which case
+    // setProgress flips the MB cell to "X.X MB downloaded" mode.
+    var downloadedBytes = 0;
+    var totalBytes = (typeof detail.sizeBytes === 'number' && isFinite(detail.sizeBytes)
+      && detail.sizeBytes > 0) ? detail.sizeBytes : 0;
+    setProgress(0, total, 0, totalBytes);
     statusEl.innerHTML = 'Downloading files…';
     for (var i = 0; i < ordered.length; i++) {
+      // Cancel checkpoint at the top of every iteration — covers the
+      // common case where the user taps Cancel between files.
+      if (cancelled) return false;
       var entry = ordered[i];
       var rel = typeof entry === 'string' ? entry : extractPath(entry);
       if (!rel) {
         // Malformed entry — skip silently rather than failing the
         // whole install. Counter still ticks so the bar advances.
         done++;
-        setProgress(done, total);
+        setProgress(done, total, downloadedBytes, totalBytes);
         continue;
       }
       var localPath = APP_ROOT + 'apps/' + detail.group + '/' + detail.id + '/' + rel;
@@ -356,9 +418,18 @@
       try {
         resp = await globalThis.fetch(remoteUrl);
       } catch (err) {
+        // Cancelled mid-fetch — treat any fetch error as a clean
+        // bail-out so we don't surface a confusing "Network error"
+        // on the (now-hidden) modal.
+        if (cancelled) return false;
         setError('Network error fetching ' + rel + ': ' + (err && err.message ? err.message : String(err)));
         return false;
       }
+      // Cancel checkpoint AFTER the fetch — the network may have
+      // landed before the user tapped Cancel, but we still want to
+      // skip the expensive `arrayBuffer()` + `writeFileSync` that
+      // come next.
+      if (cancelled) return false;
       if (!resp.ok) {
         setError('HTTP ' + resp.status + ' fetching ' + rel);
         return false;
@@ -367,17 +438,35 @@
       try {
         buf = await resp.arrayBuffer();
       } catch (err) {
+        if (cancelled) return false;
         setError('Read failed for ' + rel + ': ' + (err && err.message ? err.message : String(err)));
         return false;
       }
+      // Cancel checkpoint BEFORE the synchronous write. This is the
+      // load-bearing one for the bug — `Switch.writeFileSync` is a
+      // synchronous syscall that blocks the JS thread for the
+      // duration of the write (tens to hundreds of ms for a multi-MB
+      // file), so even one stale write after Cancel makes the
+      // cursor stutter. Skipping it once the cancel flag is set
+      // means the loop returns within a single fetch cycle.
+      if (cancelled) return false;
       try {
         Switch.writeFileSync(localPath, buf);
       } catch (err) {
         setError('Write failed for ' + rel + ': ' + (err && err.message ? err.message : String(err)));
         return false;
       }
+      // Add the actual bytes we just downloaded to the running total
+      // BEFORE the per-tick UI update so the MB readout reflects the
+      // current file's bytes. `byteLength` is defined on ArrayBuffer
+      // (and on TypedArrays); guard against either shape having lost
+      // it (defensive — `resp.arrayBuffer()` always returns an
+      // ArrayBuffer in spec-compliant fetchers).
+      if (buf && typeof buf.byteLength === 'number') {
+        downloadedBytes += buf.byteLength;
+      }
       done++;
-      setProgress(done, total);
+      setProgress(done, total, downloadedBytes, totalBytes);
     }
     return true;
   }
@@ -388,6 +477,12 @@
   async function runInstall(detail, opts) {
     if (inFlight) return;
     inFlight = true;
+    // Reset the cancel flag so a re-tap after a cancelled install
+    // starts a fresh attempt. The flag is set by `close()` to signal
+    // the loop to bail; it's reset here on every start so a stale
+    // `true` from a prior cancel can't immediately abort the new
+    // install.
+    cancelled = false;
     try {
       var catalogueUrl = (opts && opts.catalogueUrl) || '';
       if (!catalogueUrl) {
@@ -405,9 +500,11 @@
       try {
         resp = await globalThis.fetch(artifactUrl);
       } catch (e) {
+        if (cancelled) return;
         setError('Network error fetching manifest: ' + (e && e.message ? e.message : String(e)));
         return;
       }
+      if (cancelled) return;
       if (!resp.ok) {
         setError('HTTP ' + resp.status + ' fetching artifact manifest.');
         return;
@@ -416,9 +513,11 @@
       try {
         text = await resp.text();
       } catch (e) {
+        if (cancelled) return;
         setError('Failed reading manifest: ' + (e && e.message ? e.message : String(e)));
         return;
       }
+      if (cancelled) return;
       var parsed;
       try {
         parsed = JSON.parse(text);
@@ -437,6 +536,10 @@
         return;
       }
       var ok = await downloadFiles(parsed, detail, baseUrl);
+      // Cancel during the loop → downloadFiles returns false WITHOUT
+      // calling setError. Skip both the failure surfacing AND the
+      // success path so the modal just stays closed with no message.
+      if (cancelled) return;
       if (!ok) return;
       // Refresh the grid card in place — remove missing/upgrade state,
       // update the version chip, swap the logo src.
@@ -460,8 +563,9 @@
   function open(detail, opts) {
     if (modalOpen) return;
     setLoading();
-    setProgress(0, 0);
+    setProgress(0, 0, 0, 0);
     counterEl.textContent = '';
+    if (remainingEl) remainingEl.textContent = '';
     var mode = (opts && opts.mode) || 'download';
     var name = (detail && (detail.name || detail.id)) || 'app';
     titleEl.textContent = (mode === 'update' ? 'Updating ' : 'Downloading ') + name;
@@ -480,6 +584,13 @@
 
   function close() {
     if (!modalOpen) return;
+    // Signal any in-flight install loop to bail at its next
+    // checkpoint. Without this the loop keeps fetching + writing
+    // files to disk synchronously after the modal closes, which on
+    // a multi-GB install (e.g. pvzge ~1.2 GB) blocks the JS thread
+    // for tens of seconds — visible as cursor lag + FPS drop.
+    // Always set, even when the loop isn't in flight (cheap).
+    cancelled = true;
     overlay.classList.remove('app-modal-overlay--open');
     card.classList.remove('download-modal-card--loading');
     card.classList.remove('download-modal-card--error');

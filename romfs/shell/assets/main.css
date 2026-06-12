@@ -764,6 +764,24 @@ ul.settings-list li:active {
   padding: 0 4px;
 }
 .app-modal-size.app-modal-size--visible { display: inline-block; }
+/* Insufficient free space — paint the SD chip in the same red the
+   modal uses for cancel/destructive affordances so the user notices
+   it BEFORE looking at the (now-disabled) Download button. */
+.app-modal-size.app-modal-size--warn { color: #ff8676; }
+
+/* Disabled install button — `[disabled]` is set by the JS gate AND
+   we mirror with `.app-modal-btn--disabled` because the live-DOM
+   dispatcher doesn't honour the native attr for tap suppression
+   (the JS handler reads the class to bail out). Mutes the saturated
+   red Download palette so the button reads as "not actionable" at a
+   glance; cursor flip mirrors the Settings Save disabled state. */
+.app-modal-btn[disabled],
+.app-modal-btn.app-modal-btn--disabled {
+  background: #2a3a66;
+  color: #6a7c95;
+  border-color: #2a3a66;
+  cursor: default;
+}
 
 .app-modal-btn {
   background: #1f2c4d;
@@ -1079,8 +1097,27 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 /* "5/28" counter — sits below the progress track, right-aligned so
    the numbers line up with the bar's right edge as the fill grows. */
-.download-modal-counter {
+/* Two-up indicator row below the progress track. Remaining MB on the
+   LEFT, file counter on the RIGHT — `space-between` keeps them flush
+   to the bar's edges so the numbers align visually with the track's
+   start and end. */
+.download-modal-progress-row {
   margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.download-modal-remaining {
+  text-align: left;
+  color: #cdd9ee;
+  font-weight: 700;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-modal-counter {
   text-align: right;
   color: #cdd9ee;
   font-weight: 700;

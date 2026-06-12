@@ -755,6 +755,16 @@ ul.settings-list li:active {
   padding: 0 4px;
 }
 .app-modal-size.app-modal-size--visible { display: inline-block; }
+/* Insufficient free space — see main.css for the rationale. */
+.app-modal-size.app-modal-size--warn { color: #ff8676; }
+/* Disabled install button — JS adds both `disabled` attr + class. */
+.app-modal-btn[disabled],
+.app-modal-btn.app-modal-btn--disabled {
+  background: #2a3a66;
+  color: #6a7c95;
+  border-color: #2a3a66;
+  cursor: default;
+}
 
 .app-modal-btn {
   background: #1f2c4d;
@@ -1037,8 +1047,25 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 .download-modal-card--success .download-modal-progress-fill { background: #7eda9f; }
 
-.download-modal-counter {
+/* Two-up indicator row — remaining MB on the LEFT, file counter on
+   the RIGHT. See main.css for full rationale. */
+.download-modal-progress-row {
   margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.download-modal-remaining {
+  text-align: left;
+  color: #cdd9ee;
+  font-weight: 700;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-modal-counter {
   text-align: right;
   color: #cdd9ee;
   font-weight: 700;
@@ -1606,6 +1633,13 @@ fieldset.settings-group legend {
      primary CTA stays loud against the white card. */
   a.app-modal-btn { color: #1a1a1f; }
   .app-modal-size { color: #4b5563; }
+  .app-modal-size.app-modal-size--warn { color: #b91c1c; }
+  .app-modal-btn[disabled],
+  .app-modal-btn.app-modal-btn--disabled {
+    background: #e5e7eb;
+    color: #9ca3af;
+    border-color: #e5e7eb;
+  }
 
   /* Check-for-Updates modal */
   .updates-modal-section-title { color: #6b7280; }
@@ -1621,6 +1655,7 @@ fieldset.settings-group legend {
   /* Download / Update progress modal */
   .download-modal-progress-track { background: #e5e7eb; }
   .download-modal-counter { color: #1a1a1f; }
+  .download-modal-remaining { color: #1a1a1f; }
   .download-modal-status { color: #1a1a1f; }
   .download-modal-card--success .download-modal-status { color: #15803d; }
   .download-modal-card--error .download-modal-status { color: #b91c1c; }

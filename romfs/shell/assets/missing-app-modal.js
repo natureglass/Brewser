@@ -39,6 +39,12 @@
   // (missing / installed-current). Optional element — `null` if the
   // page hasn't been redeployed since the markup was added.
   var sizeEl = document.getElementById('app-modal-size');
+  // SD-free chip — read each time the modal opens via
+  // `Switch.FileSystem.openSdmc().freeSpace()` so the figure stays
+  // fresh across installs. When the free space is less than the
+  // catalog's `sizeBytes`, the chip flips into a red warning palette
+  // AND we disable the Download / Update buttons.
+  var sdFreeEl = document.getElementById('app-modal-sd-free');
   if (!overlay || !titleEl || !bodyEl || !cancelBtn || !downloadBtn || !playBtn || !updateBtn) return;
 
   var modalOpen = false;
@@ -95,6 +101,42 @@
     if (typeof bytes !== 'number' || !isFinite(bytes) || bytes <= 0) return '';
     var mb = bytes / (1024 * 1024);
     return mb.toFixed(2) + ' MB';
+  }
+
+  // Smart byte formatter for SD card free space. Mirrors the sensors
+  // app helper: GB with one decimal when >= 1 GB, MB without decimals
+  // otherwise (`X MB` reads cleaner than `0.X GB` for small values).
+  // Switch's microSD slot can hold up to 2 TB so MB granularity is
+  // unnecessary at the top end; keep the rule simple.
+  function formatBytesSmart(bytes) {
+    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return '';
+    var gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return gb.toFixed(1) + ' GB';
+    var mb = bytes / (1024 * 1024);
+    return mb.toFixed(0) + ' MB';
+  }
+
+  // Read the sdmc free space via the nx.js FileSystem API. Returns
+  // -1 on error (Switch global missing, FS open failed, runtime
+  // type mismatch) so the caller can branch and treat "unknown" the
+  // same as "skip the disable gate" — preferable to a hard refusal
+  // when the syscall fails for any non-app reason.
+  //
+  // `freeSpace()` returns a BigInt on real hardware; cast to Number
+  // for the comparison/format math. Switch SD cards top out at 2 TB
+  // (~2.2e12 bytes), well under Number.MAX_SAFE_INTEGER, so no
+  // precision loss in the conversion.
+  function getSdFreeBytes() {
+    try {
+      if (typeof Switch === 'undefined' || !Switch || !Switch.FileSystem) return -1;
+      var fs = Switch.FileSystem.openSdmc();
+      if (!fs || typeof fs.freeSpace !== 'function') return -1;
+      var v = Number(fs.freeSpace());
+      return Number.isFinite(v) && v >= 0 ? v : -1;
+    } catch (err) {
+      console.debug('[apps] sdFree read failed: ' + (err && err.message ? err.message : String(err)));
+      return -1;
+    }
   }
 
   function show(detail) {
@@ -175,8 +217,11 @@
     // (textContent + a hide-when-empty CSS gate would work, but the
     // class flip keeps the rule self-documenting and lets the cascade
     // gate the flex gap when the chip is hidden).
+    var appSizeBytes = (typeof currentDetail.sizeBytes === 'number'
+      && isFinite(currentDetail.sizeBytes) && currentDetail.sizeBytes > 0)
+      ? currentDetail.sizeBytes : 0;
     if (sizeEl) {
-      var sizeText = formatSizeMB(currentDetail.sizeBytes);
+      var sizeText = formatSizeMB(appSizeBytes);
       if (sizeText) {
         sizeEl.textContent = sizeText;
         sizeEl.classList.add('app-modal-size--visible');
@@ -184,6 +229,51 @@
         sizeEl.textContent = '';
         sizeEl.classList.remove('app-modal-size--visible');
       }
+    }
+
+    // SD free-space chip + Download/Update gate. Read each open so the
+    // figure stays fresh after installs. `freeBytes === -1` means the
+    // syscall failed for some non-app reason (Switch global missing
+    // when running outside nx.js, FS open errored, etc.) — treat that
+    // as "unknown" and skip the disable gate rather than block the
+    // user on a transient failure. When the figure IS known but is
+    // less than `appSizeBytes`, paint the chip red and disable both
+    // install paths (right-side Download + left-side Update).
+    var freeBytes = getSdFreeBytes();
+    var insufficient = (appSizeBytes > 0 && freeBytes >= 0 && freeBytes < appSizeBytes);
+    if (sdFreeEl) {
+      if (freeBytes >= 0) {
+        sdFreeEl.textContent = 'Free: ' + formatBytesSmart(freeBytes);
+        sdFreeEl.classList.add('app-modal-size--visible');
+        if (insufficient) {
+          sdFreeEl.classList.add('app-modal-size--warn');
+        } else {
+          sdFreeEl.classList.remove('app-modal-size--warn');
+        }
+      } else {
+        sdFreeEl.textContent = '';
+        sdFreeEl.classList.remove('app-modal-size--visible');
+        sdFreeEl.classList.remove('app-modal-size--warn');
+      }
+    }
+    // Disable the install buttons via the `disabled` attribute (the
+    // CSS rule `[disabled]` paints them in a muted palette) AND drop
+    // them off the keyboard-tap path by mirroring with a class so the
+    // click handler can branch without re-reading the attribute every
+    // tap. `disabled` on a `<button>` already suppresses the native
+    // click event in real browsers, but the live-DOM dispatcher
+    // doesn't honour that gate today — the JS check below is the
+    // belt-and-suspenders.
+    if (insufficient) {
+      downloadBtn.setAttribute('disabled', '');
+      updateBtn.setAttribute('disabled', '');
+      downloadBtn.classList.add('app-modal-btn--disabled');
+      updateBtn.classList.add('app-modal-btn--disabled');
+    } else {
+      downloadBtn.removeAttribute('disabled');
+      updateBtn.removeAttribute('disabled');
+      downloadBtn.classList.remove('app-modal-btn--disabled');
+      updateBtn.classList.remove('app-modal-btn--disabled');
     }
 
     var hasUpgrade = !!(currentDetail.installedVersion && currentDetail.version);
@@ -256,6 +346,14 @@
       return;
     }
     var btn = mode === 'update' ? updateBtn : downloadBtn;
+    // Respect the insufficient-SD-space gate. The live-DOM dispatcher
+    // doesn't honour the native `disabled` attribute, so the click
+    // still reaches here — silently swallow when the button is
+    // disabled rather than fire the download with an empty drive.
+    if (btn && btn.classList && btn.classList.contains('app-modal-btn--disabled')) {
+      console.debug('[apps] ' + mode + ' tap ignored — insufficient SD free space');
+      return;
+    }
     var catalogueUrl = (btn && btn.getAttribute && btn.getAttribute('data-catalogue-url')) || '';
     var artifactsUrl = (btn && btn.getAttribute && btn.getAttribute('data-artifacts-url')) || '';
     close();
