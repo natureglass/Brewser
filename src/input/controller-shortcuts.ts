@@ -201,7 +201,7 @@ export function setFullscreenVideo(el: LiveElement | null): void {
 }
 
 /** Chrome-strip y-range in screen coordinates. Updated by the shell
- * whenever the template is loaded so taps in either toolbar position
+ * whenever the toolbar is loaded so taps in either toolbar position
  * (top OR bottom) route to the same chrome-button branches. */
 let chromeY0 = 0;
 let chromeY1 = 56;

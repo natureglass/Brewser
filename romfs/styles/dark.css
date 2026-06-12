@@ -601,7 +601,7 @@ ul.settings-list li:active {
    Shared by apps.html (full catalog) and home.html (Featured Apps).
    The catalog loader stamps `data-missing="true" data-app-detail="…"`
    on every card whose `apps/<group>/<id>/<entry>` file isn't on disk
-   (see browser-template.ts `loadCatalogGroup`). The page-side script at
+   (see browser-toolbar.ts `loadCatalogGroup`). The page-side script at
    `brewser://assets/missing-app-modal.js` intercepts taps on those
    cards and toggles `.app-modal-overlay--open` to show the centered
    detail panel.

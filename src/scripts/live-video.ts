@@ -129,7 +129,7 @@ const VIDEO_BITMAP_REUSE_BETWEEN_FRAMES = true;
 // the close+immediate-realloc against cairo is the bug.
 const VIDEO_BITMAP_EXPLICIT_CLOSE = true;
 // NVTEGRA hw-accel toggle. Driven by `videoNVTEGRA` in the profile's
-// config.json (see browser-template.ts BrowserConfig). The shell calls
+// config.json (see browser-toolbar.ts BrowserConfig). The shell calls
 // `setVideoTryHwAccel(config.videoNVTEGRA)` at startup; live-video.ts
 // then passes that value as `hwAccel` to new VideoDecoder instances.
 // When true and Citron returns `decoder.error` from the hw decoder,

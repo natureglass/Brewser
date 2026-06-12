@@ -5,7 +5,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadTemplateRegistry, resolveSearchEngine } from '../profile/browser-template.js';
+import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine } from '../profile/browser-toolbar.js';
 
 /**
  * Serves the browser's built-in pages.
@@ -18,7 +18,7 @@ import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKey
  *   - Directory / page URLs: `brewser://X/Y/` → tries
  *     `pages/X/Y.html` first, then `pages/X/Y/index.html`. Content-type
  *     is always `text/html`. Custom tags (`<browser-bookmarks>`,
- *     `<browser-history>`, `<browser-templates>`,
+ *     `<browser-history>`, `<browser-toolbars>`,
  *     `<browser-featured>` / `<browser-community>` /
  *     `<browser-experimental>`, `<browser-search>`) are expanded
  *     server-side before the response is returned.
@@ -35,7 +35,7 @@ import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKey
  * substitutes a rendered list / form:
  *   `<browser-bookmarks limit="N">` → most-recently-added bookmarks
  *   `<browser-history   limit="N">` → most-recent visits
- *   `<browser-templates>`           → entries from `templates.json`
+ *   `<browser-toolbars>`            → entries from `toolbars.json`
  *   `<browser-featured>`            → cards from `catalog.json`'s `featured`
  *   `<browser-community>`           → cards from `catalog.json`'s `community`
  *   `<browser-experimental>`        → cards from `catalog.json`'s `experimental`
@@ -140,7 +140,7 @@ const UPGRADE_ARROW_SVG =
 export interface BrowserResourceLoaderOptions {
 	/** Per-profile root for `pages/` lookups. */
 	storageRoot: string;
-	/** App-level root for `loadCatalogGroup` / `loadConfig` / `loadSearchEngines` / `loadTemplateRegistry`. */
+	/** App-level root for `loadCatalogGroup` / `loadConfig` / `loadSearchEngines` / `loadToolbarRegistry`. */
 	appRoot: string;
 	bookmarksStore: BookmarksStore;
 	historyStore: HistoryStore;
@@ -277,7 +277,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 	}
 
 	/** Replace every `<browser-bookmarks>` / `<browser-history>` /
-	 * `<browser-templates>` tag with a rendered `<ul>` (or an
+	 * `<browser-toolbars>` tag with a rendered `<ul>` (or an
 	 * empty-state `<p>`). Pages without any of the tags fall through
 	 * unchanged. */
 	private expandCustomTags(html: string): string {
@@ -291,8 +291,8 @@ export class BrowserResourceLoader implements ResourceLoader {
 			(_match, attrs: string | undefined) => this.renderHistory(parseLimit(attrs) ?? 50),
 		);
 		out = out.replace(
-			/<browser-templates(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-templates\s*>)?/gi,
-			() => this.renderTemplates(),
+			/<browser-toolbars(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-toolbars\s*>)?/gi,
+			() => this.renderToolbars(),
 		);
 		out = out.replace(
 			/<browser-keyboards(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-keyboards\s*>)?/gi,
@@ -376,17 +376,17 @@ export class BrowserResourceLoader implements ResourceLoader {
 		return renderList(list);
 	}
 
-	/** Render the templates registry as radio-style rows. Each row is
+	/** Render the toolbars registry as radio-style rows. Each row is
 	 * a `<button>` with a circle indicator on the left + the
-	 * title/path label on the right. The currently-selected template
+	 * title/path label on the right. The currently-selected toolbar
 	 * (per `config.json`) carries `.active` (filled inner dot) and has
 	 * no `data-action`, so taps don't fire. Every other row carries
-	 * `<button data-action="select-template:<path>">` whose tap the
+	 * `<button data-action="select-toolbar:<path>">` whose tap the
 	 * shell intercepts to rewrite `config.json` and reload. */
-	private renderTemplates(): string {
-		const entries = loadTemplateRegistry(this.appRoot);
+	private renderToolbars(): string {
+		const entries = loadToolbarRegistry(this.appRoot);
 		if (entries.length === 0) {
-			return '<p class="empty">No templates registered. Edit <code>templates.json</code> to add one.</p>';
+			return '<p class="empty">No toolbars registered. Edit <code>toolbars.json</code> to add one.</p>';
 		}
 		const config = loadConfig(this.appRoot);
 		const indicator = '<span class="radio-indicator"><span class="radio-dot"></span></span>';
@@ -394,15 +394,15 @@ export class BrowserResourceLoader implements ResourceLoader {
 			const title = htmlEscape(e.title);
 			const path = htmlEscape(e.path);
 			const label = `<span class="template-label">${title} · <span class="path">${path}</span></span>`;
-			if (e.path === config.template) {
+			if (e.path === config.toolbar) {
 				return `<button class="template-row active" type="button">${indicator}${label}</button>`;
 			}
-			return `<button class="template-row" type="button" data-action="select-template:${path}">${indicator}${label}</button>`;
+			return `<button class="template-row" type="button" data-action="select-toolbar:${path}">${indicator}${label}</button>`;
 		}).join('');
 	}
 
 	/** Render the keyboards registry as radio-style rows. Mirrors
-	 * `renderTemplates` — the currently-selected keyboard (per
+	 * `renderToolbars` — the currently-selected keyboard (per
 	 * `config.json`'s `keyboard` field) carries `.active` and has no
 	 * `data-action` so taps are inert; every other row carries
 	 * `<button data-action="select-keyboard:<path>">` whose tap the
@@ -439,20 +439,20 @@ export class BrowserResourceLoader implements ResourceLoader {
 	private renderSettings(): string {
 		const config = loadConfig(this.appRoot);
 		const engines = loadSearchEngines(this.appRoot);
-		const templates = loadTemplateRegistry(this.appRoot);
+		const toolbars = loadToolbarRegistry(this.appRoot);
 		const keyboards = loadKeyboardRegistry(this.appRoot);
 		const styles = loadStyleRegistry(this.appRoot);
 
 		const checked = (b: boolean) => b ? ' checked' : '';
 
-		const templateRows = templates.length === 0
-			? '<p class="empty">No templates registered. Edit <code>templates.json</code> to add one.</p>'
-			: templates.map((e) => {
+		const toolbarRows = toolbars.length === 0
+			? '<p class="empty">No toolbars registered. Edit <code>toolbars.json</code> to add one.</p>'
+			: toolbars.map((e) => {
 				const path = htmlEscape(e.path);
 				const title = htmlEscape(e.title);
 				return (
 					'<label class="settings-radio">'
-					+ `<input type="radio" name="setting-template" value="${path}" data-setting="template"${checked(e.path === config.template)}>`
+					+ `<input type="radio" name="setting-toolbar" value="${path}" data-setting="toolbar"${checked(e.path === config.toolbar)}>`
 					+ `<span class="settings-radio-label">${title}</span>`
 					+ '</label>'
 				);
@@ -509,7 +509,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// handler cycles options on tap (see comment "M2.5 popup overlay"
 		// in live-form.ts paintSelect), which is unintuitive for a
 		// "pick one" preference. Radios share the same widget shape as
-		// the Template list so the visual language stays consistent. */
+		// the Toolbar list so the visual language stays consistent. */
 		const searchRows = engines.length === 0
 			? `<p class="empty">No search engines registered. Edit <code>search_engines.json</code> to add one.</p>`
 			: engines.map((e) => {
@@ -542,8 +542,8 @@ export class BrowserResourceLoader implements ResourceLoader {
 			'<div class="settings-form">'
 			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
-			+ '<legend>Template</legend>'
-			+ '<div class="settings-templates">' + templateRows + '</div>'
+			+ '<legend>Toolbar</legend>'
+			+ '<div class="settings-templates">' + toolbarRows + '</div>'
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Keyboard</legend>'

@@ -1,7 +1,7 @@
 import { nxScreen } from '@switch-web/runtime';
 import { CHROME_LAYOUT } from './browser-config.js';
-import type { BrowserTemplate, ToolbarPosition } from './profile/browser-template.js';
-import { DEFAULT_CONFIG, DEFAULT_TEMPLATE } from './profile/browser-template.js';
+import type { BrowserToolbar, ToolbarPosition } from './profile/browser-toolbar.js';
+import { DEFAULT_CONFIG, DEFAULT_TOOLBAR } from './profile/browser-toolbar.js';
 import type { ChromeIcons } from './resources/chrome-icons.js';
 
 const PADDING_X = 24;
@@ -33,7 +33,7 @@ export interface AddressBarState {
  * Browser chrome.
  *
  * Colours, heights, icon paths, hint text, and toolbar position
- * (`'top'` | `'bottom'`) all come from `BrowserTemplate`. The
+ * (`'top'` | `'bottom'`) all come from `BrowserToolbar`. The
  * `renderAddressBar` painter translates the canvas context so each
  * draw helper can use local `0..chromeHeight` coords regardless of
  * where the toolbar actually sits on screen.
@@ -44,7 +44,7 @@ export interface AddressBarState {
  */
 export class BrowserUI {
 	private icons: ChromeIcons | null = null;
-	private template: BrowserTemplate = DEFAULT_TEMPLATE;
+	private toolbar: BrowserToolbar = DEFAULT_TOOLBAR;
 	private toolbarPosition: ToolbarPosition = DEFAULT_CONFIG.toolbarPosition;
 	private toolbarBackground: Image | null = null;
 
@@ -52,8 +52,8 @@ export class BrowserUI {
 		this.icons = icons;
 	}
 
-	setTemplate(template: BrowserTemplate): void {
-		this.template = template;
+	setToolbar(toolbar: BrowserToolbar): void {
+		this.toolbar = toolbar;
 	}
 
 	/** Push the active `config.json` `toolbarPosition` onto the UI.
@@ -67,7 +67,7 @@ export class BrowserUI {
 	/** Background image for the toolbar strip. `null` (or never set)
 	 * means draw the bg colour alone. The image is stretched to fit
 	 * the toolbar rect so authors can size it to match the strip
-	 * width / height in their template. */
+	 * width / height in their toolbar. */
 	setToolbarBackground(image: Image | null): void {
 		this.toolbarBackground = image;
 	}
@@ -75,7 +75,7 @@ export class BrowserUI {
 	renderAddressBar(state: AddressBarState, hint?: string): void {
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
-		const tb = this.template.toolbar;
+		const tb = this.toolbar.toolbar;
 		const chromeHeight = tb.height;
 		const chromeY = this.toolbarPosition === 'bottom' ? canvas.height - chromeHeight : 0;
 		const hintText = hint ?? tb.hint;
@@ -89,7 +89,7 @@ export class BrowserUI {
 
 		// Strip background. The bg fill is always painted first as a
 		// fallback so any transparent area of the image still gets a
-		// solid colour. The optional template image (stretched to the
+		// solid colour. The optional toolbar image (stretched to the
 		// strip rect) sits on top, then the 2px accent line lives on
 		// the edge facing the content area (bottom for top toolbar,
 		// top for bottom toolbar).
@@ -155,7 +155,7 @@ export class BrowserUI {
 		// Right-aligned hint, sitting LEFT of the network indicator so
 		// hint + circle + Settings all stay visible. Measured first so
 		// the URL knows how much room it has. Skip the draw entirely
-		// when the template provides no hint string so the URL bar can
+		// when the toolbar provides no hint string so the URL bar can
 		// claim the full strip.
 		const urlRightLimit = reachable !== undefined
 			? (indicatorRightEdge - 2 * indicatorRadius - 12)
@@ -193,7 +193,7 @@ function drawIconOrGlyph(
 	icon: Image | null,
 	glyph: string,
 	active: boolean,
-	tb: BrowserTemplate['toolbar'],
+	tb: BrowserToolbar['toolbar'],
 ): void {
 	if (icon) {
 		drawIconCentered(ctx, icon, x, width, chromeHeight, active ? 1 : 0.32);
@@ -217,7 +217,7 @@ function drawIconOrLabel(
 	icon: Image | null,
 	label: string,
 	active: boolean,
-	tb: BrowserTemplate['toolbar'],
+	tb: BrowserToolbar['toolbar'],
 ): void {
 	if (icon) {
 		drawIconCentered(ctx, icon, x, width, chromeHeight, active ? 1 : 0.32);
@@ -240,7 +240,7 @@ function drawStarButton(
 	chromeHeight: number,
 	icon: Image | null,
 	on: boolean,
-	tb: BrowserTemplate['toolbar'],
+	tb: BrowserToolbar['toolbar'],
 ): void {
 	if (icon) {
 		drawIconCentered(ctx, icon, x, width, chromeHeight, 1);

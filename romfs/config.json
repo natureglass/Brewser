@@ -1,5 +1,5 @@
 {
-  "template": "templates/amber.json",
+  "toolbar": "toolbars/amber.json",
   "keyboard": "keyboards/amber.html",
   "brewserStyle": "styles/amber.css",
   "theme": "light",
@@ -16,6 +16,8 @@
   "keyboardHeight": 300,
   "navDebug": false,
   "swbImgDebug": false,
+  "catalogue": "https://raw.githubusercontent.com/natureglass/Brewser-apps/refs/heads/main/catalog.json",
+  "artifacts": "https://api.github.com/repos/natureglass/Brewser-apps/contents/artifacts",
   "buttonMapping": {
     "leftClick": "A",
     "rightClick": "B",

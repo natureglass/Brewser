@@ -1,6 +1,6 @@
 /**
  * Lazy loader for the toolbar icon set. Paths come from
- * `BrowserTemplate.icons` (resolved against the profile root by the
+ * `BrowserToolbar.icons` (resolved against the profile root by the
  * shell) so a user can swap or relocate icons by editing
  * `template.json`. Each PNG becomes an `Image` the chrome paint code
  * blits with `ctx.drawImage`.

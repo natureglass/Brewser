@@ -22,8 +22,8 @@ export const BROWSER_INTERNAL_ORIGIN = 'brewser://internal/';
 export const DEFAULT_PROFILE_ROOT = 'sdmc:/switch/brewser/';
 
 /** App-level root on the SD card. Holds data shared across profiles:
- * `config.json`, `templates.json`, `catalog.json`, `search_engines.json`,
- * `bookmarks.json`, `history.jsonl`, plus `templates/`, `logs/`,
+ * `config.json`, `toolbars.json`, `catalog.json`, `search_engines.json`,
+ * `bookmarks.json`, `history.jsonl`, plus `toolbars/`, `logs/`,
  * `screenshots/`. Lives one level above DEFAULT_PROFILE_ROOT. */
 export const BREWSER_APP_ROOT = 'sdmc:/switch/brewser/';
 
@@ -87,7 +87,7 @@ export const CHROME_LAYOUT = {
 	urlX: 296,
 	/** Settings button — anchored to the right edge of the chrome strip.
 	 * Opens `brewser://settings/` (settings.html); icon is
-	 * `template.icons.settings`. */
+	 * `toolbar.icons.settings`. */
 	settingsX: DEFAULT_CANVAS_WIDTH - CHROME_RIGHT_PADDING - SETTINGS_BUTTON_WIDTH,
 	settingsWidth: SETTINGS_BUTTON_WIDTH,
 } as const;

@@ -39,7 +39,7 @@ export class BrowserProfile {
 	 * at the root, plus `assets/` and per-origin dirs. */
 	readonly storageRoot: string;
 	/** App-level storage shared across profiles: `config.json`, the
-	 * other top-level JSON config files, `templates/`, `logs/`,
+	 * other top-level JSON config files, `toolbars/`, `logs/`,
 	 * `screenshots/`, `history.jsonl`, `bookmarks.json`. */
 	readonly appRoot: string;
 
@@ -81,7 +81,7 @@ export class BrowserProfile {
 		// App-level dirs shared across profiles.
 		try { Switch.mkdirSync(this.appRoot); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}templates/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}toolbars/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}keyboards/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}styles/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
@@ -119,12 +119,12 @@ export class BrowserProfile {
 		return `${this.storageRoot}assets/${filename}`;
 	}
 
-	/** Absolute SD-card path to the (app-level) `templates.json` — the
-	 * registry of available design templates the shell reads at launch.
-	 * The active template lives at one of the paths the registry
-	 * references (typically `templates/<name>.json`). */
-	templatesRegistryPath(): string {
-		return `${this.appRoot}templates.json`;
+	/** Absolute SD-card path to the (app-level) `toolbars.json` — the
+	 * registry of available toolbar designs the shell reads at launch.
+	 * The active toolbar lives at one of the paths the registry
+	 * references (typically `toolbars/<name>.json`). */
+	toolbarsRegistryPath(): string {
+		return `${this.appRoot}toolbars.json`;
 	}
 
 	/** Absolute SD-card path to a seeded keyboard panel file. Resolves
@@ -175,7 +175,7 @@ export class BrowserProfile {
 	 * — which IS the per-profile `storageRoot`, since `DEFAULT_PROFILE_ROOT`
 	 * collapsed to match `BREWSER_APP_ROOT` 2026-06-12 (see browser-config.ts).
 	 * So one walker covers both the per-profile chrome pages AND the
-	 * app-level templates / keyboards / styles / dev fixtures in one pass.
+	 * app-level toolbars / keyboards / styles / dev fixtures in one pass.
 	 */
 	async seedRomfs(): Promise<void> {
 		await this.seedRomfsDir('');

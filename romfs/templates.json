@@ -1,6 +1,0 @@
-[
-  { "title": "Dark", "path": "templates/dark.json" },
-  { "title": "Light", "path": "templates/light.json" },
-  { "title": "Amber", "path": "templates/amber.json" },
-  { "title": "Neon", "path": "templates/neon.json" }
-]

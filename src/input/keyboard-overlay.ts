@@ -1,4 +1,4 @@
-import { type BrowserTemplate } from '../profile/browser-template.js';
+import { type BrowserToolbar } from '../profile/browser-toolbar.js';
 import { COMBO_BUTTONS } from '../browser-config.js';
 import {
 	getKeyboardLiveRoot,
@@ -291,11 +291,11 @@ function applyLetterCase(letterKeys: LiveElement[], upper: boolean): void {
  *     external `__brewserKeyboardCancel`) resolves with `null`.
  */
 export class KeyboardOverlay {
-	private template: BrowserTemplate | null = null;
+	private toolbar: BrowserToolbar | null = null;
 	private panelBackground: Image | null = null;
 
-	setTemplate(template: BrowserTemplate): void {
-		this.template = template;
+	setToolbar(toolbar: BrowserToolbar): void {
+		this.toolbar = toolbar;
 	}
 
 	setPanelBackground(image: Image | null): void {
@@ -306,7 +306,7 @@ export class KeyboardOverlay {
 		initial = '',
 		callbacks: KeyboardScrollCallbacks = {},
 	): Promise<string | null> {
-		void this.template;
+		void this.toolbar;
 		void this.panelBackground;
 
 		const root = getKeyboardLiveRoot();

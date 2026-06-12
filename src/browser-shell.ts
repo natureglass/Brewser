@@ -115,7 +115,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from './network/network-probe.js';
 import { BrowserPermissionPolicy } from './permissions/browser-permission-policy.js';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_CONFIG, DEFAULT_TEMPLATE, loadConfig, loadTemplate, resolveSearchEngine, type BrowserTemplate, type ToolbarPosition } from './profile/browser-template.js';
+import { DEFAULT_CONFIG, DEFAULT_TOOLBAR, LEGACY_TOOLBAR_CONFIG_KEY, loadConfig, loadToolbar, resolveSearchEngine, type BrowserToolbar, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -165,14 +165,14 @@ export class BrowserShell {
 	 * keeping dev test artifacts out of the real user storage roots. */
 	getCurrentPageUrl(): string { return this.currentPageUrl; }
 	private mode: BrowserMode = 'normal';
-	private template: BrowserTemplate = DEFAULT_TEMPLATE;
+	private toolbar: BrowserToolbar = DEFAULT_TOOLBAR;
 	/** Active toolbar position. Sourced from `config.json` (not the
-	 * template) since 2026-06-11 so the user can flip it from Settings
+	 * toolbar design) since 2026-06-11 so the user can flip it from Settings
 	 * without re-skinning. Pushed into BrowserUI on every change so
 	 * the next paint flips chrome to the new edge. */
 	private toolbarPosition: ToolbarPosition = DEFAULT_CONFIG.toolbarPosition;
-	/** Last-applied resolved chrome icon paths. Used to gate template-
-	 * change icon reloads: when the new template's icon paths match the
+	/** Last-applied resolved chrome icon paths. Used to gate toolbar-
+	 * change icon reloads: when the new toolbar's icon paths match the
 	 * already-loaded set, we keep the existing `Image` references on
 	 * BrowserUI rather than fetching the same URLs again. Re-fetching
 	 * the same icon URL during a Settings-page Save flow was painting
@@ -184,7 +184,7 @@ export class BrowserShell {
 	private lastResolvedIconPaths: string | null = null;
 	/** Last-applied resolved toolbar/keyboard background image paths.
 	 * Same race-avoidance rationale as `lastResolvedIconPaths` — when
-	 * the new template's image paths match the already-applied ones,
+	 * the new toolbar's image paths match the already-applied ones,
 	 * skip the re-fetch. */
 	private lastResolvedBackgroundPaths: string | null = null;
 	/** Wall-clock duration (ms) of the most recent content present.
@@ -446,7 +446,7 @@ export class BrowserShell {
 					// otherwise the permission policy (which only allows
 					// http(s)/blob/data) 403s every local-scheme `Image.src`
 					// inside a WebView session, e.g. when the user picks a
-					// new template on the Settings page and the shell calls
+					// new toolbar on the Settings page and the shell calls
 					// `refreshChromeIcons` against the new icon paths. The
 					// captured native fetch reads the bytes straight off the
 					// SD card / romfs partition via `fetchFile`, which is
@@ -551,7 +551,7 @@ export class BrowserShell {
 		setTouchScrollHandler((delta) => this.handleScroll(delta));
 
 		await this.paintBootSplash();
-		// Copy missing built-in pages, toolbar icons, and template.json
+		// Copy missing built-in pages, toolbar icons, and toolbars.json
 		// from romfs into the profile dir. Cheap on every launch
 		// (existence check + skip for files that already exist) so the
 		// user's edits survive but a deleted file is restored next run.
@@ -565,7 +565,7 @@ export class BrowserShell {
 		// arrow keeps `this` bound to the shell.
 		setKeyboardRepaintDriver(() => this.repaintContent());
 		// Apply shell-level preferences from config.json. Done before
-		// loadTemplate so any future config-driven template overrides
+		// loadToolbar so any future config-driven toolbar overrides
 		// can layer on top, and before scanForAutoplayVideos runs (it
 		// reads videoTryHwAccel via openDecoder).
 		const shellConfig = loadConfig(this.profile.appRoot);
@@ -584,20 +584,20 @@ export class BrowserShell {
 		// Anchor at canvas height so the panel sits flush at the bottom
 		// regardless of any future canvas-size change.
 		setKeyboardTopY(nxScreen().height - shellConfig.keyboardHeight);
-		// Load the design template + push it into the UI, keyboard,
+		// Load the toolbar design + push it into the UI, keyboard,
 		// and touch dispatcher so the very first chrome paint already
 		// reflects the user's customisations.
-		this.template = loadTemplate(this.profile.appRoot);
-		this.ui.setTemplate(this.template);
-		this.keyboard.setTemplate(this.template);
-		// Toolbar position lives in `config.json` (not the template)
+		this.toolbar = loadToolbar(this.profile.appRoot);
+		this.ui.setToolbar(this.toolbar);
+		this.keyboard.setToolbar(this.toolbar);
+		// Toolbar position lives in `config.json` (not the toolbar design)
 		// since 2026-06-11 — cache it on the shell + push into the UI
 		// so chrome paints on the correct edge from the first frame.
 		this.toolbarPosition = shellConfig.toolbarPosition;
 		this.ui.setToolbarPosition(this.toolbarPosition);
 		this.publishChromeRegion();
 		await this.refreshChromeIcons();
-		await this.refreshTemplateBackgrounds();
+		await this.refreshToolbarBackgrounds();
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
 		// restricted memory that the live-DOM content cache's
@@ -1064,7 +1064,7 @@ export class BrowserShell {
 	 * below chrome), 0 when the toolbar is at the bottom.
 	 */
 	private layoutTopInset(): number {
-		return this.toolbarPosition === 'top' ? this.template.toolbar.height : 0;
+		return this.toolbarPosition === 'top' ? this.toolbar.toolbar.height : 0;
 	}
 
 	/**
@@ -1075,7 +1075,7 @@ export class BrowserShell {
 	 */
 	private maxScroll(): number {
 		const canvas = nxScreen();
-		const chromeHeight = this.template.toolbar.height;
+		const chromeHeight = this.toolbar.toolbar.height;
 		const visibleHeight = this.mode === 'normal' ? canvas.height - chromeHeight : canvas.height;
 		const contentBottom = getLiveContentBottom();
 		if (contentBottom <= 0) return 0;
@@ -1176,7 +1176,7 @@ export class BrowserShell {
 	 * Why the `resetLiveOverlayCache()` call: `resetLiveRoot()` resets
 	 * `liveTreeVersion` to 0. If the new page's populate produces the
 	 * same number of bumps as the prior page's last paint (e.g. two
-	 * loads of the Settings page wrapping the same templates),
+	 * loads of the Settings page wrapping the same toolbars),
 	 * `paintLiveOverlay`'s dirty check would say "cache valid" and skip
 	 * the rebuild — but the cache's WeakMap is keyed by old (now-
 	 * discarded) LiveElement instances, so the new tree has no layout
@@ -1221,7 +1221,7 @@ export class BrowserShell {
 		// new basis is what every `vh`/`vw` resolves against.
 		{
 			const screen = nxScreen();
-			const chromeH = this.template.toolbar.height;
+			const chromeH = this.toolbar.toolbar.height;
 			setCssViewport(screen.width, Math.max(1, screen.height - chromeH));
 		}
 		const byParsed = populateLiveRoot(tree);
@@ -1299,12 +1299,12 @@ export class BrowserShell {
 		if (pendingFullscreen) pendingFullscreen();
 
 		// Page padding is the page's responsibility — the engine no longer
-		// injects template-defined body insets. The previous behaviour
-		// (applying `template.page.topPadding` / `sidePadding` when the
+		// injects toolbar-defined body insets. The previous behaviour
+		// (applying `toolbar.page.topPadding` / `sidePadding` when the
 		// page hadn't set explicit padding) silently overrode page CSS
 		// that used the `padding:` shorthand, because the check inspected
 		// only the long-hand inline `style.paddingLeft` etc. The
-		// `topPadding` / `sidePadding` fields remain in the template
+		// `topPadding` / `sidePadding` fields remain in the toolbar
 		// schema for back-compat but are unused; pages are expected to
 		// set their own `<body>` padding.
 
@@ -1339,7 +1339,7 @@ export class BrowserShell {
 	 * paints over it. For `theme: light` (the web's expected default)
 	 * we use white so external pages without an explicit `<body>`
 	 * background look like they do in every other browser. For
-	 * `theme: dark` we fall back to the template's `page.background`
+	 * `theme: dark` we fall back to the toolbar's `page.background`
 	 * so the user's dark-themed chrome and content stay visually
 	 * continuous. The body's own background, when set, always paints
 	 * on top — so internal pages that explicitly set their own bg
@@ -1347,7 +1347,7 @@ export class BrowserShell {
 	 */
 	private effectivePageBackground(): string {
 		if (this.colorScheme === 'light') return '#ffffff';
-		return this.template.page.background;
+		return this.toolbar.page.background;
 	}
 
 	/**
@@ -1417,7 +1417,7 @@ export class BrowserShell {
 		// so both insets become 0 and the flash covers everything,
 		// which is the right behaviour for video / fullscreen-canvas /
 		// fullscreen-page shots.
-		const chromeHeight = this.template.toolbar.height;
+		const chromeHeight = this.toolbar.toolbar.height;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const topInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const bottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
@@ -1505,7 +1505,7 @@ export class BrowserShell {
 			);
 			return;
 		}
-		const chromeHeight = this.template.toolbar.height;
+		const chromeHeight = this.toolbar.toolbar.height;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
@@ -1770,7 +1770,7 @@ export class BrowserShell {
 		canvasWidth: number,
 		canvasHeight: number,
 	): void {
-		const chromeHeight = this.template.toolbar.height;
+		const chromeHeight = this.toolbar.toolbar.height;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
@@ -1816,15 +1816,15 @@ export class BrowserShell {
 	 * action families are recognised:
 	 *   - bare strings (`fullscreen-page`, `fullscreen-canvas`,
 	 *     `clear-history`) trigger shell-level handlers.
-	 *   - `select-template:<path>` (from the Settings page's
-	 *     `<browser-templates>` expansion) rewrites `config.json`'s
-	 *     `template` field and reloads.
+	 *   - `select-toolbar:<path>` (from the Settings page's
+	 *     `<browser-toolbars>` expansion) rewrites `config.json`'s
+	 *     `toolbar` field and reloads.
 	 * Unknown actions are silently dropped so a malformed
 	 * `data-action` doesn't break the page.
 	 */
 	private async dispatchButtonAction(action: string): Promise<void> {
-		if (action.startsWith('select-template:')) {
-			await this.selectTemplate(action.slice('select-template:'.length));
+		if (action.startsWith('select-toolbar:')) {
+			await this.selectToolbar(action.slice('select-toolbar:'.length));
 			return;
 		}
 		if (action.startsWith('select-keyboard:')) {
@@ -1904,17 +1904,21 @@ export class BrowserShell {
 	}
 
 	/**
-	 * Settings-page template switcher. Writes the new template path
-	 * into `<profile>/config.json`, re-loads the template + icons,
+	 * Settings-page toolbar switcher. Writes the new toolbar path
+	 * into `<profile>/config.json`, re-loads the toolbar + icons,
 	 * pushes the new design into the UI / keyboard / chrome region,
 	 * then reloads the current page so the chrome AND content paint
 	 * with the new colours, and the Settings page's
-	 * `<browser-templates>` expansion picks up the new active row.
+	 * `<browser-toolbars>` expansion picks up the new active row.
+	 *
+	 * `LEGACY_TOOLBAR_CONFIG_KEY` is scrubbed from the merged object so
+	 * a pre-rename config never ends up with both `toolbar` and
+	 * `template` keys pointing at different paths.
 	 */
-	private async selectTemplate(path: string): Promise<void> {
+	private async selectToolbar(path: string): Promise<void> {
 		const configPath = `${this.profile.appRoot}config.json`;
 		try {
-			// Read the raw existing config and merge `template` onto it
+			// Read the raw existing config and merge `toolbar` onto it
 			// so every other key survives — today that's
 			// `tessellationFix`, but the spread also preserves any
 			// future shell preferences AND any unknown keys a user may
@@ -1922,38 +1926,39 @@ export class BrowserShell {
 			// would re-emit only the fields the parser knows about,
 			// dropping unknowns silently — exactly the bug we're
 			// avoiding.) On any read/parse failure we fall back to
-			// writing a fresh object with the chosen template plus
+			// writing a fresh object with the chosen toolbar plus
 			// known defaults so the file ends up valid either way.
-			let next: Record<string, unknown> = { template: path };
+			let next: Record<string, unknown> = { toolbar: path };
 			try {
 				const raw = Switch.readFileSync(configPath);
 				if (raw) {
 					const parsed = JSON.parse(new TextDecoder().decode(raw));
 					if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-						next = { ...(parsed as Record<string, unknown>), template: path };
+						next = { ...(parsed as Record<string, unknown>), toolbar: path };
 					}
 				}
 			} catch (_) {
 				// Missing or unreadable config — fall through and write
 				// a minimal one with sane defaults baked in.
-				next = { ...loadConfig(this.profile.appRoot), template: path };
+				next = { ...loadConfig(this.profile.appRoot), toolbar: path };
 			}
+			delete next[LEGACY_TOOLBAR_CONFIG_KEY];
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {
 			console.debug(`[brewser] write config.json failed: ${error}`);
 			return;
 		}
-		this.template = loadTemplate(this.profile.appRoot);
-		this.ui.setTemplate(this.template);
-		this.keyboard.setTemplate(this.template);
+		this.toolbar = loadToolbar(this.profile.appRoot);
+		this.ui.setToolbar(this.toolbar);
+		this.keyboard.setToolbar(this.toolbar);
 		this.publishChromeRegion();
-		// Icons may have changed paths between templates — refresh them
+		// Icons may have changed paths between toolbars — refresh them
 		// before the next chrome render. Gated on path change so the
 		// shared-icon case skips the re-fetch.
 		await this.refreshChromeIcons();
-		await this.refreshTemplateBackgrounds();
+		await this.refreshToolbarBackgrounds();
 		// Reload the current page: re-runs the resource loader (so the
-		// new active template row shows) and re-paints with the new
+		// new active toolbar row shows) and re-paints with the new
 		// colours / padding.
 		await this.runNavigation(() => this.navigation.reload());
 	}
@@ -1962,7 +1967,7 @@ export class BrowserShell {
 	 * path into `<appRoot>/config.json`, re-reads + parses the new
 	 * panel HTML, and rebuilds the keyboard live root so the new
 	 * design is active immediately (next time the overlay opens).
-	 * Mirrors `selectTemplate`'s write shape — spread the existing
+	 * Mirrors `selectToolbar`'s write shape — spread the existing
 	 * config forward so unknown user-edited keys survive, then write.
 	 * Reloads the current page so the Settings page's
 	 * `<browser-keyboards>` expansion re-runs against the new active
@@ -2007,10 +2012,10 @@ export class BrowserShell {
 	 * apply path (`maxHistory`, `autoRotate`, `buttonMapping`) round-
 	 * trip into the file and take effect on next launch.
 	 *
-	 * Template changes go through the same loadTemplate + setTemplate +
-	 * refreshTemplateBackgrounds dance `selectTemplate` does so the
+	 * Toolbar changes go through the same loadToolbar + setToolbar +
+	 * refreshToolbarBackgrounds dance `selectToolbar` does so the
 	 * chrome / keyboard / icons reflect the new design immediately.
-	 * Mirrors selectTemplate's write shape: spread the existing config
+	 * Mirrors selectToolbar's write shape: spread the existing config
 	 * forward, overlay the staged edits, then `Switch.writeFileSync` so
 	 * a partial / hand-edited config doesn't lose unknown keys.
 	 */
@@ -2029,7 +2034,7 @@ export class BrowserShell {
 		if (Object.keys(staged).length === 0) return; // nothing to commit
 
 		// Spread the on-disk raw object so user-edited unknown keys
-		// survive — same shape `selectTemplate` uses.
+		// survive — same shape `selectToolbar` uses.
 		let next: Record<string, unknown> = { ...prior, ...staged };
 		try {
 			const raw = Switch.readFileSync(configPath);
@@ -2044,6 +2049,17 @@ export class BrowserShell {
 			// defaults + staged edits, so writing it produces a valid
 			// file either way.
 		}
+		// Legacy-key cleanup: pre-2026-06-12 configs used `template` for
+		// the active toolbar path. If the on-disk file still has it but
+		// the new `toolbar` key isn't set (user hasn't touched the
+		// Toolbar section in this save), promote the legacy value so
+		// the selection survives the rewrite. Always scrub the legacy
+		// key afterward — once we save, the file is in the post-rename
+		// shape only.
+		if (typeof next.toolbar !== 'string' && typeof next[LEGACY_TOOLBAR_CONFIG_KEY] === 'string') {
+			next.toolbar = next[LEGACY_TOOLBAR_CONFIG_KEY];
+		}
+		delete next[LEGACY_TOOLBAR_CONFIG_KEY];
 		try {
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {
@@ -2089,18 +2105,18 @@ export class BrowserShell {
 		// this form. All three round-trip into config.json above and
 		// take effect on next launch.
 
-		// Template + searchEngine are read by the resource loader at
-		// render time, so a reload picks them up. If template actually
+		// Toolbar + searchEngine are read by the resource loader at
+		// render time, so a reload picks them up. If toolbar actually
 		// changed, push the new design into the UI / keyboard / icons
-		// the same way selectTemplate does — otherwise the chrome would
+		// the same way selectToolbar does — otherwise the chrome would
 		// keep painting in the old colours until next launch.
-		if ('template' in staged && staged.template !== prior.template) {
-			this.template = loadTemplate(this.profile.appRoot);
-			this.ui.setTemplate(this.template);
-			this.keyboard.setTemplate(this.template);
+		if ('toolbar' in staged && staged.toolbar !== prior.toolbar) {
+			this.toolbar = loadToolbar(this.profile.appRoot);
+			this.ui.setToolbar(this.toolbar);
+			this.keyboard.setToolbar(this.toolbar);
 			this.publishChromeRegion();
 			await this.refreshChromeIcons();
-			await this.refreshTemplateBackgrounds();
+			await this.refreshToolbarBackgrounds();
 		}
 		// Keyboard panel HTML is parsed in-process at boot; on change,
 		// re-read + re-parse from the new path and rebuild the kb live
@@ -2200,17 +2216,17 @@ export class BrowserShell {
 	}
 
 	/** Load (or clear) the toolbar + keyboard background images
-	 * referenced by the current template and hand them to the UI /
+	 * referenced by the current toolbar and hand them to the UI /
 	 * keyboard. Empty / missing / failed paths come back as `null`,
 	 * which the painters treat as "no image — bg colour only". */
-	private async refreshTemplateBackgrounds(): Promise<void> {
-		const toolbarSrc = this.resolveAssetPath(this.template.toolbar.image);
-		const keyboardSrc = this.resolveAssetPath(this.template.keyboard.image);
+	private async refreshToolbarBackgrounds(): Promise<void> {
+		const toolbarSrc = this.resolveAssetPath(this.toolbar.toolbar.image);
+		const keyboardSrc = this.resolveAssetPath(this.toolbar.keyboard.image);
 		// Same paths as last apply — Image objects are already mounted
 		// on BrowserUI/keyboard, and re-fetching the same URL races the
 		// chrome/keyboard paint while the in-flight Image swap settles.
 		// Cf. `lastResolvedIconPaths` for the matching gate on the icon
-		// PNGs. Empty paths still get cached so a template switching
+		// PNGs. Empty paths still get cached so a toolbar switching
 		// from "no image" → "no image" stays a no-op.
 		const key = `${toolbarSrc}|${keyboardSrc}`;
 		if (this.lastResolvedBackgroundPaths === key) return;
@@ -2223,11 +2239,11 @@ export class BrowserShell {
 		this.lastResolvedBackgroundPaths = key;
 	}
 
-	/** Resolve the active template's icon paths and, if any path
+	/** Resolve the active toolbar's icon paths and, if any path
 	 * differs from the last applied set, reload the `Image` objects
 	 * and push them into the UI. When every path matches the previous
-	 * apply (the common case across template switches — every shipped
-	 * template uses the same `assets/<name>.png` PNGs) the existing
+	 * apply (the common case across toolbar switches — every shipped
+	 * toolbar uses the same `assets/<name>.png` PNGs) the existing
 	 * icon `Image` objects on BrowserUI stay in place, avoiding the
 	 * re-fetch race that was painting broken icons during the Save
 	 * flow on the Settings page. */
@@ -2295,7 +2311,7 @@ export class BrowserShell {
 		setKeyboardLiveRoot(kbRoot);
 	}
 
-	/** Resolve a template-supplied asset path against the profile
+	/** Resolve a toolbar-supplied asset path against the profile
 	 * root unless it carries an absolute scheme. Empty in → empty
 	 * out, so callers can pass through optional fields directly. */
 	private resolveAssetPath(rel: string): string {
@@ -2336,7 +2352,7 @@ export class BrowserShell {
 		const box = getLayoutBox(video);
 		if (!box || box.w <= 0 || box.h <= 0) return;
 		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
-		const chromeHeight = this.template.toolbar.height;
+		const chromeHeight = this.toolbar.toolbar.height;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const screenX = box.x;
@@ -2513,14 +2529,14 @@ export class BrowserShell {
 		if (this.mode === 'normal') this.renderChrome();
 	}
 
-	/** Resolve each `template.icons.X` path against the profile root
+	/** Resolve each `toolbar.icons.X` path against the profile root
 	 * unless the user supplied an absolute scheme. Lets a custom
-	 * template point at icons elsewhere (e.g.
+	 * toolbar point at icons elsewhere (e.g.
 	 * `romfs:/shell/assets/...`, `sdmc:/themes/.../home.png`). */
 	private resolveIconPaths() {
 		const root = this.profile.storageRoot;
 		const resolve = (rel: string) => /^(?:https?:|sdmc:|romfs:)\/\//.test(rel) ? rel : `${root}${rel}`;
-		const i = this.template.icons;
+		const i = this.toolbar.icons;
 		return {
 			left: resolve(i.back),
 			right: resolve(i.forward),
@@ -2534,11 +2550,11 @@ export class BrowserShell {
 
 	/** Tell the touch dispatcher where the chrome strip lives so taps
 	 * in that y-range route to chrome-button branches. Called once at
-	 * startup after the template is loaded; the toolbar position can
-	 * only change via a template edit + relaunch. */
+	 * startup after the toolbar is loaded; the toolbar position can
+	 * only change via a toolbar edit + relaunch. */
 	private publishChromeRegion(): void {
 		const canvas = nxScreen();
-		const chromeHeight = this.template.toolbar.height;
+		const chromeHeight = this.toolbar.toolbar.height;
 		if (this.toolbarPosition === 'top') {
 			setChromeRegion(0, chromeHeight);
 		} else {

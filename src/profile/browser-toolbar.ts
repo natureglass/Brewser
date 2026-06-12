@@ -1,24 +1,34 @@
 /**
- * Design-time configuration loaded from `<profile>/templates/…json` —
+ * Design-time configuration loaded from `<profile>/toolbars/…json` —
  * colours, icon paths, toolbar position + height, page padding, hint
  * text. Everything that used to live as inline constants in
  * `browser-ui`, `browser-config`, and the painter is here so a user
  * can re-skin the browser by editing one JSON file on the SD card.
  *
- * The shell reads `<profile>/templates.json` first — a registry list
- * of `{ title, path }` entries — and loads the first entry's template.
- * Future template-switching UI can update the registry's ordering or
+ * The shell reads `<profile>/toolbars.json` first — a registry list
+ * of `{ title, path }` entries — and loads the first entry's toolbar.
+ * Future toolbar-switching UI can update the registry's ordering or
  * add an `active` field; today, "first one wins".
  *
  * Unknown fields are ignored; missing fields fall back to
- * `DEFAULT_TEMPLATE`. A malformed file logs a debug message and the
+ * `DEFAULT_TOOLBAR`. A malformed file logs a debug message and the
  * shell carries on with defaults — there's no scenario where a bad
- * template can stop the browser from rendering at all.
+ * toolbar file can stop the browser from rendering at all.
+ *
+ * Renamed from "Template" → "Toolbar" 2026-06-12. Legacy `template`
+ * config keys and `templates/` paths are migrated in-memory by
+ * `loadConfig` + `migrateLegacyToolbarPath`, so existing user installs
+ * keep their selection across the rename.
  */
 
 export type ToolbarPosition = 'top' | 'bottom';
 
-export interface BrowserTemplate {
+/** Visual design spec for the browser chrome. Despite the name, this
+ * covers more than the toolbar strip — it also carries icon paths, page
+ * padding, and on-canvas keyboard colours — but the toolbar is the most
+ * visible bit so the whole config is referred to as a "toolbar" in the
+ * Settings UI. */
+export interface BrowserToolbar {
 	toolbar: {
 		height: number;
 		background: string;
@@ -55,7 +65,7 @@ export interface BrowserTemplate {
 	};
 	/** On-canvas soft keyboard colours. Layout (row count, key sizes,
 	 * positions) stays hardcoded in `KEYBOARD_LAYOUT`; only colours
-	 * are templatable today. */
+	 * are configurable from here. */
 	keyboard: {
 		panelBorder: string;
 		panelBg: string;
@@ -81,7 +91,7 @@ export interface BrowserTemplate {
 	};
 }
 
-export const DEFAULT_TEMPLATE: BrowserTemplate = {
+export const DEFAULT_TOOLBAR: BrowserToolbar = {
 	toolbar: {
 		height: 56,
 		background: '#0d1426',
@@ -127,27 +137,31 @@ export const DEFAULT_TEMPLATE: BrowserTemplate = {
 	},
 };
 
-/** One row in `<profile>/templates.json`. `path` is relative to the
- * profile root unless it carries an absolute scheme (`sdmc:/…`,
+/** One row in `<profile>/toolbars.json` (also reused by `keyboards.json`
+ * and `styles.json` — same `{title, path}` shape). `path` is relative
+ * to the profile root unless it carries an absolute scheme (`sdmc:/…`,
  * `romfs:/…`). */
-export interface TemplateEntry {
+export interface ToolbarEntry {
 	title: string;
 	path: string;
 }
 
 /** Shell-level preferences from `<profile>/config.json`. The active
- * template's path is the historical primary key; additional shell
+ * toolbar's path is the historical primary key; additional shell
  * preferences slot in alongside.
  *
  * IMPORTANT: when adding a field here, also (a) parse it in
  * `loadConfig` below with the same DEFAULT_CONFIG fallback, AND
  * (b) add it to `romfs/config.json` so the seeded profile copy
- * carries the default value. The template-toggle write path in
+ * carries the default value. The toolbar-toggle write path in
  * browser-shell.ts spreads existing keys forward unchanged, so any
  * key present in on-disk config (whether user-set or seeded) survives
- * template changes — keep it that way. */
+ * toolbar changes — keep it that way. */
 export interface BrowserConfig {
-	template: string;
+	/** Path to the active toolbar JSON (e.g. `toolbars/default.json`).
+	 * Renamed from `template` 2026-06-12; legacy `template` keys are
+	 * read transparently by `loadConfig` for backward compat. */
+	toolbar: string;
 	/** Try NVTEGRA hw-accel video decode first; on first decoder error,
 	 * live-video.ts auto-falls-back to software decode for that
 	 * element. See [[nvtegra-unreliable-on-citron]] — current Citron
@@ -182,7 +196,7 @@ export interface BrowserConfig {
 	/** User-preferred colour scheme. Sent to external pages as the
 	 * `Sec-CH-Prefers-Color-Scheme` client hint so servers can serve a
 	 * matching theme up front; also drives the engine-side viewport
-	 * background colour (white for `light`, the template's
+	 * background colour (white for `light`, the toolbar's
 	 * `page.background` for `dark`) and the `@media
 	 * (prefers-color-scheme:…)` cascade. Defaults to `light` to match
 	 * the wider web's expected default. */
@@ -265,15 +279,15 @@ export interface BrowserConfig {
 	brewserStyle: string;
 	/** Where the browser chrome strip sits on screen — `'top'` (above
 	 * page content) or `'bottom'` (below it). Hoisted out of
-	 * `BrowserTemplate.toolbar.position` on 2026-06-11 so the toggle
-	 * is a Settings-page preference instead of a per-template baked-in
+	 * `BrowserToolbar.toolbar.position` on 2026-06-11 so the toggle
+	 * is a Settings-page preference instead of a per-toolbar baked-in
 	 * value. The shell pushes this into BrowserUI on boot + on Save,
 	 * so the chrome flips position immediately on change. */
 	toolbarPosition: ToolbarPosition;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
-	template: 'templates/default.json',
+	toolbar: 'toolbars/default.json',
 	videoNVTEGRA: true,
 	searchEngine: 'DuckDuckGo',
 	wwwRenderChunkMs: 12,
@@ -292,15 +306,33 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	toolbarPosition: 'top',
 };
 
-/** Migrate legacy `Templates/<name>.json` (capital T, pre 2026-06-03)
- * to the renamed lowercase `templates/<name>.json` on the fly. Existing
- * user `config.json` files persist the old path; this shim rewrites
- * them in-memory so the active template resolves against the newly-
- * seeded lowercase folder. The on-disk file gets refreshed the next
- * time anything writes to it (e.g. user changes a Settings page
- * option). Returns the input unchanged if no migration applies. */
-function migrateLegacyTemplatePath(p: string): string {
-	return p.startsWith('Templates/') ? 'templates/' + p.slice('Templates/'.length) : p;
+/** Legacy `config.json` key for the active toolbar path. Read by
+ * `loadConfig` as a fallback when the new `toolbar` key isn't present —
+ * so user installs that pre-date the 2026-06-12 rename keep their
+ * selection. Exported so the saveSettings write path can scrub the old
+ * key from on-disk config once the user saves. */
+export const LEGACY_TOOLBAR_CONFIG_KEY = 'template';
+
+/** Rewrite legacy active-toolbar paths to the post-2026-06-12 layout:
+ *   - `Templates/<name>.json` (capital T, pre 2026-06-03) → `templates/<name>.json`
+ *     [historical shim, kept for very old configs]
+ *   - `templates/<name>.json` → `toolbars/<name>.json` (this rename)
+ *
+ * Existing user `config.json` files persist the old path; this shim
+ * rewrites them in-memory so the active toolbar resolves against the
+ * newly-seeded `toolbars/` folder. The on-disk file gets refreshed
+ * the next time anything writes to it (e.g. the user changes a
+ * Settings page option). Returns the input unchanged if no migration
+ * applies. */
+function migrateLegacyToolbarPath(p: string): string {
+	let result = p;
+	if (result.startsWith('Templates/')) {
+		result = 'templates/' + result.slice('Templates/'.length);
+	}
+	if (result.startsWith('templates/')) {
+		result = 'toolbars/' + result.slice('templates/'.length);
+	}
+	return result;
 }
 
 /** One entry in `search_engines.json`. `query` is the search-URL
@@ -324,7 +356,13 @@ const decoder = new TextDecoder();
 
 /** Read `<profile>/config.json`. Missing / malformed / wrong-typed
  * fields fall back to `DEFAULT_CONFIG` field-by-field, so a partial
- * config is fine (the user only needs to set what they want to change). */
+ * config is fine (the user only needs to set what they want to change).
+ *
+ * Toolbar-key migration: the new key is `toolbar`, the legacy key is
+ * `template`. Both are read; `toolbar` wins if present. The path value
+ * is run through `migrateLegacyToolbarPath` so `templates/<X>.json`
+ * resolves to the renamed `toolbars/<X>.json` on disk without the user
+ * having to edit `config.json`. */
 export function loadConfig(appRoot: string): BrowserConfig {
 	let raw: ArrayBuffer | null;
 	try {
@@ -335,8 +373,13 @@ export function loadConfig(appRoot: string): BrowserConfig {
 	if (!raw) return DEFAULT_CONFIG;
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
+		const rawToolbarPath = typeof parsed?.toolbar === 'string'
+			? parsed.toolbar
+			: typeof parsed?.[LEGACY_TOOLBAR_CONFIG_KEY] === 'string'
+				? parsed[LEGACY_TOOLBAR_CONFIG_KEY]
+				: DEFAULT_CONFIG.toolbar;
 		return {
-			template: typeof parsed?.template === 'string' ? migrateLegacyTemplatePath(parsed.template) : DEFAULT_CONFIG.template,
+			toolbar: migrateLegacyToolbarPath(rawToolbarPath),
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)
@@ -688,9 +731,9 @@ export function resolveSearchEngine(appRoot: string): SearchEngine {
 
 /** Read `<appRoot>/keyboards.json` and return the validated entries
  * in source order. Missing or malformed file → empty array. Same
- * `{ title, path }` shape as the templates registry; `path` is
+ * `{ title, path }` shape as the toolbars registry; `path` is
  * resolved against the app root unless absolute. */
-export function loadKeyboardRegistry(appRoot: string): TemplateEntry[] {
+export function loadKeyboardRegistry(appRoot: string): ToolbarEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
 		raw = Switch.readFileSync(`${appRoot}keyboards.json`);
@@ -701,7 +744,7 @@ export function loadKeyboardRegistry(appRoot: string): TemplateEntry[] {
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is TemplateEntry =>
+		return parsed.filter((e): e is ToolbarEntry =>
 			!!e && typeof e.title === 'string' && typeof e.path === 'string',
 		);
 	} catch (error) {
@@ -712,13 +755,13 @@ export function loadKeyboardRegistry(appRoot: string): TemplateEntry[] {
 
 /** Read `<appRoot>/styles.json` and return the validated entries in
  * source order. Missing or malformed file → empty array. Same
- * `{ title, path }` shape as the templates + keyboards registries;
+ * `{ title, path }` shape as the toolbars + keyboards registries;
  * `path` is resolved against the app root unless absolute. Drives the
  * Settings page's Style picker AND the resource loader's
  * `brewser://assets/main.css` redirect — the active path from
  * `config.brewserStyle` is read at request time and its bytes served
  * in place of the baked default. */
-export function loadStyleRegistry(appRoot: string): TemplateEntry[] {
+export function loadStyleRegistry(appRoot: string): ToolbarEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
 		raw = Switch.readFileSync(`${appRoot}styles.json`);
@@ -729,7 +772,7 @@ export function loadStyleRegistry(appRoot: string): TemplateEntry[] {
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is TemplateEntry =>
+		return parsed.filter((e): e is ToolbarEntry =>
 			!!e && typeof e.title === 'string' && typeof e.path === 'string',
 		);
 	} catch (error) {
@@ -738,51 +781,69 @@ export function loadStyleRegistry(appRoot: string): TemplateEntry[] {
 	}
 }
 
-/** Read `<profile>/templates.json` and return the validated entries
- * in source order. Missing or malformed file → empty array. */
-export function loadTemplateRegistry(appRoot: string): TemplateEntry[] {
-	let raw: ArrayBuffer | null;
+/** Read `<profile>/toolbars.json` and return the validated entries
+ * in source order. Missing or malformed file → empty array. Falls
+ * back to the legacy `templates.json` filename so pre-rename installs
+ * keep listing their entries until the seeder writes the new file. */
+export function loadToolbarRegistry(appRoot: string): ToolbarEntry[] {
+	let raw: ArrayBuffer | null = null;
+	let source = `${appRoot}toolbars.json`;
 	try {
-		raw = Switch.readFileSync(`${appRoot}templates.json`);
+		raw = Switch.readFileSync(source);
 	} catch (_) {
-		return [];
+		raw = null;
+	}
+	if (!raw) {
+		// Legacy filename — pre-2026-06-12 installs had `templates.json`.
+		source = `${appRoot}templates.json`;
+		try {
+			raw = Switch.readFileSync(source);
+		} catch (_) {
+			return [];
+		}
 	}
 	if (!raw) return [];
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is TemplateEntry =>
+		return parsed.filter((e): e is ToolbarEntry =>
 			!!e && typeof e.title === 'string' && typeof e.path === 'string',
-		);
+		).map((e) => ({
+			title: e.title,
+			// Rewrite stale `templates/X.json` paths inside the legacy
+			// registry so a Settings-page tap on a listed entry resolves
+			// to the renamed `toolbars/` dir.
+			path: migrateLegacyToolbarPath(e.path),
+		}));
 	} catch (error) {
-		console.debug(`[brewser] templates.json parse failed: ${error}`);
+		console.debug(`[brewser] ${source} parse failed: ${error}`);
 		return [];
 	}
 }
 
-/** Resolve a template-entry path against the profile root unless it
+/** Resolve a toolbar-entry path against the profile root unless it
  * already carries an absolute scheme. */
-function resolveTemplatePath(appRoot: string, rel: string): string {
+function resolveToolbarPath(appRoot: string, rel: string): string {
 	if (/^(?:sdmc:|romfs:)\/\//.test(rel)) return rel;
 	return `${appRoot}${rel}`;
 }
 
-export function loadTemplate(appRoot: string): BrowserTemplate {
+export function loadToolbar(appRoot: string): BrowserToolbar {
 	// Resolution order:
-	//   1. config.json's `template` field — the user-chosen active template.
-	//   2. First entry in templates.json — sensible fallback if config is
+	//   1. config.json's `toolbar` field — the user-chosen active toolbar.
+	//   2. First entry in toolbars.json — sensible fallback if config is
 	//      missing or its path points at a deleted/broken file.
 	// Each candidate is tried in turn; the first one that reads + parses
-	// successfully wins. If all fall through, `DEFAULT_TEMPLATE` keeps
+	// successfully wins. If all fall through, `DEFAULT_TOOLBAR` keeps
 	// the browser usable.
 	const config = loadConfig(appRoot);
-	const candidates: string[] = [config.template];
-	const registry = loadTemplateRegistry(appRoot);
-	if (registry[0] && registry[0].path !== config.template) {
+	const candidates: string[] = [config.toolbar];
+	const registry = loadToolbarRegistry(appRoot);
+	if (registry[0] && registry[0].path !== config.toolbar) {
 		candidates.push(registry[0].path);
 	}
 	for (const rel of candidates) {
-		const path = resolveTemplatePath(appRoot, rel);
+		const path = resolveToolbarPath(appRoot, rel);
 		let raw: ArrayBuffer | null;
 		try {
 			raw = Switch.readFileSync(path);
@@ -791,17 +852,17 @@ export function loadTemplate(appRoot: string): BrowserTemplate {
 		}
 		if (!raw) continue;
 		try {
-			const parsed = JSON.parse(decoder.decode(raw)) as Partial<BrowserTemplate>;
-			return mergeTemplate(DEFAULT_TEMPLATE, parsed);
+			const parsed = JSON.parse(decoder.decode(raw)) as Partial<BrowserToolbar>;
+			return mergeToolbar(DEFAULT_TOOLBAR, parsed);
 		} catch (error) {
-			console.debug(`[brewser] template '${rel}' parse failed: ${error}`);
+			console.debug(`[brewser] toolbar '${rel}' parse failed: ${error}`);
 			continue;
 		}
 	}
-	return DEFAULT_TEMPLATE;
+	return DEFAULT_TOOLBAR;
 }
 
-function mergeTemplate(base: BrowserTemplate, override: Partial<BrowserTemplate>): BrowserTemplate {
+function mergeToolbar(base: BrowserToolbar, override: Partial<BrowserToolbar>): BrowserToolbar {
 	return {
 		toolbar: { ...base.toolbar, ...(override.toolbar ?? {}) },
 		icons: { ...base.icons, ...(override.icons ?? {}) },
