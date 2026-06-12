@@ -8,7 +8,12 @@
 <div class="page-shell clickable">
   <section class="top-section">
     <header class="top-header">
-      <h2>Featured Apps</h2>
+      <!-- Section title tracks `config.homeSection` via the
+           `<browser-home-title>` custom tag — the resource loader
+           expands it server-side to one of "Featured Apps" /
+           "Community Apps" / "Experimental Apps" based on the
+           Settings page's Home Page radio. -->
+      <h2><browser-home-title/></h2>
       <!-- Bookmarks + History on the same line as the section title,
            pushed right by .featured-header's space-between. -->
       <nav class="top-links" aria-label="Browser navigation">
@@ -19,11 +24,11 @@
       </nav>
     </header>
     <div class="app-grid">
-      <!-- Cards injected from featured.json by the resource loader.
-           Same schema + rendering as <browser-apps>: each entry becomes
-           an .app-card (logo + title + description) whose href is the
-           entry's `url`. Edit featured.json to change what shows here. -->
-      <browser-featured></browser-featured>
+      <!-- Cards for the catalog group named by `config.homeSection`.
+           Resource loader resolves the tag to renderGroup(<group>),
+           same path the `<browser-featured>` / `<browser-community>`
+           / `<browser-experimental>` tags on apps.html take. -->
+      <browser-home-apps></browser-home-apps>
     </div>
   </section>
 

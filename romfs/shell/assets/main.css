@@ -302,12 +302,18 @@ input[name="apps-tab"] { display: none; }
   display: block;
   overflow: hidden;
   padding: 14px 18px 18px;
-  /* Description is clamped to 3 lines, version + license chips sit in
-     a small strip on top, so the card's natural height is bounded.
-     min-height keeps short-description cards from collapsing too
-     aggressively — grid rows equalize to the tallest card, but a too-
-     low floor would let an entire row of short-desc cards stay puny. */
-  min-height: 240px;
+  /* Fixed height across the whole grid — every card paints the same
+     box regardless of description length. The 3-line description
+     max-height + bounded meta strip + 80 px logo all fit inside this
+     height, so `overflow: hidden` only ever clips pathological titles.
+     Explicit `height` (not `min-height`) deliberately: the per-tap
+     localized relayout in `patchLiveDirtyRegions` re-evaluates a
+     single card's height without re-running the grid row's height
+     equalization, which collapsed short-content cards on `:active`
+     and stayed collapsed past the press. A fixed `height` short-
+     circuits that re-evaluation — every card always lays out at the
+     same number regardless of which dirty-patch path runs. */
+  height: 280px;
   text-align: center;
   color: #eaf2ff;
   text-decoration: none;
@@ -451,6 +457,20 @@ input[name="apps-tab"] { display: none; }
   max-height: none;
   overflow: visible;
   text-align: center;
+}
+
+/* "NEW" chip — emitted by `renderAppCards` for missing entries
+   (entry file absent on disk) in place of the version pill. Red
+   palette matches the Download action button so the card's "you
+   haven't installed this" signal carries the same visual weight
+   across the meta strip + the modal CTA. White text, hard
+   wedge of red. Same chip box geometry as `.app-meta__version`
+   so the meta strip layout stays identical. */
+.app-meta__version--new {
+  color: #ffffff;
+  background: #ff0000;
+  border: 1px solid #ff0000;
+  letter-spacing: 0.08em;
 }
 
 /* Inline arrow drawn between the installed + catalog versions inside
@@ -790,7 +810,15 @@ a.app-modal-btn {
 a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 /* Missing-card title styles muted relative to live apps so the
-   catalog-vs-installed distinction is visible at a glance. */
+   catalog-vs-installed distinction is visible at a glance. The
+   card itself sits on a slightly-lighter red-tinted background +
+   warm border, mirroring the `.app-card--upgrade` shape but in
+   the NEW-chip palette family so the two callout states stay
+   distinct at a glance. */
+.app-card--missing {
+  background: #2a1820;
+  border-color: #7a3338;
+}
 .app-card--missing strong { color: #cdd9ee; }
 
 /* Upgrade-available card — lighter background + slightly warmer
@@ -946,13 +974,35 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 /* Sync-complete status line on the LEFT side of the action row.
    Green to read as "all good" (same palette family as the Play
    button); hidden while the card is still in the loading state so
-   the message only appears once the check completes. */
+   the message only appears once the check completes. The `--error`
+   class on the card swaps the palette for the red Cancel/Download
+   button family so a failed fetch reads as a failure at a glance.
+   Same span is repurposed for both — the JS rewrites the text on
+   error. */
 .updates-modal-status {
   color: #7eda9f;
   font-weight: 700;
   font-size: 0.95em;
 }
 .updates-modal-card--loading .updates-modal-status { display: none; }
+.updates-modal-card--error .updates-modal-status { color: #ff8676; }
+
+/* Error slot inside the results area — visible only when the card
+   carries `--error`. Replaces the new/update section list and the
+   empty-state line so the modal reads as "the fetch didn't work,
+   here's why". Same red palette as the status line on the action row. */
+.updates-modal-error {
+  display: none;
+  padding: 24px 0;
+  text-align: center;
+  color: #ff8676;
+  font-weight: 700;
+  word-break: break-word;
+}
+.updates-modal-card--error .updates-modal-error { display: block; }
+.updates-modal-card--error .updates-modal-section { display: none; }
+.updates-modal-card--error .updates-modal-empty { display: none; }
+.updates-modal-card--error .updates-modal-results--empty .updates-modal-empty { display: none; }
 
 /* Cancel/Close action gate. The red Cancel sits in the right action
    slot while the card is in the loading state; once the 3 s check
@@ -1420,6 +1470,10 @@ fieldset.settings-group legend {
   .clickable .app-card:active {
     background: #eef2f7;
     border-color: #1d4ed8;
+  }
+  .app-card--missing {
+    background: #fef5f5;
+    border-color: #ff0000;
   }
   .app-card--missing strong { color: #6b7280; }
   .app-card--upgrade {

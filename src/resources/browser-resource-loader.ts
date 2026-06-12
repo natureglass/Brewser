@@ -5,7 +5,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine } from '../profile/browser-toolbar.js';
+import { type AppEntry, CATALOG_GROUPS, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine } from '../profile/browser-toolbar.js';
 
 /**
  * Serves the browser's built-in pages.
@@ -318,6 +318,33 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-experimental(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-experimental\s*>)?/gi,
 			() => this.renderGroup('experimental'),
 		);
+		// `<browser-config-catalogue>` — expands to the active
+		// `config.json` `catalogue` URL, HTML-escaped so it's safe inside
+		// either an attribute or text content. Empty string when no URL
+		// is configured; consumers (apps.html's Check-for-Updates button)
+		// branch on the empty case to show an error instead of fetching.
+		out = out.replace(
+			/<browser-config-catalogue(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-catalogue\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).catalogue),
+		);
+		// `<browser-home-apps>` — renders the catalog group named by
+		// `config.json` `homeSection` (featured / community /
+		// experimental). The home page has no tab strip, so this is
+		// how the user picks which catalog section the home grid
+		// surfaces. Falls through to `renderGroup`, which already
+		// handles the empty-list case.
+		out = out.replace(
+			/<browser-home-apps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-apps\s*>)?/gi,
+			() => this.renderGroup(loadConfig(this.appRoot).homeSection),
+		);
+		// `<browser-home-title>` — display name of the currently-
+		// selected home section ("Featured Apps", "Community Apps",
+		// "Experimental Apps"). Sits in the home page's section header
+		// so the title tracks the radio selection.
+		out = out.replace(
+			/<browser-home-title(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-title\s*>)?/gi,
+			() => htmlEscape(homeSectionTitle(loadConfig(this.appRoot).homeSection)),
+		);
 		return out;
 	}
 
@@ -504,6 +531,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</div>'
 		);
 
+		// Home page section picker — drives the `<browser-home-apps>` +
+		// `<browser-home-title>` expansions on home.html via the
+		// `homeSection` config field. The home page has no in-page tab
+		// strip (apps.html does), so this radio is the only way to
+		// flip the visible section. Labels mirror `homeSectionTitle`
+		// so the Settings copy reads the same as the rendered h2.
+		const homeSectionRows = CATALOG_GROUPS.map((group) => {
+			const label = homeSectionTitle(group);
+			return (
+				'<label class="settings-radio">'
+				+ `<input type="radio" name="setting-homeSection" value="${group}" data-setting="homeSection"${checked(config.homeSection === group)}>`
+				+ `<span class="settings-radio-label">${htmlEscape(label)}</span>`
+				+ '</label>'
+			);
+		}).join('');
+
 		// Search-engine picker — rendered as a radio list (one row per
 		// engine) instead of a `<select>`. The live-form SELECT tap
 		// handler cycles options on tap (see comment "M2.5 popup overlay"
@@ -555,6 +598,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Home Page</legend>'
+			+ '<div class="settings-templates">' + homeSectionRows + '</div>'
+			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Appearance</legend>'
 			+ themeRow
@@ -791,11 +838,24 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// per upgrade card, so paint cost is negligible. Hardcoded
 		// fill (`#0b1220`, the chip's text color) avoids any
 		// `currentColor` resolution questions in the SVG painter.
-		const versionChip = e.installedVersion && e.version
-			? `<div class="app-meta__version app-meta__version--upgrade"><span>v${htmlEscape(e.installedVersion)}</span>${UPGRADE_ARROW_SVG}<span>v${htmlEscape(e.version)}</span></div>`
-			: e.version
-				? `<div class="app-meta__version">v${htmlEscape(e.version)}</div>`
-				: '';
+		// Three-way chip palette:
+		//   - Missing (entry file absent on disk) → red "NEW" pill so the
+		//     card reads as "this is something to install" at a glance.
+		//     Overrides the version-text path even when the catalog
+		//     carries a version, because the user hasn't installed
+		//     anything yet — the version number is less interesting than
+		//     the call-to-action.
+		//   - Installed-but-stale (`installedVersion` differs from the
+		//     catalog's `version`) → yellow `vOld → vNew` upgrade chip.
+		//   - Installed-and-current OR catalog-only-version → ordinary
+		//     blue version pill.
+		const versionChip = isMissing
+			? `<div class="app-meta__version app-meta__version--new">NEW</div>`
+			: e.installedVersion && e.version
+				? `<div class="app-meta__version app-meta__version--upgrade"><span>v${htmlEscape(e.installedVersion)}</span>${UPGRADE_ARROW_SVG}<span>v${htmlEscape(e.version)}</span></div>`
+				: e.version
+					? `<div class="app-meta__version">v${htmlEscape(e.version)}</div>`
+					: '';
 		const licenseChip = e.license
 			? `<div class="app-meta__license">${htmlEscape(e.license)}</div>`
 			: '';
@@ -843,4 +903,16 @@ function htmlEscape(s: string): string {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#39;');
+}
+
+/** Display title for a catalog group, used by the home page's header
+ * (`<browser-home-title>`) and the Settings page's "Home Page" radio
+ * labels. Kept as a single source of truth so the two locations stay
+ * in sync if the wording ever changes. */
+function homeSectionTitle(group: CatalogGroup): string {
+	switch (group) {
+		case 'featured': return 'Featured Apps';
+		case 'community': return 'Community Apps';
+		case 'experimental': return 'Experimental Apps';
+	}
 }

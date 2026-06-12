@@ -520,6 +520,35 @@ export class BrowserShell {
 			if (this.mode !== 'normal') await this.exitFullscreen();
 			await this.runNavigation(() => this.navigation.goBack());
 		};
+		// Page-script-callable reload — exits any fullscreen mode then
+		// re-runs the current navigation. Used by updates-modal.js after
+		// it writes a fresh `catalog.json` so the apps grid re-renders
+		// with the new versions / new entries. CanvasShim's
+		// `location.reload()` is a no-op (see canvas-runner.ts), so
+		// pages have no way to trigger this without an explicit shell
+		// hook — this is that hook.
+		(globalThis as { __swbReload?: () => Promise<void> })
+			.__swbReload = async () => {
+			if (this.mode !== 'normal') await this.exitFullscreen();
+			await this.runNavigation(() => this.navigation.reload());
+		};
+		// Page-script-callable hard repaint — forces the next shell
+		// loop iteration to rebuild the static body cache from scratch
+		// (not just patch dirty regions). updates-modal.js drives this
+		// after it mutates a batch of catalog cards in-place: the
+		// per-element dirty registry alone wasn't producing the right
+		// pixels in the currently-visible tab panel (cached pre-mutation
+		// colors leaked through under the closed modal). resetLive
+		// OverlayCache nukes lastBodyVersion + the offscreen so the
+		// next paintLiveOverlay rebuilds the bake from the post-mutation
+		// tree; requestFullRepaint flips the consume-once flag so the
+		// shell loop doesn't fast-path-skip the rebuild on an otherwise
+		// idle frame.
+		(globalThis as { __swbRepaint?: () => void })
+			.__swbRepaint = () => {
+			resetLiveOverlayCache();
+			requestFullRepaint();
+		};
 	}
 
 	async run(): Promise<void> {

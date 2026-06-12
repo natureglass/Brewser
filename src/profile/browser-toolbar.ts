@@ -284,6 +284,24 @@ export interface BrowserConfig {
 	 * value. The shell pushes this into BrowserUI on boot + on Save,
 	 * so the chrome flips position immediately on change. */
 	toolbarPosition: ToolbarPosition;
+	/** Which catalog group the home page renders cards for — one of
+	 * `'featured'`, `'community'`, `'experimental'`. The home page has
+	 * no tab strip (apps.html does), so the user picks the visible
+	 * section from the Settings page's "Home Page" radio. Default
+	 * `'featured'` preserves the pre-2026-06-12 behaviour where home
+	 * always painted Featured Apps. Read by the
+	 * `<browser-home-apps>` / `<browser-home-title>` custom tag
+	 * expansions at home.html render time. */
+	homeSection: CatalogGroup;
+	/** Remote URL the apps.html "Check for Updates" button fetches when
+	 * the user wants to refresh their on-disk `catalog.json`. The fetched
+	 * bytes are written verbatim to `<appRoot>catalog.json` after a 2xx
+	 * + JSON-parse check; failure shows an error in the modal. Empty
+	 * string disables the button (the modal opens but the fetch is
+	 * skipped and an error is shown). Routes through SwitchUaFetchLoader
+	 * so the request carries the Switch UA, same as any other http(s)
+	 * fetch the shell makes. */
+	catalogue: string;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
@@ -304,6 +322,8 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	keyboard: 'keyboards/default.html',
 	brewserStyle: 'styles/dark.css',
 	toolbarPosition: 'top',
+	homeSection: 'featured',
+	catalogue: '',
 };
 
 /** Legacy `config.json` key for the active toolbar path. Read by
@@ -432,6 +452,14 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			toolbarPosition: parsed?.toolbarPosition === 'top' || parsed?.toolbarPosition === 'bottom'
 				? parsed.toolbarPosition
 				: DEFAULT_CONFIG.toolbarPosition,
+			homeSection: parsed?.homeSection === 'featured'
+				|| parsed?.homeSection === 'community'
+				|| parsed?.homeSection === 'experimental'
+				? parsed.homeSection
+				: DEFAULT_CONFIG.homeSection,
+			catalogue: typeof parsed?.catalogue === 'string'
+				? parsed.catalogue
+				: DEFAULT_CONFIG.catalogue,
 		};
 	} catch (error) {
 		console.debug(`[brewser] config.json parse failed: ${error}`);
@@ -589,9 +617,18 @@ export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry
 		} catch (_) {
 			missing = true;
 		}
-		const logo = missing
-			? MISSING_APP_LOGO_URL
-			: `brewser://apps/${group}/${e.id}/${stripLeadingSlashes(e.logo)}`;
+		// Logo URL is independent from `missing`: after a Check-for-
+		// Updates refresh, updates-modal.js seeds the missing app's
+		// logo into `apps/<group>/<id>/<logo>` so the card paints the
+		// real glyph instead of the generic `download.png` while the
+		// entry file is still absent. If the logo file isn't on disk
+		// (older sync, fetch failed, no logo specified) we fall back
+		// to the generic placeholder — same as before this change.
+		const logoRel = stripLeadingSlashes(e.logo);
+		const hasLogo = appFileExists(`${appRoot}apps/${group}/${e.id}/${logoRel}`);
+		const logo = hasLogo
+			? `brewser://apps/${group}/${e.id}/${logoRel}`
+			: MISSING_APP_LOGO_URL;
 		const catalogVersion = typeof e.version === 'string' ? e.version : '';
 		// Cross-reference the on-disk manifest's version with the
 		// catalog. Only meaningful when the app is installed (missing
@@ -693,6 +730,22 @@ function stripLeadingSlashes(p: string): string {
 	let i = 0;
 	while (i < p.length && p[i] === '/') i++;
 	return p.slice(i);
+}
+
+/** Probe whether a file exists on disk by attempting to read it.
+ * `Switch.readFileSync` returns `null` (not throws) for missing files
+ * — see [[reference-brewser-switch-readfilesync-returns-null]] — so
+ * the null check is load-bearing. A thrown error (e.g. permission
+ * issue) also counts as "doesn't exist" for our purposes: the engine
+ * would render nothing either way. */
+function appFileExists(path: string): boolean {
+	let data: ArrayBuffer | null;
+	try {
+		data = Switch.readFileSync(path);
+	} catch (_) {
+		return false;
+	}
+	return data !== null;
 }
 
 /** Read + validate `<profile>/search_engines.json`. Returns the

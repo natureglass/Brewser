@@ -302,12 +302,12 @@ input[name="apps-tab"] { display: none; }
   display: block;
   overflow: hidden;
   padding: 14px 18px 18px;
-  /* Description is clamped to 3 lines, version + license chips sit in
-     a small strip on top, so the card's natural height is bounded.
-     min-height keeps short-description cards from collapsing too
-     aggressively — grid rows equalize to the tallest card, but a too-
-     low floor would let an entire row of short-desc cards stay puny. */
-  min-height: 240px;
+  /* Fixed height across the whole grid — see the same rule in
+     `shell/assets/main.css` for the rationale (avoids the per-tap
+     localized relayout collapsing short-content cards on `:active`).
+     280 px fits the meta strip + logo + title + 3-line description
+     cap with margin to spare; `overflow: hidden` clips outliers. */
+  height: 240px;
   text-align: center;
   color: #fff4d6;
   text-decoration: none;
@@ -451,6 +451,18 @@ input[name="apps-tab"] { display: none; }
   max-height: none;
   overflow: visible;
   text-align: center;
+}
+
+/* "NEW" chip — emitted by `renderAppCards` for missing entries
+   (entry file absent on disk) in place of the version pill. Red
+   palette matches the Download action button so the card's
+   "you haven't installed this" signal carries the same visual
+   weight across the meta strip + the modal CTA. */
+.app-meta__version--new {
+  color: #ffffff;
+  background: #ff0000;
+  border: 1px solid #ff0000;
+  letter-spacing: 0.08em;
 }
 
 /* Inline arrow drawn between the installed + catalog versions inside
@@ -791,6 +803,10 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 /* Missing-card title styles muted relative to live apps so the
    catalog-vs-installed distinction is visible at a glance. */
+.app-card--missing {
+  background: #33180c;
+  border-color: #c43a14;
+}
 .app-card--missing strong { color: #f0e0c0; }
 
 /* Upgrade-available card — lighter background + slightly warmer
@@ -1420,6 +1436,10 @@ fieldset.settings-group legend {
   .clickable .app-card:active {
     background: #f3e7c8;
     border-color: #b45309;
+  }
+  .app-card--missing {
+    background: #fdebd0;
+    border-color: #c43a14;
   }
   .app-card--missing strong { color: #8a7340; }
   .app-card--upgrade {

@@ -24,7 +24,7 @@
       <label for="apps-tab-experimental" class="tab-label">Experimental</label>
       <label for="apps-tab-featured" class="tab-label">Featured</label>
     </nav>
-    <button type="button" class="munch-link apps-check-updates">Check for Updates</button>
+    <button type="button" class="munch-link apps-check-updates" data-catalogue-url="<browser-config-catalogue/>">Check for Updates</button>
   </div>
   <div class="tab-panels clickable">
     <section class="tab-panel" data-tab="community" aria-label="Community apps">
@@ -123,6 +123,11 @@
          no updates available. -->
     <div id="updates-modal-results" class="updates-modal-results">
       <div id="updates-modal-empty" class="updates-modal-empty">No new apps or updates available.</div>
+      <!-- Error slot — shown when the card carries `--error` (the JS
+           writes a human-readable message here on fetch / parse / write
+           failure). Sits above the section list so the empty / sections
+           stay hidden via the `--error` selector below. -->
+      <div id="updates-modal-error" class="updates-modal-error"></div>
       <div id="updates-modal-new-section" class="updates-modal-section">
         <h3 class="updates-modal-section-title">New apps</h3>
         <div id="updates-modal-new" class="updates-modal-list"></div>
@@ -134,11 +139,12 @@
     </div>
     <div class="app-modal-actions updates-modal-actions">
       <div class="app-modal-actions-side">
-        <!-- Sync-complete status line. Hidden while the card carries
-             `--loading` so the message only surfaces once the 3 s
-             "check" finishes — pairs with the same gate that swaps
-             the loading bar for the results list. -->
-        <span class="updates-modal-status">Local Catalog is now synced!</span>
+        <!-- Status line — populated by the JS once the fetch settles.
+             Hidden while the card carries `--loading` so the message
+             only surfaces once the check completes. `--error` on the
+             card swaps the green success palette for red error; both
+             read from the same span so the markup stays simple. -->
+        <span id="updates-modal-status" class="updates-modal-status">Local Catalog is now synced!</span>
       </div>
       <div class="app-modal-actions-side">
         <!-- Two action buttons share the right slot, one visible at a
