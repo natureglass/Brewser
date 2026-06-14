@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Sign in — Brewser</title>
+    <link rel="stylesheet" href="brewser://assets/main.css">
+    <style>
+      .signin-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .signin-tile {
+        height: 140px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        text-align: left;
+      }
+
+      .signin-provider {
+        flex: 1 1 auto;
+      }
+
+      .signin-name {
+        display: block;
+        color: #faff00;
+        font-size: 1.5em;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .signin-status {
+        display: block;
+        color: #7fb8d8;
+      }
+      .signin-status.signin-status-in {
+        color: #00ff88;
+      }
+
+      .signin-avatar-wrap {
+        flex: 0 0 auto;
+        width: 80px;
+        height: 80px;
+        border-radius: 40px;
+        overflow: hidden;
+        background: #160d2e;
+        border: 1px solid #7a00cc;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .signin-avatar-wrap img {
+        display: block;
+        width: 80px;
+        height: 80px;
+        border-radius: 40px;
+      }
+      .signin-avatar-placeholder {
+        color: #7fb8d8;
+        font-size: 34px;
+        font-weight: 700;
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <div class="page-shell">
+
+        <section class="top-section clickable">
+            <header class="top-header">
+                <h2>Sign in</h2>
+                <nav class="top-links" aria-label="Browser navigation">
+                  <a class="munch-link" href="brewser://home/">Home</a>
+                </nav>
+            </header>
+        </section>
+
+        <p class="lead">Choose a service to sign in with.</p>
+
+        <div class="app-grid signin-grid">
+          <a class="app-card signin-tile" id="signin-tile-github" href="brewser://githubLogin/">
+            <div class="signin-provider">
+              <strong class="signin-name">GitHub</strong>
+              <span class="signin-status" id="signin-status-github">Not signed in</span>
+            </div>
+            <div class="signin-avatar-wrap">
+              <img id="signin-avatar-github" src="brewser://assets/github_logo.png" alt="">
+            </div>
+          </a>
+
+          <a class="app-card signin-tile" id="signin-tile-google" href="brewser://googleLogin/">
+            <div class="signin-provider">
+              <strong class="signin-name">Google</strong>
+              <span class="signin-status" id="signin-status-google">Not signed in</span>
+            </div>
+            <div class="signin-avatar-wrap">
+              <img id="signin-avatar-google" src="brewser://assets/google_logo.png" alt="">
+            </div>
+          </a>
+
+          <a class="app-card signin-tile" id="signin-tile-twitch" href="brewser://twitchLogin/">
+            <div class="signin-provider">
+              <strong class="signin-name">Twitch</strong>
+              <span class="signin-status" id="signin-status-twitch">Not signed in</span>
+            </div>
+            <div class="signin-avatar-wrap">
+              <img id="signin-avatar-twitch" src="brewser://assets/twitch_logo.png" alt="">
+            </div>
+          </a>
+
+        </div>
+
+    </div>
+
+    <script src="brewser://assets/login-picker.js"></script>
+
+  </body>
+</html>

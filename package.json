@@ -5,8 +5,7 @@
   "description": "Switch homebrew browser shell built on @switch-web/runtime. Currently a minimal scaffold.",
   "scripts": {
     "build": "esbuild --bundle --sourcemap --sources-content=false --target=es2022 --format=esm --outdir=build src/main.ts",
-    "sync-khronos": "node scripts/sync-khronos-tests.mjs",
-    "nro": "node scripts/sync-khronos-tests.mjs && node scripts/build-icon.mjs && node scripts/stage-main.mjs && nxjs-nro && node scripts/unstage-main.mjs",
+    "nro": "node scripts/build-icon.mjs && node scripts/stage-main.mjs && nxjs-nro && node scripts/unstage-main.mjs",
     "nsp": "nxjs-nsp",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

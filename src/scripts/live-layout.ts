@@ -487,7 +487,103 @@ function layoutChildren(
 	if (allInline) {
 		return layoutInline(parent, kids, cs, originX, originY, contentW, contentH);
 	}
+	// 2026-06-14: <fieldset> with a leading <legend> renders the legend
+	// vertically centered on the fieldset's TOP BORDER LINE — not as a
+	// plain block child sitting inside the content area. Every CSS-spec
+	// browser does this; without the special case the screenshot in the
+	// settings auth screen showed "GitHub Username or Email" floating
+	// inside the fieldset frame instead of straddling its top edge.
+	// `layoutFieldsetWithLegend` positions the legend explicitly, leaves
+	// the remaining kids flowing as a normal block below it, and records
+	// a paint-time cutout so `paintBorders` skips the top-border slice
+	// behind the legend (otherwise the border line would draw THROUGH
+	// the legend text).
+	if (parent.tagName === 'FIELDSET' && kids[0]?.tagName === 'LEGEND') {
+		return layoutFieldsetWithLegend(parent, kids, cs, originX, originY, contentW, contentH);
+	}
 	return layoutBlock(kids, originX, originY, contentW, contentH, cs);
+}
+
+/**
+ * Records of where a fieldset's first <legend> child sits relative to the
+ * fieldset's top border, so `paintBorders` in live-overlay.ts can skip
+ * that section of the top border (leaving the visual "tab" look). Keyed
+ * by the fieldset element; populated by `layoutFieldsetWithLegend` on
+ * every layout pass, cleared together with the layout cache.
+ */
+const fieldsetLegendCutouts = new WeakMap<LiveElement, { x: number; w: number }>();
+
+/**
+ * Returns the paint-time top-border cutout for a fieldset, or undefined
+ * when the fieldset has no <legend> (or its layout hasn't run yet).
+ * Read by `live-overlay.ts paintBorders`.
+ */
+export function getFieldsetLegendCutout(el: LiveElement): { x: number; w: number } | undefined {
+	return fieldsetLegendCutouts.get(el);
+}
+
+function layoutFieldsetWithLegend(
+	parent: LiveElement,
+	kids: LiveElement[],
+	cs: ComputedLiveStyle,
+	originX: number,
+	originY: number,
+	contentW: number,
+	contentH: number,
+): number {
+	const legend = kids[0];
+	const lcs = getComputedLiveStyle(legend);
+	const padTop = cs.paddingTop ?? 0;
+	const borderTop = cs.borderTopWidth ?? 0;
+	// Shrink-to-fit width — `intrinsicContentWidth` gives the legend's
+	// single-line natural width. Capped to the fieldset's content width
+	// so a very long legend stays inside the box; if it's wider than the
+	// content area it'll just paint clipped (matches browsers).
+	const explicitW = resolveLength(lcs.width, contentW);
+	const naturalW = intrinsicContentWidth(legend, lcs);
+	const legendW = Math.min(
+		clampSize(explicitW ?? naturalW, lcs.minWidth, lcs.maxWidth, contentW),
+		contentW,
+	);
+	// Predicted height: `intrinsicContentHeight` for a text-only legend
+	// returns one line-height plus the legend's own padding. We need the
+	// height to PRE-position the legend (its center on the top border
+	// line) before laying it out — the alternative would be a second
+	// layout pass to re-position after measurement.
+	const predictedH = intrinsicContentHeight(legend, lcs);
+	// Inset from the inline-start border. Real browsers use a small gap
+	// (~6-12px) so the legend doesn't visually touch the left border;
+	// 6px lines up with the screenshot in the settings page.
+	const legendInsetX = 6;
+	const legendX = originX + legendInsetX;
+	// `originY` is the fieldset's CONTENT box top (this engine bakes
+	// padding into the box, so contentBox.y = borderBox.y + padTop).
+	// Recover the border-box top via `originY - padTop`; the top border
+	// LINE is centered at `borderBox.y + borderTop/2`. The legend's
+	// vertical center should land on that line.
+	const topBorderCenterY = (originY - padTop) + borderTop / 2;
+	const legendY = topBorderCenterY - predictedH / 2;
+	const legendH = layoutLeaf(legend, lcs, legendX, legendY, legendW);
+	// Remaining children: stack as a normal block, pushed down so they
+	// start BELOW the legend's bottom (with a small breathing gap).
+	// `Math.max(originY, …)` keeps the normal originY when the legend
+	// sits high enough that its bottom is above the original content
+	// top — i.e. a short legend on a fieldset with generous padding.
+	const legendBottom = legendY + legendH;
+	const restStartY = Math.max(originY, legendBottom + 4);
+	// Record the cutout in border-box coords for the painter. Add a
+	// small horizontal pad on either side so the border-end-cap doesn't
+	// kiss the legend text glyphs at the typical font sizes.
+	const cutoutPad = 4;
+	fieldsetLegendCutouts.set(parent, {
+		x: legendX - cutoutPad,
+		w: legendW + cutoutPad * 2,
+	});
+	const restKids = kids.slice(1);
+	const restConsumed = restKids.length > 0
+		? layoutBlock(restKids, originX, restStartY, contentW, contentH, cs)
+		: 0;
+	return (restStartY - originY) + restConsumed;
 }
 
 /** Inline formatting context — flow text + inline elements into wrapped

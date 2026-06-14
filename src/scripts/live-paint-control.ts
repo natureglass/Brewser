@@ -35,7 +35,18 @@ let pendingFullRepaint = false;
 const dirtyLiveElements = new Set<LiveElement>();
 
 export function markLiveDirty(el: LiveElement | null | undefined): void {
-	if (el) dirtyLiveElements.add(el);
+	if (!el) return;
+	// 2026-06-14 kb-input lag fix: mutations inside the keyboard's own
+	// subtree shouldn't pollute the host page's dirty set. The keyboard
+	// tree is a separate live-DOM root with its own offscreen cache; its
+	// mutations route through `bumpKbTreeVersion` instead of bumping the
+	// host's `liveTreeVersion`. Adding kb elements to `dirtyLiveElements`
+	// would either (a) force the host's `patchLiveDirtyRegions` to try
+	// to re-layout kb elements against the host's layout cache, or (b)
+	// punt to a full host rebuild — both of which we're explicitly
+	// avoiding by isolating kb mutations.
+	if (kbMutationScopeDepth > 0) return;
+	dirtyLiveElements.add(el);
 }
 
 /** Return + clear the set of elements mutated since the last drain/clear. */
@@ -125,6 +136,45 @@ const DEFAULT_KEYBOARD_TOP_Y = 320;
 export function requestFullRepaint(): void {
 	pendingFullRepaint = true;
 }
+
+// =========================================================================
+// 2026-06-14 kb-input lag fix: keyboard mutation scope.
+//
+// The on-canvas keyboard is a separate live-DOM root with its own offscreen
+// cache (`paintKeyboardOverlay`). Without scoping, every keypress causes:
+//   - `setPseudoActive(key, true/false)` → bumps `liveTreeVersion`
+//   - `setInputValue(urlInput, …)` → bumps `liveTreeVersion`
+//   - `capsKey.classList.toggle('held', …)` / shiftKey ditto → bumps
+//   - text-node case-rewrite (when shift consumed) → bumps per node
+// The shared version counter invalidates BOTH the kb cache AND the host
+// page's overlay cache — and since the dirty set contains kb elements
+// that have no layout box in the host's cache, the host's
+// `patchLiveDirtyRegions` typically punts to a full chunked rebuild on
+// every keystroke. On heavy pages (settings.html etc.) that rebuild
+// blocks the JS thread long enough that the next touchstart never gets
+// polled — the second tap is silently dropped because Switch's HID layer
+// only reports the latest snapshot per frame.
+//
+// Routing kb-internal mutations through a separate `kbTreeVersion`
+// counter (and skipping `markLiveDirty` for them) keeps the host cache
+// warm across keystrokes; only the kb cache invalidates, and that's a
+// small ~80-element rebuild instead of a full host page paint.
+//
+// `pushKbMutationScope` / `popKbMutationScope` are wrapped around
+// (a) the open()/finish() bookends in KeyboardOverlay (so initial
+// `setInputValue(urlInput, initial)` + state sync don't dirty the host),
+// (b) the `__brewserKeyboardHandleTap` body (every per-tap mutation), and
+// (c) the deferred `setPseudoActive(key, false)` flash-clear timer.
+let kbMutationScopeDepth = 0;
+let kbTreeVersion = 0;
+
+export function pushKbMutationScope(): void { kbMutationScopeDepth++; }
+export function popKbMutationScope(): void {
+	if (kbMutationScopeDepth > 0) kbMutationScopeDepth--;
+}
+export function inKbMutationScope(): boolean { return kbMutationScopeDepth > 0; }
+export function bumpKbTreeVersion(): void { kbTreeVersion++; }
+export function getKbTreeVersion(): number { return kbTreeVersion; }
 
 /** One-shot consumer — returns true once, then resets. The shell
  * checks this each loop iteration before the cache-blit skip logic. */

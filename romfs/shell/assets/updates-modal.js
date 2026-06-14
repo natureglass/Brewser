@@ -74,11 +74,14 @@
   console.debug('[updates-modal] wired');
 
   // Where the fetched bytes are written. Matches the on-disk path
-  // `loadCatalogGroup` reads via `Switch.readFileSync(`${appRoot}catalogue.json`)`
+  // `loadCatalogGroup` reads via
+  // `Switch.readFileSync(`${appRoot}configs/catalogue.json`)`
   // — `appRoot` is `sdmc:/switch/brewser/` on real hardware (see
-  // `BREWSER_APP_ROOT` in src/browser-config.ts).
+  // `BREWSER_APP_ROOT` in src/browser-config.ts). The `configs/`
+  // segment came from the 2026-06-14 consolidation of every JSON
+  // config file under one folder.
   var APP_ROOT = 'sdmc:/switch/brewser/';
-  var CATALOG_PATH = APP_ROOT + 'catalogue.json';
+  var CATALOG_PATH = APP_ROOT + 'configs/catalogue.json';
   // The three catalog groups walked when computing the diff. Mirror
   // `CATALOG_GROUPS` in src/profile/browser-toolbar.ts — keep in sync
   // if a new group is ever added on the engine side.

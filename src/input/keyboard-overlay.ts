@@ -1,14 +1,18 @@
 import { type BrowserToolbar } from '../profile/browser-toolbar.js';
 import { COMBO_BUTTONS } from '../browser-config.js';
 import {
+	getKbTreeVersion,
 	getKeyboardLiveRoot,
 	getKeyboardTopY,
+	popKbMutationScope,
+	pushKbMutationScope,
 	setKeyboardOpen,
 	setKeyboardOverlayVisible,
 } from '../scripts/live-paint-control.js';
 import { setInputValue } from '../scripts/live-form.js';
 import {
 	getInternalLiveScrollY,
+	getLiveTreeVersion,
 	hitTestLive,
 	setInternalLiveScrollY,
 	type LiveElement,
@@ -336,6 +340,14 @@ export class KeyboardOverlay {
 			shift: false,
 			caps: false,
 		};
+		// 2026-06-14 kb-input lag fix: wrap every keyboard-tree mutation
+		// (initial sync here, per-tap mutations in handleTap, deferred
+		// flash-clear timers) in a `pushKbMutationScope` / `popKbMutationScope`
+		// pair so the bumps route to `kbTreeVersion` instead of the
+		// shared `liveTreeVersion`. The host page's `liveCacheOffscreen`
+		// stays warm across keystrokes; only the small kb cache rebuilds.
+		// See `live-paint-control.ts` for the full rationale.
+		pushKbMutationScope();
 		const urlInput = findUrlInput(root);
 		if (urlInput) setInputValue(urlInput, state.value);
 		// Cache the latch keys + letter-key list once per session so
@@ -351,6 +363,7 @@ export class KeyboardOverlay {
 		applyLetterCase(letterKeys, false);
 		if (capsKey) capsKey.classList.toggle('held', false);
 		if (shiftKey) shiftKey.classList.toggle('held', false);
+		popKbMutationScope();
 
 		setKeyboardOpen(true);
 		setKeyboardOverlayVisible(true);
@@ -447,8 +460,16 @@ export class KeyboardOverlay {
 			 * on. */
 			const flashKey = (key: LiveElement): void => {
 				setPseudoActive(key, true);
+				// 2026-06-14 kb-input lag fix: the deferred clear runs
+				// 120 ms later as its own macrotask — by then any
+				// `pushKbMutationScope` from `__brewserKeyboardHandleTap`
+				// has already popped, so we re-enter the scope here so
+				// the `setPseudoActive(key, false)` bump still routes to
+				// `kbTreeVersion` and doesn't dirty the host page cache.
 				nativeSetTimeout(() => {
+					pushKbMutationScope();
 					setPseudoActive(key, false);
+					popKbMutationScope();
 				}, 120);
 			};
 
@@ -465,6 +486,23 @@ export class KeyboardOverlay {
 
 			globals.__brewserKeyboardHandleTap = (target: LiveElement): void => {
 				if (!running) return;
+				// 2026-06-14 kb-input lag fix: scope ALL kb mutations
+				// triggered by this tap so they bump `kbTreeVersion`
+				// instead of the shared `liveTreeVersion`. The host
+				// page's overlay cache stays warm — without this, on
+				// heavy pages (settings.html) every keystroke kicked
+				// off a full chunked rebuild of the host cache that
+				// blocked the JS thread long enough for the next
+				// touchstart to be dropped by Switch's HID poll.
+				pushKbMutationScope();
+				try {
+					handleTapInner(target);
+				} finally {
+					popKbMutationScope();
+				}
+			};
+
+			const handleTapInner = (target: LiveElement): void => {
 				// Top-row dedicated affordances:
 				//   - Close (id=closeBtn): dismiss the kb without
 				//     committing — same outcome as the gamepad B button
@@ -504,6 +542,15 @@ export class KeyboardOverlay {
 				flashKey(key);
 				playClick();
 				const action = key.getAttribute('data-action');
+				// 2026-06-14 kb-input lag fix: track whether shift was
+				// ACTUALLY consumed by this keypress so we only re-sync
+				// the visual case + latch state when something changed.
+				// Previously `syncCaseAndLatch()` ran on every tap and
+				// called `classList.toggle('held', state.caps)` + ditto
+				// for shift; the token-list notify fires even when the
+				// token state is unchanged, so each unrelated keypress
+				// was bumping the tree version twice for nothing.
+				const wasShift = state.shift;
 				if (action) {
 					switch (action) {
 						case 'backspace': backspace(); return;
@@ -550,11 +597,11 @@ export class KeyboardOverlay {
 					}
 					insertChar(ch);
 				}
-				// `insertChar` flips shift back to false (one-shot). When
-				// shift was actually consumed by this key, re-sync visual
-				// case + clear the shift key's held style so the user
-				// sees the next letter return to lowercase.
-				if (!state.shift) {
+				// Only re-sync when shift went from on → off (i.e. this
+				// keypress consumed the one-shot shift latch). Caps /
+				// shift toggles already returned above with their own
+				// syncCaseAndLatch call.
+				if (wasShift && !state.shift) {
 					syncCaseAndLatch();
 				}
 			};
@@ -565,6 +612,19 @@ export class KeyboardOverlay {
 			// doesn't fire. Mirrors the old canvas keyboard's pollLoop
 			// shape (mouse + touch only; no D-pad nav).
 			let prev = readButtons();
+			// 2026-06-14 kb-input lag fix: track the host + kb tree
+			// versions across ticks so we can skip the per-tick
+			// `repaintDriver()` when nothing actually needs repainting.
+			// Calling repaintContent on every tick (60×/s) was the
+			// dominant CPU cost while the keyboard was open — on heavy
+			// host pages it took long enough that Switch's per-frame
+			// HID poll missed fast successive taps. We still tick
+			// repaintDriver when (a) the kb tree mutated (key flash,
+			// urlInput value change, latch toggle), (b) the host tree
+			// mutated (page rAF / video / Canvas2D activity), (c) the
+			// cursor moved.
+			let lastPaintedLiveVersion = getLiveTreeVersion();
+			let lastPaintedKbVersion = getKbTreeVersion();
 			const tick = (): void => {
 				if (!running) return;
 				const next = readButtons();
@@ -605,16 +665,26 @@ export class KeyboardOverlay {
 				// Right-stick Y → page scroll behind the keyboard. The
 				// shell's main-loop scroll handler is suspended on this
 				// promise, so we sample here and forward to onScroll.
+				let scrolled = false;
 				if (onScroll) {
 					const delta = readStickScroll(activePad());
-					if (delta !== 0) onScroll(delta);
+					if (delta !== 0) { onScroll(delta); scrolled = true; }
 				}
 				// Keep the software cursor alive while we own the loop —
 				// movement-only variant since A is hit-tested above as a
 				// keyboard activation, not dispatched as a page click.
 				const cursorMoved = tickCursorMovementOnly();
 
-				if (repaintDriver) repaintDriver();
+				const liveVer = getLiveTreeVersion();
+				const kbVer = getKbTreeVersion();
+				const dirty = liveVer !== lastPaintedLiveVersion
+					|| kbVer !== lastPaintedKbVersion;
+				const needsPaint = dirty || cursorMoved || scrolled;
+				if (needsPaint && repaintDriver) {
+					lastPaintedLiveVersion = liveVer;
+					lastPaintedKbVersion = kbVer;
+					repaintDriver();
+				}
 				prev = next;
 				// Drop the delay to 0 when the cursor moved this tick so
 				// stick-driven cursor motion doesn't visibly drag (matches

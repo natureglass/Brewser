@@ -1,0 +1,6 @@
+[
+  { "title": "Dark", "path": "themes/toolbars/dark.json" },
+  { "title": "Light", "path": "themes/toolbars/light.json" },
+  { "title": "Amber", "path": "themes/toolbars/amber.json" },
+  { "title": "Neon", "path": "themes/toolbars/neon.json" }
+]

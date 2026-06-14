@@ -378,8 +378,36 @@ export interface ComputedLiveStyle {
 /** Map of <style> LiveElement → rules parsed from its textContent.
  * Cleared on page navigation when the documentShim re-resets. */
 const styleSheets = new Map<LiveElement, ParsedRule[]>();
-/** Monotonic source counter so rules from later <style> elements (or
- * later in the same sheet) win on source-order tiebreaks. */
+/** Reserved cascade slot per `<style>` LiveElement. Slots are integers
+ * that pre-encode DOM-order position among `<head>` stylesheets so
+ * async `<link rel=stylesheet>` rules can slot in at their original
+ * head position even though their fetch resolves after inline
+ * `<style>` blocks already registered.
+ *
+ * Without this, an external sheet that loaded async always ended up
+ * with HIGHER source numbers than inline `<style>`, so on equal-
+ * specificity tiebreaks the external rule won. Real browsers resolve
+ * by DOM order — an inline `<style>` AFTER a `<link>` overrides the
+ * link even if it parsed first. The login page repro: a `<link rel=
+ * stylesheet>` to main.css with `.app-grid { repeat(4,...) }` was
+ * winning over a subsequent inline `<style>` with `.signin-grid {
+ * repeat(3,...) }` because of registration order.
+ *
+ * Slot 0 is reserved for "no slot assigned" (falls back to the
+ * monotonic counter, used by page scripts that mutate stylesheets
+ * post-load and for the kb scope). DOM-walk-time reservations start
+ * at slot 1. */
+const sheetSlot = new WeakMap<LiveElement, number>();
+let nextSheetSlot = 1;
+/** Multiplier separating sheets in cascade-source space. 1M rules per
+ * sheet is the cap; pages we ship are nowhere near. */
+const SHEET_SOURCE_STRIDE = 1_000_000;
+/** Monotonic source counter for rules in sheets that have no reserved
+ * slot. Bumped past the maximum reserved slot range so unreserved
+ * sheets always sort AFTER reserved ones in source order. (Reserves
+ * happen first during head-walk; runtime-added sheets register later
+ * and naturally cascade-win the tiebreak — same as real browsers'
+ * document-order rule for runtime `document.head.appendChild(style)`.) */
 let nextSource = 0;
 /** Computed-style cache. Invalidated on classList / attr / pseudo-state
  * changes (see `invalidateLiveStyle`). */
@@ -537,6 +565,11 @@ function someHoverRuleAffectsElement(el: LiveElement): boolean {
  * a leaving page's rules + caches don't bleed into the next. */
 export function resetLiveCss(): void {
 	styleSheets.clear();
+	// sheetSlot is a WeakMap so entries die with their LiveElements
+	// after resetLiveRoot drops the live tree; explicit clear isn't
+	// possible and isn't needed. Reset the counters so the next page
+	// starts fresh at slot 1.
+	nextSheetSlot = 1;
 	nextSource = 0;
 	stylesheetsWithActive.clear();
 	stylesheetsWithFocus.clear();
@@ -546,11 +579,35 @@ export function resetLiveCss(): void {
 	// WeakMap/WeakSet entries die with the LiveElements they referenced.
 }
 
+/** Reserve a cascade slot for `styleEl` in DOM-order position. Called
+ * by `html-to-live`'s head-walk for both inline `<style>` and `<link
+ * rel=stylesheet>` placeholders BEFORE either registers any rules.
+ * The returned slot is stable across re-registrations of the same
+ * element (e.g. an async `<link>` populating its placeholder after
+ * fetch). Idempotent — repeated calls return the same slot. */
+export function reserveStylesheetSlot(styleEl: LiveElement): number {
+	let slot = sheetSlot.get(styleEl);
+	if (slot === undefined) {
+		slot = nextSheetSlot++;
+		sheetSlot.set(styleEl, slot);
+	}
+	return slot;
+}
+
 /** Register (or re-register) the rules parsed from `<style>` element
  * `styleEl`'s textContent. Called by LiveStyleElement on textContent /
  * innerHTML assignment and on appendChild into document.head. */
 export function registerStyleSheet(styleEl: LiveElement, cssText: string): void {
-	const rules = parseStyleSheet(cssText);
+	// Source-base derives from the sheet's reserved slot if any (head-walk
+	// reserved it), else from the monotonic post-reserved counter. Either
+	// way, rules within this sheet get consecutive source numbers
+	// (baseSource + i), preserving intra-sheet ordering.
+	const slot = sheetSlot.get(styleEl);
+	const baseSource = (slot !== undefined)
+		? slot * SHEET_SOURCE_STRIDE
+		: (nextSheetSlot * SHEET_SOURCE_STRIDE) + nextSource;
+	const rules = parseStyleSheet(cssText, baseSource);
+	if (slot === undefined) nextSource += rules.length;
 	styleSheets.set(styleEl, rules);
 	// Track per-stylesheet pseudo-class usage so setPseudoActive /
 	// setPseudoFocus can skip invalidation on pages with no matching rule.
@@ -2887,7 +2944,7 @@ function compareSpec(a: readonly [number, number, number], b: readonly [number, 
 // Stylesheet parser (uses css-tree)
 // =========================================================================
 
-function parseStyleSheet(cssText: string): ParsedRule[] {
+function parseStyleSheet(cssText: string, baseSource: number): ParsedRule[] {
 	const out: ParsedRule[] = [];
 	let ast: CssNode;
 	try {
@@ -2896,7 +2953,7 @@ function parseStyleSheet(cssText: string): ParsedRule[] {
 		return out;
 	}
 	walkRulesWithMedia(ast, true, (rule, mediaActive) => {
-		collectRule(rule, out, mediaActive);
+		collectRule(rule, out, mediaActive, baseSource);
 	});
 	return out;
 }
@@ -3025,7 +3082,7 @@ function matchMediaQuery(q: string): boolean {
 	return true;
 }
 
-function collectRule(rule: Rule, out: ParsedRule[], mediaActive: boolean): void {
+function collectRule(rule: Rule, out: ParsedRule[], mediaActive: boolean, baseSource: number): void {
 	if (!rule.prelude || rule.prelude.type !== 'SelectorList') return;
 	if (!rule.block || rule.block.type !== 'Block') return;
 
@@ -3047,7 +3104,7 @@ function collectRule(rule: Rule, out: ParsedRule[], mediaActive: boolean): void 
 			chain,
 			decls,
 			specificity: computeChainSpecificity(chain),
-			source: nextSource++,
+			source: baseSource + out.length,
 			mediaActive,
 		});
 	});

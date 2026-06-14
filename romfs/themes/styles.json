@@ -1,0 +1,5 @@
+[
+  { "title": "Dark", "path": "themes/styles/dark.css" },
+  { "title": "Amber", "path": "themes/styles/amber.css" },
+  { "title": "Neon", "path": "themes/styles/neon.css" }
+]

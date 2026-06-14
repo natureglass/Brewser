@@ -115,7 +115,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from './network/network-probe.js';
 import { BrowserPermissionPolicy } from './permissions/browser-permission-policy.js';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_CONFIG, DEFAULT_TOOLBAR, LEGACY_TOOLBAR_CONFIG_KEY, loadConfig, loadToolbar, resolveSearchEngine, type BrowserToolbar, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { DEFAULT_CONFIG, DEFAULT_TOOLBAR, loadConfig, loadToolbar, resolveSearchEngine, type BrowserToolbar, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -1939,13 +1939,9 @@ export class BrowserShell {
 	 * then reloads the current page so the chrome AND content paint
 	 * with the new colours, and the Settings page's
 	 * `<browser-toolbars>` expansion picks up the new active row.
-	 *
-	 * `LEGACY_TOOLBAR_CONFIG_KEY` is scrubbed from the merged object so
-	 * a pre-rename config never ends up with both `toolbar` and
-	 * `template` keys pointing at different paths.
 	 */
 	private async selectToolbar(path: string): Promise<void> {
-		const configPath = `${this.profile.appRoot}config.json`;
+		const configPath = `${this.profile.appRoot}configs/config.json`;
 		try {
 			// Read the raw existing config and merge `toolbar` onto it
 			// so every other key survives — today that's
@@ -1971,7 +1967,6 @@ export class BrowserShell {
 				// a minimal one with sane defaults baked in.
 				next = { ...loadConfig(this.profile.appRoot), toolbar: path };
 			}
-			delete next[LEGACY_TOOLBAR_CONFIG_KEY];
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {
 			console.debug(`[brewser] write config.json failed: ${error}`);
@@ -2002,7 +1997,7 @@ export class BrowserShell {
 	 * `<browser-keyboards>` expansion re-runs against the new active
 	 * row. */
 	private async selectKeyboard(path: string): Promise<void> {
-		const configPath = `${this.profile.appRoot}config.json`;
+		const configPath = `${this.profile.appRoot}configs/config.json`;
 		try {
 			let next: Record<string, unknown> = { keyboard: path };
 			try {
@@ -2057,7 +2052,7 @@ export class BrowserShell {
 		// reload. Walk the live root for the button by its action; if
 		// it's missing the page is something else entirely (clean no-op).
 		if (this.isSaveButtonDisabled()) return;
-		const configPath = `${this.profile.appRoot}config.json`;
+		const configPath = `${this.profile.appRoot}configs/config.json`;
 		const prior = loadConfig(this.profile.appRoot);
 		const staged = this.readStagedSettings();
 		if (Object.keys(staged).length === 0) return; // nothing to commit
@@ -2078,17 +2073,6 @@ export class BrowserShell {
 			// defaults + staged edits, so writing it produces a valid
 			// file either way.
 		}
-		// Legacy-key cleanup: pre-2026-06-12 configs used `template` for
-		// the active toolbar path. If the on-disk file still has it but
-		// the new `toolbar` key isn't set (user hasn't touched the
-		// Toolbar section in this save), promote the legacy value so
-		// the selection survives the rewrite. Always scrub the legacy
-		// key afterward — once we save, the file is in the post-rename
-		// shape only.
-		if (typeof next.toolbar !== 'string' && typeof next[LEGACY_TOOLBAR_CONFIG_KEY] === 'string') {
-			next.toolbar = next[LEGACY_TOOLBAR_CONFIG_KEY];
-		}
-		delete next[LEGACY_TOOLBAR_CONFIG_KEY];
 		try {
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {

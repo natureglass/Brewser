@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Login with GitHub — Brewser</title>
+    <link rel="stylesheet" href="brewser://assets/main.css">
+    <style>
+        /* Stage gate — only the .auth-stage-X matching body's
+        data-auth-stage is shown. Driven by github-auth.js. All-page
+        (not fixed-position) so the live-DOM cache covers the whole
+        tree once per stage change. */
+        .auth-stage { display: none; }
+        body[data-auth-stage="email"]   .auth-stage-email   { display: block; }
+        body[data-auth-stage="device"]  .auth-stage-device  { display: block; }
+        body[data-auth-stage="success"] .auth-stage-success { display: block; }
+        body[data-auth-stage="error"]   .auth-stage-error   { display: block; }
+
+        #auth-verification-url {
+            font-size: 48px;
+            padding: 8px 0px;
+            text-align: center;
+        }
+
+        #auth-user-code {
+            font-size: 64px;
+            padding: 8px 0px;
+            text-align: center;
+        }
+
+        #auth-poll-status {
+            font-size: 20px;
+            padding: 12px 16px;
+            text-align: center;
+        }
+
+        #auth-hint {
+            width: 300px;
+        }
+
+    </style>
+  </head>
+
+ <body data-auth-stage="email" data-github-client-id="<browser-config-github-client-id/>">
+
+    <div class="page-shell">
+
+        <section class="top-section clickable">
+            <header class="top-header">
+                <h2>Github Account</h2>
+                <nav class="top-links" aria-label="Browser navigation">
+                <a class="munch-link" href="brewser://login/">Back</a>
+                <a class="munch-link" href="brewser://home/">Home</a>
+                </nav>
+            </header>
+        </section>
+
+        <p class="lead">Use your GitHub account for advance features</p>
+
+        <!-- STAGE: email/username capture. -->
+        <div class="auth-stage auth-stage-email">
+            <div class="settings-form">
+                <fieldset class="settings-group">
+                    <legend>GitHub Username or Email</legend>
+                    <input id="auth-hint" name="auth-hint" type="text" class="auth-input" autocomplete="username" placeholder="you@example.com or username">
+                    <div id="auth-email-error" class="auth-inline-error"></div>
+                </fieldset>
+
+                <div class="settings-savebar">
+                    <button id="auth-submit-email" class="settings-save" type="button">Continue with GitHub</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STAGE: device flow. Steps split into labelled fieldsets. -->
+        <div class="auth-stage auth-stage-device">
+            <div class="settings-form">
+                
+                <fieldset class="settings-group">
+                    <legend>Step 1 — Open this URL in any browser</legend>
+                    <div id="auth-verification-url"></div>
+                </fieldset>
+                
+                <fieldset class="settings-group">
+                    <legend>Step 2 — Enter this one-time code</legend>
+                    <div id="auth-user-code">…</div>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend>Status</legend>
+                    <div id="auth-poll-status" class="auth-poll-status">Waiting for confirmation…</div>
+                </fieldset>
+                <div class="settings-savebar">
+                    <a class="settings-save" href="brewser://settings/">Cancel</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- STAGE: signed-in -->
+        <div class="auth-stage auth-stage-success">
+            <div class="settings-form">
+                <fieldset class="settings-group" style="display: flex; gap: 24px; align-items: flex-start;">
+                    <div style="flex: 1 1 auto;">
+                        <div class="settings-row">
+                            <span class="settings-label">Email</span>
+                            <div id="auth-success-email" style="font-size: 32px; padding: 8px 0; word-break: break-all;"></div>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Name &amp; username</span>
+                            <div id="auth-success-name" style="font-size: 32px; padding: 8px 0; word-break: break-all;"></div>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Unique ID (GitHub user id)</span>
+                            <div id="auth-success-sub" style="font-size: 32px; padding: 8px 0; word-break: break-all;"></div>
+                        </div>
+                    </div>
+                    <div style="flex: 0 0 auto; padding-top: 8px;">
+                        <img id="auth-success-avatar" alt="" width="160" height="160" style="border-radius: 80px; display: block;">
+                    </div>
+                </fieldset>
+                <div class="settings-savebar">
+                    <button id="auth-logout" class="settings-save" type="button">Log out</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- STAGE: error. -->
+        <div class="auth-stage auth-stage-error">
+            <div class="settings-form">
+                <fieldset class="settings-group">
+                    <legend>Reason</legend>
+                    <div id="auth-error-message" class="auth-inline-error"></div>
+                </fieldset>
+                <div class="settings-savebar">
+                    <a class="settings-save" href="brewser://settings/">Back to Settings</a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="brewser://assets/github-auth.js"></script>
+
+  </body>
+</html>

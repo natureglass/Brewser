@@ -911,6 +911,17 @@ export async function openKeyboardAndApply(el: LiveElement): Promise<boolean> {
 	// rebuild. Sync the cache version after patching so the rebuild is
 	// skipped.
 	patchAndSync(el);
+	// 2026-06-14 kb-commit lag fix: `KeyboardOverlay.finish()` already
+	// did one repaint via `repaintDriver()` at close time — but that
+	// fired BEFORE this resume point (we're inside the macrotask the
+	// finish() `setTimeout(() => resolve(result), 0)` deferred). The
+	// shell's main-loop `onTick` then consumed any pending repaint
+	// request from `setKeyboardOpen(false)` BEFORE `setInputValue`
+	// landed, so its blit showed the stale value. Re-request a repaint
+	// here so the next `onTick` blits the freshly-patched cache (which
+	// holds the new text) to the screen. Without this the typed value
+	// only became visible after the next unrelated tap re-painted.
+	requestFullRepaint();
 	return true;
 }
 

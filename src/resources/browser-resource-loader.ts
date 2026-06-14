@@ -164,15 +164,13 @@ export class BrowserResourceLoader implements ResourceLoader {
 	}
 
 	/** Decide whether a `brewser://`-derived `<rel>` reads from the
-	 * app-level `apps/` tree (shared across profiles), the app-level
-	 * `dev/` tree (HTML/CSS/canvas/WebGL test fixtures + Khronos
-	 * conformance corpus), or the per-profile flat content root. The
-	 * `apps.html` launcher does NOT start with `apps/`, so it correctly
-	 * stays at `<storageRoot>apps.html`; `apps/<rest>` and `dev/<rest>`
-	 * (where `<rest>` is non-empty) go to the app root. */
+	 * app-level `apps/` tree (shared across profiles) or the per-profile
+	 * flat content root. The `apps.html` launcher does NOT start with
+	 * `apps/`, so it correctly stays at `<storageRoot>apps.html`;
+	 * `apps/<rest>` (where `<rest>` is non-empty) goes to the app root.
+	 * `dev/` routing was removed 2026-06-13 alongside the romfs purge. */
 	private resolveContentPath(rel: string): string {
 		if (rel.startsWith('apps/')) return `${this.appRoot}${rel}`;
-		if (rel.startsWith('dev/')) return `${this.appRoot}${rel}`;
 		return `${this.storageRoot}${rel}`;
 	}
 
@@ -337,6 +335,30 @@ export class BrowserResourceLoader implements ResourceLoader {
 		out = out.replace(
 			/<browser-config-artifacts(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-artifacts\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).artifacts),
+		);
+		// `<browser-config-<provider>-client-id>` family — expands to
+		// the matching `config.json` `<provider>OAuthClientId` value,
+		// HTML-escaped. Stamped onto each provider's login page <body>
+		// as `data-<provider>-client-id` so the per-provider auth.js
+		// can read it without re-parsing config.json from the page.
+		// Empty string / "REPLACE_ME" when the user hasn't configured
+		// the provider; each auth script branches on those and shows
+		// the misconfiguration stage instead of starting the flow.
+		out = out.replace(
+			/<browser-config-github-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-github-client-id\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).githubOAuthClientId),
+		);
+		out = out.replace(
+			/<browser-config-microsoft-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-microsoft-client-id\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).microsoftOAuthClientId),
+		);
+		out = out.replace(
+			/<browser-config-google-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-google-client-id\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).googleOAuthClientId),
+		);
+		out = out.replace(
+			/<browser-config-twitch-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-twitch-client-id\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).twitchOAuthClientId),
 		);
 		// `<browser-home-apps>` — renders the catalog group named by
 		// `config.json` `homeSection` (featured / community /

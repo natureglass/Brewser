@@ -69,7 +69,7 @@ import {
 	isLiveCacheBuilding, patchLiveCacheRegion, patchLiveImagePixelsOnly,
 	scrollElementIntoView, syncLiveCacheVersion,
 } from './live-overlay.js';
-import { markLiveDirty, markPageHasCanvas2dActivity, requestFullRepaint } from './live-paint-control.js';
+import { bumpKbTreeVersion, inKbMutationScope, markLiveDirty, markPageHasCanvas2dActivity, requestFullRepaint } from './live-paint-control.js';
 import {
 	notifyAttribute, notifyCharacterData, notifyChildList,
 } from '../polyfills/mutation-observer.js';
@@ -685,7 +685,19 @@ export function resolveLiveResourceUrl(src: string): string {
 // Side effect for callers: page scripts that mutate state DON'T need to
 // call any "invalidate" API; mutation hooks bump the counter automatically.
 let liveTreeVersion = 0;
-export function bumpLiveTreeVersion(): void { liveTreeVersion++; }
+export function bumpLiveTreeVersion(): void {
+	// 2026-06-14 kb-input lag fix: while a keyboard mutation scope is
+	// active (`pushKbMutationScope` / `popKbMutationScope` around
+	// per-tap mutations in keyboard-overlay.ts), route the bump to the
+	// kb-only counter so the host page's `liveCacheOffscreen` stays
+	// warm across keystrokes. See `live-paint-control.ts` for the full
+	// rationale.
+	if (inKbMutationScope()) {
+		bumpKbTreeVersion();
+		return;
+	}
+	liveTreeVersion++;
+}
 export function getLiveTreeVersion(): number { return liveTreeVersion; }
 
 /** Runtime predicate that answers "is this offscreen currently

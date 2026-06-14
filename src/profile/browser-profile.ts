@@ -21,26 +21,24 @@ const SEED_SKIP_ROOT_FILES: ReadonlySet<string> = new Set([
 ]);
 
 /** Romfs subtrees the seeder must NOT recurse into. Each entry is a
- * directory path relative to `romfs:/` with a trailing slash. The
- * Khronos WebGL conformance test corpora (~2350 files each) live
- * under `romfs:/dev/full-webgl{1,2}-conformance/sdk/` and are read
- * on-demand by the runner from romfs at runtime, so seeding them to
- * sdmc would be slow + wasteful (and quietly fills the SD card with
- * test-vector duplicates). Anything else under `dev/` is small enough
- * to seed normally. */
-const SEED_SKIP_DIRS: ReadonlySet<string> = new Set([
-	'dev/full-webgl1-conformance/sdk/',
-	'dev/full-webgl2-conformance/sdk/',
-]);
+ * directory path relative to `romfs:/` with a trailing slash. Empty
+ * after the 2026-06-13 purge of `romfs:/dev/` — kept as a hook for
+ * future skip rules so the walker code doesn't need re-plumbing. */
+const SEED_SKIP_DIRS: ReadonlySet<string> = new Set([]);
 
 export class BrowserProfile {
 	readonly name: string;
 	/** Per-profile storage: seeded pages (home.html etc.) sit flat
 	 * at the root, plus `assets/` and per-origin dirs. */
 	readonly storageRoot: string;
-	/** App-level storage shared across profiles: `config.json`, the
-	 * other top-level JSON config files, `toolbars/`, `logs/`,
-	 * `screenshots/`, `history.jsonl`, `bookmarks.json`. */
+	/** App-level storage shared across profiles. Layout:
+	 *   - `configs/` → all persisted JSON state (config, catalogue,
+	 *     bookmarks, search_engines, warnings, history.jsonl).
+	 *   - `themes/` → `toolbars/`, `keyboards/`, `styles/` plus their
+	 *     three registry JSONs.
+	 *   - `logs/` → runtime log files.
+	 *   - `screenshots/` → user screenshots.
+	 *   - `apps/` → installed apps under `<group>/<id>/...`. */
 	readonly appRoot: string;
 
 	constructor(name = 'shell', profileRoot = DEFAULT_PROFILE_ROOT, appRoot = BREWSER_APP_ROOT) {
@@ -49,14 +47,16 @@ export class BrowserProfile {
 		this.appRoot = appRoot;
 	}
 
-	/** Returns the absolute file path for the (app-level) history journal. */
+	/** Returns the absolute file path for the (app-level) history journal.
+	 * Lives under `configs/` alongside the other persisted JSON state. */
 	historyPath(): string {
-		return `${this.appRoot}history.jsonl`;
+		return `${this.appRoot}configs/history.jsonl`;
 	}
 
-	/** Returns the absolute file path for the (app-level) bookmarks file. */
+	/** Returns the absolute file path for the (app-level) bookmarks file.
+	 * Lives under `configs/` alongside the other JSON config files. */
 	bookmarksPath(): string {
-		return `${this.appRoot}bookmarks.json`;
+		return `${this.appRoot}configs/bookmarks.json`;
 	}
 
 	/** Per-origin path inside this profile (used by future cookie/local-storage stores). */
@@ -81,22 +81,20 @@ export class BrowserProfile {
 		// App-level dirs shared across profiles.
 		try { Switch.mkdirSync(this.appRoot); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}logs/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}toolbars/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}keyboards/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}styles/`); } catch (_) { /* exists */ }
+		// All app-level JSON config files (config / catalogue / bookmarks /
+		// search_engines / warnings) consolidated under `configs/` 2026-06-14.
+		try { Switch.mkdirSync(`${this.appRoot}configs/`); } catch (_) { /* exists */ }
+		// All theme assets (toolbars/ + keyboards/ + styles/ + their
+		// registry JSONs) consolidated under `themes/` 2026-06-14.
+		try { Switch.mkdirSync(`${this.appRoot}themes/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}themes/toolbars/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}themes/keyboards/`); } catch (_) { /* exists */ }
+		try { Switch.mkdirSync(`${this.appRoot}themes/styles/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
 		// `apps/` itself is intentionally NOT pre-created here. Apps live
 		// in arbitrary subtrees (e.g. `apps/<channel>/<reverse-dns>/...`)
 		// that are deployed via robocopy; the structure changes over time
 		// and the shell must not assume any particular shape.
-		// App-level dev surface: HTML/CSS/canvas/WebGL test fixtures +
-		// Khronos conformance corpora. The walker creates these on its
-		// own, but pre-creating them keeps the dir tree intact even when
-		// `dev/` is empty in romfs (defensive — pages that fetch
-		// `sdmc:/switch/brewser/dev/...` expect the dir to exist).
-		try { Switch.mkdirSync(`${this.appRoot}dev/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}dev/full-webgl1-conformance/assets/`); } catch (_) { /* exists */ }
 	}
 
 	/** Absolute SD-card path to a seeded HTML page. The browser's
@@ -106,25 +104,18 @@ export class BrowserProfile {
 		return `${this.storageRoot}${filename}`;
 	}
 
-	/** Absolute SD-card path to a seeded dev/test-fixture page or
-	 * asset. Dev pages live at the (app-level) `dev/` dir, shared
-	 * across profiles, mirrored from `romfs:/dev/` by `seedRomfs`. */
-	devPagePath(filename: string): string {
-		return `${this.appRoot}dev/${filename}`;
-	}
-
-	/** Absolute SD-card path to a seeded asset. Used by the chrome
+/** Absolute SD-card path to a seeded asset. Used by the chrome
 	 * code to construct `Image.src` URLs for toolbar icons. */
 	assetPath(filename: string): string {
 		return `${this.storageRoot}assets/${filename}`;
 	}
 
-	/** Absolute SD-card path to the (app-level) `toolbars.json` — the
-	 * registry of available toolbar designs the shell reads at launch.
+	/** Absolute SD-card path to the (app-level) `themes/toolbars.json` —
+	 * the registry of available toolbar designs the shell reads at launch.
 	 * The active toolbar lives at one of the paths the registry
-	 * references (typically `toolbars/<name>.json`). */
+	 * references (typically `themes/toolbars/<name>.json`). */
 	toolbarsRegistryPath(): string {
-		return `${this.appRoot}toolbars.json`;
+		return `${this.appRoot}themes/toolbars.json`;
 	}
 
 	/** Absolute SD-card path to a seeded keyboard panel file. Resolves
@@ -166,16 +157,12 @@ export class BrowserProfile {
 	 * Skips:
 	 *   - `main.js` + `main.js.map` at the romfs root — the runtime bundle,
 	 *     read by nxjs from INSIDE the NRO, never from sdmc.
-	 *   - The Khronos test corpora under `dev/full-webgl{1,2}-conformance/sdk/`
-	 *     — ~2350 files each, read on-demand from romfs by the conformance
-	 *     runner at runtime. Seeding them would saturate the SD card with
-	 *     read-mostly duplicates for ~hundreds of MB of test vectors.
 	 *
 	 * Note this also seeds the romfs `shell/` subtree into `<appRoot>shell/`
 	 * — which IS the per-profile `storageRoot`, since `DEFAULT_PROFILE_ROOT`
 	 * collapsed to match `BREWSER_APP_ROOT` 2026-06-12 (see browser-config.ts).
 	 * So one walker covers both the per-profile chrome pages AND the
-	 * app-level toolbars / keyboards / styles / dev fixtures in one pass.
+	 * app-level toolbars / keyboards / styles in one pass.
 	 */
 	async seedRomfs(): Promise<void> {
 		await this.seedRomfsDir('');

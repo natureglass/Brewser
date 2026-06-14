@@ -5,6 +5,7 @@
 // runner-managed `<canvas>` offscreens into the live tree.
 
 import { type HtmlElement, type HtmlNode, parseHtml } from '../html/html-parser.js';
+import { reserveStylesheetSlot } from './live-css.js';
 import { bumpLiveTreeVersion, getLiveRoot, LiveElement } from './live-dom.js';
 import { resetLiveOverlayCache } from './live-overlay.js';
 import { requestFullRepaint } from './live-paint-control.js';
@@ -118,16 +119,45 @@ export function parseFragmentInto(target: LiveElement, html: string): void {
 	}
 }
 
-/** Walk the parsed tree (skipping `<body>` since its descendants are
- * processed by the main converter) and register every `<style>` block
- * we find with the live cascade. Each style becomes a `display:none`
- * LiveElement child of the live root so `resetLiveRoot` on the next
- * navigation tears it down cleanly.
+/** One pending `<link rel=stylesheet>` waiting for its async fetch.
+ * `placeholder` was appended to the live root during head-walk and
+ * had a cascade slot reserved at that DOM-order position; when the
+ * fetch resolves, the loader assigns `placeholder.textContent` which
+ * triggers `registerStyleSheet` at that pre-reserved slot. */
+interface PendingHeadLink {
+	placeholder: LiveElement;
+	href: string;
+	media: string | undefined;
+}
+
+/** Per-parsed-tree pending-link queue. Keyed by the parsed `HtmlElement`
+ * root so `loadHeadLinkStylesheets` can pick up the queue that
+ * `populateRootFromTree` built during the synchronous head-walk. The
+ * WeakMap entry dies with the parsed tree (next navigation drops the
+ * reference). */
+const pendingHeadLinks = new WeakMap<HtmlElement, PendingHeadLink[]>();
+
+/** Walk the parsed tree's `<head>` IN DOM ORDER and register both
+ * `<style>` blocks and `<link rel=stylesheet>` placeholders against
+ * the live cascade. Slots are reserved at walk time so async link
+ * fetches that resolve LATER still slot into their original DOM
+ * position relative to inline `<style>` blocks. Without DOM-order
+ * slotting, an external sheet that loaded async always won equal-
+ * specificity tiebreaks over a subsequent inline `<style>` (which
+ * registered synchronously and got a LOWER source) — see the login
+ * page's `.app-grid` vs `.signin-grid` regression.
+ *
+ * Each `<style>` and `<link>` becomes a `display:none` LiveElement
+ * child of the live root so `resetLiveRoot` on the next navigation
+ * tears it down cleanly.
  *
  * `scope` (optional) rewrites every selector so the rule only matches
  * descendants of (or the scoped root itself). Used by the HTML-driven
- * keyboard so its CSS doesn't bleed into the host page's cascade. */
+ * keyboard so its CSS doesn't bleed into the host page's cascade.
+ * When `scope` is supplied, `<link>` placeholders are skipped — the
+ * keyboard never depends on external sheets. */
 function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement, scope?: string): void {
+	const links: PendingHeadLink[] = [];
 	const visit = (n: HtmlElement) => {
 		if (n.tag === 'body') return; // body styles register via the normal walk
 		if (n.tag === 'style') {
@@ -139,7 +169,20 @@ function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement, scope?: stri
 			const styleEl = new LiveElement('style');
 			styleEl.style.display = 'none';
 			liveRoot.appendChild(styleEl);
+			reserveStylesheetSlot(styleEl);
 			styleEl.textContent = scope ? scopeCssToSelector(cssText, scope) : cssText;
+			return;
+		}
+		if (n.tag === 'link' && !scope) {
+			const rel = (n.attrs.rel || '').toLowerCase();
+			const href = n.attrs.href;
+			if (rel.split(/\s+/).includes('stylesheet') && href) {
+				const placeholder = new LiveElement('style');
+				placeholder.style.display = 'none';
+				liveRoot.appendChild(placeholder);
+				reserveStylesheetSlot(placeholder);
+				links.push({ placeholder, href, media: n.attrs.media });
+			}
 			return;
 		}
 		for (const child of n.children) {
@@ -147,11 +190,18 @@ function attachHeadStyles(node: HtmlElement, liveRoot: LiveElement, scope?: stri
 		}
 	};
 	visit(node);
+	if (links.length > 0) pendingHeadLinks.set(node, links);
 }
 
-/** Walk the parsed tree's `<head>` for `<link rel="stylesheet" href=…>`,
- * fetch each URL, and graft the result into the live cascade as a
- * `display:none` `<style>` LiveElement (same path as inline styles).
+/** Drive the async fetches for `<link rel=stylesheet>` placeholders
+ * that `populateRootFromTree`'s head-walk already attached + slot-
+ * reserved against the live cascade. When each fetch resolves, the
+ * loader assigns the placeholder's textContent — that triggers
+ * `registerStyleSheet` at the pre-reserved DOM-order slot, so the
+ * external sheet cascades exactly where it would have appeared had
+ * it loaded synchronously, regardless of whether subsequent inline
+ * `<style>` blocks already registered.
+ *
  * Async — runs after `populateLiveRoot` so the page renders immediately
  * with whatever inline `<style>` and UA-default rules it has, then
  * re-renders as each external sheet arrives. `pageUrl` is used to
@@ -169,27 +219,15 @@ export async function loadHeadLinkStylesheets(
 	parsed: HtmlElement,
 	pageUrl: string,
 ): Promise<void> {
-	const links: { href: string; media: string | undefined }[] = [];
-	const visit = (n: HtmlElement) => {
-		if (n.tag === 'body') return;
-		if (n.tag === 'link') {
-			const rel = (n.attrs.rel || '').toLowerCase();
-			const href = n.attrs.href;
-			if (rel.split(/\s+/).includes('stylesheet') && href) {
-				links.push({ href, media: n.attrs.media });
-			}
-			return;
-		}
-		for (const child of n.children) {
-			if (child.type === 'element') visit(child);
-		}
-	};
-	visit(parsed);
-	if (links.length === 0) return;
-	const liveRoot = getLiveRoot();
-	// Fire all fetches in parallel — each registers its sheet as soon as
-	// it arrives, so the page progressively gains style.
-	await Promise.all(links.map(async ({ href, media }) => {
+	const links = pendingHeadLinks.get(parsed);
+	if (!links || links.length === 0) return;
+	// Hand off — multiple concurrent invocations on the same tree would
+	// double-fetch. Clearing here also lets the WeakMap entry GC sooner.
+	pendingHeadLinks.delete(parsed);
+	// Fire all fetches in parallel — each registers its sheet (at its
+	// pre-reserved slot) as soon as it arrives, so the page
+	// progressively gains style.
+	await Promise.all(links.map(async ({ placeholder, href, media }) => {
 		if (media) {
 			const m = media.toLowerCase();
 			const tokens = m.split(',').map((s) => s.trim());
@@ -208,10 +246,7 @@ export async function loadHeadLinkStylesheets(
 			return;
 		}
 		if (!cssText) return;
-		const styleEl = new LiveElement('style');
-		styleEl.style.display = 'none';
-		liveRoot.appendChild(styleEl);
-		styleEl.textContent = cssText; // triggers registerStyleSheet
+		placeholder.textContent = cssText; // triggers registerStyleSheet at reserved slot
 		// An external sheet changes the global cascade — every element's
 		// computed style is now potentially different. The default
 		// repaint path (patchLiveDirtyRegions) would try a targeted

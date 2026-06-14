@@ -1,5 +1,6 @@
 import { nxScreen } from '@switch-web/runtime';
 import { getLiveRoot, getLiveWindow, type LiveElement } from '../scripts/live-dom.js';
+import { isKeyboardOpen } from '../scripts/live-paint-control.js';
 
 // Inline-canvas page games (Cocos Creator, Three.js demos, hand-rolled
 // WebGL) register touch listeners on either `window` or the page's
@@ -123,6 +124,19 @@ function dispatchPointerTo(target: LiveElement | ReturnType<typeof getLiveWindow
 }
 
 function forward(touchType: string, pointerType: string, ev: TouchEvent): void {
+	// 2026-06-14 kb-input lag fix: while the on-canvas keyboard is open,
+	// the touch belongs entirely to the keyboard (controller-shortcuts'
+	// own listener routes it through `__brewserKeyboardHandleTap`).
+	// Page games (Cocos, Three.js) registered touch handlers on
+	// `window`/canvas before the keyboard opened; dispatching to them
+	// here makes their touch processing run synchronously on top of the
+	// kb tick's repaint. On Cocos pages the page-side touch handling
+	// alone took long enough to keep the JS thread busy past the next
+	// HID poll, dropping the user's NEXT keystroke. Skip forwarding
+	// entirely while the kb is up — the page won't receive any touch
+	// events during keyboard input, which matches what the user expects
+	// (the kb owns the screen).
+	if (isKeyboardOpen()) return;
 	const canvases: LiveElement[] = [];
 	collectCanvases(getLiveRoot(), canvases);
 	const primaryCanvas = canvases.length ? canvases[canvases.length - 1] : null;
@@ -137,25 +151,6 @@ function forward(touchType: string, pointerType: string, ev: TouchEvent): void {
 		changed.push(toSynthTouch(ev.changedTouches[i], primaryCanvas));
 	}
 
-	// Introspect: how many listeners does the primary canvas have for this event?
-	const canvasListeners = primaryCanvas
-		? ((primaryCanvas as unknown as { listeners?: Map<string, Set<Function>> }).listeners?.get(touchType)?.size ?? 0)
-		: 0;
-	const windowListeners = (liveWindow as unknown as { listeners?: Map<string, Set<Function>> })
-		.listeners?.get(touchType)?.size ?? 0;
-	const allCanvasListenerTypes = primaryCanvas
-		? Array.from(((primaryCanvas as unknown as { listeners?: Map<string, Set<Function>> }).listeners?.keys() ?? [])).join(',')
-		: '';
-	console.debug(
-		'[page-touch-fwd] forward type=' + touchType +
-		' canvases=' + canvases.length +
-		' touches=' + touches.length +
-		' changed=' + changed.length +
-		' canvasListeners=' + canvasListeners +
-		' windowListeners=' + windowListeners +
-		' canvasAllTypes=[' + allCanvasListenerTypes + ']' +
-		(changed[0] ? ' first=[' + changed[0].clientX + ',' + changed[0].clientY + ']' : ''),
-	);
 	if (primaryCanvas) {
 		dispatchTouchTo(primaryCanvas, touchType, touches, changed);
 		for (const t of changed) dispatchPointerTo(primaryCanvas, pointerType, t);
@@ -168,16 +163,13 @@ export function installPageTouchForwarder(): void {
 	if (installed) return;
 	installed = true;
 	const screen = nxScreen();
-	console.debug('[page-touch-fwd] installing on screen');
 	screen.addEventListener('touchstart', (ev: TouchEvent) => {
-		console.debug('[page-touch-fwd] touchstart event arrived');
 		forward('touchstart', 'pointerdown', ev);
 	});
 	screen.addEventListener('touchmove', (ev: TouchEvent) => {
 		forward('touchmove', 'pointermove', ev);
 	});
 	screen.addEventListener('touchend', (ev: TouchEvent) => {
-		console.debug('[page-touch-fwd] touchend event arrived');
 		forward('touchend', 'pointerup', ev);
 	});
 }

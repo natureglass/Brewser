@@ -52,13 +52,14 @@ import {
 
 import {
 	collectAbsolutes, findAbsoluteContainingBlock,
+	getFieldsetLegendCutout,
 	getInlineLayout, getLayoutBox,
 	layoutAbsoluteRoot, layoutFixedRoot,
 	resetLayoutCache, setLayoutMeasureCtx,
 	type InlineAtom, type InlineLayout, type LayoutBox,
 } from './live-layout.js';
 import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
-import { clearLiveDirty, drainLiveDirty, requestFullRepaint } from './live-paint-control.js';
+import { clearLiveDirty, drainLiveDirty, getKbTreeVersion, requestFullRepaint } from './live-paint-control.js';
 
 /** Viewport rectangle for the live overlay. `x` / `y` are the
  * top-left offset into the screen surface; `width` / `height` are
@@ -527,7 +528,31 @@ export function patchLiveDirtyRegions(): boolean {
 		// check on the cached layout entry; getLayoutBox returns the
 		// same reference until a relayout replaces it.
 		const newB = getLayoutBox(el);
-		if (newB && newB !== oldB) pushRect(newB);
+		if (newB && newB !== oldB) {
+			// 2026-06-14: when the pinned re-layout produced a box whose
+			// HEIGHT differs from the cached one (typically a `<div>`
+			// without an explicit height whose textContent grew from
+			// empty to a wrapping multi-line URL — see the login-page
+			// device-flow `#auth-verification-url`), the ancestor chain
+			// is stale: every ancestor's box was sized against the
+			// smaller intrinsic. The patch can repaint the new region
+			// but can't move the ancestor's borders — so e.g. the
+			// containing `<fieldset>` keeps drawing its border at the
+			// pre-grow height while the new text overflows it. Punt to
+			// a full rebuild so the ancestor chain re-lays-out at the
+			// new sizes. Same-height updates (the audio player's 4 Hz
+			// timeline label — same font / same line count / different
+			// glyphs) skip the punt: they're the original case the
+			// partial patch was designed for, and don't affect any
+			// ancestor's intrinsic.
+			if (Math.abs(newB.h - oldB.h) > 0.5) {
+				_partialDbg('  PATCH punt: ' + _tagOf(el)
+					+ ' height ' + oldB.h.toFixed(1) + ' → ' + newB.h.toFixed(1)
+					+ ' (ancestor box stale) → full rebuild');
+				return false;
+			}
+			pushRect(newB);
+		}
 		_partialDbg('  ' + _tagOf(el) + ' relaid ['
 			+ Math.round(rect.x) + ',' + Math.round(rect.y) + ' '
 			+ Math.round(rect.w) + 'x' + Math.round(rect.h) + ']');
@@ -1402,7 +1427,13 @@ export function paintKeyboardOverlay(
 ): void {
 	const w = Math.max(1, Math.floor(viewport.width));
 	const h = Math.max(1, Math.floor(viewport.height));
-	const version = getLiveTreeVersion();
+	// 2026-06-14: combine the host tree version with the kb-only version
+	// so per-key mutations (routed through `bumpKbTreeVersion` while a
+	// kb-mutation scope is active in keyboard-overlay.ts) still
+	// invalidate the kb cache, while host-page mutations do too. Without
+	// the kb counter, scoping the kb's own taps would leave the panel
+	// frozen at the open()-time layout.
+	const version = getLiveTreeVersion() + getKbTreeVersion();
 	const needsBuild =
 		!kbCacheOffscreen
 		|| kbCacheW !== w
@@ -2015,13 +2046,22 @@ function paintBoxedElementInner(
 	// submit button invisible.
 	const isFormTag = tag === 'INPUT' || tag === 'BUTTON'
 		|| tag === 'SELECT' || tag === 'TEXTAREA';
+	// 2026-06-14: a <fieldset> whose first child is <legend> gets a
+	// border that's interrupted by the legend along its top edge — the
+	// layout pass recorded the legend's screen-x range as a cutout so
+	// `paintBorders` can break its top-border draw into two segments
+	// (left of legend, right of legend) and leave a visible gap behind
+	// the legend text. Lookup is cheap; undefined for fieldsets without
+	// a legend, and the call to getFieldsetLegendCutout is a no-op for
+	// every other tag.
+	const topCutout = tag === 'FIELDSET' ? getFieldsetLegendCutout(el) : undefined;
 	if (isFormTag) {
 		const richBg = !!cs.backgroundLayers || !!cs.boxShadow;
 		if (richBg && box.w > 0 && box.h > 0) {
 			paintOuterBoxShadows(ctx, cs, box, radius);
 			paintBackground(ctx, cs, box, radius);
 			paintInsetBoxShadows(ctx, cs, box, radius);
-			paintBorders(ctx, cs, box, radius);
+			paintBorders(ctx, cs, box, radius, topCutout);
 		}
 		if (paintFormWidget(ctx, el, cs, box, richBg)) return;
 	}
@@ -2030,7 +2070,7 @@ function paintBoxedElementInner(
 		paintBackground(ctx, cs, box, radius);
 		paintInsetBoxShadows(ctx, cs, box, radius);
 	}
-	paintBorders(ctx, cs, box, radius);
+	paintBorders(ctx, cs, box, radius, topCutout);
 	// `::before` / `::after` BOX backgrounds (decorative overlays like the
 	// visualizer grid) — painted above the host background, below the
 	// host's own content + children. Text-only pseudos are no-ops here and
@@ -2893,12 +2933,20 @@ function paintIconGlyph(
 /** Paint solid-only CSS borders inside the border-box edges. Borders
  * are painted at the EDGE of `box` (no layout effect — see comment in
  * inline-css.ts on the border type slots). Skips zero-width sides and
- * sides without a resolved color. */
+ * sides without a resolved color.
+ *
+ * `topCutout` lets the top border skip a horizontal slice — used for
+ * <fieldset>'s top edge so a <legend> sitting on the border line has
+ * a visible gap to render into. Coordinates are screen-space (same
+ * basis as `box.x`); the cutout is clipped to the box's horizontal
+ * extent. Ignored for rounded-rect mode (rare combination).
+ */
 function paintBorders(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	cs: ComputedLiveStyle,
 	box: LayoutBox,
 	radius: number = 0,
+	topCutout?: { x: number; w: number },
 ): void {
 	if (box.w <= 0 || box.h <= 0) return;
 	const tw = cs.borderTopWidth ?? 0;
@@ -2929,7 +2977,21 @@ function paintBorders(
 	}
 	if (tw > 0 && tc && tc !== 'transparent') {
 		ctx.fillStyle = tc;
-		ctx.fillRect(box.x, box.y, box.w, tw);
+		if (topCutout && topCutout.w > 0) {
+			// Clip the cutout to the box's horizontal extent so a legend
+			// hanging off the left/right edge doesn't make the segment
+			// math invert. Then paint left + right segments, skipping the
+			// middle slice that the legend will cover.
+			const cx0 = Math.max(box.x, topCutout.x);
+			const cx1 = Math.min(box.x + box.w, topCutout.x + topCutout.w);
+			const leftW = Math.max(0, cx0 - box.x);
+			const rightX = cx1;
+			const rightW = Math.max(0, (box.x + box.w) - cx1);
+			if (leftW > 0) ctx.fillRect(box.x, box.y, leftW, tw);
+			if (rightW > 0) ctx.fillRect(rightX, box.y, rightW, tw);
+		} else {
+			ctx.fillRect(box.x, box.y, box.w, tw);
+		}
 	}
 	if (rw > 0 && rc && rc !== 'transparent') {
 		ctx.fillStyle = rc;

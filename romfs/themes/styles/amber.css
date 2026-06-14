@@ -1,0 +1,1740 @@
+/* Unified Brewser per-profile page stylesheet. Linked from each page
+   under shell/ via
+   <link rel="stylesheet" href="brewser://assets/main.css">. Resource
+   loader resolves that to <storageRoot>assets/main.css (assets/ does
+   not match the apps/ or dev/ routing prefixes). Seeded from
+   romfs:/shell/assets/main.css by seedBuiltinAssets on
+   first run; user-edits on disk persist (missing-only seeder).
+
+   Body padding is now global (28px 48px on the `body` rule below); the
+   old per-page convention (32px 28px for home, 28px for the top-bar
+   pages) no longer applies. error.html does NOT link this sheet — its
+   palette is unrelated.
+
+   PERF NOTE: gradients, box-shadows, radial glows and transitions
+   were stripped out to stay cheap on the software/low-end GPU path.
+   Visuals are now flat solid fills drawn from the same palette, so
+   colour uniformity is preserved while per-frame paint cost drops. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  padding: 28px 48px;
+  background: #1a1206;
+  color: #f3e9d6;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 18px;
+}
+
+h1 { color: #ffbf00; }
+h2 { color: #ffcf40; }
+a  { color: #f2b705; }
+
+.lead {
+  color: #c9b489;
+  margin-top: 0;
+  margin-bottom: 24px;
+}
+
+.empty { color: #9c8758; font-style: italic; }
+
+/* Card-grid empty-state — used when <browser-apps> / <browser-featured>
+   render no entries. Same <p class="empty"> markup as the list pages,
+   but inside .app-grid it gets the card-style backdrop. */
+.app-grid .empty {
+  background-color: #241a0c;
+  padding: 14px 16px;
+  border-left: 3px solid #ffcf40;
+  color: #c9b489;
+  border-radius: 6px;
+  font-style: normal;
+}
+
+code, kbd { color: #ffe2a8; }
+
+.page-shell {
+  width: min(1280px, 100%);
+  margin: 0 auto;
+}
+
+/* Header row: page title left, single action button right. Used by
+   history.html + bookmarks.html. */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.top-bar h1 {
+  margin: 0 0 4px;
+  line-height: 1.12;
+}
+
+/* Pill nav links — used by home top-links + bottom-bar CTAs. */
+.munch-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  min-height: 46px;
+  padding: 11px 20px;
+  overflow: hidden;
+  color: #fff4d6;
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 999px;
+}
+
+.munch-link:focus-visible {
+  outline: 2px solid #f2b705;
+  outline-offset: 3px;
+}
+
+/* Destructive pill — red/orange accents reading as "careful, this
+   clears data". Used by history.html (Clear History) and bookmarks.html
+   (Clear Bookmarks); shell intercepts data-action="clear-history"
+   / "clear-bookmarks". */
+.clear-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132px;
+  min-height: 46px;
+  padding: 11px 22px;
+  color: #ffb8b8;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  background: #4c2626;
+  border: 1px solid #7a3338;
+  border-radius: 999px;
+}
+
+/* Internet search bar — emitted by <browser-search> (loader). */
+.search-section {
+  display: flex;
+  justify-content: center;
+  margin: 0 auto 32px;
+}
+
+.search-form {
+  display: flex;
+  align-items: center;
+  width: min(760px, 100%);
+  min-height: 66px;
+  padding: 8px;
+  background: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 999px;
+}
+
+.search-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #fff4d6;
+  font: inherit;
+  padding: 12px 8px;
+}
+
+.search-input::placeholder {
+  color: #c9b489;
+  opacity: 1;
+}
+
+.search-button {
+  flex: 0 0 auto;
+  border: none;
+  cursor: pointer;
+  color: #1a1206;
+  background: #ffbf00;
+  font: inherit;
+  font-weight: 800;
+  padding: 13px 22px;
+  border-radius: 999px;
+}
+
+.search-button:hover,
+.search-button:focus-visible {
+  background: #f2b705;
+  outline: none;
+}
+
+/* CSS-only radio tabs on apps.html. The three radios live as direct
+   children of <body> (so they're siblings of `.page-shell`) and are
+   hidden — `:checked` drives panel visibility via the `~` (general
+   sibling) combinator. Pages with these rules force a full cache
+   rebuild on each radio tap (see someStylesheetUsesSibling in
+   live-css.ts), so the cost shows up only on tab switches, not idle
+   scroll. */
+input[name="apps-tab"] { display: none; }
+
+.tab-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+/* Apps page top toolbar — tab strip flush left, action buttons (today
+   just "Check for Updates") flush right. The toolbar owns the bottom
+   margin so the inner `.tab-bar` can drop its own (otherwise both
+   stack and the row sits 44px above the grid instead of 22px). */
+.apps-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.apps-toolbar .tab-bar { margin-bottom: 0; }
+.apps-check-updates { cursor: pointer; font: inherit; }
+
+.tab-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132px;
+  min-height: 44px;
+  padding: 10px 22px;
+  color: #c9b489;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  background: #241a0c;
+  border: 1px solid #5c4410;
+  border-radius: 999px;
+}
+
+.tab-panel { display: none; }
+
+/* Active-tab visuals + active panel — the three `:checked` rules below
+   are the whole tab-switching mechanism. Each radio sits before
+   `.page-shell` in the DOM; `~ .page-shell` walks forward to the shell
+   and `.tab-label[for=...]` / `.tab-panel[data-tab=...]` pick out the
+   matching label + panel inside it. */
+#apps-tab-featured:checked ~ .page-shell .tab-label[for="apps-tab-featured"],
+#apps-tab-community:checked ~ .page-shell .tab-label[for="apps-tab-community"],
+#apps-tab-experimental:checked ~ .page-shell .tab-label[for="apps-tab-experimental"] {
+  color: #1a1206;
+  background: #ffbf00;
+  border-color: #ffbf00;
+}
+
+#apps-tab-featured:checked ~ .page-shell .tab-panel[data-tab="featured"],
+#apps-tab-community:checked ~ .page-shell .tab-panel[data-tab="community"],
+#apps-tab-experimental:checked ~ .page-shell .tab-panel[data-tab="experimental"] {
+  display: block;
+}
+
+.apps-check-updates,
+.communityApps {
+  color: #1a1206;
+  background: #ffbf00;
+  border-color: #ffbf00;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  min-height: 46px;
+  padding: 11px 20px;
+  overflow: hidden;
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+}
+
+.apps-check-updates:active,
+.apps-check-updates[aria-pressed="true"],
+.communityApps:active,
+.communityApps[aria-pressed="true"] {
+  background: #e0a800;
+  border-color: #e0a800;
+  color: #1a1206;
+}
+
+.tab-label:active {
+  background: #15100a;
+  border-color: #ffcf40;
+}
+
+/* App / Featured grid — 4-column responsive grid of .app-card anchors
+   (logo + title + description). Same markup the resource loader
+   emits for <browser-apps> and <browser-featured>. */
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.app-card {
+  position: relative;
+  /* Block layout (not flex) so the existing painters center the logo
+     under the parent's `text-align: center`, and the `<strong>` title
+     + `<span>` description blocks stretch full-width with their own
+     `text-align: left` for readable copy. The meta strip on top
+     handles its left-right chip layout via its own internal flex. */
+  display: block;
+  overflow: hidden;
+  padding: 14px 18px;
+  /* Fixed height across the whole grid — see the same rule in
+     `shell/assets/main.css` for the rationale (avoids the per-tap
+     localized relayout collapsing short-content cards on `:active`).
+     280 px fits the meta strip + logo + title + 3-line description
+     cap with margin to spare; `overflow: hidden` clips outliers. */
+  height: 245px;
+  text-align: center;
+  color: #fff4d6;
+  text-decoration: none;
+  background: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 16px;
+}
+
+.app-logo {
+  display: block;
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+  margin-bottom: 14px;
+}
+
+.app-card strong {
+  display: block;
+  color: #ffbf00;
+  font-size: 1.15em;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+/* Description text — clamped to three lines max so cards stay uniform
+   no matter how chatty the catalog blurb is. `max-height` is set just
+   above `3 × line-height` (4.5em vs the bare-min 4.05em) so descender
+   ink on the third line — gpqy etc. — paints in full instead of being
+   cut by the baseline. `overflow: hidden` still chops a fourth line.
+   (Brewser's painter doesn't honor `-webkit-line-clamp` / `text-
+   overflow: ellipsis`, so the cut is a hard clip — fine for catalog
+   copy that already favors short blurbs.) */
+.app-card span {
+  display: block;
+  color: #c9b489;
+  line-height: 1.35;
+  max-height: 4.5em;
+  overflow: hidden;
+  text-align: left;
+}
+
+/* Version + license footer pinned to the card's bottom edge. The
+   parent `.app-card` already carries `position: relative`, so absolute
+   positioning anchors to its content box. A thin top border separates
+   the meta strip from the description above; version sits flush left
+   (subdued blue chip), license flush right (accent green chip). When
+   only one of the two is present the surviving chip sits at its own
+   side and the other slot stays empty — no centering rebalance, on
+   purpose, so the chip placement stays predictable across cards. The
+   overrides on `display: inline-flex` / `text-align: center` undo the
+   generic `.app-card span { display: block; text-align: left }` rule
+   above (which is what the description text inherits). */
+/* Renderer emits `<div class="app-card__meta">` with two chip `<div>`s
+   inside. The strip flows after the description text instead of being
+   absolutely-anchored to the card bottom — brewser's `layoutAbsoluteRoot`
+   path turned out unreliable for this case (shrink-to-fit absolutes
+   with only `bottom:` set don't measure children correctly). The card's
+   `min-height` keeps cards uniform-looking even when descriptions are
+   short. */
+/* Top-of-card meta strip — version chip flush left, license chip
+   flush right. `width: 100%` so the row spans the card's content area
+   even though the parent flex axis is `align-items: center` (which
+   would otherwise shrink the row to its content width and center it,
+   defeating the corner-anchor look the user asked for). */
+.app-card__meta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.app-meta__version,
+.app-meta__license {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 22px;
+  text-align: center;
+  white-space: nowrap;
+  flex-grow: 0;
+}
+
+.app-meta__version {
+  color: #ffe2a8;
+  background: #3a2c10;
+  border: 1px solid #5c4410;
+}
+
+/* Upgrade-available chip — the renderer emits this when the on-disk
+   manifest.json's version disagrees with the catalogue.json's. Bright
+   yellow to read as "do something about this"; same palette as page
+   h1s + active tab + search button. The chip text grows to fit
+   "v1.0.0 [→] v1.0.1" so we widen the padding a touch and let the
+   chip shrink naturally — `flex-grow: 0` from the shared rule above
+   keeps it from stretching across the meta strip. */
+.app-meta__version--upgrade {
+  color: #1a1206;
+  background: #ffbf00;
+  border: 1px solid #ffbf00;
+  padding: 0 14px;
+  /* The chip sits inside the `.app-card__meta` flex strip. The shared
+     `.app-meta__version` rule above only sets `flex-grow: 0`, so the
+     default `flex-shrink: 1` lets the parent squeeze the chip below
+     its intrinsic width when the row gets cramped — and on a narrow
+     4-col card that pinched the yellow pill background down while the
+     `white-space: nowrap` version text spilled past it. Pinning
+     `flex-shrink: 0` keeps the chip at its content width. Switching
+     to `inline-flex` makes the chip self-size around its
+     `<span>v1.0.0</span><svg/><span>v1.0.7</span>` children with
+     proper vertical alignment so the arrow + text sit on the same
+     baseline without relying on `vertical-align: middle` quirks. */
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Reset the generic `.app-card span { display: block; color: #c9b489;
+   line-height: 1.35; text-align: left; ... }` rule above so the version
+   chip's inline `<span>v1.0.0</span><svg/><span>v1.0.7</span>` markup
+   actually flows on ONE line — without this override the spans paint
+   as block elements and stack vertically with the arrow stranded in
+   between (the same gotcha the meta-chip refactor called out for
+   `<div>`-vs-`<span>`).
+   Color is hardcoded `#1a1206` to match the chip's text color: the
+   parent `.app-meta__version--upgrade` sets that color, but `color:
+   inherit` on the span doesn't resolve through live-css the way the
+   spec implies — it ends up yellow (same as the chip bg, see the
+   "letters invisible" repro) instead of dark. Hardcoding sidesteps
+   the inherit-resolution question entirely.
+   Same specificity as `.app-card span`; later in source order so this
+   wins the tiebreak. */
+.app-meta__version--upgrade span {
+  display: inline;
+  color: #1a1206;
+  line-height: 22px;
+  max-height: none;
+  overflow: visible;
+  text-align: center;
+}
+
+/* "NEW" chip — emitted by `renderAppCards` for missing entries
+   (entry file absent on disk) in place of the version pill. Red
+   palette matches the Download action button so the card's
+   "you haven't installed this" signal carries the same visual
+   weight across the meta strip + the modal CTA. */
+.app-meta__version--new {
+  color: #ffffff;
+  background: #ff0000;
+  border: 1px solid #ff0000;
+  letter-spacing: 0.08em;
+}
+
+/* Inline arrow drawn between the installed + catalog versions inside
+   `.app-meta__version--upgrade`. The SVG carries width/height attrs
+   (14×10) so live-layout reserves the right inline-box; the CSS here
+   just nudges it vertically into line with the surrounding text and
+   adds breathing room either side. No painter or layout cost beyond
+   one polygon fill per chip. */
+.upgrade-arrow {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  margin: 0 6px;
+  vertical-align: middle;
+}
+
+.app-meta__license {
+  color: #1a1206;
+  background: #f2b705;
+  border: 1px solid #c79200;
+}
+
+/* Settings-list rows — used by settings.html (Developer section),
+   history.html (recent visits), bookmarks.html (saved pages). The
+   loader emits <ul class="settings-list"><li>…</li></ul>. */
+ul.settings-list { list-style-type: none; padding: 0; }
+ul.settings-list li {
+  background-color: #241a0c;
+  padding: 8px 14px;
+  margin-top: 4px;
+  border-left: 3px solid #3a2c10;
+}
+/* Anchors inside list rows render in the muted blue-grey so they
+   blend with the .url / .desc spans below them — louder green would
+   fight the row's own muted treatment. `display: block` so the
+   anchor's bounding box spans the full row — the inner inline label
+   + url span still flow as text, and `.desc` already forces its own
+   line, so resting layout is unchanged. Needed so the :active press
+   background (see "Press indication" below) covers the whole row. */
+ul.settings-list a { color: #c9b489; text-decoration: none; display: block; }
+ul.settings-list .url { color: #9c8758; }
+ul.settings-list .desc {
+  display: block;
+  color: #9c8758;
+  font-size: 15px;
+  margin-top: 2px;
+}
+
+/* Template rows — settings.html "Templates" radio-style buttons.
+   The loader emits <button class="template-row"><span
+   class="radio-indicator"><span class="radio-dot"></span></span>
+   <span class="template-label">…</span></button>; the .active row
+   (currently-selected per config.json) has the inner dot filled and
+   no data-action so taps are no-ops. Inactive rows carry
+   data-action="select-template:<path>". */
+button.template-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background-color: #3a2c10;
+  color: #f3e9d6;
+  margin-top: 6px;
+  padding: 12px 16px;
+  border: 1px solid #5c4410;
+  border-radius: 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button.template-row.active {
+  background-color: #241a0c;
+  border-color: #ffcf40;
+  cursor: default;
+}
+button.template-row .template-label { flex: 1; }
+button.template-row .path { color: #c9b489; }
+button.template-row .radio-indicator {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #ffcf40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+}
+button.template-row .radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: transparent;
+}
+button.template-row.active .radio-dot {
+  background-color: #ffcf40;
+}
+
+/* Press indication — visible "depressed" state on tap. Pure colour
+   delta (darker background + brighter accent border) so the engine
+   paints the state statically without needing transitions/animations.
+   The live-css :active wiring (live-input-dispatch.ts beginLivePress /
+   endLivePress, called from both touch and engine-mouse) drives the
+   state flip; stylesheetsWithActive is gated so adding these rules
+   costs a per-tap cascade invalidation. The endLivePress hold timer
+   keeps :active visible for ~120ms after a fast tap so the press
+   visual is reliably observable.
+
+   `:hover` is intentionally absent — the engine-mouse cursor moves
+   across hover boundaries fast enough that per-frame cascade
+   invalidation + repaint tanks system FPS. Touch has no hover concept
+   either. Page authors who NEED hover should re-enable the sink in
+   page-mouse-forwarder.updateHover with finer-grained throttling.
+
+   For button.template-row the [data-action] attribute selector scopes
+   the press style to inactive rows — the currently-selected row
+   (rendered without data-action by the loader) won't flash on tap. */
+.clickable .munch-link:active {
+  background: #15100a;
+  border-color: #ffcf40;
+}
+.clear-btn:active {
+  background: #2a0f08;
+  border-color: #ff5055;
+}
+.clickable .app-card:active {
+  background: #15100a;
+  border-color: #ffcf40;
+}
+.search-button:active {
+  background: #c79200;
+}
+.tab-label:active {
+  color: #fff4d6;
+  background: #15100a;
+  border-color: #ffcf40;
+}
+button.template-row[data-action]:active {
+  background-color: #15100a;
+  border-color: #f2b705;
+}
+ul.settings-list a:active,
+ul.settings-list li:active {
+  background-color: #15100a;
+}
+
+/* ---- Missing-app modal -------------------------------------------
+   Shared by apps.html (full catalog) and home.html (Featured Apps).
+   The catalog loader stamps `data-missing="true" data-app-detail="…"`
+   on every card whose `apps/<group>/<id>/<entry>` file isn't on disk
+   (see browser-toolbar.ts `loadCatalogGroup`). The page-side script at
+   `brewser://assets/missing-app-modal.js` intercepts taps on those
+   cards and toggles `.app-modal-overlay--open` to show the centered
+   detail panel.
+
+   IMPORTANT: visibility is driven by a class flip, NOT
+   `style.display`. The InlineStyle setters on LiveElement.style are
+   plain field writes that don't run through `invalidateLiveStyle` —
+   they leave the live-DOM paint cache holding the previous frame's
+   pixels (= second open layers a fresh modal on top of the stale one).
+   classList.add/remove routes through `LiveTokenList.notify` which
+   calls invalidateLiveStyle + bumpLiveTreeVersion + markLiveDirty, so
+   the dirty-region pass actually erases the closed modal on the next
+   onTick repaint. */
+.app-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 10, 4, 0.80);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+.app-modal-overlay.app-modal-overlay--open { display: flex; }
+
+.app-modal-card {
+  width: 760px;
+  max-width: 100%;
+  background: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 16px;
+  padding: 24px 26px 20px;
+  color: #fff4d6;
+  text-align: center;
+}
+
+/* Meta strip — same flush-left version / flush-right license chip
+   layout the grid card uses (`.app-card__meta`). Reuses the
+   `.app-meta__version` / `.app-meta__license` pill rules already in
+   this sheet so the chips look identical to the card's. The script
+   leaves the inner divs empty when the catalog entry omits the
+   field; the empty pills disappear visually because their content
+   is zero-width but they still occupy a flex slot. */
+.app-modal-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+  min-height: 22px;
+}
+.app-modal-meta .app-meta__version:empty,
+.app-modal-meta .app-meta__license:empty { display: none; }
+
+.app-modal-logo {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  margin: 0 auto 14px;
+}
+
+.app-modal-title {
+  color: #ffbf00;
+  font-size: 1.5em;
+  margin: 0 0 8px;
+}
+
+.app-modal-description {
+  color: #f0e0c0;
+  margin: 0 0 16px;
+  text-align: left;
+}
+.app-modal-description:empty { display: none; }
+
+.app-modal-body { margin-bottom: 18px; text-align: left; }
+
+.app-modal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #3a2c10;
+}
+.app-modal-row:first-child { border-top: none; }
+
+.app-modal-row-label {
+  /* 160px fits the longest label we currently emit ("Allowed origins")
+     on a single line at the 0.9em uppercase scale. `nowrap` is the
+     belt to the suspenders — a future label slightly longer than the
+     basis would otherwise wrap and visually merge into the row below,
+     which is what bit us when "Allowed origins" + a 110px column
+     stacked atop "Developer". */
+  flex: 0 0 160px;
+  color: #a8946a;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.app-modal-row-value {
+  flex: 1;
+  color: #f3e9d6;
+  word-break: break-word;
+}
+
+/* Two-slot action row. The left slot holds the upgrade-install button
+   (visible only when the catalog version > installed version); the
+   right slot holds Cancel + Play / Download. `space-between` keeps
+   the right group glued to the modal's right edge even when the left
+   slot is empty (display: flex on the empty wrapper still occupies a
+   0-width position-1 slot, which is exactly what we want — the
+   right group sits at position-2 / end). */
+.app-modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-modal-actions-side {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Install-size chip in the LEFT action slot. See main.css for full
+   rationale. Amber-tinted muted palette so it reads as metadata. */
+.app-modal-size {
+  display: none;
+  font-weight: 700;
+  font-size: 0.95em;
+  color: #c9b489;
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+.app-modal-size.app-modal-size--visible { display: inline-block; }
+/* Insufficient free space — amber palette uses the same red warning
+   colour as the cancel/destructive buttons. */
+.app-modal-size.app-modal-size--warn { color: #ff8676; }
+/* Disabled install button — muted amber so the button reads as
+   "not actionable" but still feels in-palette. */
+.app-modal-btn[disabled],
+.app-modal-btn.app-modal-btn--disabled {
+  background: #3a2c10;
+  color: #6b5320;
+  border-color: #3a2c10;
+  cursor: default;
+}
+
+.app-modal-btn {
+  background: #3a2c10;
+  color: #f3e9d6;
+  border: 1px solid #5c4410;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Play (installed app) — green pill matching the license-chip palette
+   (#f2b705), reading as "confirm / go". Dark text so the label stays
+   legible on the bright fill. */
+.app-modal-btn--play {
+  background: #228B22;
+  border-color: #355E3B;
+  color: #ffffff;
+}
+
+/* Download (missing app) — red pill matching the .clear-btn palette,
+   reading as "this is a fresh-install action, takes a moment". Same
+   warm-tone family used elsewhere for state-changing actions. */
+.app-modal-btn--download {
+  background: #ff0000;
+  border-color: #7a3338;
+  color: #ffffff;
+}
+
+.app-modal-btn:active {
+  background: #15100a;
+  border-color: #f2b705;
+}
+.app-modal-btn--play:active {
+  background: #355E3B;
+  border-color: #228B22;
+  color: #ffffff;
+}
+.app-modal-btn--download:active {
+  background: #7a3338;
+  border-color: #ff0000;
+  color: #ffb8b8;
+}
+
+/* Action buttons whose role is gated by `detail.missing`. The script
+   toggles this class on Play vs Download so only the appropriate
+   button is visible. Higher specificity than `.app-modal-btn` so the
+   class wins regardless of source order. */
+.app-modal-btn.app-modal-btn--hidden { display: none; }
+
+/* Play is an `<a role="button">` so the chrome looks identical to
+   the surrounding `<button>` siblings (`<a>`'s default text-decoration
+   + link color would otherwise leak through the `.app-modal-btn`
+   palette). */
+a.app-modal-btn {
+  display: inline-block;
+  text-decoration: none;
+  color: #f3e9d6;
+}
+a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
+
+/* Missing-card title styles muted relative to live apps so the
+   catalog-vs-installed distinction is visible at a glance. */
+.app-card--missing {
+  background: #33180c;
+  border-color: #c43a14;
+}
+.app-card--missing strong { color: #f0e0c0; }
+
+/* Upgrade-available card — lighter background + slightly warmer
+   border so the row reads as a call-to-action next to the standard
+   #241a0c cards. Pairs with the yellow `.app-meta__version--upgrade`
+   chip the renderer pins to the top of the card; the chip palette
+   stays loud against the slightly-lighter fill since the new bg keeps
+   the same blue family. The `.clickable .app-card:active` rule
+   already in this sheet overrides on press. */
+.app-card--upgrade {
+  background: #2e2210;
+  border-color: #9a7420;
+}
+
+/* ---- Check-for-Updates modal -------------------------------------
+   Triggered by the `.apps-check-updates` button on apps.html. Reuses
+   the missing-app modal's overlay + card chrome (`.app-modal-overlay`,
+   `.app-modal-card`) so the two modals look the same family; only the
+   internals differ. The card is bounded by `max-height` and lays its
+   children out as a column so the OK action row stays pinned at the
+   bottom and `.updates-modal-results` scrolls inside the middle slot.
+
+   Loading vs results gating: the JS adds `updates-modal-card--loading`
+   on open and removes it after the 3 s setTimeout fires. The two
+   selectors below flip which slot is visible without touching
+   `style.display` from JS (which wouldn't invalidate the live-DOM
+   paint cache — same gotcha as the open/close class flip). */
+.updates-modal-card {
+  width: 760px;
+  max-width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 26px 20px;
+}
+
+.updates-modal-title {
+  flex: 0 0 auto;
+  margin: 0 0 16px;
+}
+
+/* Loading slot — visible only while the card carries `--loading`.
+   The bar is a fixed-height fill that pulses via opacity (the only
+   keyframe property live-css interpolates reliably for our needs —
+   transform-origin isn't supported so scaleX would expand from
+   center, and width keyframes aren't picked up either). */
+.updates-modal-loading {
+  flex: 0 0 auto;
+  display: none;
+  padding: 24px 0 32px;
+}
+.updates-modal-card--loading .updates-modal-loading { display: block; }
+.updates-modal-card--loading .updates-modal-results { display: none; }
+
+.updates-modal-loading-bar {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #ffbf00;
+  opacity: 0.4;
+  animation: updates-modal-pulse 1.2s linear infinite;
+}
+
+@keyframes updates-modal-pulse {
+  0%   { opacity: 0.35; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+/* Results slot — visible only when the card is NOT in loading state.
+   Flex column inside a bounded card height: `flex: 1 1 auto` claims
+   the leftover vertical space; `overflow-y: auto` lets the inner
+   list scroll when its content exceeds the slot. */
+.updates-modal-results {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  text-align: left;
+  margin-bottom: 16px;
+  padding-right: 4px;
+}
+
+.updates-modal-section { margin-bottom: 16px; }
+.updates-modal-section:last-child { margin-bottom: 0; }
+
+.updates-modal-section-title {
+  color: #a8946a;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+.updates-modal-list { display: block; }
+
+/* One row per entry — flex strip with app name flush left, version
+   info flush right. Same dark divider as `.app-modal-row` so the
+   visual rhythm matches the detail modal's row stack. */
+.updates-modal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px;
+  border-top: 1px solid #3a2c10;
+  color: #f3e9d6;
+}
+.updates-modal-row:first-child { border-top: none; }
+
+.updates-modal-row-name {
+  flex: 1 1 auto;
+  font-weight: 700;
+  color: #fff4d6;
+  word-break: break-word;
+}
+
+/* Version cell on the right edge of each row. For "New apps" it
+   holds a single `v1.0.0` token; for "Updates" it holds
+   `v1.0.0 [→] v1.0.1` where [→] is the same inline-SVG
+   `.upgrade-arrow` polygon the grid card / detail modal use. */
+.updates-modal-row-version {
+  flex: 0 0 auto;
+  color: #f0e0c0;
+  font-size: 0.95em;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+.updates-modal-row-version .upgrade-arrow {
+  margin: 0 6px;
+  vertical-align: middle;
+}
+
+/* Empty-state line shown when there are no new apps AND no
+   updates. The JS toggles visibility by adding `--has-rows` to the
+   results container so this rule and the section rules invert. */
+.updates-modal-empty {
+  display: none;
+  padding: 20px 0;
+  text-align: center;
+  color: #a8946a;
+}
+.updates-modal-results--empty .updates-modal-empty { display: block; }
+.updates-modal-results--empty .updates-modal-section { display: none; }
+/* Sections individually hide when their respective list is empty —
+   keyed by a class the JS toggles on the section element. */
+.updates-modal-section--empty { display: none; }
+
+/* OK button row stays pinned at the bottom — `flex: 0 0 auto` inside
+   the column-flex card, sibling to the scrollable results above. */
+.updates-modal-actions { flex: 0 0 auto; }
+
+/* Sync-complete status line on the LEFT side of the action row.
+   Green to read as "all good" (same palette family as the Play
+   button); hidden while the card is still in the loading state so
+   the message only appears once the check completes. */
+.updates-modal-status {
+  color: #f2b705;
+  font-weight: 700;
+  font-size: 0.95em;
+}
+.updates-modal-card--loading .updates-modal-status { display: none; }
+
+/* Cancel/Close action gate. The red Cancel sits in the right action
+   slot while the card is in the loading state; once the 3 s check
+   finishes (class removed by the JS), Cancel hides and the green
+   Close takes its place. Higher specificity than `.app-modal-btn` so
+   the rule wins regardless of source order — same approach the
+   missing-app modal uses for its Play/Download swap. */
+.updates-modal-card--loading .updates-modal-btn-close { display: none; }
+.updates-modal-card:not(.updates-modal-card--loading) .updates-modal-btn-cancel { display: none; }
+
+/* ---- Download / Update progress modal ----------------------------
+   Amber palette — warm-bronze track + amber fill while loading, swap
+   to green on success and red on error to match the Check-for-Updates
+   modal's status colours. */
+.download-modal-card {
+  width: 520px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 26px 20px;
+}
+
+.download-modal-title {
+  flex: 0 0 auto;
+  margin: 0 0 32px;
+}
+
+.download-modal-progress {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px 0 16px;
+}
+.download-modal-card--error .download-modal-progress { display: none; }
+
+.download-modal-progress-track {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: #3a2c10;
+  overflow: hidden;
+}
+
+.download-modal-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #ffbf00;
+  width: 0%;
+}
+.download-modal-card--success .download-modal-progress-fill { background: #f2b705; }
+
+/* Two-up indicator row — remaining MB on the LEFT, file counter on
+   the RIGHT. See main.css for full rationale. */
+.download-modal-progress-row {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.download-modal-remaining {
+  text-align: left;
+  color: #f0e0c0;
+  font-weight: 700;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-modal-counter {
+  text-align: right;
+  color: #f0e0c0;
+  font-weight: 700;
+  font-size: 0.95em;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-modal-error {
+  display: none;
+  padding: 16px 0 8px;
+  text-align: center;
+  color: #ff8676;
+  font-weight: 700;
+  word-break: break-word;
+}
+.download-modal-card--error .download-modal-error { display: block; }
+
+.download-modal-actions { flex: 0 0 auto; }
+
+.download-modal-status {
+  color: #f0e0c0;
+  font-weight: 700;
+  font-size: 0.95em;
+  word-break: break-word;
+}
+.download-modal-card--success .download-modal-status { color: #f2b705; }
+.download-modal-card--error .download-modal-status { color: #ff8676; }
+
+.download-modal-card--loading .download-modal-btn-close { display: none; }
+.download-modal-card:not(.download-modal-card--loading) .download-modal-btn-cancel { display: none; }
+
+/* ---- about.html ----------------------------------------------------
+   Migrated from about.html's inline <style>. The 28px 48px text-heavy
+   body padding now lives on the global `body` rule above. Gradients /
+   shadows / glows that were in the inline sheet are flattened to solid
+   palette fills, in line with the rest of this stylesheet. */
+.page-about h1 { margin-bottom: 4px; line-height: 1.12; }
+
+/* Featured Apps heading — bumped to feel like a real section title
+   instead of a sub-heading. Tracking + weight match the rest of the
+   page; the colour stays in the blue accent family. */
+
+.top-section h2 {
+  margin-top: 26px;
+  margin-bottom: 20px;
+  font-size: 2em;
+  letter-spacing: 0.005em;
+}
+
+.top-section { margin-top: 0; margin-bottom: 16px; }
+
+/* The featured-header row sits on top of the grid: section title on
+   the left, secondary nav (Bookmarks, History) flush right. Reuses
+   the same flex shape the old top-bar had. */
+.top-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.top-header h2 {
+  /* Override the page-level h2 vertical margins — the section's own
+     layout handles spacing now. */
+  margin: 0;
+}
+
+.top-links {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.about-hero {
+  margin-bottom: 28px;
+}
+
+.about-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 0;
+}
+
+.about-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  color: #ffe2a8;
+  background-color: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.about-section {
+  margin-top: 30px;
+}
+
+.about-card {
+  background: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 16px;
+  padding: 20px 18px;
+}
+
+.about-card h2,
+.about-card h3 {
+  margin-top: 0;
+}
+
+.about-card p {
+  color: #c9b489;
+  line-height: 1.45;
+}
+
+.about-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.about-meta article {
+  background-color: #241a0c;
+  padding: 14px 16px;
+  border-left: 3px solid #ffcf40;
+  border-radius: 6px;
+}
+
+.about-meta strong {
+  display: block;
+  color: #ffbf00;
+  margin-bottom: 6px;
+}
+
+.about-meta span {
+  display: block;
+  color: #c9b489;
+  line-height: 1.35;
+}
+
+.about-footer-note {
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid #5c4410;
+  color: #9c8758;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* ---- settings.html / <browser-settings> ----------------------------
+   The loader emits `.settings-form` with one `.settings-group`
+   `<fieldset>` per section (Template, Appearance, Performance,
+   Behaviour, Diagnostics) and a `.settings-savebar` row at the bottom
+   whose Save button is the only commit point. Every input is tagged
+   with `data-setting="<key>"` so the shell's `save-settings` handler
+   can walk the live root and read staged values back. The savebar
+   flows inline at the end of the form (no fixed positioning) so a
+   scroll-to-bottom is the natural way to commit edits. */
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+fieldset.settings-group {
+  background-color: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 12px;
+  /* Extra bottom padding (28px vs the 14px top) absorbs the
+     border-box-vs-content-box discrepancy on fixed-height inputs —
+     live-layout's intrinsicContentHeight returns just `cs.height`
+     for explicit-height inputs (44px), without adding the 2px border,
+     so each `.settings-row` underreports by ~2-4px and the cumulative
+     deficit pushes the last number input through the fieldset's
+     bottom border. */
+  padding: 14px 18px;
+  margin: 0;
+}
+
+fieldset.settings-group legend {
+  color: #ffbf00;
+  font-weight: 700;
+  padding: 0 8px;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-row-toggle { margin-top: 10px; }
+
+.settings-label {
+  display: block;
+  color: #f3e9d6;
+  font-weight: 600;
+}
+
+.settings-hint {
+  display: block;
+  color: #c9b489;
+  font-size: 14px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.path { color: #c9b489; }
+
+/* Numeric / text inputs. Live-form.ts paints these via the
+   form-widget painter; we set explicit colours so the placeholder
+   palette matches the page card backdrops. Width AND height are set
+   explicitly because the live-layout column-flex axis was computing
+   the intrinsic input height too small inside `.settings-row`,
+   leaving only the bottom edge of the box visible under the labels —
+   pinning the height makes the input box paint at its full size. */
+.settings-form input[type="number"],
+.settings-form input[type="text"] {
+  background: #15100a;
+  color: #f3e9d6;
+  border: 1px solid #5c4410;
+  border-radius: 8px;
+  padding: 0 12px;
+  font: inherit;
+  width: 260px;
+  height: 44px;
+}
+
+/* Radio rows — used by the Template list (stacked) and the Theme row
+   (inline). Both share the `.settings-radio` class; `.inline` flips
+   the layout from one-per-line to flex-row. */
+.settings-radio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #15100a;
+  border: 1px solid #5c4410;
+  border-radius: 10px;
+  color: #f3e9d6;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.settings-radio.inline {
+  margin-top: 0;
+  padding: 8px 14px;
+  min-width: 100px;
+  justify-content: center;
+}
+
+.settings-radio input[type="radio"] {
+  margin: 0;
+}
+
+.settings-radio-label { flex: 1; }
+
+.settings-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-templates {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Side-by-side fieldset pair (Template + Keyboard) on the Settings
+   page. Each child fieldset claims an equal share of the row width
+   so the two pickers sit shoulder to shoulder rather than stacking.
+   Uses the same 18px gap as `.settings-form` keeps between vertical
+   sections so the rhythm matches the rest of the form. */
+.settings-row-pair {
+  display: flex;
+  gap: 18px;
+}
+
+.settings-row-pair > fieldset.settings-group {
+  flex: 1;
+}
+
+/* Checkbox toggle rows. Live-form.ts paints the checkmark inside the
+   box; we make the box noticeably larger than the default 20×20 so
+   the checkmark stroke (~12% of box width) reads from a normal
+   viewing distance. The dark fill + light highlight border give the
+   checked state high contrast against the row background. */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: #15100a;
+  border: 1px solid #5c4410;
+  border-radius: 10px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.settings-toggle input[type="checkbox"] {
+  width: 30px;
+  height: 30px;
+  background: #3a2c10;
+  color: #f2b705;
+  border: 1px solid #ffcf40;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+/* Sticky bottom-right save bar — visible across the whole content
+   area, anchored to the bottom of the viewport so the Save button
+   stays reachable while the user scrolls through the form.
+
+   Width is set explicitly because the live-layout engine only honors
+   `right:` anchoring when `width` is known (see `layoutFixedRoot` →
+   `if (csRight !== undefined && explicitW !== undefined)`). Without
+   it the bar stretches to viewport width and the 999px radius paints
+   the whole content area as one giant ellipse. */
+.settings-savebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #241a0c;
+  border: 1px solid #7a5a16;
+  border-radius: 14px;
+}
+
+/* `flex-grow: 1` on the status text expands it to fill all the spare
+   main-axis space, anchoring the Save button flush against the bar's
+   right padding edge. Auto-margins (the usual CSS idiom) aren't
+   honored in the engine's flex layout (`live-layout.ts` drops them
+   to 0), so this is the load-bearing trick that keeps the button
+   pinned to the right regardless of how long the status text is. */
+.settings-status {
+  flex-grow: 1;
+  color: #c9b489;
+  font-size: 15px;
+}
+
+.settings-save {
+  border: none;
+  cursor: pointer;
+  color: #1a1206;
+  background: #ffbf00;
+  font: inherit;
+  font-weight: 800;
+  padding: 10px 22px;
+  border-radius: 999px;
+}
+
+.settings-save:active {
+  background: #c79200;
+}
+
+/* Disabled Save = no unsaved changes. Pure colour delta so the
+   software-painter doesn't need a transition; cursor flips to `default`
+   to communicate "nothing to do." */
+.settings-save[disabled] {
+  background: #5c4410;
+  color: #9c8758;
+  cursor: default;
+}
+
+/* ===================================================================
+   Light theme overrides
+   -------------------------------------------------------------------
+   Active when the user's `theme` config is `light` (Settings →
+   Appearance → Theme). The shell pushes the choice via
+   `setMediaColorScheme()` so `@media (prefers-color-scheme: light)`
+   matches; the rules below override only the colour tokens that
+   need to flip vs. the dark defaults above. Cascade order makes the
+   light overrides win when the query matches; when it doesn't (dark
+   theme), nothing here applies and the original dark palette stays.
+
+   Palette:
+     - Page bg            #fdf6e3
+     - Card surface       #ffffff
+     - Subtle/sunken bg   #f7eed5
+     - Inactive row bg    #f3e7c8
+     - Border (major)     #e3c98a
+     - Border (strong)    #b45309  (focus / active)
+     - Border (subtle)    #ecdfc0  (dividers)
+     - Text (primary)     #2a1d08
+     - Text (secondary)   #6b5320
+     - Text (muted)       #8a7340
+     - Heading amber      #b45309
+     - Heading navy       #b45309
+     - Link green         #9a7300
+     - Code teal          #9a6a00
+     - Destructive bg     #fee2e2
+     - Destructive border #fca5a5
+     - Destructive text   #b91c1c
+     - Accent yellow      #ffbf00  (preserved — Save, tab-active)
+   =================================================================== */
+
+@media (prefers-color-scheme: light) {
+
+  body {
+    background: #fdf6e3;
+    color: #2a1d08;
+  }
+
+  h1 { color: #b45309; }
+  h2 { color: #b45309; }
+  a  { color: #9a7300; }
+
+  .lead { color: #6b5320; }
+  .empty { color: #8a7340; }
+
+  .app-grid .empty {
+    background-color: #ffffff;
+    border-left-color: #b45309;
+    color: #6b5320;
+  }
+
+  code, kbd { color: #9a6a00; }
+
+  /* Pill nav (.munch-link) */
+  .munch-link {
+    color: #2a1d08;
+    background: #ffffff;
+    border-color: #e3c98a;
+  }
+  .munch-link:focus-visible { outline-color: #9a7300; }
+  .clickable .munch-link:active {
+    background: #f3e7c8;
+    border-color: #b45309;
+  }
+
+  /* Destructive pill */
+  .clear-btn {
+    color: #b91c1c;
+    background: #fee2e2;
+    border-color: #fca5a5;
+  }
+  .clear-btn:active {
+    background: #fecaca;
+    border-color: #b91c1c;
+  }
+
+  /* Search bar */
+  .search-form {
+    background: #ffffff;
+    border-color: #e3c98a;
+  }
+  .search-input { color: #2a1d08; }
+  .search-input::placeholder { color: #a8946a; }
+  .search-button:hover,
+  .search-button:focus-visible { background: #c79200; color: #ffffff; }
+  .search-button:active { background: #9a7300; color: #ffffff; }
+
+  /* Apps page tabs */
+  .tab-label {
+    color: #6b5320;
+    background: #f3e7c8;
+    border-color: #e3c98a;
+  }
+  .tab-label:active {
+    color: #1a1206;
+    background: #fdebb0;
+    border-color: #b45309;
+  }
+  /* Active tab keeps the yellow palette — dark text on yellow reads
+     fine against the light page bg too. */
+
+  /* App / Featured grid cards */
+  .app-card {
+    color: #2a1d08;
+    background: #ffffff;
+    border-color: #e3c98a;
+  }
+  .app-card strong { color: #b45309; }
+  .app-card span { color: #6b5320; }
+  .clickable .app-card:active {
+    background: #f3e7c8;
+    border-color: #b45309;
+  }
+  .app-card--missing {
+    background: #fdebd0;
+    border-color: #c43a14;
+  }
+  .app-card--missing strong { color: #8a7340; }
+  .app-card--upgrade {
+    background: #fdf3d0;
+    border-color: #f59e0b;
+  }
+
+  /* Card meta chips */
+  .app-meta__version {
+    color: #b45309;
+    background: #fbeecb;
+    border-color: #e3c98a;
+  }
+  .app-meta__license {
+    color: #064e3b;
+    background: #d1fae5;
+    border-color: #c79200;
+  }
+  /* Upgrade chip keeps its bright-yellow callout — same readability
+     story as the Save button + active tab. */
+
+  /* Settings list rows (Developer section, history.html, bookmarks.html) */
+  ul.settings-list li {
+    background-color: #ffffff;
+    border-left-color: #b45309;
+  }
+  ul.settings-list a { color: #b45309; }
+  ul.settings-list .url { color: #8a7340; }
+  ul.settings-list .desc { color: #8a7340; }
+  ul.settings-list a:active,
+  ul.settings-list li:active { background-color: #f3e7c8; }
+
+  /* Template rows (legacy <browser-templates>) */
+  button.template-row {
+    background-color: #f3e7c8;
+    color: #2a1d08;
+    border-color: #e3c98a;
+  }
+  button.template-row.active {
+    background-color: #ffffff;
+    border-color: #b45309;
+  }
+  button.template-row .path { color: #8a7340; }
+  button.template-row .radio-indicator { border-color: #b45309; }
+  button.template-row.active .radio-dot { background-color: #b45309; }
+  button.template-row[data-action]:active {
+    background-color: #f7eed5;
+    border-color: #9a7300;
+  }
+
+  /* App-modal */
+  .app-modal-overlay { background: rgba(20, 12, 4, 0.55); }
+  .app-modal-card {
+    background: #ffffff;
+    border-color: #e3c98a;
+    color: #2a1d08;
+  }
+  .app-modal-title { color: #b45309; }
+  .app-modal-description { color: #6b5320; }
+  .app-modal-row { border-top-color: #ecdfc0; }
+  .app-modal-row-label { color: #8a7340; }
+  .app-modal-row-value { color: #2a1d08; }
+  .app-modal-btn {
+    background: #f3e7c8;
+    color: #2a1d08;
+    border-color: #e3c98a;
+  }
+  .app-modal-btn:active {
+    background: #f7eed5;
+    border-color: #9a7300;
+  }
+  /* Play / Download buttons keep their saturated green / red so the
+     primary CTA stays loud against the white card. */
+  a.app-modal-btn { color: #2a1d08; }
+  .app-modal-size { color: #6b5320; }
+  .app-modal-size.app-modal-size--warn { color: #b91c1c; }
+  .app-modal-btn[disabled],
+  .app-modal-btn.app-modal-btn--disabled {
+    background: #ecdfc0;
+    color: #a8946a;
+    border-color: #ecdfc0;
+  }
+
+  /* Check-for-Updates modal */
+  .updates-modal-section-title { color: #8a7340; }
+  .updates-modal-row {
+    border-top-color: #ecdfc0;
+    color: #2a1d08;
+  }
+  .updates-modal-row-name { color: #2a1d08; }
+  .updates-modal-row-version { color: #6b5320; }
+  .updates-modal-empty { color: #8a7340; }
+  .updates-modal-status { color: #9a7300; }
+
+  /* Download / Update progress modal */
+  .download-modal-progress-track { background: #ecdfc0; }
+  .download-modal-counter { color: #2a1d08; }
+  .download-modal-remaining { color: #2a1d08; }
+  .download-modal-status { color: #2a1d08; }
+  .download-modal-card--success .download-modal-status { color: #9a7300; }
+  .download-modal-card--error .download-modal-status { color: #b91c1c; }
+  .download-modal-card--error .download-modal-error { color: #b91c1c; }
+
+  /* about.html */
+  .about-badge {
+    color: #9a6a00;
+    background-color: #ffffff;
+    border-color: #e3c98a;
+  }
+  .about-card {
+    background: #ffffff;
+    border-color: #e3c98a;
+  }
+  .about-card p { color: #6b5320; }
+  .about-meta article {
+    background-color: #ffffff;
+    border-left-color: #b45309;
+  }
+  .about-meta strong { color: #b45309; }
+  .about-meta span { color: #6b5320; }
+  .about-footer-note {
+    border-top-color: #ecdfc0;
+    color: #8a7340;
+  }
+
+  /* settings.html / <browser-settings> */
+  fieldset.settings-group {
+    background-color: #ffffff;
+    border-color: #e3c98a;
+  }
+  fieldset.settings-group legend { color: #b45309; }
+  .settings-label { color: #2a1d08; }
+  .settings-hint { color: #8a7340; }
+  .path { color: #8a7340; }
+
+  .settings-form input[type="number"],
+  .settings-form input[type="text"] {
+    background: #ffffff;
+    color: #2a1d08;
+    border-color: #e3c98a;
+  }
+
+  .settings-radio {
+    background: #f7eed5;
+    border-color: #e3c98a;
+    color: #2a1d08;
+  }
+  /* paintRadio reads `cs.color` for the inner dot. Without this
+     override the dot inherits `#2a1d08` from `.settings-radio` above
+     and reads as near-black against the painter's default dark
+     `#2c3e50` radio backdrop — invisible. Pin to white so the dot
+     pops on the dark inner fill. */
+  .settings-radio input[type="radio"] {
+    color: #ffffff;
+  }
+  .settings-toggle {
+    background: #f7eed5;
+    border-color: #e3c98a;
+  }
+  .settings-toggle input[type="checkbox"] {
+    background: #ffffff;
+    color: #c79200;
+    border-color: #b45309;
+  }
+
+  .settings-savebar {
+    background: #ffffff;
+    border-color: #e3c98a;
+  }
+  .settings-status { color: #8a7340; }
+  /* Save button keeps its yellow CTA palette — already readable on
+     both surfaces; the disabled state needs a light-friendly swap. */
+  .settings-save:active { background: #c79200; color: #ffffff; }
+  .settings-save[disabled] {
+    background: #ecdfc0;
+    color: #a8946a;
+  }
+}

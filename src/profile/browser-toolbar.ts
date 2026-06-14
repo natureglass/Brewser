@@ -14,11 +14,6 @@
  * `DEFAULT_TOOLBAR`. A malformed file logs a debug message and the
  * shell carries on with defaults — there's no scenario where a bad
  * toolbar file can stop the browser from rendering at all.
- *
- * Renamed from "Template" → "Toolbar" 2026-06-12. Legacy `template`
- * config keys and `templates/` paths are migrated in-memory by
- * `loadConfig` + `migrateLegacyToolbarPath`, so existing user installs
- * keep their selection across the rename.
  */
 
 export type ToolbarPosition = 'top' | 'bottom';
@@ -311,10 +306,41 @@ export interface BrowserConfig {
 	 * via the `<browser-config-artifacts>` custom tag. Empty string is
 	 * treated as "no listing available, skip the sanity check". */
 	artifacts: string;
+	/** GitHub OAuth App client ID for the Device Authorization Grant
+	 * (Settings → Login). Public client — GitHub's device flow honors
+	 * RFC 8628's public-client model, so no client_secret is needed.
+	 * Register at https://github.com/settings/developers as an OAuth App
+	 * with "Enable Device Flow" ticked. Empty string / "REPLACE_ME"
+	 * disables the Login flow and shows an error stage instead.
+	 * Surfaced to githubLogin.html via the
+	 * `<browser-config-github-client-id/>` custom tag. */
+	githubOAuthClientId: string;
+	/** Microsoft Entra application (client) ID for the Device
+	 * Authorization Grant. Register a single-tenant or multi-tenant
+	 * (recommended: multi-tenant `common`) app at Microsoft Entra >
+	 * App registrations, then under Authentication enable
+	 * "Allow public client flows" — that's required for device-code.
+	 * Surfaced to microsoftLogin.html via the
+	 * `<browser-config-microsoft-client-id/>` custom tag. */
+	microsoftOAuthClientId: string;
+	/** Google OAuth client ID for the Limited Input Device flow.
+	 * Register in Google Cloud Console > APIs & Services > Credentials
+	 * as an "OAuth 2.0 Client ID" of type "TVs and Limited Input
+	 * devices" (any other client type — desktop, web, mobile — won't
+	 * issue device codes). Surfaced to googleLogin.html via the
+	 * `<browser-config-google-client-id/>` custom tag. */
+	googleOAuthClientId: string;
+	/** Twitch OAuth application client ID. Register at
+	 * https://dev.twitch.tv/console with the Device Code Flow enabled.
+	 * (Twitch requires an OAuth Redirect URL to be set — `https://localhost`
+	 * is fine since device flow never redirects.) Surfaced to
+	 * twitchLogin.html via the `<browser-config-twitch-client-id/>` custom
+	 * tag. */
+	twitchOAuthClientId: string;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
-	toolbar: 'toolbars/default.json',
+	toolbar: 'themes/toolbars/default.json',
 	videoNVTEGRA: true,
 	searchEngine: 'DuckDuckGo',
 	wwwRenderChunkMs: 12,
@@ -328,42 +354,18 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	swbImgDebug: false,
 	buttonMapping: {},
 	keyboardHeight: 400,
-	keyboard: 'keyboards/default.html',
-	brewserStyle: 'styles/dark.css',
+	keyboard: 'themes/keyboards/default.html',
+	brewserStyle: 'themes/styles/dark.css',
 	toolbarPosition: 'top',
 	homeSection: 'featured',
 	catalogue: '',
 	artifacts: '',
+	githubOAuthClientId: '',
+	microsoftOAuthClientId: '',
+	googleOAuthClientId: '',
+	twitchOAuthClientId: '',
 };
 
-/** Legacy `config.json` key for the active toolbar path. Read by
- * `loadConfig` as a fallback when the new `toolbar` key isn't present —
- * so user installs that pre-date the 2026-06-12 rename keep their
- * selection. Exported so the saveSettings write path can scrub the old
- * key from on-disk config once the user saves. */
-export const LEGACY_TOOLBAR_CONFIG_KEY = 'template';
-
-/** Rewrite legacy active-toolbar paths to the post-2026-06-12 layout:
- *   - `Templates/<name>.json` (capital T, pre 2026-06-03) → `templates/<name>.json`
- *     [historical shim, kept for very old configs]
- *   - `templates/<name>.json` → `toolbars/<name>.json` (this rename)
- *
- * Existing user `config.json` files persist the old path; this shim
- * rewrites them in-memory so the active toolbar resolves against the
- * newly-seeded `toolbars/` folder. The on-disk file gets refreshed
- * the next time anything writes to it (e.g. the user changes a
- * Settings page option). Returns the input unchanged if no migration
- * applies. */
-function migrateLegacyToolbarPath(p: string): string {
-	let result = p;
-	if (result.startsWith('Templates/')) {
-		result = 'templates/' + result.slice('Templates/'.length);
-	}
-	if (result.startsWith('templates/')) {
-		result = 'toolbars/' + result.slice('templates/'.length);
-	}
-	return result;
-}
 
 /** One entry in `search_engines.json`. `query` is the search-URL
  * prefix the encoded query string is appended to (e.g.
@@ -386,30 +388,19 @@ const decoder = new TextDecoder();
 
 /** Read `<profile>/config.json`. Missing / malformed / wrong-typed
  * fields fall back to `DEFAULT_CONFIG` field-by-field, so a partial
- * config is fine (the user only needs to set what they want to change).
- *
- * Toolbar-key migration: the new key is `toolbar`, the legacy key is
- * `template`. Both are read; `toolbar` wins if present. The path value
- * is run through `migrateLegacyToolbarPath` so `templates/<X>.json`
- * resolves to the renamed `toolbars/<X>.json` on disk without the user
- * having to edit `config.json`. */
+ * config is fine (the user only needs to set what they want to change). */
 export function loadConfig(appRoot: string): BrowserConfig {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${appRoot}config.json`);
+		raw = Switch.readFileSync(`${appRoot}configs/config.json`);
 	} catch (_) {
 		return DEFAULT_CONFIG;
 	}
 	if (!raw) return DEFAULT_CONFIG;
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
-		const rawToolbarPath = typeof parsed?.toolbar === 'string'
-			? parsed.toolbar
-			: typeof parsed?.[LEGACY_TOOLBAR_CONFIG_KEY] === 'string'
-				? parsed[LEGACY_TOOLBAR_CONFIG_KEY]
-				: DEFAULT_CONFIG.toolbar;
 		return {
-			toolbar: migrateLegacyToolbarPath(rawToolbarPath),
+			toolbar: typeof parsed?.toolbar === 'string' ? parsed.toolbar : DEFAULT_CONFIG.toolbar,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)
@@ -473,6 +464,18 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			artifacts: typeof parsed?.artifacts === 'string'
 				? parsed.artifacts
 				: DEFAULT_CONFIG.artifacts,
+			githubOAuthClientId: typeof parsed?.githubOAuthClientId === 'string'
+				? parsed.githubOAuthClientId
+				: DEFAULT_CONFIG.githubOAuthClientId,
+			microsoftOAuthClientId: typeof parsed?.microsoftOAuthClientId === 'string'
+				? parsed.microsoftOAuthClientId
+				: DEFAULT_CONFIG.microsoftOAuthClientId,
+			googleOAuthClientId: typeof parsed?.googleOAuthClientId === 'string'
+				? parsed.googleOAuthClientId
+				: DEFAULT_CONFIG.googleOAuthClientId,
+			twitchOAuthClientId: typeof parsed?.twitchOAuthClientId === 'string'
+				? parsed.twitchOAuthClientId
+				: DEFAULT_CONFIG.twitchOAuthClientId,
 		};
 	} catch (error) {
 		console.debug(`[brewser] config.json parse failed: ${error}`);
@@ -735,7 +738,7 @@ function joinStringArray(arr: unknown): string {
 function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${appRoot}catalogue.json`);
+		raw = Switch.readFileSync(`${appRoot}configs/catalogue.json`);
 	} catch (_) {
 		return [];
 	}
@@ -787,7 +790,7 @@ function appFileExists(path: string): boolean {
 export function loadSearchEngines(appRoot: string): SearchEngine[] {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${appRoot}search_engines.json`);
+		raw = Switch.readFileSync(`${appRoot}configs/search_engines.json`);
 	} catch (_) {
 		return [DEFAULT_SEARCH_ENGINE];
 	}
@@ -815,96 +818,42 @@ export function resolveSearchEngine(appRoot: string): SearchEngine {
 	return engines.find((e) => e.title === selected) ?? engines[0] ?? DEFAULT_SEARCH_ENGINE;
 }
 
-/** Read `<appRoot>/keyboards.json` and return the validated entries
- * in source order. Missing or malformed file → empty array. Same
- * `{ title, path }` shape as the toolbars registry; `path` is
- * resolved against the app root unless absolute. */
+/** Read a theme registry file (`themes/<name>.json`) and return its
+ * validated entries in source order. Missing or malformed file →
+ * empty array. Each entry is `{ title, path }` where `path` is
+ * relative to the app root unless it carries an absolute scheme. */
+function loadThemeRegistry(appRoot: string, filename: string): ToolbarEntry[] {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${appRoot}themes/${filename}`);
+	} catch (_) {
+		return [];
+	}
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter((e): e is ToolbarEntry =>
+			!!e && typeof e.title === 'string' && typeof e.path === 'string',
+		);
+	} catch (error) {
+		console.debug(`[brewser] themes/${filename} parse failed: ${error}`);
+		return [];
+	}
+}
+
+/** Theme registries: `<appRoot>themes/{toolbars,keyboards,styles}.json`.
+ * The registries drive the Settings page's Toolbar / Keyboard / Style
+ * pickers and (for the style registry) the resource loader's
+ * `brewser://assets/main.css` redirect. */
 export function loadKeyboardRegistry(appRoot: string): ToolbarEntry[] {
-	let raw: ArrayBuffer | null;
-	try {
-		raw = Switch.readFileSync(`${appRoot}keyboards.json`);
-	} catch (_) {
-		return [];
-	}
-	if (!raw) return [];
-	try {
-		const parsed = JSON.parse(decoder.decode(raw));
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is ToolbarEntry =>
-			!!e && typeof e.title === 'string' && typeof e.path === 'string',
-		);
-	} catch (error) {
-		console.debug(`[brewser] keyboards.json parse failed: ${error}`);
-		return [];
-	}
+	return loadThemeRegistry(appRoot, 'keyboards.json');
 }
-
-/** Read `<appRoot>/styles.json` and return the validated entries in
- * source order. Missing or malformed file → empty array. Same
- * `{ title, path }` shape as the toolbars + keyboards registries;
- * `path` is resolved against the app root unless absolute. Drives the
- * Settings page's Style picker AND the resource loader's
- * `brewser://assets/main.css` redirect — the active path from
- * `config.brewserStyle` is read at request time and its bytes served
- * in place of the baked default. */
 export function loadStyleRegistry(appRoot: string): ToolbarEntry[] {
-	let raw: ArrayBuffer | null;
-	try {
-		raw = Switch.readFileSync(`${appRoot}styles.json`);
-	} catch (_) {
-		return [];
-	}
-	if (!raw) return [];
-	try {
-		const parsed = JSON.parse(decoder.decode(raw));
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is ToolbarEntry =>
-			!!e && typeof e.title === 'string' && typeof e.path === 'string',
-		);
-	} catch (error) {
-		console.debug(`[brewser] styles.json parse failed: ${error}`);
-		return [];
-	}
+	return loadThemeRegistry(appRoot, 'styles.json');
 }
-
-/** Read `<profile>/toolbars.json` and return the validated entries
- * in source order. Missing or malformed file → empty array. Falls
- * back to the legacy `templates.json` filename so pre-rename installs
- * keep listing their entries until the seeder writes the new file. */
 export function loadToolbarRegistry(appRoot: string): ToolbarEntry[] {
-	let raw: ArrayBuffer | null = null;
-	let source = `${appRoot}toolbars.json`;
-	try {
-		raw = Switch.readFileSync(source);
-	} catch (_) {
-		raw = null;
-	}
-	if (!raw) {
-		// Legacy filename — pre-2026-06-12 installs had `templates.json`.
-		source = `${appRoot}templates.json`;
-		try {
-			raw = Switch.readFileSync(source);
-		} catch (_) {
-			return [];
-		}
-	}
-	if (!raw) return [];
-	try {
-		const parsed = JSON.parse(decoder.decode(raw));
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is ToolbarEntry =>
-			!!e && typeof e.title === 'string' && typeof e.path === 'string',
-		).map((e) => ({
-			title: e.title,
-			// Rewrite stale `templates/X.json` paths inside the legacy
-			// registry so a Settings-page tap on a listed entry resolves
-			// to the renamed `toolbars/` dir.
-			path: migrateLegacyToolbarPath(e.path),
-		}));
-	} catch (error) {
-		console.debug(`[brewser] ${source} parse failed: ${error}`);
-		return [];
-	}
+	return loadThemeRegistry(appRoot, 'toolbars.json');
 }
 
 /** Resolve a toolbar-entry path against the profile root unless it
