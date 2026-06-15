@@ -103,8 +103,16 @@ const DARK_THEME: FormWidgetTheme = {
 };
 
 let liveFormTheme: FormWidgetTheme = LIGHT_THEME;
-export function setLiveFormColorScheme(scheme: 'light' | 'dark'): void {
-	liveFormTheme = scheme === 'dark' ? DARK_THEME : LIGHT_THEME;
+export function setLiveFormColorScheme(_scheme: 'light' | 'dark'): void {
+	// Chrome / Firefox / Safari render `<input>` / `<textarea>` / `<select>`
+	// as light controls (white bg, black text, grey placeholder) by default
+	// regardless of the OS color scheme. They only flip to dark form chrome
+	// when the page opts in via `color-scheme: dark` CSS — which we don't
+	// support. Until we do, always use the LIGHT defaults so a typical
+	// page-styled-for-dark-theme (`body { background: #0b1220 }`) still
+	// shows readable form controls instead of grey-on-grey from the dark
+	// chrome palette.
+	liveFormTheme = LIGHT_THEME;
 }
 
 /** Filter a parsed `cs.background` string so the CSS keywords
@@ -201,6 +209,7 @@ export function paintFormWidget(
 			case 'color':    paintColorSwatch(ctx, el, cs, box); return true;
 			case 'button':
 			case 'submit':   paintButton(ctx, el, cs, box, skipBg); return true;
+			case 'file':     paintFileInput(ctx, el, cs, box, skipBg); return true;
 			default:         paintTextField(ctx, el, cs, box, skipBg); return true;
 		}
 	}
@@ -302,8 +311,14 @@ function paintRange(
 	const value = Number.isFinite(parsedValue) ? parsedValue : ((min + max) / 2);
 	const range = max - min || 1;
 	const frac = Math.max(0, Math.min(1, (value - min) / range));
-	const trackBg = cs.background || '#2c3e50';
-	const fillColor = cs.color || '#7eda9f';
+	// Chrome's UA paints the range track white-ish with a blue fill +
+	// thumb (the OS accent color). We hardcode `#0075ff` for the accent
+	// because our cascade has already populated `cs.color` with the
+	// engine's `#1a1a1a` UA default for INPUT, which would otherwise
+	// paint the fill black. Author CSS can still override the TRACK via
+	// `background:` — we only force the accent color.
+	const trackBg = resolveWidgetBg(cs.background) ?? '#ffffff';
+	const fillColor = '#0075ff';
 	const trackH = Math.max(2, Math.min(6, box.h / 4));
 	const trackY = box.y + box.h / 2 - trackH / 2;
 	const thumbR = Math.min(box.h / 2 - 1, 9);
@@ -314,6 +329,10 @@ function paintRange(
 		// Track background
 		ctx.fillStyle = trackBg;
 		ctx.fillRect(box.x, trackY, box.w, trackH);
+		// Track outline so a white track on white page bg is visible.
+		ctx.strokeStyle = '#bdbdbd';
+		ctx.lineWidth = 1;
+		ctx.strokeRect(box.x + 0.5, trackY + 0.5, box.w - 1, trackH - 1);
 		// Filled portion left of the thumb
 		ctx.fillStyle = fillColor;
 		ctx.fillRect(box.x, trackY, thumbX - box.x, trackH);
@@ -322,7 +341,7 @@ function paintRange(
 		ctx.beginPath();
 		ctx.arc(thumbX, thumbY, thumbR, 0, Math.PI * 2);
 		ctx.fill();
-		ctx.strokeStyle = '#5a6a7e';
+		ctx.strokeStyle = '#0058cc';
 		ctx.lineWidth = 1;
 		ctx.stroke();
 	} finally { ctx.restore(); }
@@ -431,9 +450,14 @@ function paintButton(
 			}
 		}
 	}
-	// Label: <button>'s textContent or <input>'s value attribute.
+	// Label: <button>'s descendant text or <input>'s value attribute.
+	// `LiveElement.textContent` only returns the element's OWN `_text`
+	// field (the parser appends `#text` as a CHILD, not as the parent's
+	// `_text`), so a `<button>Submit</button>` parsed from HTML has
+	// `el.textContent === ''`. Walk `#text` children to recover the
+	// label — same pattern `readOptionLabel` uses for `<option>`.
 	const label = el.tagName === 'BUTTON'
-		? (el.textContent || '')
+		? readDescendantText(el)
 		: (el.getAttribute('value') || '');
 	if (label) {
 		ctx.save();
@@ -445,6 +469,62 @@ function paintButton(
 			ctx.fillText(label, box.x + box.w / 2, box.y + box.h / 2);
 		} finally { ctx.restore(); }
 	}
+}
+
+/** `<input type=file>` renders as a "Choose File" button on the left
+ * (grey chip) followed by the picked file name on the right — or the
+ * placeholder "No file chosen" when no file is selected. We don't have
+ * a real file picker yet, so the tap handler (in handleFormTap) just
+ * forwards to the keyboard like a text field. The user's typed string
+ * becomes the displayed file name; until then the placeholder shows. */
+function paintFileInput(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	el: LiveElement,
+	cs: ComputedLiveStyle,
+	box: LayoutBox,
+	skipBg = false,
+): void {
+	const color = cs.color || liveFormTheme.textFieldText;
+	if (!skipBg) {
+		// Outer field is transparent — Chrome doesn't draw a box around
+		// the whole control, only around the inner "Choose File" button.
+		// We still need to clear the slot so any cached pixels from a
+		// prior render don't show through.
+		const outerBg = resolveWidgetBg(cs.background);
+		if (outerBg) {
+			ctx.fillStyle = outerBg;
+			ctx.fillRect(box.x, box.y, box.w, box.h);
+		}
+	}
+	ctx.save();
+	try {
+		ctx.font = resolveCanvasFont({ fontSize: cs.fontSize, fontFamily: cs.fontFamily });
+		const btnLabel = 'Choose File';
+		const labelW = ctx.measureText(btnLabel).width;
+		const btnPadX = 8;
+		const btnW = Math.ceil(labelW + btnPadX * 2);
+		const btnY = box.y + 2;
+		const btnH = Math.max(0, box.h - 4);
+		// Button chip
+		ctx.fillStyle = liveFormTheme.buttonBg;
+		ctx.fillRect(box.x, btnY, btnW, btnH);
+		ctx.strokeStyle = '#bdbdbd';
+		ctx.lineWidth = 1;
+		ctx.strokeRect(box.x + 0.5, btnY + 0.5, btnW - 1, btnH - 1);
+		ctx.fillStyle = liveFormTheme.buttonText;
+		ctx.textBaseline = 'middle';
+		ctx.textAlign = 'center';
+		ctx.fillText(btnLabel, box.x + btnW / 2, btnY + btnH / 2);
+		// File name / placeholder text
+		const value = getInputValue(el);
+		const displayText = value || 'No file chosen';
+		ctx.fillStyle = value ? color : (cs.color ? withAlpha(cs.color, 0.6) : liveFormTheme.textFieldPlaceholder);
+		ctx.textAlign = 'left';
+		ctx.beginPath();
+		ctx.rect(box.x + btnW + 4, box.y, box.w - btnW - 4, box.h);
+		ctx.clip();
+		ctx.fillText(displayText, box.x + btnW + 8, box.y + box.h / 2);
+	} finally { ctx.restore(); }
 }
 
 function paintTextField(
@@ -490,7 +570,16 @@ function paintTextField(
 			}
 		}
 	}
-	const value = getInputValue(el);
+	let value = getInputValue(el);
+	// `<textarea>` carries its initial value as descendant `#text`
+	// (HTML spec), but `getInputValue` only reads the `value` attribute
+	// + `valueMap`. Walk the children when nothing else has been set so
+	// `<textarea>Default text</textarea>` renders its markup. Once the
+	// user types via the keyboard, `valueMap` wins.
+	const isTextarea = el.tagName === 'TEXTAREA';
+	if (!value && isTextarea) {
+		value = readDescendantText(el);
+	}
 	// Fall back to the `placeholder` attribute (muted) when empty, so an
 	// empty search field shows its prompt instead of nothing.
 	const placeholder = el.getAttribute('placeholder') || '';
@@ -500,14 +589,60 @@ function paintTextField(
 		try {
 			ctx.font = resolveCanvasFont({ fontSize: cs.fontSize, fontFamily: cs.fontFamily });
 			ctx.fillStyle = value ? color : (cs.color ? withAlpha(cs.color, 0.6) : liveFormTheme.textFieldPlaceholder);
-			ctx.textBaseline = 'middle';
 			ctx.textAlign = 'left';
-			// Clip to box; pad 3px inside.
-			ctx.beginPath();
-			ctx.rect(box.x + 2, box.y + 1, box.w - 4, box.h - 2);
-			ctx.clip();
-			ctx.fillText(text, box.x + 6, box.y + box.h / 2);
+			// `<textarea>` paints multi-line, top-left-anchored, word-
+			// wrapped content (matches Chrome's textarea behavior — text
+			// starts at the upper-left corner and wraps under). A
+			// single-line `<input>` paints centered on the box height
+			// for a typical button-bar look.
+			if (isTextarea) {
+				ctx.textBaseline = 'top';
+				ctx.beginPath();
+				ctx.rect(box.x + 2, box.y + 2, box.w - 4, box.h - 4);
+				ctx.clip();
+				const lineH = (cs.fontSize ?? 14) * 1.2;
+				drawWrappedText(ctx, text, box.x + 6, box.y + 4, box.w - 12, lineH);
+			} else {
+				ctx.textBaseline = 'middle';
+				ctx.beginPath();
+				ctx.rect(box.x + 2, box.y + 1, box.w - 4, box.h - 2);
+				ctx.clip();
+				ctx.fillText(text, box.x + 6, box.y + box.h / 2);
+			}
 		} finally { ctx.restore(); }
+	}
+}
+
+/** Draw `text` with word-wrap inside `[x, y, maxWidth]`, advancing y by
+ * `lineH` each line. Respects explicit `\n` line breaks. Used by
+ * `paintTextField` for `<textarea>` so a multi-line block of text
+ * renders as flowed paragraphs instead of a single clipped line. */
+function drawWrappedText(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	text: string,
+	x: number,
+	y: number,
+	maxWidth: number,
+	lineH: number,
+): void {
+	let cursorY = y;
+	for (const rawLine of text.split('\n')) {
+		const words = rawLine.split(/\s+/);
+		let line = '';
+		for (const word of words) {
+			if (!word) continue;
+			const candidate = line ? line + ' ' + word : word;
+			const w = ctx.measureText(candidate).width;
+			if (w <= maxWidth || !line) {
+				line = candidate;
+			} else {
+				ctx.fillText(line, x, cursorY);
+				cursorY += lineH;
+				line = word;
+			}
+		}
+		if (line) ctx.fillText(line, x, cursorY);
+		cursorY += lineH;
 	}
 }
 
@@ -533,6 +668,22 @@ function readOptionLabel(el: LiveElement): string {
 	for (const c of el.children) {
 		if (c.tagName === '#text') s += c.data;
 	}
+	return s;
+}
+
+/** Concatenate descendant `#text` nodes into a single label string.
+ * Used by `paintButton` to read a `<button>`'s label when the parser
+ * stored the label as a `#text` child rather than as `_text` on the
+ * button element itself. Whitespace runs already collapsed by the
+ * parser so a straight concat reproduces the visible text. */
+function readDescendantText(el: LiveElement): string {
+	if (el.textContent) return el.textContent;
+	let s = '';
+	const visit = (e: LiveElement) => {
+		if (e.tagName === '#text') { s += e.data; return; }
+		for (const c of e.children) visit(c);
+	};
+	for (const c of el.children) visit(c);
 	return s;
 }
 

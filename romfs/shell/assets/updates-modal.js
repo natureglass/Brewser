@@ -82,6 +82,14 @@
   // config file under one folder.
   var APP_ROOT = 'sdmc:/switch/brewser/';
   var CATALOG_PATH = APP_ROOT + 'configs/catalogue.json';
+  // Sibling telemetry files refreshed alongside the catalogue. The
+  // URLs come from `data-downloads-url` / `data-ratings-url` on the
+  // trigger button (populated from `config.json` `downloads`
+  // / `ratings` via `<browser-config-downloads>` /
+  // `<browser-config-ratings>`). Empty URL → the refresh is skipped
+  // and the on-disk file is left untouched.
+  var DOWNLOADS_PATH = APP_ROOT + 'configs/downloads.json';
+  var RATINGS_PATH = APP_ROOT + 'configs/ratings.json';
   // The three catalog groups walked when computing the diff. Mirror
   // `CATALOG_GROUPS` in src/profile/browser-toolbar.ts — keep in sync
   // if a new group is ever added on the engine side.
@@ -313,6 +321,36 @@
     }
   }
 
+  // Best-effort refresh of a sibling JSON config (downloads / ratings)
+  // from a remote URL. Validates the response body as JSON before the
+  // write so a stray HTML 200 (e.g. captive portal) can't replace a
+  // good file with garbage. Every failure path is logged + swallowed —
+  // a downloads.json HTTP 500 should NOT block a successful catalog
+  // refresh. Empty URL is treated as "skip silently".
+  async function refreshConfigFile(remoteUrl, localPath, label) {
+    if (!remoteUrl) {
+      console.debug('[updates-modal] ' + label + ' URL not configured; skipping refresh');
+      return;
+    }
+    try {
+      var resp = await globalThis.fetch(remoteUrl);
+      if (!resp.ok) {
+        console.debug('[updates-modal] ' + label + ' HTTP ' + resp.status + ' for ' + remoteUrl);
+        return;
+      }
+      var text = await resp.text();
+      try { JSON.parse(text); }
+      catch (e) {
+        console.debug('[updates-modal] ' + label + ' is not valid JSON; refusing write: ' + (e && e.message ? e.message : String(e)));
+        return;
+      }
+      Switch.writeFileSync(localPath, text);
+      console.debug('[updates-modal] ' + label + ' refreshed (' + text.length + ' bytes)');
+    } catch (err) {
+      console.debug('[updates-modal] ' + label + ' refresh failed: ' + (err && err.message ? err.message : String(err)));
+    }
+  }
+
   // Walk the fetched catalog and bucket each entry as missing (the
   // launcher file isn't on disk under `apps/<group>/<id>/<entry>`) or
   // updated (manifest.json's `version` differs from the catalog's
@@ -492,13 +530,19 @@
         setError('Diff failed: ' + (e && e.message ? e.message : String(e)));
         return;
       }
-      // Seed each missing app's folder + logo from the remote catalog
-      // BEFORE flipping out of the loading state — the user sees the
-      // pulsing bar continue while the logos arrive, then the diff
-      // list reveals with the real images already on disk. Errors are
-      // swallowed inside seedMissingLogos; we never want a logo 404
-      // to fail the whole refresh.
-      await seedMissingLogos(buckets.missing, url);
+      // Refresh the sibling telemetry files (downloads + ratings)
+      // alongside the catalogue. Run in parallel with the logo seed
+      // since they hit different hosts/repos and don't depend on each
+      // other. Each call is best-effort and swallows its own errors,
+      // so Promise.all here can't reject — we just await the whole
+      // batch before flipping out of the loading state.
+      var downloadsUrl = triggerBtn.getAttribute('data-downloads-url') || '';
+      var ratingsUrl = triggerBtn.getAttribute('data-ratings-url') || '';
+      await Promise.all([
+        seedMissingLogos(buckets.missing, url),
+        refreshConfigFile(downloadsUrl, DOWNLOADS_PATH, 'downloads.json'),
+        refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json'),
+      ]);
       // Repaint upgrade chips on already-installed cards whose
       // manifest version trails the new catalog. Synchronous DOM
       // mutation — runs after the logo downloads so all card-side

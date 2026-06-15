@@ -671,23 +671,51 @@ ul.settings-list li:active {
 .app-modal-meta .app-meta__version:empty,
 .app-modal-meta .app-meta__license:empty { display: none; }
 
+/* Header row: logo flush-left, title + identifier + description
+   stacked on its right. Mirrors main.css's modal-header layout —
+   keep in sync if either side changes. */
+.app-modal-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+.app-modal-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .app-modal-logo {
   display: block;
   width: 96px;
   height: 96px;
+  flex: 0 0 96px;
   object-fit: contain;
-  margin: 0 auto 14px;
+  margin: 0;
 }
 
 .app-modal-title {
   color: #ffd35e;
   font-size: 1.5em;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
+  text-align: left;
 }
+
+.app-modal-identifier {
+  color: #7a8aa3;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  margin: 0 0 10px;
+  text-align: left;
+  word-break: break-all;
+}
+.app-modal-identifier:empty { display: none; }
 
 .app-modal-description {
   color: #cdd9ee;
-  margin: 0 0 16px;
+  margin: 0;
   text-align: left;
 }
 .app-modal-description:empty { display: none; }
@@ -1616,6 +1644,7 @@ fieldset.settings-group legend {
     color: #1a1a1f;
   }
   .app-modal-title { color: #1d4ed8; }
+  .app-modal-identifier { color: #6b7280; }
   .app-modal-description { color: #4b5563; }
   .app-modal-row { border-top-color: #e5e7eb; }
   .app-modal-row-label { color: #6b7280; }

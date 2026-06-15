@@ -6,7 +6,7 @@
 
 import { type HtmlElement, type HtmlNode, parseHtml } from '../html/html-parser.js';
 import { reserveStylesheetSlot } from './live-css.js';
-import { bumpLiveTreeVersion, getLiveRoot, LiveElement } from './live-dom.js';
+import { bumpLiveTreeVersion, getLiveRoot, LiveElement, resolveLiveResourceUrl } from './live-dom.js';
 import { resetLiveOverlayCache } from './live-overlay.js';
 import { requestFullRepaint } from './live-paint-control.js';
 
@@ -378,9 +378,14 @@ export function loadIframeContents(iframeEl: LiveElement, src: string): void {
 	state._iframeScopeClass = scope;
 	const existing = iframeEl.getAttribute('class') ?? '';
 	iframeEl.setAttribute('class', existing ? existing + ' ' + scope : scope);
+	// Resolve PAGE-relative srcs (`./align.html`, `assets/foo.html`) against
+	// the current page's directory — same path the live-DOM uses for
+	// `<img>` / `<audio>` / `<video>` resources. Absolute schemes
+	// (brewser://, https://, sdmc:/, …) pass through unchanged.
+	const resolved = resolveLiveResourceUrl(src);
 	(async () => {
 		try {
-			const res = await fetch(src);
+			const res = await fetch(resolved);
 			if (!res.ok) {
 				state._iframeLoadFailed = true;
 				return;

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Native &lt;dialog&gt; demo · Brewser</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
+<style>
+  body { padding: 32px 28px 28px; color: #e0e8f4; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; }
+  p.lead { color: #9bb1d6; margin: 0 0 18px; }
+
+  /* Author CSS layered ON TOP of the engine UA defaults the cascade
+     supplies for <dialog>. The UA path stamps `position: fixed;
+     top: 100; left: 100; background: #fff; color: #1a1a1a; padding: 16`
+     when the open attribute is present; everything below overrides /
+     extends. */
+  dialog#myModal {
+    top: 180px;
+    left: 380px;
+    width: 520px;
+    background: #14202d;
+    color: #eaf2ff;
+    border: 1px solid #314672;
+    border-radius: 14px;
+    padding: 22px 24px 18px;
+  }
+  dialog#myModal h2 { margin: 0 0 10px; font-size: 18px; font-weight: 700; }
+  dialog#myModal p { margin: 0 0 14px; color: #cfd8e8; }
+  dialog#myModal .actions { display: flex; gap: 10px; justify-content: flex-end; }
+  dialog#myModal button {
+    background: #1f3a64;
+    color: #eaf2ff;
+    border: 1px solid #2f4d80;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  dialog#myModal button.primary { background: #2563eb; border-color: #3b82f6; }
+
+  .open-btn {
+    background: #2563eb;
+    color: white;
+    border: 1px solid #3b82f6;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  .log {
+    margin-top: 22px;
+    font-family: monospace;
+    font-size: 13px;
+    color: #9bb1d6;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-shell">
+  <h1>Native &lt;dialog&gt; demo</h1>
+  <p class="lead">Tap the button to open a spec-shaped dialog via <code>myModal.showModal()</code>. Tap Close to hide it via <code>myModal.close('cancel')</code>.</p>
+
+  <button id="openBtn" class="open-btn" type="button">Open Modal</button>
+
+  <dialog id="myModal">
+    <h2>Hello from a native HTML modal!</h2>
+    <p>This <code>&lt;dialog&gt;</code> is driven by the spec API — no <code>&lt;browser-modal&gt;</code> wrapping. The engine recognises the tag via <code>isEngineModalRoot</code> and routes mutations through the modal-layer cache.</p>
+    <div class="actions">
+      <button id="confirmBtn" class="primary" type="button">Confirm</button>
+      <button id="closeBtn" type="button">Cancel</button>
+    </div>
+  </dialog>
+
+  <div id="log" class="log">Waiting for dialog events…</div>
+</div>
+
+<script>
+  (function () {
+    var openBtn = document.getElementById('openBtn');
+    var confirmBtn = document.getElementById('confirmBtn');
+    var closeBtn = document.getElementById('closeBtn');
+    var modal = document.getElementById('myModal');
+    var logEl = document.getElementById('log');
+
+    function log(msg) {
+      var ts = new Date().toLocaleTimeString();
+      logEl.textContent = '[' + ts + '] ' + msg + '\n' + logEl.textContent;
+    }
+
+    openBtn.addEventListener('click', function () {
+      modal.showModal();
+      log('showModal() — open attribute now set');
+    });
+    confirmBtn.addEventListener('click', function () {
+      modal.close('confirm');
+    });
+    closeBtn.addEventListener('click', function () {
+      modal.close('cancel');
+    });
+    modal.addEventListener('close', function () {
+      log('close event — returnValue = ' + JSON.stringify(modal.returnValue));
+    });
+  })();
+</script>
+
+</body>
+</html>

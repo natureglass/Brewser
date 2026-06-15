@@ -65,9 +65,18 @@
       <div id="app-modal-version" class="app-meta__version"></div>
       <div id="app-modal-license" class="app-meta__license"></div>
     </div>
-    <img id="app-modal-logo" class="app-modal-logo" src="brewser://assets/download.png" alt="App logo">
-    <h2 id="app-modal-title" class="app-modal-title">App</h2>
-    <p id="app-modal-description" class="app-modal-description"></p>
+    <!-- Header row: logo flush-left, title + identifier + description
+         stacked on its right. See apps.html for the full rationale —
+         keep the two files in sync. -->
+    <div class="app-modal-header">
+      <img id="app-modal-logo" class="app-modal-logo" src="brewser://assets/download.png" alt="App logo">
+      <div class="app-modal-header-text">
+        <h2 id="app-modal-title" class="app-modal-title">App</h2>
+        <p id="app-modal-identifier" class="app-modal-identifier"></p>
+        <p id="app-modal-description" class="app-modal-description"></p>
+      </div>
+    </div>
+    <!-- Body rows — see apps.html for the full rationale. -->
     <div id="app-modal-body" class="app-modal-body"></div>
     <!-- Two-slot action row (see apps.html for the rationale). -->
     <div class="app-modal-actions">
@@ -80,7 +89,7 @@
       </div>
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
-        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Play</a>
+        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Run</a>
         <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Download</button>
       </div>
     </div>

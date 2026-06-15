@@ -69,7 +69,7 @@ import {
 	isLiveCacheBuilding, patchLiveCacheRegion, patchLiveImagePixelsOnly,
 	scrollElementIntoView, syncLiveCacheVersion,
 } from './live-overlay.js';
-import { bumpKbTreeVersion, bumpModalTreeVersion, bumpToolbarTreeVersion, inKbMutationScope, inModalMutationScope, inToolbarMutationScope, markLiveDirty, markPageHasCanvas2dActivity, registerModalRoot, requestFullRepaint, unregisterModalRoot } from './live-paint-control.js';
+import { bumpKbTreeVersion, bumpModalTreeVersion, bumpToolbarTreeVersion, getModalModeDialogs, inKbMutationScope, inModalMutationScope, inToolbarMutationScope, markDialogModalMode, markLiveDirty, markPageHasCanvas2dActivity, registerModalRoot, requestFullRepaint, unmarkDialogModalMode, unregisterModalRoot } from './live-paint-control.js';
 import {
 	notifyAttribute, notifyCharacterData, notifyChildList,
 } from '../polyfills/mutation-observer.js';
@@ -1557,6 +1557,36 @@ export class LiveElement {
 		if (lower === 'class') return this.classList.length > 0;
 		return lower in this.attrs;
 	}
+	/** Element-scoped `querySelector` / `querySelectorAll` for the
+	 * simple selectors `liveSelectorPredicate` supports — `#id`,
+	 * `.class`, bare `tag`, `[attr]`, `[attr=value]`. Walks THIS
+	 * element's subtree (excludes self). Unsupported selectors return
+	 * null / empty.
+	 *
+	 * 2026-06-15: added so spec-shaped patterns like
+	 * `dialog.querySelectorAll('[data-close]')` work — without it the
+	 * call threw `TypeError: dialog.querySelectorAll is not a function`
+	 * and aborted the surrounding inline `<script>` after the very
+	 * first invocation, which made every subsequent
+	 * `addEventListener` / `bindClose` in that script silently skipped.
+	 * Mirrors the `document.querySelector*` shim in canvas-runner;
+	 * shares the same `liveSelectorPredicate` for selector parsing. */
+	querySelector(selector: string): LiveElement | null {
+		const pred = liveSelectorPredicate(selector);
+		if (!pred) return null;
+		for (const child of this.children) {
+			const hit = findLiveElement(child, pred);
+			if (hit) return hit;
+		}
+		return null;
+	}
+	querySelectorAll(selector: string): LiveElement[] {
+		const pred = liveSelectorPredicate(selector);
+		const out: LiveElement[] = [];
+		if (!pred) return out;
+		for (const child of this.children) findAllLiveElements(child, pred, out);
+		return out;
+	}
 	removeAttribute(name: string): void {
 		const lower = name.toLowerCase();
 		const oldValue = Object.prototype.hasOwnProperty.call(this.attrs, lower)
@@ -1827,6 +1857,58 @@ export class LiveElement {
 		this.dispatchEvent({ type: 'blur', target: this, currentTarget: this, bubbles: false });
 	}
 
+	/** Spec-shaped `<dialog>.show()` — show the dialog as a non-modal.
+	 * No-op on non-DIALOG tags (spec throws `InvalidStateError`; we
+	 * silently no-op to stay friendly to libs that probe the method
+	 * before knowing whether the element is a dialog). The UA defaults
+	 * in `live-css.ts applyUaDefaults` map the `open` attribute to
+	 * `display:block + position:fixed`, so setting it flips the
+	 * cascade-resolved display to visible and the modal paint pass picks
+	 * the dialog up via the modal-roots registry that `propagateAttached`
+	 * populated on attach.
+	 *
+	 * Modal-mode blocking (focus trap, Esc-to-close, outside-tap-
+	 * dismiss) is NOT implemented — `showModal()` aliases to the same
+	 * `open=""` flip. Pages can layer their own behaviour on top via
+	 * keydown / click listeners, same as the missing-app modal does. */
+	show(): void {
+		if (this.tagName !== 'DIALOG') return;
+		// Non-modal show: NO backdrop, no scroll block, no tap block.
+		// Pages stay interactive behind the dialog. Clear any prior
+		// modal-mode tag in case the same dialog was previously
+		// `showModal()`-opened and is being re-shown non-modally.
+		unmarkDialogModalMode(this);
+		this.setAttribute('open', '');
+	}
+	showModal(): void {
+		if (this.tagName !== 'DIALOG') return;
+		// Modal mode: tag the dialog so `paintModalOverlay` paints a
+		// backdrop, the shell scroll handler short-circuits, and
+		// `hitTestLive` drops any tap that doesn't land inside this
+		// dialog's subtree (mirrors the spec's top-layer + inertness
+		// for the user-visible parts — focus trap + esc-to-close
+		// aren't implemented today). Cleared in `close()`.
+		markDialogModalMode(this);
+		this.setAttribute('open', '');
+	}
+	/** Spec-shaped `<dialog>.close(returnValue?)` — hide the dialog
+	 * and dispatch a `close` event. The optional `returnValue` argument
+	 * is stored on `this.returnValue` so the listener can read it (the
+	 * common spec pattern is `dialog.addEventListener('close', () => …
+	 * dialog.returnValue)`). */
+	close(returnValue?: string): void {
+		if (this.tagName !== 'DIALOG') return;
+		if (typeof returnValue === 'string') this.returnValue = returnValue;
+		unmarkDialogModalMode(this);
+		this.removeAttribute('open');
+		this.dispatchEvent({ type: 'close', target: this, currentTarget: this, bubbles: false });
+	}
+	/** Spec-shaped `<dialog>.returnValue` — last value passed to
+	 * `close()`, or '' if never closed with a value. The spec also lets
+	 * the page set this directly before calling `close()`; the property
+	 * is a plain field so reads/writes work the same way. */
+	returnValue = '';
+
 	/** Spec-aligned with OffscreenCanvas.convertToBlob — encode this
 	 * canvas's pixels into a Blob (default PNG). Forwards to the backing
 	 * OffscreenCanvas. Resolves to a Blob; rejects for non-canvas tags.
@@ -2035,25 +2117,95 @@ export class LiveElement {
 	}
 }
 
+/** Walk `root`'s subtree (including `root` itself) returning the first
+ * element that satisfies `pred`. Pre-order. Used by
+ * `LiveElement.querySelector` and the `document.querySelector` shim in
+ * canvas-runner so the two share one implementation. */
+export function findLiveElement(root: LiveElement, pred: (el: LiveElement) => boolean): LiveElement | null {
+	if (pred(root)) return root;
+	for (const child of root.children) {
+		const hit = findLiveElement(child, pred);
+		if (hit) return hit;
+	}
+	return null;
+}
+
+/** Walk `root`'s subtree (including `root` itself), appending every
+ * element that satisfies `pred` to `out`, in document order. Used by
+ * `LiveElement.querySelectorAll` and the `document.querySelectorAll`
+ * shim. */
+export function findAllLiveElements(root: LiveElement, pred: (el: LiveElement) => boolean, out: LiveElement[]): void {
+	if (pred(root)) out.push(root);
+	for (const child of root.children) findAllLiveElements(child, pred, out);
+}
+
+/** Build a match predicate for a SIMPLE CSS selector — `#id`, `.class`,
+ * bare `tag`, `[attr]`, or `[attr=value]` (both quoted forms). Compound
+ * / descendant / pseudo selectors return null (unsupported). Shared by
+ * `LiveElement.querySelector*` and the `document.querySelector*` shim
+ * in canvas-runner — one parser, one rule set. */
+export function liveSelectorPredicate(selector: string): ((el: LiveElement) => boolean) | null {
+	const sel = selector.trim();
+	if (!sel) return null;
+	if (sel.charAt(0) === '#') {
+		const id = sel.slice(1);
+		return (el) => el.getAttribute('id') === id;
+	}
+	if (sel.charAt(0) === '.') {
+		const cls = sel.slice(1);
+		return (el) => (el.getAttribute('class') || '').split(/\s+/).indexOf(cls) >= 0;
+	}
+	const attrMatch = /^\[([a-zA-Z_][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]$/.exec(sel);
+	if (attrMatch) {
+		const name = attrMatch[1];
+		const value = attrMatch[2] ?? attrMatch[3] ?? attrMatch[4];
+		if (value === undefined) {
+			return (el) => el.hasAttribute(name);
+		}
+		return (el) => el.getAttribute(name) === value;
+	}
+	if (/^[a-z][a-z0-9-]*$/i.test(sel)) {
+		const want = sel.toUpperCase();
+		return (el) => el.tagName === want;
+	}
+	return null;
+}
+
+/** True if `el` is recognised by the engine as a modal-layer root:
+ * either the `<browser-modal>` tag's `data-engine-modal="true"` stamp
+ * (the engine-blessed authoring API) or a native `<dialog>` element
+ * (the spec-shaped path — `dialog.showModal()` / `.close()` toggle the
+ * `open` attribute which the UA defaults map to display:flex / none).
+ * Used by `propagateAttached` to register the element with the
+ * modal-roots registry, by `collectPaintOps` to skip the subtree from
+ * the host body cache, and by the fixed-element pass to lay it out but
+ * defer paint to `paintModalOverlay`. Keeping the two triggers behind
+ * one helper means a future third modal mechanism is a one-line add. */
+export function isEngineModalRoot(el: LiveElement): boolean {
+	return el.getAttribute('data-engine-modal') === 'true'
+		|| el.tagName === 'DIALOG';
+}
+
 /** Walk a subtree updating the `attached` flag. The live painter
  * relies on this so it can iterate only the registered roots' trees
  * and skip orphan subtrees.
  *
  * 2026-06-14: also propagates `inModalLayer` and registers / unregisters
- * `<browser-modal>` roots (elements with `data-engine-modal="true"`) with
- * the modal-roots registry in live-paint-control. The flag is set when
- * EITHER the parent is in a modal layer OR the element itself carries
- * the data-engine-modal stamp; descendants inherit. On detach the flag
- * is cleared and the registry entry is dropped so the modal paint pass
- * stops walking it. This is the foundation of the modal-layer
- * quarantine — see the module header of live-paint-control.ts. */
+ * modal roots (`<browser-modal>` with `data-engine-modal="true"`, OR a
+ * native `<dialog>` element — see `isEngineModalRoot`) with the
+ * modal-roots registry in live-paint-control. The flag is set when
+ * EITHER the parent is in a modal layer OR the element itself is a
+ * modal root; descendants inherit. On detach the flag is cleared and
+ * the registry entry is dropped so the modal paint pass stops walking
+ * it. This is the foundation of the modal-layer quarantine — see the
+ * module header of live-paint-control.ts. */
 function propagateAttached(el: LiveElement, isAttached: boolean, parentInModalLayer = false): void {
 	// `inModalLayer` is recomputed on every (de)attach because subtree
 	// hot-swaps via innerHTML re-attach the same children under a
 	// freshly-stamped parent, and a previously-detached subtree could be
 	// re-parented under a different (non-modal) host. Cheap; one
 	// attribute lookup per element on each (de)attach.
-	const selfIsModalRoot = el.getAttribute('data-engine-modal') === 'true';
+	const selfIsModalRoot = isEngineModalRoot(el);
 	const newInModalLayer = isAttached && (parentInModalLayer || selfIsModalRoot);
 	const layerChanged = el.inModalLayer !== newInModalLayer;
 	if (el.attached !== isAttached || layerChanged) {
@@ -2693,15 +2845,57 @@ export function hitTestLive(
 		for (const c of el.children) collect(c, nowFixed, childScrollOff, effZ, descendantClip, descRelX, descRelY);
 	}
 	collect(root, false, 0, 0, null, 0, 0);
-	candidates.sort((a, b) => {
+	// 2026-06-15 modal-mode tap blocking — if any `<dialog>.showModal()`
+	// dialog is currently open (cs.display !== 'none') and registered as
+	// modal-mode, drop candidates that aren't inside its subtree. Mirrors
+	// the spec's "rest of the page is inert" semantics for the
+	// user-visible part: a tap outside the modal does nothing instead
+	// of bleeding through to the page underneath. `show()` (non-modal)
+	// dialogs aren't tagged → page stays interactive behind them. The
+	// candidate sort already gives the modal a z-index boost; this
+	// extra filter is the difference between "the modal CAN steal a
+	// tap from a same-z body element" and "nothing outside the modal
+	// is tappable at all."
+	const activeModalDialog = findActiveModalModeDialog(root);
+	const filtered = activeModalDialog
+		? candidates.filter((c) => activeModalDialog.contains(c.el))
+		: candidates;
+	filtered.sort((a, b) => {
 		if (a.z !== b.z) return b.z - a.z; // higher z first
 		return b.order - a.order;          // latest in doc order first
 	});
-	for (const c of candidates) {
+	for (const c of filtered) {
 		if (c.w <= 0 || c.h <= 0) continue;
 		if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) {
 			return c.el;
 		}
+	}
+	return null;
+}
+
+/** Returns the currently-visible `<dialog>` that was opened via
+ * `showModal()` (so it's modal-mode-tagged and should block taps to
+ * the rest of the page), or null if none. Walks the modal-mode set
+ * checking `cs.display !== 'none'` — a stale entry whose `open`
+ * attribute was cleared by direct DOM manipulation rather than
+ * `close()` is filtered out here. Only one such dialog is expected to
+ * be open at a time per spec; the first match wins. */
+function findActiveModalModeDialog(root: LiveElement): LiveElement | null {
+	const dialogs = getModalModeDialogs();
+	if (dialogs.length === 0) return null;
+	for (const d of dialogs) {
+		// Must still be in the tree under `root` — a detached dialog
+		// shouldn't suppress taps on the page that's actually painted.
+		let n: LiveElement | null = d;
+		let inTree = false;
+		while (n) {
+			if (n === root) { inTree = true; break; }
+			n = n.parent;
+		}
+		if (!inTree) continue;
+		const cs = getComputedLiveStyle(d);
+		if (cs.display === 'none') continue;
+		return d;
 	}
 	return null;
 }

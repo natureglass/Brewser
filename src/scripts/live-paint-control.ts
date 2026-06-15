@@ -312,6 +312,11 @@ export function unregisterModalRoot(el: LiveElement): void {
 		modalTreeVersion++;
 		pendingFullRepaint = true;
 	}
+	// Also drop modal-mode tracking if the dialog was detached while
+	// open (e.g. innerHTML hot-swap or navigation). Without this the
+	// stale entry would keep the backdrop + scroll/tap block active
+	// for an element that's no longer painted.
+	modalModeDialogs.delete(el);
 }
 export function getModalRoots(): readonly LiveElement[] {
 	// Snapshot — callers iterate without holding a Set reference.
@@ -320,3 +325,60 @@ export function getModalRoots(): readonly LiveElement[] {
 /** Cheap "does any modal exist at all?" gate for the paint-pass fast-path
  * skip when the page has no modals. */
 export function hasAnyModalRoot(): boolean { return modalRoots.size > 0; }
+
+// =========================================================================
+// 2026-06-15 modal-mode tracking — `<dialog>.showModal()` vs `<dialog>.show()`.
+//
+// Spec semantics: `showModal()` puts the dialog in the "top layer" and makes
+// the rest of the page inert (no user interaction outside the modal),
+// renders a `::backdrop` pseudo, and traps focus. `show()` is non-modal —
+// the dialog renders but the page stays interactive. Engine-side we mirror
+// just the user-visible parts: showModal-tagged dialogs get a backdrop
+// painted underneath, block scroll on the host, and intercept hit-test so
+// taps outside the modal are dropped. show()-tagged dialogs do none of
+// those things (modal renders, page stays interactive — same shape as
+// `<browser-modal>` without `.--open` would behave, but visible).
+//
+// The flag is per-element (a separate Set rather than a field on
+// LiveElement) so it doesn't pollute every LiveElement instance with a
+// rarely-used field. Cleared automatically on detach via
+// `unregisterModalRoot` and on close via `LiveElement.close()`.
+// =========================================================================
+const modalModeDialogs = new Set<LiveElement>();
+export function markDialogModalMode(el: LiveElement): void { modalModeDialogs.add(el); }
+export function unmarkDialogModalMode(el: LiveElement): void { modalModeDialogs.delete(el); }
+export function isDialogModalMode(el: LiveElement): boolean { return modalModeDialogs.has(el); }
+/** Iterates currently-attached modal-mode dialogs. Callers should filter
+ * by `cs.display !== 'none'` to skip those that were closed via attribute
+ * manipulation (rare — `LiveElement.close()` unmarks, but page scripts
+ * that `removeAttribute('open')` directly leave the flag stale). */
+export function getModalModeDialogs(): readonly LiveElement[] {
+	return Array.from(modalModeDialogs);
+}
+
+/** Find the topmost OPEN modal-mode dialog (the one the user sees on
+ * top) and close it via `LiveElement.close()`. Returns true iff a
+ * dialog was found and closed. Used by the shell to intercept B-button
+ * / Escape / exit so the user can dismiss a modal without it
+ * bypassing the page's own close handlers. Last-inserted Set member
+ * wins — matches the visual "most recently opened is on top" stack
+ * order (the spec's top-layer ordering, approximated). */
+export function closeTopmostModalModeDialog(): boolean {
+	if (modalModeDialogs.size === 0) return false;
+	// Iterate in REVERSE insertion order to find the topmost open one.
+	const arr = Array.from(modalModeDialogs);
+	for (let i = arr.length - 1; i >= 0; i--) {
+		const d = arr[i];
+		if (d.getAttribute('open') === null) continue;
+		// LiveElement has a typed `close(returnValue?)` — call it via
+		// a structural cast so this control module doesn't depend on
+		// the full LiveElement shape (`live-dom.ts` already imports
+		// from us, importing it back would loop).
+		const closer = d as unknown as { close?: () => void };
+		if (typeof closer.close === 'function') {
+			closer.close();
+			return true;
+		}
+	}
+	return false;
+}

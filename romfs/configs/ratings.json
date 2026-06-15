@@ -1,0 +1,17 @@
+[
+  {
+    "packageId": "com.natureglass.pvzge",
+    "count": 1,
+    "average": 5
+  },
+  {
+    "packageId": "com.natureglass.webgl1demo",
+    "count": 2,
+    "average": 1.5
+  },
+  {
+    "packageId": "com.natureglass.webgl2demo",
+    "count": 2,
+    "average": 5
+  }
+]

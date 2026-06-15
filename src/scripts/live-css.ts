@@ -237,6 +237,7 @@ export interface ComputedLiveStyle {
 	textAlign?: 'left' | 'center' | 'right' | 'start' | 'end';
 	lineHeight?: number;
 	textDecoration?: 'none' | 'underline' | 'line-through' | 'overline';
+	textDecorationStyle?: 'solid' | 'dotted' | 'dashed' | 'double' | 'wavy';
 	verticalAlign?: 'baseline' | 'super' | 'sub';
 	listStyleType?: 'none' | 'disc' | 'circle' | 'square'
 		| 'decimal' | 'lower-alpha' | 'upper-alpha'
@@ -832,7 +833,7 @@ export function isPseudoHover(el: LiveElement): boolean { return hoverElements.h
  * `<mark>` highlight bg, `<small>` smaller font. Anything author CSS sets
  * overrides these. Returned object is mutated into the per-call `computed`
  * accumulator. */
-function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveElement): void {
+function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveElement, parentComputed?: ComputedLiveStyle): void {
 	// Text nodes participate in inline-formatting context.
 	if (tag === '#text') { computed.display = 'inline'; return; }
 	switch (tag) {
@@ -869,9 +870,13 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 			computed.textDecoration = 'underline';
 			return;
 		case 'MARK':
+			// Spec UA rule:
+			//   mark { background-color: mark; color: marktext; }
+			// where `mark` and `marktext` are CSS system colors. Their
+			// computed values across all major browsers are yellow + black.
 			computed.display = 'inline';
-			computed.background = '#ffd35e';
-			computed.color = '#1a1a1a';
+			computed.background = '#ffff00';
+			computed.color = '#000000';
 			return;
 		case 'SUP':
 			computed.display = 'inline';
@@ -887,18 +892,60 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 			computed.display = 'inline';
 			computed.fontSize = 13; return;
 		case 'SPAN':
-		case 'ABBR':
-		case 'Q':
 		case 'TIME':
 		case 'BDO':
 		case 'BDI':
+		case 'DATA':
+		case 'OUTPUT':
+		case 'WBR':
+		case 'RUBY':
+		case 'RP':
+		case 'RT':
+		case 'RTC':
+			// All phrasing-content tags whose UA default is just
+			// `display: inline`. Anything missing here lands as block
+			// (the engine's default for unset display) which poisons the
+			// `allInline` check in live-layout for the parent paragraph,
+			// stacking every sibling onto its own line.
 			computed.display = 'inline'; return;
+		case 'Q': {
+			// Spec UA rule: `q::before { content: open-quote; } q::after { content: close-quote; }`
+			// The matched-rules pass below will overwrite `before`/`after`
+			// if author CSS supplies its own pseudo-element content. For
+			// English-locale default, open/close-quote resolve to U+201C / U+201D
+			// (curly double quotes). Nested-quote levels (single quotes
+			// inside double) aren't tracked — the spec calls for switching
+			// per depth, but our showcase doesn't depend on it.
+			computed.display = 'inline';
+			computed.before = '“';
+			computed.after = '”';
+			return;
+		}
+		case 'ABBR': {
+			// Spec UA rule: `abbr[title] { text-decoration: underline dotted; }`
+			// The dotted hint only appears when a title is actually present —
+			// abbr without a title is just plain inline text.
+			computed.display = 'inline';
+			const title = el.getAttribute('title');
+			if (title && title.length > 0) {
+				computed.textDecoration = 'underline';
+				computed.textDecorationStyle = 'dotted';
+			}
+			return;
+		}
 		case 'CODE':
 		case 'KBD':
 		case 'SAMP':
 		case 'TT':
+			// Spec UA defaults — inline + monospace, no size override (1em
+			// inherits from parent). The previous 2em bump was a workaround
+			// for nx.js dropping the size when monospace was requested; the
+			// proper fix is the trailing-sans-serif fallback in
+			// `quoteFontFamily` (inline-css.ts), which preserves the
+			// requested size when nx.js can't render monospace.
 			computed.display = 'inline';
-			computed.fontFamily = 'monospace'; return;
+			computed.fontFamily = 'monospace';
+			return;
 
 		// Block formatting.
 		case 'PRE':
@@ -906,41 +953,85 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 			computed.marginTop = 8;
 			computed.marginBottom = 8;
 			return;
-		// Heading UA defaults: ONLY margins + bold. Font-size dropped on
-		// purpose so author CSS (a `.card h2 { font-size:26px }` etc.) can
-		// control size directly without competing against a baked-in number
-		// — the previous defaults (32/24/19/16/14/12) were close to common
-		// author values, making small bumps look like they "did nothing"
-		// when actually a hardcoded UA size was winning. With no UA size,
-		// h1-h6 fall back to the inherited body font-size unless author
-		// CSS sets one, which matches what authors usually expect.
-		case 'H1':
+		// Heading UA defaults — spec values per html.spec.whatwg.org/Rendering.
+		// Font-size em is relative to the PARENT's font-size; margin em is
+		// relative to the ELEMENT's OWN font-size (per CSS spec for em on
+		// margin/padding). h4 has no font-size override (inherits from
+		// parent), so its margins multiply against parent's font-size.
+		// `unicode-bidi: isolate` and `display: block` from the spec are
+		// implicit here: the engine treats unset display as block for these
+		// tags, and BiDi isolation isn't implemented (no impact on LTR text).
+		case 'H1': {
+			const fs = 2 * (parentComputed?.fontSize ?? 16);
 			computed.fontWeight = 'bold';
-			computed.marginTop = 16; computed.marginBottom = 12;
+			computed.fontSize = fs;
+			computed.marginTop = 0.67 * fs;
+			computed.marginBottom = 0.67 * fs;
+			computed.marginLeft = 0;
+			computed.marginRight = 0;
 			return;
-		case 'H2':
+		}
+		case 'H2': {
+			const fs = 1.5 * (parentComputed?.fontSize ?? 16);
 			computed.fontWeight = 'bold';
-			computed.marginTop = 14; computed.marginBottom = 10;
+			computed.fontSize = fs;
+			computed.marginTop = 0.83 * fs;
+			computed.marginBottom = 0.83 * fs;
+			computed.marginLeft = 0;
+			computed.marginRight = 0;
 			return;
-		case 'H3':
+		}
+		case 'H3': {
+			const fs = 1.17 * (parentComputed?.fontSize ?? 16);
 			computed.fontWeight = 'bold';
-			computed.marginTop = 12; computed.marginBottom = 8;
+			computed.fontSize = fs;
+			computed.marginTop = fs;
+			computed.marginBottom = fs;
+			computed.marginLeft = 0;
+			computed.marginRight = 0;
 			return;
-		case 'H4':
+		}
+		case 'H4': {
+			const inheritedFs = parentComputed?.fontSize ?? 16;
 			computed.fontWeight = 'bold';
-			computed.marginTop = 10; computed.marginBottom = 8;
+			computed.marginTop = 1.33 * inheritedFs;
+			computed.marginBottom = 1.33 * inheritedFs;
+			computed.marginLeft = 0;
+			computed.marginRight = 0;
 			return;
-		case 'H5':
+		}
+		case 'H5': {
+			const fs = 0.83 * (parentComputed?.fontSize ?? 16);
 			computed.fontWeight = 'bold';
-			computed.marginTop = 10; computed.marginBottom = 6;
+			computed.fontSize = fs;
+			computed.marginTop = 1.67 * fs;
+			computed.marginBottom = 1.67 * fs;
+			computed.marginLeft = 0;
+			computed.marginRight = 0;
 			return;
-		case 'H6':
+		}
+		case 'H6': {
+			const fs = 0.67 * (parentComputed?.fontSize ?? 16);
 			computed.fontWeight = 'bold';
-			computed.marginTop = 10; computed.marginBottom = 6;
+			computed.fontSize = fs;
+			computed.marginTop = 2.33 * fs;
+			computed.marginBottom = 2.33 * fs;
+			computed.marginLeft = 0;
+			computed.marginRight = 0;
 			return;
-		case 'P':
-			computed.marginTop = 8; computed.marginBottom = 8;
+		}
+		case 'P': {
+			// Spec UA: `margin-block-start: 1em; margin-block-end: 1em;`
+			// 1em resolves against the element's own font-size; P inherits
+			// font-size from its parent, so using the parent's fontSize
+			// matches what the spec value would resolve to (= 18px on an
+			// 18px-body page). The previous 8px hardcode produced
+			// noticeably tighter paragraph stacking than Chrome.
+			const fs = parentComputed?.fontSize ?? 16;
+			computed.marginTop = fs;
+			computed.marginBottom = fs;
 			return;
+		}
 		// `<iframe>` — UA default is `overflow: auto` so embedded content
 		// that exceeds the iframe's declared box height is scrollable
 		// (with a visible scrollbar) instead of just being clipped. The
@@ -956,6 +1047,48 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 			computed.overflowX = 'auto';
 			computed.overflowY = 'auto';
 			return;
+		// 2026-06-15 `<dialog>` UA defaults — the spec-shaped path into
+		// the engine modal layer. Hidden by default; the `open`
+		// attribute (added by `dialog.show()` / `.showModal()`,
+		// removed by `.close()`) flips display to `block` and the
+		// modal paint pass picks the element up via the modal-roots
+		// registry that `propagateAttached` populated when the dialog
+		// attached. Position:fixed makes the host fixed-element pass
+		// include the dialog in `cachedFixed` so `paintModalOverlay`
+		// has a layout box to read.
+		//
+		// Author CSS overrides: any `dialog { … }` rule the page
+		// supplies cascades AFTER these UA defaults (per the
+		// `applyUaDefaults` → matched-rules order at the top of the
+		// resolution function), so the page can re-style / re-position
+		// freely. Without overrides, the dialog renders as a small
+		// padded white box at the top-left of the content viewport —
+		// visible and usable, not centered. (Spec-correct centering
+		// requires `inset: 0; margin: auto; width: fit-content` which
+		// our layout doesn't fully support; the simple positioning
+		// keeps the UA path predictable.)
+		case 'DIALOG': {
+			const isOpen = el.getAttribute('open') !== null;
+			if (!isOpen) {
+				computed.display = 'none';
+				return;
+			}
+			computed.display = 'block';
+			computed.position = 'fixed';
+			computed.top = 100;
+			computed.left = 100;
+			computed.background = '#ffffff';
+			computed.color = '#1a1a1a';
+			computed.padding = 16;
+			// Stacking — modal subtree must beat body content in
+			// hit-test (otherwise a body element at the same screen
+			// coords with a LATER document order steals taps via the
+			// "same-z → later-order-wins" tie-break in `hitTestLive`).
+			// Body content is at z:0 by default; 100 puts the dialog
+			// well above. Author CSS can override for layered modals.
+			computed.zIndex = 100;
+			return;
+		}
 		case 'BLOCKQUOTE':
 			computed.marginTop = 8; computed.marginBottom = 8;
 			computed.marginLeft = 24; computed.marginRight = 24;
@@ -1019,16 +1152,16 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 			computed.fontStyle = 'italic';
 			computed.textAlign = 'center';
 			return;
-		// Form widgets — vertical UA margins so stacked widgets don't
-		// fuse together. Real Chrome/Firefox/Safari ship `margin: 0`
-		// on `<input>`/`<button>` and rely on inline-block line-height
-		// for visual breathing room, but our engine renders form
-		// widgets as block-level via layoutLeaf, so the gap has to be
-		// added explicitly. 3 + 3 = 6 px between adjacent widgets
-		// matches what tier3-style pages look like in a real browser.
-		// Author CSS still overrides via the normal cascade.
-		// `<input type=hidden>` zero-sizes itself in layoutLeaf so the
-		// margin doesn't push siblings around for hidden fields.
+		// Form widgets — Chrome/Firefox/Safari ship `display: inline-block`
+		// on `<input>`, `<button>`, `<select>`, `<textarea>` so they flow
+		// inline next to their `<label>` text instead of taking a full
+		// block-level row each. Without the inline-block default, our
+		// engine's `allInline` check fails for a fieldset of `<label>` +
+		// `<input>` pairs and everything stacks vertically with the input
+		// stretched to the parent's full width. UA vertical margins (3+3=6
+		// px) keep stacked widgets from fusing — Chrome lets line-height
+		// do this, but our packing doesn't add line spacing between rows,
+		// so the margin is needed for visual breathing room.
 		//
 		// SKIP when the parent is a flex container — there the widget
 		// is a flex item, not a block-level box, and the UA margin
@@ -1039,10 +1172,41 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 		// row's `align-items: stretch` was meant to give them all the
 		// same height). Author CSS can still set explicit margins for
 		// the flex case via the normal cascade.
+		//
+		// `<input type=hidden>` zero-sizes itself in layoutLeaf so the
+		// margin doesn't push siblings around for hidden fields.
 		case 'INPUT':
 		case 'BUTTON':
 		case 'SELECT':
 		case 'TEXTAREA': {
+			computed.display = 'inline-block';
+			// Black text on the widget regardless of what the page
+			// inherited from its `body { color: … }`. Chrome / Firefox /
+			// Safari's UA stylesheet sets `color: ButtonText` (system) /
+			// `color: -internal-light-dark(black, white)` on form
+			// controls so they don't pick up the page's body color — a
+			// dark-themed page (`body { color: #e0e8f4 }`) would otherwise
+			// paint light-grey text inside the white input boxes and the
+			// black-text-on-light-grey button labels (set below by the
+			// theme + paint code) would render in the inherited light
+			// blue instead. Setting it here in UA-defaults beats
+			// `parentComputed.color` in the inheritance pass.
+			computed.color = '#1a1a1a';
+			// Default background for the widget chrome. Text-family inputs
+			// + textarea + select keep the LIGHT-theme white; buttons get
+			// the standard Chrome-ish grey chip. INPUT type-specific
+			// overrides (color picker, range, file) layer on top in
+			// `applyPresentationalHints`. Background isn't inherited per
+			// CSS spec, so the only thing we beat here is the form-widget
+			// painter's theme fallback — making the UA path the canonical
+			// source of truth.
+			if (el.tagName === 'BUTTON') {
+				computed.background = '#efefef';
+			} else if (el.tagName !== 'INPUT') {
+				// SELECT / TEXTAREA: white field.
+				computed.background = '#ffffff';
+			}
+			// INPUT bg is set per-type in applyPresentationalHints below.
 			if (el.parent) {
 				const parentCs = getComputedLiveStyle(el.parent);
 				if (parentCs.display === 'flex' || parentCs.display === 'inline-flex') {
@@ -1051,8 +1215,97 @@ function applyUaDefaults(computed: ComputedLiveStyle, tag: string, el: LiveEleme
 			}
 			computed.marginTop = 3;
 			computed.marginBottom = 3;
+			// Horizontal margins so sibling widgets don't fuse together.
+			// Real browsers let the inline-formatting context's whitespace
+			// between source tags do this work, but our `layoutBlock`
+			// anonymous-block-wrap packs widgets via the float-row
+			// mechanism which doesn't insert inter-atom whitespace —
+			// without margins, `<button>A</button><button>B</button>`
+			// renders as `AB`. 6 px on the left gives the `<label>` →
+			// `<input>` row some breathing room between the colon and
+			// the field; 3 px on the right matches the vertical margins
+			// so adjacent widgets still pack cleanly.
+			computed.marginLeft = 6;
+			computed.marginRight = 3;
 			return;
 		}
+		case 'LABEL':
+			// HTML spec UA: `display: inline` so a `<label>` sits next to
+			// its target `<input>` instead of taking its own full-width row.
+			computed.display = 'inline';
+			return;
+		case 'FIELDSET':
+			// HTML5 spec UA: `2px groove ThreeDFace` border with
+			// `padding: 0.35em 0.75em 0.625em` and `margin-inline: 2px`.
+			// Engine doesn't support `groove`, so a 2px solid silver border
+			// matches the Chrome look closely. Padding values follow the
+			// spec ratios scaled against the body font (18px → 6/13/11 px).
+			//
+			// Vertical UA margins are NOT in the HTML spec for fieldset
+			// (Chrome ships `margin: 0 2px`), but our row-packer doesn't
+			// model line-box spacing between block-level siblings, so two
+			// adjacent fieldsets stack flush — the second fieldset's
+			// border line crosses the bottom of the first one's content.
+			// 12 px each side keeps them visually distinct.
+			computed.display = 'block';
+			computed.marginTop = 12;
+			computed.marginBottom = 12;
+			computed.marginLeft = 2;
+			computed.marginRight = 2;
+			computed.paddingTop = 6;
+			computed.paddingBottom = 11;
+			computed.paddingLeft = 13;
+			computed.paddingRight = 13;
+			computed.borderTopWidth = 2;
+			computed.borderRightWidth = 2;
+			computed.borderBottomWidth = 2;
+			computed.borderLeftWidth = 2;
+			computed.borderTopColor = '#c0c0c0';
+			computed.borderRightColor = '#c0c0c0';
+			computed.borderBottomColor = '#c0c0c0';
+			computed.borderLeftColor = '#c0c0c0';
+			return;
+		case 'LEGEND':
+			// HTML5 spec UA: `padding-inline: 2px`. Block by default;
+			// `layoutFieldsetWithLegend` repositions it onto the fieldset's
+			// top border line and records a cutout so the border splits
+			// around the legend text (see `getFieldsetLegendCutout`).
+			computed.display = 'block';
+			computed.paddingLeft = 2;
+			computed.paddingRight = 2;
+			return;
+		case 'PROGRESS':
+			// HTML5 spec UA: inline-block, ~160×16. The painter draws a
+			// slim 8 px bar centered low in the box so the bar baseline
+			// aligns roughly with the surrounding text's baseline (real
+			// browsers do this via inline-block baseline alignment that
+			// our row packer doesn't model). The 18 px UA height gives
+			// the painter the room to place the bar low and matches the
+			// row's text line-height so it doesn't shrink the row.
+			computed.display = 'inline-block';
+			computed.width = 160;
+			computed.height = 18;
+			// Horizontal gap from the preceding `<label>` so the bar
+			// doesn't sit flush against the label colon.
+			computed.marginLeft = 3;
+			computed.marginRight = 3;
+			return;
+		case 'METER':
+			// Same treatment as progress — taller UA box with the bar
+			// painted low so it visually aligns with adjacent text.
+			computed.display = 'inline-block';
+			computed.width = 80;
+			computed.height = 18;
+			computed.marginLeft = 3;
+			computed.marginRight = 3;
+			return;
+		case 'DATALIST':
+			// HTML spec: `<datalist>` provides autocomplete options for an
+			// associated `<input list="…">` but renders nothing itself.
+			// Without an explicit `display: none` the OPTIONs inside would
+			// flow as plain inline-block siblings of the input.
+			computed.display = 'none';
+			return;
 		// Non-rendered elements. STYLE is the load-bearing one — body-
 		// level `<style>` blocks were rendering their CSS source as
 		// visible text (Google's `/search` "Update je browser" page
@@ -1134,15 +1387,45 @@ function applyPresentationalHints(computed: ComputedLiveStyle, el: LiveElement):
 			setLenAttr(computed, 'height', el.getAttribute('height'));
 			return;
 		}
+		// Per-type default backgrounds. UA-defaults already set `color:
+		// #1a1a1a` on every INPUT; here we pick the bg for the chrome.
+		// Range / color have their own painter logic that drives the
+		// visual (track color / picked colour); leaving their bg
+		// undefined lets the painter use its own fallback. Hidden is
+		// layout-suppressed already.
+		if (computed.background === undefined) {
+			if (type === 'submit' || type === 'button' || type === 'reset') {
+				computed.background = '#efefef';
+			} else if (
+				type !== 'range' && type !== 'color' && type !== 'hidden'
+				&& type !== 'image' && type !== 'file'
+			) {
+				// text / search / email / url / tel / password / number /
+				// date / time / month / week / datetime-local / checkbox /
+				// radio — all get a white field. `file` is excluded so
+				// `paintFileInput` can leave the outer area transparent
+				// behind the "Choose File" chip (Chrome paints no field
+				// background on file inputs).
+				computed.background = '#ffffff';
+			}
+		}
 		// Text-family inputs: HTML's `size` attribute is roughly "N
 		// characters wide." We don't have proper character-width metrics
 		// at cascade time, so approximate with the font size (or the 14px
 		// default) × ~0.55. Matches what real browsers do within ±20% and
-		// makes tier3's `<input size=35>` paint visibly.
+		// makes tier3's `<input size=35>` paint visibly. When no `size`
+		// attr is present, Chrome defaults to size=20 (~152px at 18px
+		// font) — without that fallback, a CSS-less text input lands in
+		// layoutBlock with no explicit width and stretches to the parent's
+		// full content area (every `<input type=text>` becomes a wide bar).
 		if (
 			type === 'text' || type === 'search' || type === 'email' || type === 'url'
 			|| type === 'tel' || type === 'password' || type === '' || type === 'number'
 		) {
+			// 1.5× multiplier on the size-derived character width so the
+			// default text input has noticeably more typing room than
+			// Chrome's tight ~150 px default. Matches the user's
+			// preferred ergonomics for our viewport.
 			const sizeStr = el.getAttribute('size');
 			if (sizeStr) {
 				const n = parseInt(sizeStr, 10);
@@ -1150,8 +1433,34 @@ function applyPresentationalHints(computed: ComputedLiveStyle, el: LiveElement):
 					const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
 					// 4px each side of internal padding so the value text
 					// has breathing room inside the painted box.
-					computed.width = Math.round(n * fontPx * 0.55 + 8);
+					computed.width = Math.round(n * fontPx * 0.55 * 1.5 + 8);
 				}
+			} else if (computed.width === undefined) {
+				const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
+				computed.width = Math.round(20 * fontPx * 0.55 * 1.5 + 8);
+			}
+		} else if (computed.width === undefined) {
+			// Per-type Chrome defaults for non-text inputs. Each value
+			// approximates what Chrome / Firefox actually render and keeps
+			// the widget from stretching to fill the parent. Authors who
+			// want a different width set CSS — the cascade overwrites.
+			// `checkbox` / `radio` square sizing is handled inside
+			// `intrinsicContentWidth` + `layoutLeaf` based on font-size.
+			// `submit` / `button` / `reset` size to label-width + padding
+			// via layoutBlock's label-measure branch.
+			if (type === 'date' || type === 'month' || type === 'week') {
+				computed.width = 150;
+			} else if (type === 'datetime-local') {
+				computed.width = 200;
+			} else if (type === 'time') {
+				computed.width = 105;
+			} else if (type === 'color') {
+				computed.width = 50;
+				if (computed.height === undefined) computed.height = 24;
+			} else if (type === 'range') {
+				computed.width = 132;
+			} else if (type === 'file') {
+				computed.width = 246;
 			}
 		}
 		return;
@@ -1166,6 +1475,10 @@ function applyPresentationalHints(computed: ComputedLiveStyle, el: LiveElement):
 				const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
 				computed.width = Math.round(n * fontPx * 0.55 + 8);
 			}
+		} else if (computed.width === undefined) {
+			// Default cols=20 (HTML spec) when the attribute is missing.
+			const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
+			computed.width = Math.round(20 * fontPx * 0.55 + 8);
 		}
 		if (rowsStr) {
 			const n = parseInt(rowsStr, 10);
@@ -1174,6 +1487,11 @@ function applyPresentationalHints(computed: ComputedLiveStyle, el: LiveElement):
 				const lineH = typeof computed.lineHeight === 'number' ? computed.lineHeight : 1.2;
 				computed.height = Math.round(n * fontPx * lineH + 8);
 			}
+		} else if (computed.height === undefined) {
+			// Default rows=2 (HTML spec) when the attribute is missing.
+			const fontPx = typeof computed.fontSize === 'number' ? computed.fontSize : 14;
+			const lineH = typeof computed.lineHeight === 'number' ? computed.lineHeight : 1.2;
+			computed.height = Math.round(2 * fontPx * lineH + 8);
 		}
 		return;
 	}
@@ -1215,11 +1533,16 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 
 	const computed: ComputedLiveStyle = {};
 
+	// Resolved parent (cache hit on the second+ frame). Pre-computed here
+	// so the UA-default pass below can size em-based heading defaults
+	// (h1 = 2em, h2 = 1.5em, …) against the parent's font-size.
+	const parentComputed = el.parent ? getComputedLiveStyle(el.parent) : undefined;
+
 	// 0. Apply per-tag UA default styles BEFORE author rules so user
 	//    stylesheets can override them. Spec-correct UA stylesheet would
 	//    use specificity 0 (matched-by-tag) — we model that by simply
 	//    layering defaults first and letting matched rules overwrite.
-	applyUaDefaults(computed, el.tagName, el);
+	applyUaDefaults(computed, el.tagName, el, parentComputed);
 	// 0a. Apply HTML presentational hints (`<img width=…>`, `<table
 	//    width=…%>`, `<input size=…>`, …). Per HTML5 these contribute at
 	//    UA-stylesheet specificity (lower than any author rule), so we
@@ -1253,7 +1576,6 @@ export function getComputedLiveStyle(el: LiveElement): ComputedLiveStyle {
 	//      `@media (pointer:coarse) .lil-gui.allow-touch-styles { --font-size:13px }`
 	//    Single-pass would resolve var(--font-size) to 11px during the
 	//    first rule and never see the touch override.
-	const parentComputed = el.parent ? getComputedLiveStyle(el.parent) : undefined;
 	const customProps: Record<string, string> = {};
 	let beforeContent: string | undefined;
 	let afterContent: string | undefined;
@@ -1510,12 +1832,26 @@ function applyDeclToComputed(
 		}
 		case 'text-decoration':
 		case 'text-decoration-line': {
+			// `text-decoration` is a shorthand; tokens can be a line keyword
+			// (underline/overline/line-through/none) and/or a style keyword
+			// (solid/dotted/dashed/double/wavy). Color/thickness tokens are
+			// ignored (color falls back to text color in the painter).
 			for (const tok of value.toLowerCase().split(/\s+/)) {
 				if (tok === 'none' || tok === 'underline' ||
 				    tok === 'line-through' || tok === 'overline') {
 					computed.textDecoration = tok;
-					return;
+				} else if (tok === 'solid' || tok === 'dotted' || tok === 'dashed'
+				    || tok === 'double' || tok === 'wavy') {
+					computed.textDecorationStyle = tok;
 				}
+			}
+			return;
+		}
+		case 'text-decoration-style': {
+			const v = value.trim().toLowerCase();
+			if (v === 'solid' || v === 'dotted' || v === 'dashed'
+			    || v === 'double' || v === 'wavy') {
+				computed.textDecorationStyle = v;
 			}
 			return;
 		}

@@ -345,6 +345,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-artifacts(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-artifacts\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).artifacts),
 		);
+		// `<browser-config-downloads>` / `<browser-config-ratings>` —
+		// expand to the active `config.json` `downloads` / `ratings`
+		// URLs. Stamped onto the apps.html Check-for-Updates button as
+		// `data-downloads-url` / `data-ratings-url` so updates-modal.js
+		// can fetch them alongside the catalogue and replace the
+		// local copies under `<appRoot>configs/`. Empty when no URL is
+		// configured; the modal skips the refresh in that case and
+		// leaves the on-disk file untouched.
+		out = out.replace(
+			/<browser-config-downloads(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-downloads\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).downloads),
+		);
+		out = out.replace(
+			/<browser-config-ratings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-ratings\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).ratings),
+		);
 		// `<browser-config-<provider>-client-id>` family — expands to
 		// the matching `config.json` `<provider>OAuthClientId` value,
 		// HTML-escaped. Stamped onto each provider's login page <body>

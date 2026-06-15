@@ -621,10 +621,19 @@ export function quoteFontFamily(family: string): string {
 			out.push(raw);
 		}
 	}
-	// Guarantee a generic fallback so unknown-family declarations still apply
-	// their size. See workaround #2 in the doc-comment above.
+	// Always end the stack with `sans-serif` (unless that's already the
+	// last entry). nx.js's font parser ONLY honours sans-serif reliably;
+	// the other generic keywords (monospace, serif, cursive, fantasy) and
+	// any unregistered named family cause it to silently fall back to
+	// `10px sans-serif` — losing the requested size. Putting sans-serif
+	// last in the stack lets nx.js fall through to it at the requested
+	// size when its primary-family handler bails. Code looks proportional
+	// instead of monospaced on Switch, but at the right size; once a
+	// monospace TTF is shipped + registered via FontFace, this fallback
+	// is harmless (nx.js will keep using monospace and never reach the
+	// trailing sans-serif).
 	const lastLower = out[out.length - 1]?.toLowerCase() ?? '';
-	if (!GENERIC_FAMILIES.has(lastLower)) out.push('sans-serif');
+	if (lastLower !== 'sans-serif') out.push('sans-serif');
 	return out.join(', ');
 }
 

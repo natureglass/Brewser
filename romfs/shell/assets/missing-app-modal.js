@@ -22,6 +22,7 @@
   var versionEl = document.getElementById('app-modal-version');
   var licenseEl = document.getElementById('app-modal-license');
   var titleEl = document.getElementById('app-modal-title');
+  var identifierEl = document.getElementById('app-modal-identifier');
   var descEl = document.getElementById('app-modal-description');
   var bodyEl = document.getElementById('app-modal-body');
   var cancelBtn = document.getElementById('app-modal-cancel');
@@ -139,6 +140,134 @@
     }
   }
 
+  // Format an integer with thousands separators ("1234" → "1,234"). The
+  // catalog of downloaded apps is small today but the field can grow
+  // unbounded — formatting keeps four-and-five-digit counts readable.
+  function formatCount(n) {
+    var s = String(n | 0);
+    return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  // Star pixel dimension. Mirrored in inline `style="width:Npx..."`
+  // on each <img> in renderStarsHtml so the live-DOM layout sizes the
+  // replaced inline atom at this dimension regardless of whether the
+  // `.app-modal-star` class rule lands in the cascade (the PNGs are
+  // 64×64 natural, which would otherwise determine layout size).
+  var STAR_PX = 22;
+
+  // Build the star-row HTML for a given raw average (0..5) + count.
+  // Always 5 stars (full / half / empty mix) so the row width is
+  // stable across apps. The average is rounded to the nearest HALF
+  // — `halves = round(average * 2)` yields 0..10 — so 4.3 → 4 full +
+  // 1 half (8.6 → 9), 4.8 → 5 full (9.6 → 10), 4.1 → 4 full (8.2 → 8).
+  // For each star index `i` (0..4): full when at least two halves
+  // remain for that slot, half when exactly one remains, else empty.
+  // Inline style on each <img> forces the layout to STAR_PX × STAR_PX
+  // even if class width doesn't reach the live-DOM image atom — the
+  // engine's IMG layoutLeaf reads `cs.width`, and inline style is the
+  // most specific rule.
+  // Format the raw average as a short numeric string for the leading
+  // chip in the rating row. One decimal place, with trailing ".0"
+  // stripped so integer averages read clean (5.0 → "5", 4.5 → "4.5").
+  function formatAverage(avg) {
+    if (typeof avg !== 'number' || !isFinite(avg)) return '0';
+    var s = avg.toFixed(1);
+    if (s.length > 2 && s.charAt(s.length - 2) === '.' && s.charAt(s.length - 1) === '0') {
+      s = s.slice(0, -2);
+    }
+    return s;
+  }
+
+  function renderStarsHtml(average, count) {
+    var avg = typeof average === 'number' && isFinite(average) ? average : 0;
+    var halves = Math.max(0, Math.min(10, Math.round(avg * 2)));
+    // Row layout: explicit 5px inline-block spacers flank the star
+    // group. Margins on flex / inline IMG children turned out to be
+    // unreliable in the live-DOM engine, but `display:inline-block;
+    // width:5px` paints a measurable empty atom every time (same
+    // path the 22×22 stars use for their explicit size). The spacer
+    // span carries the dimensions inline so a CSS-class miss can't
+    // collapse it.
+    //   [average] [5px spacer] [★1..★5] [5px spacer] [(count)]
+    var spacer = '<span style="display:inline-block;width:5px;height:1px;"></span>';
+    var html = '<span class="app-modal-rating-average">' + formatAverage(avg) + '</span>';
+    html += spacer;
+    for (var i = 0; i < 5; i++) {
+      var src;
+      if (halves >= (i + 1) * 2) src = 'brewser://assets/star_full.png';
+      else if (halves === i * 2 + 1) src = 'brewser://assets/star_half.png';
+      else src = 'brewser://assets/star_empty.png';
+      html += '<img class="app-modal-star" style="width:' + STAR_PX + 'px;height:' + STAR_PX + 'px;" src="' + src + '" alt="">';
+    }
+    html += spacer;
+    html += '<span class="app-modal-stats-count">(' + formatCount(count) + ')</span>';
+    return html;
+  }
+
+  // The Downloads + Rating rows that get prepended to the body row
+  // stack on every show(). Stamped with IDs so the async fetch can
+  // re-query and update them after the JSONs land. Uses the same
+  // `.app-modal-row` / `.app-modal-row-label` / `.app-modal-row-value`
+  // markup as the metadata rows below so labels line up across the
+  // whole list. `.app-modal-rating-value` adds flex alignment for the
+  // star <img>s + trailing count span.
+  function statsRowsHtml() {
+    return '<div class="app-modal-row">'
+      + '<span class="app-modal-row-label">Downloads</span>'
+      + '<span id="app-modal-downloads" class="app-modal-row-value">' + formatCount(0) + '</span>'
+      + '</div>'
+      + '<div class="app-modal-row">'
+      + '<span class="app-modal-row-label">Rating</span>'
+      + '<span id="app-modal-rating" class="app-modal-row-value app-modal-rating-value">'
+      + renderStarsHtml(0, 0)
+      + '</span>'
+      + '</div>';
+  }
+
+  // Token guard for stats fetches. Bumped on every show(); the async
+  // fetch checks the captured value before writing into the DOM so a
+  // fast modal-swap (open A, close, open B before A's fetch resolves)
+  // can't paint A's stats into B's modal.
+  var statsToken = 0;
+
+  function loadStats(appId) {
+    var myToken = ++statsToken;
+    if (!appId) return;
+    var dlPromise = globalThis.fetch('configs/downloads.json')
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+    var rtPromise = globalThis.fetch('configs/ratings.json')
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+    Promise.all([dlPromise, rtPromise]).then(function (results) {
+      if (myToken !== statsToken) return;
+      var dl = results[0];
+      var rt = results[1];
+      var count = (dl && typeof dl === 'object' && typeof dl[appId] === 'number') ? dl[appId] : 0;
+      // Re-query the DOM each time — the row spans are written into
+      // body innerHTML on every show(), so module-level refs would go
+      // stale after the second open.
+      var dlEl = document.getElementById('app-modal-downloads');
+      var rtEl = document.getElementById('app-modal-rating');
+      if (dlEl) dlEl.textContent = formatCount(count);
+      var entry = null;
+      if (Array.isArray(rt)) {
+        for (var i = 0; i < rt.length; i++) {
+          if (rt[i] && rt[i].packageId === appId) { entry = rt[i]; break; }
+        }
+      }
+      if (rtEl) {
+        if (entry) {
+          var avg = (typeof entry.average === 'number' && isFinite(entry.average)) ? entry.average : 0;
+          var c = (typeof entry.count === 'number' && isFinite(entry.count)) ? entry.count : 0;
+          rtEl.innerHTML = renderStarsHtml(avg, c);
+        } else {
+          rtEl.innerHTML = renderStarsHtml(0, 0);
+        }
+      }
+    });
+  }
+
   function show(detail) {
     currentDetail = detail || {};
     // Logo. The catalog renderer passes a brewser:// URL — for missing
@@ -175,17 +304,26 @@
 
     titleEl.textContent = currentDetail.name || currentDetail.id || 'Unknown app';
 
+    // Identifier sits in the header column next to the logo (above
+    // the description). Promoted out of the body rows so the user can
+    // see the dotted ID at a glance alongside the title. The `:empty`
+    // CSS rule hides the slot when the catalog entry has no `id`.
+    if (identifierEl) identifierEl.textContent = currentDetail.id || '';
+
     if (descEl) descEl.textContent = currentDetail.description || '';
 
     // Detail rows in the order requested: category → features →
     // permissions → allowed_origins → developer → source. Identifier
-    // + catalog group sit at the top so the user knows which entry
-    // the modal is describing (esp. useful when two groups list an
-    // app with the same display name during community/featured
-    // promotion). Version + license are already shown as chips in
-    // the meta strip so we don't repeat them here.
+    // used to lead this list but now lives in the header column (see
+    // identifierEl above) so the modal surfaces it next to the logo.
+    // Version + license are shown as chips in the meta strip, so we
+    // don't repeat them here either.
     var rows = [];
-    if (currentDetail.id) rows.push(row('Identifier', currentDetail.id));
+    // Downloads + Rating sit at the top of the row stack so the user
+    // sees popularity + score before the metadata fields. Initial render
+    // is the 0 / 5-empty-stars placeholder; loadStats() rewrites the
+    // value spans once the configs land.
+    rows.push(statsRowsHtml());
     if (currentDetail.category) rows.push(row('Category', currentDetail.category));
     if (currentDetail.features) rows.push(row('Features', currentDetail.features));
     if (currentDetail.permissions) rows.push(row('Permissions', currentDetail.permissions));
@@ -200,6 +338,12 @@
     if (currentDetail.developer) rows.push(row('Developer', currentDetail.developer));
     if (currentDetail.source) rows.push(row('Source', currentDetail.source));
     bodyEl.innerHTML = rows.join('');
+
+    // Kick off the Downloads + Rating fetches AFTER the body innerHTML
+    // is written — the async update path re-queries the row spans by
+    // ID, which must exist by then. The token guard handles fast
+    // modal swaps.
+    loadStats(currentDetail.id || '');
 
     // Action button branch (3-way):
     //   - missing                         → right Download

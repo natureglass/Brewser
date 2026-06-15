@@ -21,10 +21,16 @@ const SEED_SKIP_ROOT_FILES: ReadonlySet<string> = new Set([
 ]);
 
 /** Romfs subtrees the seeder must NOT recurse into. Each entry is a
- * directory path relative to `romfs:/` with a trailing slash. Empty
- * after the 2026-06-13 purge of `romfs:/dev/` — kept as a hook for
- * future skip rules so the walker code doesn't need re-plumbing. */
-const SEED_SKIP_DIRS: ReadonlySet<string> = new Set([]);
+ * directory path relative to `romfs:/` with a trailing slash.
+ *
+ * `emojis/` is the 1870-PNG Twemoji asset bundle. Live-layout/live-overlay
+ * read these directly via `romfs:/emojis/<codepoint>.png` through
+ * `LocalSchemeFetchLoader` — there's no reason to copy ~10 MB of PNGs
+ * onto the SD card on first launch. Skipping keeps cold-start fast and
+ * keeps the user's profile dir tidy. */
+const SEED_SKIP_DIRS: ReadonlySet<string> = new Set([
+	'emojis/',
+]);
 
 export class BrowserProfile {
 	readonly name: string;

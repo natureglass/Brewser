@@ -21,9 +21,11 @@
   "googleOAuthClientId": "549999047870-6rahojjhe0ppm42te9uggecbkv3qg3sl.apps.googleusercontent.com",
   "twitchOAuthClientId": "",
   "microsoftOAuthClientId": "",
-  "catalogue": "https://raw.githubusercontent.com/natureglass/Brewser-apps/refs/heads/main/catalogue.json",
-  "artifacts": "https://api.github.com/repos/natureglass/Brewser-apps/contents/artifacts",
   "telemetry": "https://brewser.tech/index.php?rest_route=/telemetry/v1/log",
+  "artifacts": "https://api.github.com/repos/natureglass/Brewser-apps/contents/artifacts",
+  "catalogue": "https://raw.githubusercontent.com/natureglass/Brewser-apps/refs/heads/main/catalogue.json",
+  "downloads": "https://raw.githubusercontent.com/natureglass/Brewser-telemetry/refs/heads/main/downloads.json",
+  "ratings": "https://raw.githubusercontent.com/natureglass/Brewser-telemetry/refs/heads/main/ratings.json",
   "buttonMapping": {
     "leftClick": "A",
     "rightClick": "B",

@@ -42,7 +42,7 @@
 
 import { getCssViewport, isBoldWeight, isItalicStyle, isPercent, quoteFontFamily, resolveCanvasFont, setCssViewport, resolveLength } from './inline-css.js';
 import { getComputedLiveStyle, getKeyframes, someStylesheetUsesSibling, type BackgroundLayer, type BoxShadow, type ComputedLiveStyle, type PseudoStyle } from './live-css.js';
-import { ensureCssAnimation, getBackgroundImage, getCssAnimState, getLiveTreeVersion, type LiveElement } from './live-dom.js';
+import { ensureCssAnimation, getBackgroundImage, getCssAnimState, getLiveTreeVersion, isEngineModalRoot, type LiveElement } from './live-dom.js';
 import { buildFormSubmitUrl, findEnclosingForm, paintFormWidget } from './live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
@@ -59,7 +59,8 @@ import {
 	type InlineAtom, type InlineLayout, type LayoutBox,
 } from './live-layout.js';
 import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
-import { clearLiveDirty, drainLiveDirty, getKbTreeVersion, getModalRoots, getModalTreeVersion, getToolbarTreeVersion, hasAnyModalRoot, requestFullRepaint } from './live-paint-control.js';
+import { clearLiveDirty, drainLiveDirty, getKbTreeVersion, getModalRoots, getModalTreeVersion, getToolbarTreeVersion, hasAnyModalRoot, isDialogModalMode, requestFullRepaint } from './live-paint-control.js';
+import { emojiAssetFailed, getEmojiImage } from './emoji-atlas.js';
 
 /** Viewport rectangle for the live overlay. `x` / `y` are the
  * top-left offset into the screen surface; `width` / `height` are
@@ -314,6 +315,44 @@ interface DirtyRect { x: number; y: number; w: number; h: number; }
 function rectsIntersect(a: DirtyRect, b: DirtyRect): boolean {
 	return a.x < b.x + b.w && a.x + a.w > b.x
 		&& a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/** True iff the CSS colour string carries an alpha < 1. Used by the
+ * modal-layer paint pass to decide whether a backdrop fill needs to
+ * land on the main ctx (to blend with the host page) vs. inside the
+ * OffscreenCanvas modal cache. The latter would corrupt the alpha
+ * channel on this engine — translucent pixels read back as opaque
+ * through the offscreen → main `drawImage` blit. Recognised forms:
+ *   rgba(r, g, b, a)   — a < 1 → translucent
+ *   hsla(h, s%, l%, a) — a < 1 → translucent
+ *   transparent        — fully translucent (a=0)
+ * Any other shape (named colour, `#rgb` / `#rrggbb` / `#rrggbbaa`, plain
+ * `rgb(...)` / `hsl(...)`) is treated as OPAQUE. `#rrggbbaa` with an
+ * alpha byte < 0xff would also be translucent — included here so a
+ * future overlay using the hex-alpha shorthand routes through the
+ * same path. */
+function isTranslucentColorValue(bg: string | undefined): boolean {
+	if (!bg) return false;
+	const t = bg.trim().toLowerCase();
+	if (t === 'transparent') return true;
+	const rgbaM = /^rgba?\(\s*[^,]+,\s*[^,]+,\s*[^,]+(?:,\s*([0-9.]+))?\s*\)$/.exec(t);
+	if (rgbaM) {
+		if (rgbaM[1] === undefined) return false; // rgb() w/o alpha → opaque
+		const a = parseFloat(rgbaM[1]);
+		return Number.isFinite(a) && a < 1;
+	}
+	const hslaM = /^hsla?\(\s*[^,]+,\s*[^,]+,\s*[^,]+(?:,\s*([0-9.]+))?\s*\)$/.exec(t);
+	if (hslaM) {
+		if (hslaM[1] === undefined) return false;
+		const a = parseFloat(hslaM[1]);
+		return Number.isFinite(a) && a < 1;
+	}
+	const hexA = /^#([0-9a-f]{8})$/.exec(t);
+	if (hexA) {
+		const a = parseInt(hexA[1].slice(6, 8), 16);
+		return a < 0xff;
+	}
+	return false;
 }
 
 /**
@@ -1257,7 +1296,27 @@ export function paintLiveOverlay(
 					try {
 						setLayoutMeasureCtx(sctx);
 						sctx.translate(-sBox.contentX, -sBox.contentY);
+						// 2026-06-15: render the scroll container's OWN
+						// inline content too (textContent / inline atoms),
+						// not just element children. Without this an
+						// `overflow:auto` container with only text content
+						// (like a `<div id="log">` that the page updates via
+						// `logEl.textContent = …`) rendered as a hollow
+						// box — the body cache emits a `bg` op for the
+						// container but skips its inline atoms (atoms
+						// belong to the scroll-overlay), and the previous
+						// child-only walk here ignored the atoms too.
+						const sCs = getComputedLiveStyle(sEl);
+						const inline = getInlineLayout(sEl);
+						if (inline) {
+							for (const atom of inline.atoms) {
+								if (atom.isBr) continue;
+								try { paintOneInlineAtom(sctx, atom); }
+								catch (_) { /* skip a bad atom */ }
+							}
+						}
 						for (const c of sEl.children) paintSubtreeLaid(sctx, c);
+						void sCs;
 					} finally {
 						sctx.restore();
 						setLayoutMeasureCtx(ctx);
@@ -1349,7 +1408,7 @@ export function paintLiveOverlay(
 			// can run `layoutFixedRoot` on it — which is what the
 			// engine-side touch hit-test reads to route taps inside
 			// the modal. Paint is skipped in the pass loop below.)
-			if (el.getAttribute('data-engine-modal') === 'true') return;
+			if (isEngineModalRoot(el)) return;
 			for (const c of el.children) collect(c);
 		};
 		collect(root);
@@ -1368,8 +1427,9 @@ export function paintLiveOverlay(
 		// hit-test against the host layout cache finds modal elements
 		// on tap), but skip PAINT — `paintModalOverlay` owns that.
 		// `paintSubtreeLaid` is the only call that touches screen
-		// pixels; gate it on the modal-stamp check.
-		const isModalRoot = el.getAttribute('data-engine-modal') === 'true';
+		// pixels; gate it on the modal-stamp check (covers both
+		// `<browser-modal>` and native `<dialog>`).
+		const isModalRoot = isEngineModalRoot(el);
 		const alpha = cs.opacity ?? el.style.opacity ?? 1;
 		// Resolve box width / height from cascade-or-inline, defaulting
 		// to "let layout figure it out" when neither side declares.
@@ -1766,6 +1826,55 @@ export function paintModalOverlay(
 	const w = Math.max(1, Math.floor(viewport.width));
 	const h = Math.max(1, Math.floor(viewport.height));
 	const version = getLiveTreeVersion() + getModalTreeVersion();
+	// 2026-06-15 backdrop pass — paint a semi-transparent dark fill
+	// over the content viewport BEFORE any modal-mode dialog blits.
+	// Mirrors the rgba backdrop the `.app-modal-overlay` CSS adds for
+	// `<browser-modal>`-style modals, but applied automatically for
+	// `dialog.showModal()`-opened native dialogs (which would otherwise
+	// render as a small box over an unblurred, interactive page).
+	// One fillRect per frame; cheap.
+	//
+	// Triple guard: modal-mode flag set AND `open` attribute still
+	// present AND `cs.display !== 'none'`. The `open` attribute check
+	// covers the case where a page script calls `removeAttribute('open')`
+	// directly instead of `dialog.close()` — the modal-mode flag would
+	// stay stale, but the attribute check + display check still hide
+	// the backdrop. (close() clears all three.)
+	for (const root of getModalRoots()) {
+		if (!isDialogModalMode(root)) continue;
+		if (root.getAttribute('open') === null) continue;
+		const cs0 = getComputedLiveStyle(root);
+		if (cs0.display === 'none') continue;
+		ctx.save();
+		try {
+			ctx.fillStyle = 'rgba(8, 13, 26, 0.55)';
+			ctx.fillRect(viewport.x, viewport.y, w, h);
+		} finally { ctx.restore(); }
+		break;
+	}
+		// 2026-06-15 translucent-backdrop pass for `<browser-modal>` -- paint
+		// the overlay root's CSS background DIRECTLY onto the main ctx when
+		// the colour is translucent. The cache-build path below would otherwise
+		// fill the rgba into the OffscreenCanvas cache, which on this engine
+		// does not preserve alpha through the offscreen -> main drawImage
+		// blit: translucent pixels land on screen as opaque (the modal backdrop
+		// reads as solid black instead of a tinted view of the host page).
+		// Painting onto the main ctx blends with the host page already painted
+		// in the preceding shell cache blit, giving the intended dim effect.
+		for (const root of getModalRoots()) {
+			if (isDialogModalMode(root)) continue;
+			const cs0b = getComputedLiveStyle(root);
+			if (cs0b.display === 'none') continue;
+			const bgB = cs0b.background;
+			if (!bgB || !isTranslucentColorValue(bgB)) continue;
+			const rb = getLayoutBox(root);
+			if (!rb || rb.w <= 0 || rb.h <= 0) continue;
+			ctx.save();
+			try {
+				ctx.fillStyle = bgB;
+				ctx.fillRect(rb.x, rb.y, rb.w, rb.h);
+			} finally { ctx.restore(); }
+		}
 	for (const root of getModalRoots()) {
 		// Visibility gate — closed modals (no `--open` class on the
 		// overlay, so the CSS rule `.app-modal-overlay { display: none }`
@@ -1807,11 +1916,20 @@ export function paintModalOverlay(
 				// the whole subtree into the modal cache's local
 				// space.
 				cctx.translate(-viewport.x, -viewport.y);
-				if (cs.background) {
+				// Skip the root bg + border paint when the background is
+				// translucent — already painted DIRECTLY onto the main
+				// ctx in the pre-pass above (see translucent-backdrop
+				// pass). Filling it here would land in the
+				// OffscreenCanvas cache where the alpha doesn't survive
+				// the offscreen → main `drawImage` blit (renders opaque
+				// black on screen). Opaque backgrounds stay in the
+				// cache as before — no alpha issue.
+				const rootBgTranslucent = isTranslucentColorValue(cs.background);
+				if (cs.background && !rootBgTranslucent) {
 					cctx.fillStyle = cs.background;
 					cctx.fillRect(rootBox.x, rootBox.y, rootBox.w, rootBox.h);
 				}
-				paintBoxedElement(cctx, root, cs, rootBox);
+				if (!rootBgTranslucent) paintBoxedElement(cctx, root, cs, rootBox);
 				const ops: PaintOp[] = [];
 				collectPaintOps(root, ops, /* skipBgOfRoot */ true);
 				for (const op of ops) {
@@ -2140,6 +2258,34 @@ function paintSubtreeLaid(
 	// element move together visually.
 	const pos = cs.position ?? el.style.position;
 	const isRelative = pos === 'relative';
+	// Form widgets and self-painting leaves are rendered entirely by
+	// `paintBoxedElement` — walking the subtree would paint the inner
+	// `#text` child a SECOND time at its inline-flow position. The layout
+	// pass installs an InlineLayout for any element whose kid is `#text`,
+	// so `<button>Submit Button</button>` ended up with "Submit" and
+	// "Button" as separate inline atoms stacked next to the centered
+	// label, and `<progress value=70>70%</progress>` rendered "70%" text
+	// on top of the bar.
+	// INPUT is void (nothing to walk) but included for symmetry.
+	// PROGRESS / METER have fallback `<text>` content for non-supporting
+	// browsers ("70%", "60%") which Chrome hides — we hide it too by
+	// skipping the subtree.
+	// HR has no children but is included for symmetry.
+	const tag = el.tagName;
+	// `<button><img></button>` icon buttons (used by the HTML-driven
+	// toolbar) need the subtree walk to paint their `<img>` child.
+	// Skip the walk only for pure-text buttons (the case the skip was
+	// added for in the first place — `<button>Submit Button</button>`
+	// double-painting "Submit"/"Button" word atoms over paintButton's
+	// centered label). When the BUTTON has any element child, the
+	// subtree walk paints it via the normal IMG/SVG/etc. path, and
+	// `paintButton`'s `readDescendantText` falls back to '' so no
+	// label-double-paint happens.
+	const buttonIsTextOnly = tag === 'BUTTON'
+		&& el.children.every((c) => c.tagName === '#text');
+	const formWidgetOwnsPaint = tag === 'INPUT' || buttonIsTextOnly
+		|| tag === 'SELECT' || tag === 'TEXTAREA'
+		|| tag === 'PROGRESS' || tag === 'METER' || tag === 'HR';
 	if (isRelative) {
 		const dx = (cs.left ?? el.style.left ?? 0) - (cs.right ?? el.style.right ?? 0);
 		const dy = (cs.top ?? el.style.top ?? 0) - (cs.bottom ?? el.style.bottom ?? 0);
@@ -2148,7 +2294,7 @@ function paintSubtreeLaid(
 			try {
 				ctx.translate(dx, dy);
 				paintBoxedElement(ctx, el, cs, box);
-				paintSubtreeRest(ctx, el, cs, box);
+				if (!formWidgetOwnsPaint) paintSubtreeRest(ctx, el, cs, box);
 			} finally {
 				ctx.restore();
 			}
@@ -2156,6 +2302,7 @@ function paintSubtreeLaid(
 		}
 	}
 	paintBoxedElement(ctx, el, cs, box);
+	if (formWidgetOwnsPaint) return;
 	paintSubtreeRest(ctx, el, cs, box);
 }
 
@@ -2486,6 +2633,27 @@ function paintOneInlineAtom(
 		paintSubtreeLaid(ctx, atom.el);
 		return;
 	}
+	// Emoji cluster: draw the cached Twemoji PNG (or fall back to the
+	// text path if the asset is permanently missing). The atom carries
+	// `text` (the source codepoints) so the fallback can render them
+	// with the page font instead of a blank box.
+	if (atom.emojiKey) {
+		const img = getEmojiImage(atom.emojiKey);
+		if (img) {
+			try {
+				ctx.drawImage(img as unknown as CanvasImageSource,
+					atom.x, atom.y, atom.w, atom.h);
+			} catch (_) { /* swallow — drawImage on uninitialised image */ }
+			return;
+		}
+		// Still loading: leave the box blank for this frame; the load
+		// completion bumps liveTreeVersion + requests a repaint.
+		if (!emojiAssetFailed(atom.emojiKey)) return;
+		// Asset is genuinely missing — fall through to the text path so
+		// the source codepoints render with the page font. atom.text is
+		// the original cluster slice, so fillText draws the unicode chars
+		// (the OS font may have its own emoji glyph or render notdef).
+	}
 	if (atom.el.tagName === 'IMG') {
 		paintImg(ctx, atom.el, cs, {
 			x: atom.x, y: atom.y, w: atom.w, h: atom.h,
@@ -2527,6 +2695,34 @@ function paintOneInlineAtom(
 		});
 		return;
 	}
+	// Paint inline bg FIRST (before the text early-return) so spacer atoms
+	// used to back inline padding (text='', w=padding) still get their
+	// strip drawn. Walks up inline ancestors so mark/code/kbd text
+	// children inherit their parent's bg highlight (background isn't
+	// inherited per CSS spec, but the visual highlight on the inline
+	// parent has to extend over its text-node children).
+	{
+		let bg = cs.background;
+		if (!bg || bg === 'transparent') {
+			let p: LiveElement | null = atom.el.parent;
+			while (p) {
+				const pcs = getComputedLiveStyle(p);
+				if (pcs.display !== 'inline') break;
+				if (pcs.background && pcs.background !== 'transparent') {
+					bg = pcs.background;
+					break;
+				}
+				p = p.parent;
+			}
+		}
+		if (bg && bg !== 'transparent') {
+			ctx.save();
+			try {
+				ctx.fillStyle = bg;
+				ctx.fillRect(atom.x, atom.y, atom.w, atom.h);
+			} finally { ctx.restore(); }
+		}
+	}
 	if (!atom.text) return;
 	const styleShim = {
 		fontFamily: cs.fontFamily,
@@ -2538,16 +2734,39 @@ function paintOneInlineAtom(
 	const bold = isBoldWeight(styleShim);
 	const italic = isItalicStyle(styleShim);
 	const fontSize = atom.fontSize;
+	// Sup/sub shift is spec'd relative to the LINE's dominant font, not
+	// the sup/sub's own smaller font. Two layers to handle:
+	//   1. atom.el IS the SUP/SUB (rare — element has its own _text)
+	//   2. atom.el is a #text node CHILD of SUP/SUB (common case — parser
+	//      always wraps text in a #text LiveElement, and verticalAlign
+	//      isn't inherited per CSS spec). Without checking the parent we'd
+	//      see cs.verticalAlign === undefined and apply no shift at all —
+	//      which is what `Sub<sub>script</sub>` was hitting in the
+	//      typography fixture.
+	let va = cs.verticalAlign;
+	let shiftBaseEl: LiveElement | null = atom.el;
+	if (va !== 'super' && va !== 'sub') {
+		const p = atom.el.parent;
+		if (p) {
+			const pcs = getComputedLiveStyle(p);
+			if (pcs.verticalAlign === 'super' || pcs.verticalAlign === 'sub') {
+				va = pcs.verticalAlign;
+				shiftBaseEl = p;
+			}
+		}
+	}
 	let shiftY = 0;
-	if (cs.verticalAlign === 'super') shiftY = -fontSize * 0.35;
-	else if (cs.verticalAlign === 'sub') shiftY = fontSize * 0.3;
+	if (va === 'super' || va === 'sub') {
+		const lineParent = shiftBaseEl?.parent;
+		const baseFs = lineParent
+			? (getComputedLiveStyle(lineParent).fontSize ?? fontSize)
+			: fontSize;
+		if (va === 'super') shiftY = -baseFs * 0.5;
+		else shiftY = baseFs * 0.25;
+	}
 	const drawY = atom.y + atom.h / 2 + shiftY;
 	ctx.save();
 	try {
-		if (cs.background && cs.background !== 'transparent') {
-			ctx.fillStyle = cs.background;
-			ctx.fillRect(atom.x, atom.y, atom.w, atom.h);
-		}
 		ctx.font = atom.font;
 		ctx.fillStyle = color;
 		ctx.textBaseline = 'middle';
@@ -2570,7 +2789,7 @@ function paintOneInlineAtom(
 			else if (td === 'overline') lineY = drawY - fontSize * 0.5;
 			else lineY = drawY;
 			ctx.fillStyle = color;
-			ctx.fillRect(atom.x, Math.round(lineY), atom.w, 1);
+			paintTextDecorationStyledRun(ctx, atom.x, Math.round(lineY), atom.w, cs.textDecorationStyle);
 		}
 	} finally { ctx.restore(); }
 }
@@ -2602,13 +2821,13 @@ function collectPaintOps(
 	const opacity = cs.opacity ?? el.style.opacity ?? 1;
 	if (opacity <= 0) return;
 	if (el.style.position === 'fixed' && !skipBgOfRoot) return;
-	// 2026-06-14 modal layer: skip the entire `<browser-modal>` subtree
-	// (data-engine-modal="true" stamp from the resource loader's tag
-	// expansion). Modals paint via `paintModalOverlay` from their own
+	// 2026-06-14 modal layer: skip the entire modal subtree
+	// (`<browser-modal>` w/ data-engine-modal stamp OR native
+	// `<dialog>`). Modals paint via `paintModalOverlay` from their own
 	// offscreen cache, with their own version counter — see
 	// `live-paint-control.ts` modal-layer block. Including them in the
 	// host's cache ops was the original logo-ghost bug.
-	if (!skipBgOfRoot && el.getAttribute('data-engine-modal') === 'true') return;
+	if (!skipBgOfRoot && isEngineModalRoot(el)) return;
 	const box = getLayoutBox(el);
 	if (!box) {
 		// Table sectioning elements (THEAD / TBODY / TFOOT / TR) don't get
@@ -2634,14 +2853,35 @@ function collectPaintOps(
 		if (scrollOut) scrollOut.push(el);
 		return;
 	}
+	// Form widgets and self-painting leaves are rendered entirely by the
+	// `bg` op's paintBoxedElement → paintFormWidget / paintProgress /
+	// paintMeter / paintHr dispatch. Walking their InlineLayout here
+	// double-paints the inner `#text`: `<button>Submit Button</button>`
+	// would push "Submit"/space/"Button" word atoms in addition to the
+	// button label paintButton already centered inside the chip; same
+	// for `<progress>70%</progress>` painting "70%" on top of the bar.
+	// Mirrors the same skip in `paintSubtreeLaid`'s live-paint path.
+	const tag = el.tagName;
+	// Icon-button case (`<button><img></button>` in the HTML-driven
+	// toolbar): the IMG kid still needs to paint, so don't skip
+	// BUTTON when it has any non-#text child. Pure-text BUTTONs still
+	// take the skip path so paintButton's centered label isn't joined
+	// by left-aligned inline word atoms from the layout pass.
+	const buttonIsTextOnly = tag === 'BUTTON'
+		&& el.children.every((c) => c.tagName === '#text');
+	const selfPaintingLeaf = tag === 'INPUT' || buttonIsTextOnly
+		|| tag === 'SELECT' || tag === 'TEXTAREA'
+		|| tag === 'PROGRESS' || tag === 'METER' || tag === 'HR';
 	const inline = getInlineLayout(el);
 	if (inline) {
+		if (selfPaintingLeaf) return;
 		for (const atom of inline.atoms) {
 			if (atom.isBr) continue;
 			out.push({ kind: 'atom', el: atom.el, atom });
 		}
 		return; // inline layout replaces child walk
 	}
+	if (selfPaintingLeaf) return;
 	// `overflow: hidden` (not auto/scroll — those go via scrollOut above):
 	// bracket the children's ops with a clip-push / clip-pop pair so the
 	// static cache builder applies the same clipping the live painter
@@ -3090,9 +3330,41 @@ function paintLiveSvg(
 	}
 }
 
+/** Paint a `<progress>` or `<meter>` slim-bar into the lower portion of
+ * `box`. Real browsers vertically align the bar at the surrounding
+ * text's baseline; our row packer aligns everything at row top, so we
+ * push the bar low inside its (taller-than-bar) UA box to roughly land
+ * on the adjacent label's baseline. `fillFrac` is the proportion of the
+ * track that should be filled (clamped to [0, 1]); the caller computes
+ * it from the value / min / max attributes. */
+function paintBar(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	box: LayoutBox,
+	trackBg: string,
+	fillColor: string,
+	fillFrac: number,
+): void {
+	const barH = Math.min(8, Math.max(4, box.h));
+	// Push the bar low inside the UA box so its baseline aligns with the
+	// row's text baseline (~4 px below the row's vertical center for an
+	// 18 px row). `box.h - barH` puts the bar's bottom flush with the
+	// box's bottom; bumping up by 2 keeps a hair of breathing room.
+	const barY = box.y + Math.max(0, box.h - barH - 2);
+	ctx.fillStyle = trackBg;
+	ctx.fillRect(box.x, barY, box.w, barH);
+	if (fillFrac > 0) {
+		ctx.fillStyle = fillColor;
+		ctx.fillRect(box.x, barY, box.w * fillFrac, barH);
+	}
+	ctx.strokeStyle = '#bdbdbd';
+	ctx.lineWidth = 1;
+	ctx.strokeRect(box.x + 0.5, barY + 0.5, box.w - 1, barH - 1);
+}
+
 /** `<meter>` paints a track + filled bar proportional to
  * (value − min) / (max − min). Defaults follow HTML spec: min=0,
- * max=1, value=0. Color is green (cascade-overridable via background). */
+ * max=1, value=0. Color is Chrome-ish blue; cascade can override the
+ * track background. */
 function paintMeter(
 	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
 	el: LiveElement,
@@ -3104,15 +3376,12 @@ function paintMeter(
 	const value = parseFloat(el.getAttribute('value') ?? '0') || 0;
 	const range = max > min ? max - min : 1;
 	const frac = Math.max(0, Math.min(1, (value - min) / range));
-	const trackBg = cs.background || '#1d2c43';
-	const fillColor = cs.color || '#7eda9f';
-	ctx.fillStyle = trackBg;
-	ctx.fillRect(box.x, box.y, box.w, box.h);
-	ctx.fillStyle = fillColor;
-	ctx.fillRect(box.x, box.y, box.w * frac, box.h);
-	ctx.strokeStyle = '#5a6a7e';
-	ctx.lineWidth = 1;
-	ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+	const trackBg = cs.background || '#ffffff';
+	// Chrome paints `<meter>` with a green optimum-range fill by default.
+	// We don't model low/high/optimum thresholds yet, so just pick the
+	// green for any value.
+	const fillColor = '#0075ff';
+	paintBar(ctx, box, trackBg, fillColor, frac);
 }
 
 /** `<progress>` is like meter but with only `value` + `max` attributes
@@ -3126,26 +3395,27 @@ function paintProgress(
 ): void {
 	const valueAttr = el.getAttribute('value');
 	const max = parseFloat(el.getAttribute('max') ?? '1') || 1;
-	const trackBg = cs.background || '#1d2c43';
-	const fillColor = cs.color || '#7aa2ff';
-	ctx.fillStyle = trackBg;
-	ctx.fillRect(box.x, box.y, box.w, box.h);
+	const trackBg = cs.background || '#ffffff';
+	const fillColor = '#0075ff';
 	if (valueAttr === null) {
-		// Indeterminate — paint a static striped pattern.
+		// Indeterminate — paint a static striped pattern in the bar's slot.
+		const barH = Math.min(8, Math.max(4, box.h));
+		const barY = box.y + Math.max(0, box.h - barH - 2);
+		ctx.fillStyle = trackBg;
+		ctx.fillRect(box.x, barY, box.w, barH);
 		ctx.fillStyle = fillColor;
 		const stripe = 8;
 		for (let x = 0; x < box.w; x += stripe * 2) {
-			ctx.fillRect(box.x + x, box.y, stripe, box.h);
+			ctx.fillRect(box.x + x, barY, stripe, barH);
 		}
-	} else {
-		const value = parseFloat(valueAttr) || 0;
-		const frac = Math.max(0, Math.min(1, value / max));
-		ctx.fillStyle = fillColor;
-		ctx.fillRect(box.x, box.y, box.w * frac, box.h);
+		ctx.strokeStyle = '#bdbdbd';
+		ctx.lineWidth = 1;
+		ctx.strokeRect(box.x + 0.5, barY + 0.5, box.w - 1, barH - 1);
+		return;
 	}
-	ctx.strokeStyle = '#5a6a7e';
-	ctx.lineWidth = 1;
-	ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+	const value = parseFloat(valueAttr) || 0;
+	const frac = Math.max(0, Math.min(1, value / max));
+	paintBar(ctx, box, trackBg, fillColor, frac);
 }
 
 /** Paint known icon-font glyphs as canvas paths. lil-gui's CSS uses
@@ -3906,14 +4176,18 @@ function paintLiveText(
 			ctx.transform(1, 0, -0.2, 1, textY * 0.2, 0);
 		}
 
-		// Vertical-align: super / sub raise/lower the text baseline
-		// by ~30% of font-size. The text painter is single-line so we
-		// only shift the row's y rather than mixing baselines within a
-		// line (real inline-flow would do per-glyph baseline).
+		// Vertical-align super/sub: shift is sized against the PARENT's
+		// font-size (the line's dominant font), not the sup/sub element's
+		// own smaller font — otherwise the rise/drop is barely visible.
 		const fontSize = cs.fontSize ?? 14;
 		let shiftY = 0;
-		if (cs.verticalAlign === 'super') shiftY = -fontSize * 0.35;
-		else if (cs.verticalAlign === 'sub') shiftY = fontSize * 0.3;
+		if (cs.verticalAlign === 'super' || cs.verticalAlign === 'sub') {
+			const parentFs = el.parent
+				? (getComputedLiveStyle(el.parent).fontSize ?? fontSize)
+				: fontSize;
+			if (cs.verticalAlign === 'super') shiftY = -parentFs * 0.5;
+			else shiftY = parentFs * 0.25;
+		}
 		const drawY = textY + shiftY;
 
 		// <details>/<summary> chevron — drawn as a left-edge triangle
@@ -4134,8 +4408,29 @@ function paintTextDecorationLine(
 	ctx.save();
 	try {
 		ctx.fillStyle = color;
-		ctx.fillRect(lineX, Math.round(lineY), w, 1);
+		paintTextDecorationStyledRun(ctx, lineX, Math.round(lineY), w, cs.textDecorationStyle);
 	} finally { ctx.restore(); }
+}
+
+/** Draw one text-decoration run at `(x, y)` of width `w`. ctx.fillStyle
+ * must already be set to the desired color. Solid is a single-pixel rect;
+ * dotted is a row of 1px squares at 2px stride. Other shorthand-permitted
+ * styles (dashed/double/wavy) fall back to solid until they're needed —
+ * adding them is a matter of adjusting the dot pattern / drawing a second
+ * offset line. */
+function paintTextDecorationStyledRun(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	x: number,
+	y: number,
+	w: number,
+	style: 'solid' | 'dotted' | 'dashed' | 'double' | 'wavy' | undefined,
+): void {
+	if (w <= 0) return;
+	if (style === 'dotted') {
+		for (let dx = 0; dx < w; dx += 2) ctx.fillRect(x + dx, y, 1, 1);
+		return;
+	}
+	ctx.fillRect(x, y, w, 1);
 }
 
 /** True iff there's at least one paintable element in the tree (fixed

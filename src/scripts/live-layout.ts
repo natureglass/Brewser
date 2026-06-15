@@ -47,6 +47,7 @@
 import { getComputedLiveStyle, setLayoutCacheResetFn, type ComputedLiveStyle } from './live-css.js';
 import type { LiveElement } from './live-dom.js';
 import { quoteFontFamily, resolveLength, type CssLength } from './inline-css.js';
+import { matchEmojiClusterAt, textHasEmoji } from './emoji-atlas.js';
 
 /** Per-element layout result. `(x, y, w, h)` is the border box (i.e.
  * the rect the painter draws the background into). `contentX/Y/W/H`
@@ -108,6 +109,10 @@ export interface InlineAtom {
 	isInlineBlock?: boolean;
 	mLeft?: number;
 	mRight?: number;
+	/** Set when this atom represents an emoji grapheme cluster. The
+	 * painter dispatches to `getEmojiImage(emojiKey)` and `drawImage`s
+	 * the cached Twemoji PNG into `(x, y, w, h)` instead of `fillText`. */
+	emojiKey?: string;
 }
 export interface InlineLayout {
 	atoms: InlineAtom[];
@@ -565,12 +570,20 @@ function layoutFieldsetWithLegend(
 	const legendY = topBorderCenterY - predictedH / 2;
 	const legendH = layoutLeaf(legend, lcs, legendX, legendY, legendW);
 	// Remaining children: stack as a normal block, pushed down so they
-	// start BELOW the legend's bottom (with a small breathing gap).
-	// `Math.max(originY, …)` keeps the normal originY when the legend
-	// sits high enough that its bottom is above the original content
-	// top — i.e. a short legend on a fieldset with generous padding.
+	// start BELOW the legend's bottom (with a breathing gap of ~half the
+	// legend text height so the first row of fieldset content doesn't
+	// crowd the legend baseline). `Math.max(originY, …)` keeps the normal
+	// originY when the legend sits high enough that its bottom is above
+	// the original content top — i.e. a short legend on a fieldset with
+	// generous padding.
 	const legendBottom = legendY + legendH;
-	const restStartY = Math.max(originY, legendBottom + 4);
+	// Gap of one full line-height of clearance below the legend before
+	// the rest of the content starts — Chrome reserves ~0.625em of
+	// padding-bottom on `<fieldset>` itself, but the legend already
+	// extends past the top border line so we need extra breathing room
+	// here too. predictedH ≈ font line-height; using it as the gap
+	// produces ~22 px at 18px font, matching Chrome's visual spacing.
+	const restStartY = Math.max(originY, legendBottom + predictedH);
 	// Record the cutout in border-box coords for the painter. Add a
 	// small horizontal pad on either side so the border-end-cap doesn't
 	// kiss the legend text glyphs at the typical font sizes.
@@ -580,6 +593,14 @@ function layoutFieldsetWithLegend(
 		w: legendW + cutoutPad * 2,
 	});
 	const restKids = kids.slice(1);
+	// Stay on `layoutBlock` here — calling `layoutInline(parent, …)`
+	// stores an InlineLayout on the FIELDSET itself, and
+	// `paintSubtreeRest`'s `getInlineLayout` short-circuit then prevents
+	// the children walk that would have painted the `<legend>` (kids[0]).
+	// The legend disappears entirely. layoutBlock handles inline-pack via
+	// its float-row mechanism, so labels + inputs still flow on the same
+	// row — we just lose the cross-axis centering, which the user-side
+	// margin-left already compensates for.
 	const restConsumed = restKids.length > 0
 		? layoutBlock(restKids, originX, restStartY, contentW, contentH, cs)
 		: 0;
@@ -634,6 +655,7 @@ function layoutInline(
 		isInlineBlock?: boolean;
 		mLeft?: number;
 		mRight?: number;
+		emojiKey?: string;
 	}
 	const work: WorkAtom[] = [];
 
@@ -642,6 +664,7 @@ function layoutInline(
 		ctx!.save();
 		ctx!.font = font;
 		try {
+			const scanForEmoji = textHasEmoji(raw);
 			let i = 0;
 			while (i < raw.length) {
 				const c = raw.charCodeAt(i);
@@ -651,9 +674,32 @@ function layoutInline(
 						el, text: ' ', w: ctx!.measureText(' ').width,
 						h: fontSize * 1.2, isBr: false, isWhitespace: true, font, fontSize,
 					});
-				} else {
-					const start = i;
-					while (i < raw.length && raw.charCodeAt(i) > 32) i++;
+					continue;
+				}
+				// Emoji cluster: replaced-inline atom rendered as a PNG by
+				// the painter (see live-overlay paintOneInlineAtom). Box is
+				// fontSize square so the glyph occupies a normal text line.
+				// We probe even mid-word so `text😀more` splits cleanly.
+				if (scanForEmoji && c >= 0x23) {
+					const m = matchEmojiClusterAt(raw, i);
+					if (m) {
+						work.push({
+							el, text: raw.slice(i, m.end), w: fontSize, h: fontSize,
+							isBr: false, isWhitespace: false, font, fontSize,
+							emojiKey: m.key,
+						});
+						i = m.end;
+						continue;
+					}
+				}
+				const start = i;
+				while (i < raw.length) {
+					const cc = raw.charCodeAt(i);
+					if (cc <= 32) break;
+					if (scanForEmoji && cc >= 0x80 && matchEmojiClusterAt(raw, i)) break;
+					i++;
+				}
+				if (i > start) {
 					const word = raw.slice(start, i);
 					work.push({
 						el, text: word, w: ctx!.measureText(word).width,
@@ -676,7 +722,19 @@ function layoutInline(
 		const fontFamily = cs.fontFamily || parentFontFamily;
 		const font = fontSize + 'px ' + quoteFontFamily(fontFamily);
 		if (el.tagName === '#text') {
-			tokenizeText(el, el.data, font, fontSize);
+			// `<bdo dir="rtl">…</bdo>` overrides the Unicode BiDi algorithm
+			// for its child text — codepoints render in reverse visual order.
+			// Text content lives in a #text child node (per parser shape),
+			// so the BDO check has to happen here against the parent rather
+			// than on the BDO element itself. A real BiDi engine would also
+			// invert nested element runs; we only cover direct text children
+			// (the common typography-test shape).
+			let text = el.data;
+			const p = el.parent;
+			if (p && p.tagName === 'BDO' && (p.getAttribute('dir') ?? '').toLowerCase() === 'rtl') {
+				text = [...text].reverse().join('');
+			}
+			tokenizeText(el, text, font, fontSize);
 			return;
 		}
 		// IMG: replaced-inline; one indivisible atom sized to its image.
@@ -786,14 +844,40 @@ function layoutInline(
 			});
 			return;
 		}
-		// Generic inline element: own textContent FIRST (model limitation —
-		// we don't interleave text nodes with children unless the page
-		// uses createTextNode), then walk inline children.
+		// Generic inline element: ::before pseudo-content (e.g. Q's UA
+		// open-quote) flows first, then own textContent (model
+		// limitation — we don't interleave text nodes with children
+		// unless the page uses createTextNode), then walk inline
+		// children, then ::after (Q's close-quote).
+		//
+		// CSS inline `padding-left` / `padding-right` extends the bg
+		// strip horizontally — we model that as leading/trailing spacer
+		// atoms (text='', w=padding) belonging to the inline element
+		// itself so the painter draws the element's bg over them.
+		// Vertical inline padding is skipped — per CSS it doesn't push
+		// line height anyway, and we don't yet extend the bg rect
+		// beyond atom.h for inline parents.
+		const pL = cs.paddingLeft ?? 0;
+		const pR = cs.paddingRight ?? 0;
+		if (pL > 0) {
+			work.push({
+				el, text: '', w: pL, h: fontSize * 1.2,
+				isBr: false, isWhitespace: false, font, fontSize,
+			});
+		}
+		if (cs.before) tokenizeText(el, cs.before, font, fontSize);
 		if (el.textContent) tokenizeText(el, el.textContent, font, fontSize);
 		for (const child of el.children) {
 			const ccs = getComputedLiveStyle(child);
 			if (ccs.display === 'none') continue;
 			walkInline(child, ccs);
+		}
+		if (cs.after) tokenizeText(el, cs.after, font, fontSize);
+		if (pR > 0) {
+			work.push({
+				el, text: '', w: pR, h: fontSize * 1.2,
+				isBr: false, isWhitespace: false, font, fontSize,
+			});
 		}
 	}
 
@@ -888,6 +972,7 @@ function layoutInline(
 				isInlineBlock: item.isInlineBlock,
 				mLeft: mL,
 				mRight: mR,
+				emojiKey: item.emojiKey,
 			});
 			// Replaced inline atoms (IMG / CANVAS / INPUT) also need a
 			// per-element layout box so `getLayoutBox(el)` works for
@@ -996,26 +1081,55 @@ function layoutBlock(
 		const mRight = ccs.marginRight ?? 0;
 		const float = ccs.float;
 		const isFloat = float === 'left' || float === 'right';
-		// `display:inline-block` siblings flow on the same line per CSS
-		// spec until the row fills. We piggy-back on the float-row
-		// mechanism — treat `inline-block` as `float:left`-equivalent
-		// for sizing+packing. Only kicks in when the child has an
-		// explicit width AND the parent has multiple inline-block-ish
-		// kids; without that there's no point packing one item on its
-		// own row. The width gate also keeps full-width inline-block
-		// blocks (no explicit width) on their own row as the stack flow
-		// would have done. DDG's `.frm__select` (inline-block + width:
-		// 145px, no float because the float:left rule is gated to
-		// .lt-ie8) used to stack vertically before this — each select
-		// occupied a full-width row in the form. Real browsers flow
-		// them side-by-side because inline-block.
-		const isInlineBlockPack = !isFloat && ccs.display === 'inline-block';
-		if (isFloat || isInlineBlockPack) {
-			const childExplicitWF = resolveLength(ccs.width, contentW);
-			// Floats / inline-blocks with no explicit width fall back to
-			// parent allocation, which would defeat side-by-side packing.
-			// Keep the existing block-stacking path for those.
-			if (childExplicitWF !== undefined) {
+		// `<br>` inside a block parent's child list acts as a line break
+		// for the in-flight inline-pack row: flush the row (start a fresh
+		// one below). When no row is in flight, advance y by one line-
+		// height so empty `<br>` rows still take vertical space. Real
+		// browsers achieve this via inline-formatting context; our
+		// `layoutBlock` anonymous-block-wraps inline runs via the row
+		// mechanism, so BR has to drive the flush explicitly.
+		if (child.tagName === 'BR') {
+			if (floatRowH > 0) {
+				flushFloatRow();
+			} else {
+				const lh = parentCs?.lineHeight
+					?? (parentCs?.fontSize ?? 14) * 1.2;
+				y += lh;
+			}
+			prevMarginBottom = 0;
+			continue;
+		}
+		// `display:inline-block` and `display:inline` siblings flow on the
+		// same row per CSS spec until the row fills. We piggy-back on the
+		// float-row mechanism — pack them left-to-right, flush on width
+		// overflow, and let block siblings interrupt with a full-width row.
+		// This is our anonymous-block-wrap approximation: a mixed parent
+		// (some block kids, some inline kids) gets each inline run flowed
+		// inline. Without it, every `<label>` in a `<form>` next to its
+		// `<input>` ends up on its own block-stretched row even though
+		// Chrome puts label + widget on the same line.
+		//
+		// DDG's `.frm__select` (inline-block + width: 145px, no float
+		// because the float:left rule is gated to .lt-ie8) relies on this
+		// to flow side-by-side; before the inline-block branch existed it
+		// stacked full-width.
+		const isInlinePack = !isFloat && (
+			ccs.display === 'inline-block' || ccs.display === 'inline'
+		);
+		if (isFloat || isInlinePack) {
+			let childExplicitWF = resolveLength(ccs.width, contentW);
+			// Inline / inline-block kids without an explicit CSS width:
+			// fall back to the intrinsic content width so an `<label>`
+			// sized to its caption text or a `<button>` sized to its
+			// label packs at its natural size instead of expanding to
+			// fill the row. Floats still skip this branch — a float with
+			// no width is rare and the legacy "stack full-width" behavior
+			// is what existing pages expect.
+			if (childExplicitWF === undefined && isInlinePack) {
+				const intrinsic = intrinsicContentWidth(child, ccs);
+				if (intrinsic > 0) childExplicitWF = intrinsic;
+			}
+			if (childExplicitWF !== undefined && childExplicitWF > 0) {
 				const childWF = clampSize(
 					childExplicitWF, ccs.minWidth, ccs.maxWidth, contentW,
 				);
@@ -2186,7 +2300,7 @@ function layoutLeaf(
 			intrinsicVoidH = Math.round(fontPx * 1.6 + 6);
 		} else if (type !== 'image') {
 			// text / search / email / url / tel / password / number /
-			// color / date / file / month / week / time
+			// color / date / file / month / week / time.
 			intrinsicVoidH = Math.round(fontPx * 1.4 + 6);
 		}
 	}
@@ -2445,13 +2559,47 @@ function intrinsicContentWidth(el: LiveElement, cs: ComputedLiveStyle): number {
 	// content, so the kid-loop fallback below returns 0. That makes an
 	// inline `<input type=radio>` sized as a zero-width atom by the inline
 	// layout — invisible. Reserve a square based on font-size, matching
-	// what `layoutLeaf` does for the block path.
+	// what `layoutLeaf` does for the block path. Submit/button/reset
+	// `<input>`s carry their label in the `value` attribute (not as a
+	// child text node), so the kid-loop / textContent branches return 0
+	// for them too — measure the label here so the parent's inline pack
+	// reserves the right width.
 	if (explicit === undefined && el.tagName === 'INPUT') {
 		const type = (el.getAttribute('type') ?? 'text').toLowerCase();
 		if (type === 'checkbox' || type === 'radio') {
 			const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
 			const size = Math.max(14, fontPx + 2);
 			return size + padL + padR;
+		}
+		if (type === 'submit' || type === 'button' || type === 'reset') {
+			const label = el.getAttribute('value') ?? '';
+			let labelW = 0;
+			if (label && measureCtx) {
+				const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
+				const fontFamily = cs.fontFamily || 'sans-serif';
+				measureCtx.save();
+				try {
+					measureCtx.font = fontPx + 'px ' + quoteFontFamily(fontFamily);
+					labelW = measureCtx.measureText(label).width;
+				} finally { measureCtx.restore(); }
+			}
+			return Math.max(32, Math.round(labelW + 24)) + padL + padR;
+		}
+	}
+	// `<button>` carries its label as a `#text` CHILD (not `value`), so
+	// the kid-loop below handles it via SUM. But we want a sensible floor
+	// for label-less buttons so the box is still tappable / visible.
+	if (explicit === undefined && el.tagName === 'BUTTON') {
+		const childLabel = el.children.find((c) => c.tagName === '#text');
+		if (childLabel && measureCtx) {
+			const fontPx = typeof cs.fontSize === 'number' ? cs.fontSize : 14;
+			const fontFamily = cs.fontFamily || 'sans-serif';
+			measureCtx.save();
+			try {
+				measureCtx.font = fontPx + 'px ' + quoteFontFamily(fontFamily);
+				const labelW = measureCtx.measureText(childLabel.data).width;
+				return Math.max(32, Math.round(labelW + 24)) + padL + padR;
+			} finally { measureCtx.restore(); }
 		}
 	}
 	if (explicit === undefined && el.tagName === 'IMG') {
@@ -2488,6 +2636,14 @@ function intrinsicContentWidth(el: LiveElement, cs: ComputedLiveStyle): number {
 			const isFlexRow = (cs.display === 'flex' || cs.display === 'inline-flex')
 				&& (dir === 'row' || dir === 'row-reverse');
 			const gap = cs.gap ?? 0;
+			// Inline parents flow their kids left-to-right, so the intrinsic
+			// width is the SUM of the kids' max-content widths. Without
+			// this, a `<label><input type="checkbox"> Caption</label>`
+			// returns just the wider of the two kids (the caption text) —
+			// the LABEL ends up sized smaller than its content needs, the
+			// inline pack inside wraps "Caption" onto a second line, and
+			// the row visually splits the checkbox from its label.
+			const isInlineFlow = cs.display === 'inline' || cs.display === 'inline-block';
 			if (isFlexRow) {
 				let count = 0;
 				for (const c of kids) {
@@ -2496,6 +2652,12 @@ function intrinsicContentWidth(el: LiveElement, cs: ComputedLiveStyle): number {
 					count++;
 				}
 				inner += gap * Math.max(0, count - 1);
+			} else if (isInlineFlow) {
+				for (const c of kids) {
+					const ccs = getComputedLiveStyle(c);
+					if (ccs.display === 'none') continue;
+					inner += outerIntrinsicWidth(c, ccs);
+				}
 			} else {
 				for (const c of kids) {
 					const ccs = getComputedLiveStyle(c);

@@ -3,7 +3,9 @@ import type { HtmlElement, HtmlNode } from '../html/html-parser.js';
 import { installPointerLockOnDocumentShim } from '../polyfills/pointer-lock.js';
 import { setCursorFromCss } from '../input/page-mouse-forwarder.js';
 import {
-	getLiveRoot, getLiveWindow, getLiveWindowProxy, LiveElement, resetLiveRoot, setOwnerDocument,
+	findAllLiveElements, findLiveElement,
+	getLiveRoot, getLiveWindow, getLiveWindowProxy, LiveElement, liveSelectorPredicate,
+	resetLiveRoot, resolveLiveResourceUrl, setOwnerDocument,
 	setWebGLBackedPredicate, wrapCanvasCtx2dForRepaint,
 } from './live-dom.js';
 
@@ -1221,59 +1223,10 @@ function createCanvasEntry(el: HtmlElement): CanvasEntry {
 	return entry;
 }
 
-/** Depth-first, document-order search of a live subtree for the first
- * element matching `pred`. */
-function findLiveElement(root: LiveElement, pred: (el: LiveElement) => boolean): LiveElement | null {
-	if (pred(root)) return root;
-	for (const child of root.children) {
-		const hit = findLiveElement(child, pred);
-		if (hit) return hit;
-	}
-	return null;
-}
-
-/** Collect every element in a live subtree matching `pred`, in document order. */
-function findAllLiveElements(root: LiveElement, pred: (el: LiveElement) => boolean, out: LiveElement[]): void {
-	if (pred(root)) out.push(root);
-	for (const child of root.children) findAllLiveElements(child, pred, out);
-}
-
-/** Build a match predicate for a SIMPLE selector — `#id`, `.class`, or a
- * bare `tag`. Compound / descendant selectors return null (unsupported).
- * Used so `document.querySelector` / `getElementById` resolve ordinary
- * page elements out of the live DOM tree, not just the canvas/script
- * shims the runner tracks. */
-function liveSelectorPredicate(selector: string): ((el: LiveElement) => boolean) | null {
-	const sel = selector.trim();
-	if (!sel) return null;
-	if (sel.charAt(0) === '#') {
-		const id = sel.slice(1);
-		return (el) => el.getAttribute('id') === id;
-	}
-	if (sel.charAt(0) === '.') {
-		const cls = sel.slice(1);
-		return (el) => (el.getAttribute('class') || '').split(/\s+/).indexOf(cls) >= 0;
-	}
-	// Bracket attribute selector — `[attr]` (existence) or
-	// `[attr="value"]` / `[attr=value]` (equality). Settings.html's
-	// inline script uses `[data-setting]` to walk every staged widget;
-	// without this branch querySelectorAll returned null and the Save
-	// button never enabled. Quoted and unquoted values both accepted.
-	const attrMatch = /^\[([a-zA-Z_][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]$/.exec(sel);
-	if (attrMatch) {
-		const name = attrMatch[1];
-		const value = attrMatch[2] ?? attrMatch[3] ?? attrMatch[4];
-		if (value === undefined) {
-			return (el) => el.hasAttribute(name);
-		}
-		return (el) => el.getAttribute(name) === value;
-	}
-	if (/^[a-z][a-z0-9-]*$/i.test(sel)) {
-		const want = sel.toUpperCase();
-		return (el) => el.tagName === want;
-	}
-	return null;
-}
+// 2026-06-15: `findLiveElement` / `findAllLiveElements` /
+// `liveSelectorPredicate` moved to live-dom.ts so `LiveElement` itself can
+// expose `querySelector` / `querySelectorAll` against the same parser.
+// Imported at the top of this file alongside the other live-dom symbols.
 
 function buildDocumentShim(
 	byId: Map<string, CanvasEntry>,
@@ -1524,12 +1477,89 @@ function buildDocumentShim(
  * Called once per page nav, before any page script runs. Subsequent
  * page navs overwrite the values.
  */
+// =========================================================================
+// Page-relative fetch + Worker wrappers
+// =========================================================================
+// Page scripts that call `fetch('./x')` / `new Worker('./y.js')` expect the
+// relative URL to resolve against the current page URL — exactly how a real
+// browser behaves. The nxjs runtime's Request resolves relative URLs
+// against `$.entrypoint` (the runtime bundle path), and nxjs Worker treats
+// a no-scheme arg as inline JS source. Both produce wrong results for a
+// `./foo` page-script call.
+//
+// Fix: capture the runtime originals once, then install wrappers on
+// globalThis that pipe string inputs through `resolveLiveResourceUrl` (the
+// same resolver `<img>`, `<audio>`, `<video>`, and the iframe loader already
+// use). It returns absolute URLs unchanged and resolves page-relative paths
+// against `livePageBase` — which `resolveLiveResourceUrl` reads at call
+// time, so a single install lasts across all navigations.
+//
+// Idempotent: the shell calls this BEFORE populateLiveRoot so engine-side
+// callers (live-css `@font-face` async fetch, etc.) see the wrapper on the
+// very first nav. installPageGlobals also calls it as a safety net.
+//
+// Non-string inputs (URL, Request, Function) pass through unchanged.
+// =========================================================================
+
+type AnyFetch = (input: unknown, init?: unknown) => Promise<unknown>;
+type AnyWorkerCtor = new (scriptOrUrl: unknown, options?: unknown) => unknown;
+
+let __origFetch: AnyFetch | null = null;
+let __origWorker: AnyWorkerCtor | null = null;
+let __wrappersInstalled = false;
+
+export function installPageFetchAndWorker(): void {
+	if (__wrappersInstalled) return;
+	const g = globalThis as Record<string, unknown>;
+	if (typeof g.fetch !== 'function' && typeof g.Worker !== 'function') return;
+
+	if (typeof g.fetch === 'function') {
+		__origFetch = g.fetch as AnyFetch;
+		const orig = __origFetch;
+		g.fetch = function pageFetchWrapper(input: unknown, init?: unknown): Promise<unknown> {
+			if (typeof input === 'string') {
+				return orig(resolveLiveResourceUrl(input), init);
+			}
+			// URL, Request, etc. — pass through. `new URL(rel, base)` already
+			// resolves at construction; `new Request(rel)` goes through
+			// nxjs's own resolver (against $.entrypoint) which we don't
+			// override here to avoid changing engine-internal call sites.
+			return orig(input, init);
+		};
+	}
+
+	if (typeof g.Worker === 'function') {
+		__origWorker = g.Worker as AnyWorkerCtor;
+		const Orig = __origWorker;
+		// Class-extend so private # fields, prototype methods, and
+		// `instanceof` checks against the page's `Worker` all keep working.
+		class PageWorker extends (Orig as unknown as { new (...args: unknown[]): object }) {
+			constructor(scriptOrUrl: unknown, options?: unknown) {
+				const resolved = typeof scriptOrUrl === 'string'
+					? resolveLiveResourceUrl(scriptOrUrl)
+					: scriptOrUrl;
+				super(resolved, options);
+			}
+		}
+		g.Worker = PageWorker;
+	}
+
+	__wrappersInstalled = true;
+}
+
 function installPageGlobals(documentShim: object, pageUrl: string | undefined): void {
 	const g = globalThis as Record<string, unknown>;
 
 	// Bridge documentShim onto globalThis so module-scope `document.foo`
 	// resolves to the per-page shim, not whatever was left over.
 	try { g.document = documentShim; } catch (_) { /* ignore frozen */ }
+
+	// Make `fetch('./x')` and `new Worker('./y.js')` resolve against the
+	// current page URL, like a real browser. Idempotent — the shell
+	// already called this BEFORE populateLiveRoot, so engine-side @font-face
+	// async fetches etc. see the wrapper on first-page nav too. This call
+	// is a safety net in case the shell path is bypassed.
+	installPageFetchAndWorker();
 
 	// Build a Location-shaped object from the current page URL. Cocos +
 	// many other engines parse this at boot for behaviour gates and

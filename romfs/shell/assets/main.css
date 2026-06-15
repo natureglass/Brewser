@@ -638,7 +638,12 @@ ul.settings-list li:active {
 .app-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(8, 13, 26, 0.78);
+  /* Pure black at 35% alpha. The page bg is already near-black
+     (#0b1220), so a heavier alpha rounds everything to solid black
+     and the cards behind disappear. 0.35 lets 65% of the page
+     through — enough to recognise the grid behind the modal while
+     still de-emphasising it. */
+  background: rgba(0, 0, 0, 0.35);
   display: none;
   align-items: center;
   justify-content: center;
@@ -676,26 +681,91 @@ ul.settings-list li:active {
 .app-modal-meta .app-meta__version:empty,
 .app-modal-meta .app-meta__license:empty { display: none; }
 
+/* Header row: logo flush-left, title + identifier + description
+   stacked on its right. Replaces the old vertical layout where the
+   logo was centered above the title. `align-items: flex-start` keeps
+   the logo top-aligned with the title even when the description
+   wraps to several lines. `min-width: 0` on the text column is the
+   flex idiom that lets long identifiers/descriptions wrap instead of
+   forcing the column to its content's intrinsic width. */
+.app-modal-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+.app-modal-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .app-modal-logo {
   display: block;
   width: 96px;
   height: 96px;
+  flex: 0 0 96px;
   object-fit: contain;
-  margin: 0 auto 14px;
+  margin: 0;
 }
 
 .app-modal-title {
   color: #ffd35e;
   font-size: 1.5em;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
+  text-align: left;
 }
+
+/* Identifier (dotted ID like `com.natureglass.domhtmlcss`). Sits in
+   the header column right after the title, before the description.
+   Monospace + muted color so it reads as meta, not body copy.
+   `word-break: break-all` handles the rare case where a long ID
+   would otherwise overflow the column on narrow viewports. */
+.app-modal-identifier {
+  color: #7a8aa3;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+  margin: 0 0 10px;
+  text-align: left;
+  word-break: break-all;
+}
+.app-modal-identifier:empty { display: none; }
 
 .app-modal-description {
   color: #cdd9ee;
-  margin: 0 0 16px;
+  margin: 0;
   text-align: left;
 }
 .app-modal-description:empty { display: none; }
+
+/* Rating row value cell. Lays out three chips in a row:
+   [average] [star-group] [(count)]. Spacing is driven by an explicit
+   5px margin on the star-group rather than the parent's flex gap —
+   gap interacts unreliably with the inline-flex star wrapper here,
+   so margins keep the visual contract local to the stars block. */
+.app-modal-rating-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* Numeric average chip (e.g. "4.5") leading the row. Matches the
+   row value palette so it reads as data, not chrome. */
+.app-modal-rating-average {
+  color: #e0e8f4;
+}
+/* Star imgs sized to read at the same visual weight as the row label
+   text. object-fit: contain keeps the asset's transparent margins
+   from squashing on non-square layouts. */
+.app-modal-star {
+  width: 22px;
+  height: 22px;
+  display: inline-block;
+  object-fit: contain;
+}
+.app-modal-stats-count {
+  color: #7a8aa3;
+}
 
 .app-modal-body { margin-bottom: 18px; text-align: left; }
 
@@ -1676,10 +1746,13 @@ fieldset.settings-group legend {
     color: #1a1a1f;
   }
   .app-modal-title { color: #1d4ed8; }
+  .app-modal-identifier { color: #6b7280; }
   .app-modal-description { color: #4b5563; }
   .app-modal-row { border-top-color: #e5e7eb; }
   .app-modal-row-label { color: #6b7280; }
   .app-modal-row-value { color: #1a1a1f; }
+  .app-modal-stats-count { color: #6b7280; }
+  .app-modal-rating-average { color: #1a1a1f; }
   .app-modal-btn {
     background: #eef2f7;
     color: #1a1a1f;

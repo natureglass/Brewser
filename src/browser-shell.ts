@@ -34,6 +34,7 @@ import {
 	clearAnimationFrames,
 	clearSharedScreenGLBridge,
 	copyBridgeToScreen,
+	installPageFetchAndWorker,
 	isWebGLBackedCanvas,
 	pageHasAnimationActivity,
 	runPageScripts,
@@ -72,7 +73,9 @@ import {
 import {
 	bumpToolbarTreeVersion,
 	clearPageHasCanvas2dActivity,
+	closeTopmostModalModeDialog,
 	consumeFullRepaintRequest,
+	getModalModeDialogs,
 	getKeyboardLiveRoot,
 	getKeyboardTopY,
 	getToolbarLiveRoot,
@@ -833,6 +836,17 @@ export class BrowserShell {
 					(input.kind === 'navigate' ? ' url=' + input.url : ''));
 				switch (input.kind) {
 					case 'exit':
+						// 2026-06-15: if a `<dialog>.showModal()` modal-mode
+						// dialog is open, exit means DISMISS THE MODAL first
+						// — same shape as Esc in real browsers and the
+						// existing `back` action below. Otherwise the user
+						// would have to chase a Close button on every modal
+						// page, and apps that map `exit:B` (the dom-html-css
+						// app does) couldn't use B to close native dialogs
+						// at all. `close()` dispatches the spec `close`
+						// event so page listeners still observe the
+						// dismissal.
+						if (closeTopmostModalModeDialog()) break;
 						// Context-aware. While an app page is active (URL
 						// under `brewser://apps/<group>/<id>/...`), "exit"
 						// means EXIT THE APP — close any fullscreen-canvas
@@ -849,6 +863,11 @@ export class BrowserShell {
 						await this.promptAndNavigate();
 						break;
 					case 'back':
+						// 2026-06-15: matching `exit` above — if a
+						// `<dialog>.showModal()` modal is open, close it
+						// first instead of walking history back. Same
+						// "Esc closes modal" affordance.
+						if (closeTopmostModalModeDialog()) break;
 						// In a fullscreen mode (video or canvas), B exits
 						// back to the page rather than navigating history —
 						// same affordance as the L+R combo.
@@ -1079,6 +1098,15 @@ export class BrowserShell {
 		// scrolling its hidden position would surprise the user on exit).
 		if (this.mode === 'fullscreen-canvas') return;
 		if (this.mode === 'video-fullscreen') return;
+		// 2026-06-15: while any `<dialog>.showModal()`-opened dialog is
+		// visible (still has the `open` attribute), scrolling the host
+		// page is a spec violation — the modal-blocking semantics make
+		// the rest of the page inert. Drop the scroll silently.
+		// `show()` (non-modal) dialogs aren't tagged → don't enter this
+		// branch. Cheap check; iterates a usually-empty Set.
+		for (const d of getModalModeDialogs()) {
+			if (d.getAttribute('open') !== null) return;
+		}
 		const next = Math.max(0, Math.min(this.maxScroll(), this.currentScrollY + delta));
 		if (next === this.currentScrollY) return;
 		const t0 = performance.now();
@@ -1258,6 +1286,11 @@ export class BrowserShell {
 		// Page-relative `<img>` base: the SD-card directory of THIS page, so
 		// `./assets/x.png` resolves like a browser would (index.html as base).
 		setLivePageBase(this.computeLivePageBase(url));
+		// Install fetch + Worker wrappers on globalThis BEFORE populateLiveRoot
+		// so engine-side callers triggered during tree population (e.g.
+		// live-css `@font-face` async fetch, iframe loader) see the wrapper
+		// on the first-page nav too. Idempotent — runs once total.
+		installPageFetchAndWorker();
 		// Resolve `vw`/`vh` units against the CONTENT area (the canvas minus
 		// the toolbar chrome), not the full screen. Set BEFORE scripts run +
 		// the first computed-style resolution so a page's `height: 100vh`

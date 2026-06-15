@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-12T20:16:18Z",
+  "generated": "2026-06-15T07:35:39Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -149,6 +149,36 @@
     }
   ],
   "experimental": [
+    {
+      "id": "com.natureglass.domhtmlcss",
+      "name": "DOM HTML CSS",
+      "version": "1.0.0",
+      "description": "An experimental app that demonstrates the use of DOM, HTML, and CSS in a Nintendo Switch homebrew web app.",
+      "logo": "assets/domhtmlcss_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
+      "sizeBytes": 9315928
+    },
     {
       "id": "com.natureglass.itchio",
       "name": "itch.io Games",

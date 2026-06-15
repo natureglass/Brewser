@@ -236,6 +236,21 @@ export interface BrowserConfig {
 	 * via the `<browser-config-artifacts>` custom tag. Empty string is
 	 * treated as "no listing available, skip the sanity check". */
 	artifacts: string;
+	/** Remote URL of the per-app download-count telemetry file. The
+	 * apps.html "Check for Updates" button fetches the bytes alongside
+	 * the catalog and writes them verbatim to
+	 * `<appRoot>configs/downloads.json` (replacing any existing copy).
+	 * Read by missing-app-modal.js to surface a Downloads count on the
+	 * detail card. Empty string disables the refresh — the existing
+	 * on-disk file stays in place. */
+	downloads: string;
+	/** Remote URL of the per-app rating telemetry file (array of
+	 * `{packageId, count, average}`). Fetched alongside `downloads` by
+	 * the Check-for-Updates flow and written to
+	 * `<appRoot>configs/ratings.json`. Read by missing-app-modal.js to
+	 * surface a star row on the detail card. Empty string disables the
+	 * refresh. */
+	ratings: string;
 	/** GitHub OAuth App client ID for the Device Authorization Grant
 	 * (Settings → Login). Public client — GitHub's device flow honors
 	 * RFC 8628's public-client model, so no client_secret is needed.
@@ -292,6 +307,8 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	homeSection: 'featured',
 	catalogue: '',
 	artifacts: '',
+	downloads: '',
+	ratings: '',
 	githubOAuthClientId: '',
 	microsoftOAuthClientId: '',
 	googleOAuthClientId: '',
@@ -407,6 +424,12 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			artifacts: typeof parsed?.artifacts === 'string'
 				? parsed.artifacts
 				: DEFAULT_CONFIG.artifacts,
+			downloads: typeof parsed?.downloads === 'string'
+				? parsed.downloads
+				: DEFAULT_CONFIG.downloads,
+			ratings: typeof parsed?.ratings === 'string'
+				? parsed.ratings
+				: DEFAULT_CONFIG.ratings,
 			githubOAuthClientId: typeof parsed?.githubOAuthClientId === 'string'
 				? parsed.githubOAuthClientId
 				: DEFAULT_CONFIG.githubOAuthClientId,
