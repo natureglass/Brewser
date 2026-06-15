@@ -69,7 +69,7 @@ import {
 	isLiveCacheBuilding, patchLiveCacheRegion, patchLiveImagePixelsOnly,
 	scrollElementIntoView, syncLiveCacheVersion,
 } from './live-overlay.js';
-import { bumpKbTreeVersion, inKbMutationScope, markLiveDirty, markPageHasCanvas2dActivity, requestFullRepaint } from './live-paint-control.js';
+import { bumpKbTreeVersion, bumpModalTreeVersion, bumpToolbarTreeVersion, inKbMutationScope, inModalMutationScope, inToolbarMutationScope, markLiveDirty, markPageHasCanvas2dActivity, registerModalRoot, requestFullRepaint, unregisterModalRoot } from './live-paint-control.js';
 import {
 	notifyAttribute, notifyCharacterData, notifyChildList,
 } from '../polyfills/mutation-observer.js';
@@ -252,6 +252,14 @@ export function ensureCssAnimation(
 		const box = getLayoutBox(el);
 		return !!box && box.w > 0 && box.h > 0;
 	};
+	// 2026-06-14: modal-layer elements (`.updates-modal-loading-bar`
+	// pulse is the in-tree case) don't patch the HOST cache —
+	// `patchLiveCacheRegion` uses the element's layout box (screen-coord
+	// for fixed-anchored modal descendants) and would bake the animated
+	// pixels into the body cache, which was the previous bug. Instead
+	// the tick bumps the modal-only counter so the next modal paint
+	// rebuilds the modal cache with the new animation state. Cheap;
+	// modal subtree is small.
 	const tick = (): void => {
 		if (cancelled) return;
 		const elapsed = performance.now() - start;
@@ -260,7 +268,8 @@ export function ensureCssAnimation(
 			if (t >= spec.iterationCount) {
 				cssAnimStateByEl.set(el, sampleStops(stops, 1));
 				if (elementHasPaintedBox()) {
-					patchLiveCacheRegion(el);
+					if (el.inModalLayer) bumpModalTreeVersion();
+					else patchLiveCacheRegion(el);
 					requestFullRepaint();
 				}
 				activeCssAnimations.delete(ticker);
@@ -271,7 +280,8 @@ export function ensureCssAnimation(
 		t = t - Math.floor(t);
 		cssAnimStateByEl.set(el, sampleStops(stops, t));
 		if (elementHasPaintedBox()) {
-			patchLiveCacheRegion(el);
+			if (el.inModalLayer) bumpModalTreeVersion();
+			else patchLiveCacheRegion(el);
 			requestFullRepaint();
 		}
 		tid = setTimeout(tick, 33);
@@ -581,22 +591,82 @@ function flushPendingImageCompletions(): void {
 	const auto = Array.from(pendingAutoImageCompletions);
 	pendingExplicitImageCompletions.clear();
 	pendingAutoImageCompletions.clear();
+	// 2026-06-14: partition by which live tree owns each image. Images
+	// inside the HTML-driven toolbar / keyboard roots have their own
+	// offscreen caches keyed on `toolbarTreeVersion` / `kbTreeVersion`;
+	// painting them into the host's `liveCacheOffscreen` would bake the
+	// toolbar's icons into the host page cache, where they would (a)
+	// appear as visible duplicates below the chrome strip and (b) scroll
+	// with the page — exactly the bug this guard closes. The alt-tree
+	// imgs route to their own version-bump invalidation so the next
+	// paintToolbarOverlay / paintKeyboardOverlay rebuilds with the
+	// loaded pixels.
+	const explicitHost: LiveElement[] = [];
+	const autoHost: LiveElement[] = [];
+	let anyAlt = false;
+	let anyModal = false;
+	for (const el of explicit) {
+		if (!isInHostLiveTree(el)) { anyAlt = true; continue; }
+		// 2026-06-14: modal-layer images skip the host's
+		// `patchLiveImagePixelsOnly` path entirely. That helper paints
+		// into the host's `liveCacheOffscreen` using the IMG's layout
+		// box (screen-coords for fixed-anchored modal IMGs) — exactly
+		// the leak that ghosted the modal logo into the host cache when
+		// an image load raced a modal close. Modal IMGs now invalidate
+		// the modal cache via `bumpModalTreeVersion` and the modal
+		// paint pass re-renders the small modal subtree from scratch.
+		if (el.inModalLayer) { anyModal = true; continue; }
+		explicitHost.push(el);
+	}
+	for (const el of auto) {
+		if (!isInHostLiveTree(el)) { anyAlt = true; continue; }
+		if (el.inModalLayer) { anyModal = true; continue; }
+		autoHost.push(el);
+	}
 	// Explicit-dimensions images: LIGHTWEIGHT patch. Paint just each
 	// IMG's own box on top of the existing cache; the bg stack behind
 	// each IMG (card gradient + shadow + border) was painted into the
 	// cache during the initial build and DOES NOT NEED TO BE
 	// REPAINTED. Measured: ~193 ms/img → ~0-2 ms/img on Featured app
 	// cards (Cairo gradient + box-shadow skipped).
-	if (explicit.length > 0) patchLiveImagePixelsOnly(explicit);
+	if (explicitHost.length > 0) patchLiveImagePixelsOnly(explicitHost);
 	// Auto-dimensions images: layout depends on the decoded size, so
 	// route through the dirty-set path — patchLiveDirtyRegions on the
 	// next paint will re-layout each subtree with the now-known
 	// natural width/height and repaint the changed region.
-	for (const el of auto) markLiveDirty(el);
+	for (const el of autoHost) markLiveDirty(el);
 	// Batched invalidation — one bump + one repaint for the whole batch.
-	if (auto.length > 0) bumpLiveTreeVersion();
-	if (explicit.length > 0 && !isLiveCacheBuilding()) syncLiveCacheVersion();
+	if (autoHost.length > 0) bumpLiveTreeVersion();
+	if (explicitHost.length > 0 && !isLiveCacheBuilding()) syncLiveCacheVersion();
+	if (anyAlt) {
+		// Bump both alt-tree counters so whichever cache (toolbar or
+		// keyboard) contains the loaded image invalidates and rebuilds
+		// on the next paint pass. Cheap — two integer bumps regardless
+		// of how many images landed in this flush.
+		bumpToolbarTreeVersion();
+		bumpKbTreeVersion();
+	}
+	// Modal-layer images: bump the modal-only counter so the per-modal
+	// cache invalidates on the next `paintModalOverlay`. Modal subtrees
+	// are small (~30 nodes) so a full rebuild is cheap and avoids the
+	// host-cache leak class of bug.
+	if (anyModal) bumpModalTreeVersion();
 	requestFullRepaint();
+}
+
+/** True iff `el` is a descendant of the host page's live root (the
+ * `getLiveRoot()` singleton). Used to gate host-cache-affecting work
+ * so it doesn't fire for elements in a separate live tree (the HTML-
+ * driven toolbar root or the on-canvas keyboard root, both of which
+ * are owned by the shell and have their own version-keyed offscreen
+ * caches). Walks the parent chain — toolbar / kb trees are tiny
+ * (~30 nodes max), so this is cheap. */
+function isInHostLiveTree(el: LiveElement): boolean {
+	const hostRoot = getLiveRoot();
+	for (let n: LiveElement | null = el; n; n = n.parent) {
+		if (n === hostRoot) return true;
+	}
+	return false;
 }
 
 /** Drop any pending image-completion work on navigation. Called by
@@ -685,7 +755,15 @@ export function resolveLiveResourceUrl(src: string): string {
 // Side effect for callers: page scripts that mutate state DON'T need to
 // call any "invalidate" API; mutation hooks bump the counter automatically.
 let liveTreeVersion = 0;
-export function bumpLiveTreeVersion(): void {
+/** Bump the live tree version, routing to the appropriate counter
+ * based on (a) an active mutation scope (kb / toolbar / modal) or (b)
+ * the optional `el`'s `inModalLayer` flag — set on attach when the
+ * element or an ancestor carries `data-engine-modal="true"` (the
+ * `<browser-modal>` tag's expansion). The element parameter lets
+ * per-mutation callers (LiveTokenList.notify, LiveElement.setAttribute,
+ * etc.) auto-route to `modalTreeVersion` without the page script
+ * having to push an explicit scope. */
+export function bumpLiveTreeVersion(el?: LiveElement): void {
 	// 2026-06-14 kb-input lag fix: while a keyboard mutation scope is
 	// active (`pushKbMutationScope` / `popKbMutationScope` around
 	// per-tap mutations in keyboard-overlay.ts), route the bump to the
@@ -694,6 +772,29 @@ export function bumpLiveTreeVersion(): void {
 	// rationale.
 	if (inKbMutationScope()) {
 		bumpKbTreeVersion();
+		return;
+	}
+	// Same shape for the HTML-driven toolbar root (rip-replace of the
+	// engine-drawn chrome, 2026-06-14). Address-bar value sync, back/
+	// forward enable toggles, star-icon swap, and :active flashes on
+	// chrome buttons route here so the host page cache doesn't dirty
+	// on every chrome state push.
+	if (inToolbarMutationScope()) {
+		bumpToolbarTreeVersion();
+		return;
+	}
+	// 2026-06-14 modal layer: per-modal mutations (page-script open/close
+	// class flips, async logo onload from setAttribute('src'), title
+	// textContent updates) route through `modalTreeVersion` so the host's
+	// `liveCacheOffscreen` stays warm across modal opens — and the logo
+	// no longer ghosts into the host cache when an image load races a
+	// close. Driven by `el.inModalLayer`, set on attach in
+	// `propagateAttached` whenever an ancestor (or self) carries
+	// `data-engine-modal="true"` (the `<browser-modal>` tag's expansion).
+	// `inModalMutationScope()` covers any engine-side scoped mutations
+	// (currently none, kept for symmetry with kb/toolbar).
+	if (inModalMutationScope() || el?.inModalLayer) {
+		bumpModalTreeVersion();
 		return;
 	}
 	liveTreeVersion++;
@@ -733,7 +834,10 @@ export class LiveTokenList {
 		// mutation. invalidateLiveStyle would also bump (see live-css.ts),
 		// but the chained call ensures both the style cache and the
 		// live-overlay cache see a consistent dirty signal.
-		bumpLiveTreeVersion();
+		// 2026-06-14: pass owner so classList ops on a `<browser-modal>`
+		// descendant (the page-script `--open` flip) auto-route to
+		// `modalTreeVersion` instead of dirtying the host cache.
+		bumpLiveTreeVersion(this.owner ?? undefined);
 		if (this.owner) invalidateLiveStyle(this.owner);
 	}
 	get length(): number { return this.tokens.size; }
@@ -901,6 +1005,16 @@ export class LiveElement {
 	 * attached to the live root. Maintained by appendChild/removeChild
 	 * so the registry-driven painter can shortcut traversal. */
 	attached = false;
+	/** 2026-06-14: true when this element OR any ancestor in its current
+	 * attachment chain carries `data-engine-modal="true"` (the
+	 * `<browser-modal>` tag's expansion stamp). Set by
+	 * `propagateAttached` on every attach + cleared on detach. Mutations
+	 * on flagged elements route through `modalTreeVersion` instead of
+	 * the host's `liveTreeVersion`, so per-modal opens / closes / image
+	 * loads don't dirty the host page cache (and don't leak modal pixels
+	 * into it — the class of bug closed by this rewrite). See
+	 * `live-paint-control.ts` for the modal-layer rationale. */
+	inModalLayer = false;
 	/** Plain text content (set via `.textContent =` / `.innerHTML =`).
 	 * Stored in M2.0; rendered by the painter in M2.1. innerHTML strips
 	 * tags rather than parsing (lil-gui only assigns text strings, not
@@ -1056,7 +1170,7 @@ export class LiveElement {
 		this.textContent = '';
 		parseFragmentInto(this, s);
 		invalidateLiveStyle(this);
-		bumpLiveTreeVersion();
+		bumpLiveTreeVersion(this);
 	}
 
 	/** M2.4 form-element accessors. `.value` works for INPUT / SELECT /
@@ -1352,6 +1466,29 @@ export class LiveElement {
 	/** True only when the image's load failed (not while it's loading). */
 	hasImageError(): boolean { return this.imageLoadFailed; }
 
+	/** Pre-warm the backing Image on an `<img>` LiveElement by
+	 * transplanting an already-decoded HTMLImageElement onto it.
+	 * Used by the toolbar re-build to carry the previous tree's
+	 * loaded icons into the new tree's same-src `<img>` slots, so
+	 * the navigation transition doesn't flash empty / broken-image
+	 * boxes while the new Image objects' async fetch+decode runs.
+	 * The element's own async load (started by `loadImage` on `src`
+	 * assignment) still runs in the background and will overwrite
+	 * `loadedImage` with a fresh Image when it settles — same bytes,
+	 * imperceptible swap. No-op on non-IMG elements.
+	 *
+	 * Skipped when the element already has a loaded image so we don't
+	 * stomp on a more-recent decode (e.g. a src reassignment that
+	 * raced the pre-warm). Also clears any prior `imageLoadFailed`
+	 * flag so the pre-warmed paint draws the icon instead of the
+	 * broken-image placeholder. */
+	presetLoadedImage(img: HTMLImageElement): void {
+		if (this.tagName !== 'IMG') return;
+		if (this.loadedImage) return;
+		this.loadedImage = img;
+		this.imageLoadFailed = false;
+	}
+
 	/** If `img` is an animated GIF (`frameCount > 1`), schedule a
 	 * chained-setTimeout loop that advances frames at each frame's
 	 * declared delay and patches just this element's region into the
@@ -1384,7 +1521,8 @@ export class LiveElement {
 			// rebuild scheduled; subsequent ticks fire after layout has
 			// settled, so the patch lands in the correct region with no
 			// further work needed.
-			patchLiveCacheRegion(this);
+			if (this.inModalLayer) bumpModalTreeVersion();
+			else patchLiveCacheRegion(this);
 			requestFullRepaint();
 			const delay = clampGifDelay(anim.frameDelay(idx));
 			currentTid = setTimeout(advance, delay);
@@ -1453,9 +1591,9 @@ export class LiveElement {
 		const prev = this.children.length ? this.children[this.children.length - 1] : null;
 		child.parent = this;
 		this.children.push(child);
-		propagateAttached(child, this.attached);
+		propagateAttached(child, this.attached, this.inModalLayer);
 		markLiveDirty(this);
-		bumpLiveTreeVersion();
+		bumpLiveTreeVersion(this);
 		// `bumpLiveTreeVersion` only invalidates the cache — on idle
 		// pages the paint loop sleeps, so DOM mutations from async
 		// paths (e.g. fetch().then() → appendChild) wouldn't visually
@@ -1478,7 +1616,7 @@ export class LiveElement {
 			propagateAttached(child, false);
 			if (child.tagName === 'STYLE') unregisterStyleSheet(child);
 			markLiveDirty(this);
-			bumpLiveTreeVersion();
+			bumpLiveTreeVersion(this);
 			requestFullRepaint();
 			notifyChildList(this, [], [child], prev, next);
 		}
@@ -1497,7 +1635,7 @@ export class LiveElement {
 		const prev = idx > 0 ? this.children[idx - 1] : null;
 		child.parent = this;
 		this.children.splice(idx, 0, child);
-		propagateAttached(child, this.attached);
+		propagateAttached(child, this.attached, this.inModalLayer);
 		markLiveDirty(this);
 		bumpLiveTreeVersion();
 		requestFullRepaint();
@@ -1516,9 +1654,9 @@ export class LiveElement {
 		propagateAttached(oldChild, false);
 		newChild.parent = this;
 		this.children.splice(idx, 1, newChild);
-		propagateAttached(newChild, this.attached);
+		propagateAttached(newChild, this.attached, this.inModalLayer);
 		markLiveDirty(this);
-		bumpLiveTreeVersion();
+		bumpLiveTreeVersion(this);
 		requestFullRepaint();
 		notifyChildList(this, [newChild], [oldChild], prev, next);
 		return oldChild;
@@ -1899,11 +2037,38 @@ export class LiveElement {
 
 /** Walk a subtree updating the `attached` flag. The live painter
  * relies on this so it can iterate only the registered roots' trees
- * and skip orphan subtrees. */
-function propagateAttached(el: LiveElement, isAttached: boolean): void {
-	if (el.attached === isAttached) return;
-	el.attached = isAttached;
-	for (const c of el.children) propagateAttached(c, isAttached);
+ * and skip orphan subtrees.
+ *
+ * 2026-06-14: also propagates `inModalLayer` and registers / unregisters
+ * `<browser-modal>` roots (elements with `data-engine-modal="true"`) with
+ * the modal-roots registry in live-paint-control. The flag is set when
+ * EITHER the parent is in a modal layer OR the element itself carries
+ * the data-engine-modal stamp; descendants inherit. On detach the flag
+ * is cleared and the registry entry is dropped so the modal paint pass
+ * stops walking it. This is the foundation of the modal-layer
+ * quarantine — see the module header of live-paint-control.ts. */
+function propagateAttached(el: LiveElement, isAttached: boolean, parentInModalLayer = false): void {
+	// `inModalLayer` is recomputed on every (de)attach because subtree
+	// hot-swaps via innerHTML re-attach the same children under a
+	// freshly-stamped parent, and a previously-detached subtree could be
+	// re-parented under a different (non-modal) host. Cheap; one
+	// attribute lookup per element on each (de)attach.
+	const selfIsModalRoot = el.getAttribute('data-engine-modal') === 'true';
+	const newInModalLayer = isAttached && (parentInModalLayer || selfIsModalRoot);
+	const layerChanged = el.inModalLayer !== newInModalLayer;
+	if (el.attached !== isAttached || layerChanged) {
+		el.attached = isAttached;
+		el.inModalLayer = newInModalLayer;
+		// Modal-root registration tracks only `<browser-modal>` ROOTS
+		// (the elements that carry the data-engine-modal stamp), not
+		// every descendant inside one. Paint walks descend from the
+		// registered root.
+		if (selfIsModalRoot) {
+			if (isAttached) registerModalRoot(el);
+			else unregisterModalRoot(el);
+		}
+	}
+	for (const c of el.children) propagateAttached(c, isAttached, newInModalLayer);
 }
 
 /**

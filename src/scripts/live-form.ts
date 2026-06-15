@@ -403,19 +403,32 @@ function paintButton(
 ): void {
 	const color = cs.color || liveFormTheme.buttonText;
 	if (!skipBg) {
-		// Solid-bg path. Rich CSS backgrounds (gradients) are painted by
-		// the caller before dispatch; here `cs.background` is a plain
-		// colour (or the default). Using it as fillStyle directly would
-		// silently no-op for a gradient string — hence the skipBg gate.
-		ctx.fillStyle = resolveWidgetBg(cs.background) ?? liveFormTheme.buttonBg;
-		// Honor `border-radius` on solid-bg buttons (icon buttons use
-		// rounded corners). A plain fillRect ignored it, leaving square
-		// chips; round the fill when a radius is set.
-		const r = formBorderRadius(cs, box.w, box.h);
-		if (r > 0) {
-			fillRoundedRectPath(ctx, box.x, box.y, box.w, box.h, r);
-		} else {
-			ctx.fillRect(box.x, box.y, box.w, box.h);
+		// Respect explicit `background:none` / `background:transparent`
+		// from the page (same pattern paintSelect uses): when the
+		// author has deliberately said "no bg" we don't want to paint
+		// the engine's theme chip on top — that defeats icon-button
+		// themes (e.g. HTML-driven chrome toolbar buttons that wrap an
+		// <img> and don't want a UA bg). Undefined = no rule at all →
+		// fall back to the theme bg so a bare `<button>` on a page
+		// with no styling still reads as a tappable control.
+		const bgRaw = cs.background;
+		const bgExplicitlyNone = bgRaw === 'none' || bgRaw === 'transparent';
+		if (!bgExplicitlyNone) {
+			// Solid-bg path. Rich CSS backgrounds (gradients) are painted
+			// by the caller before dispatch; here `cs.background` is a
+			// plain colour (or the default). Using it as fillStyle
+			// directly would silently no-op for a gradient string —
+			// hence the skipBg gate.
+			ctx.fillStyle = resolveWidgetBg(cs.background) ?? liveFormTheme.buttonBg;
+			// Honor `border-radius` on solid-bg buttons (icon buttons
+			// use rounded corners). A plain fillRect ignored it, leaving
+			// square chips; round the fill when a radius is set.
+			const r = formBorderRadius(cs, box.w, box.h);
+			if (r > 0) {
+				fillRoundedRectPath(ctx, box.x, box.y, box.w, box.h, r);
+			} else {
+				ctx.fillRect(box.x, box.y, box.w, box.h);
+			}
 		}
 	}
 	// Label: <button>'s textContent or <input>'s value attribute.

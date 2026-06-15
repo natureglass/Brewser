@@ -594,6 +594,22 @@ export function reserveStylesheetSlot(styleEl: LiveElement): number {
 	return slot;
 }
 
+/** Drop the cascade slot reservation for `styleEl` so the next
+ * `reserveStylesheetSlot` call assigns a fresh slot. Used by the
+ * cross-navigation toolbar / keyboard re-registration path:
+ * `resetLiveCss` (called from `resetLiveRoot` on navigation) wipes
+ * the cascade state but leaves the `sheetSlot` WeakMap entries alive
+ * for any LiveElements that survived (the toolbar + keyboard roots
+ * are separate from the host root and survive `resetLiveRoot`). If
+ * those entries kept their pre-reset slot numbers, the new page's
+ * inline `<style>` blocks would collide with them at slot=1, 2, … and
+ * cascade tiebreaks would become ambiguous. Clearing + re-reserving
+ * gives the surviving sheets fresh slots at the front of the new
+ * cascade so the new page's slots land AFTER them. */
+export function clearStylesheetSlot(styleEl: LiveElement): void {
+	sheetSlot.delete(styleEl);
+}
+
 /** Register (or re-register) the rules parsed from `<style>` element
  * `styleEl`'s textContent. Called by LiveStyleElement on textContent /
  * innerHTML assignment and on appendChild into document.head. */
@@ -714,7 +730,13 @@ export function invalidateLiveStyle(el?: LiveElement | null): void {
 	}
 	walkInvalidate(el);
 	markLiveDirty(el);
-	bumpLiveTreeVersion();
+	// 2026-06-14: pass `el` so per-modal mutations route the bump to
+	// `modalTreeVersion` instead of the host's `liveTreeVersion`. Without
+	// this, every `setAttribute` / `classList` change inside a modal
+	// subtree (each calls `invalidateLiveStyle(el)`) was still bumping
+	// the host version, defeating most of the host-cache-warmth win the
+	// modal-layer quarantine was meant to deliver.
+	bumpLiveTreeVersion(el);
 }
 
 function walkInvalidate(el: LiveElement): void {

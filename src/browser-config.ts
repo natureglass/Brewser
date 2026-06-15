@@ -47,50 +47,13 @@ export const COMBO_BUTTONS = {
 /** Time the L+R+Minus combo must be held continuously to exit the shell. */
 export const EXIT_COMBO_HOLD_MS = 1000;
 
-/** Height in CSS pixels of the chrome strip drawn on top of the page. */
-export const CHROME_HEIGHT = 56;
-
-/**
- * Chrome strip layout: back / forward / home buttons on the left, URL
- * in the middle, Settings button anchored to the right edge. Pixel
- * coordinates match the chrome strip's top-left at `(0, 0)` and the
- * default canvas width (`DEFAULT_CANVAS_WIDTH`). Buttons fill the full
- * chrome height vertically; touch dispatch in
- * `controller-shortcuts.ts` matches the x-ranges defined here.
- */
-const CHROME_RIGHT_PADDING = 24;
-// Match the other nav buttons' slot (back / forward / home are 56 px)
-// so the settings icon sits with the same `ICON_INSET` breathing room
-// rather than swimming in a wide ~32-px pad on each side. The icon
-// itself is unchanged — its rendered size is `min(width, chromeHeight)
-// - 2 * ICON_INSET = 32 px`, capped by chromeHeight, not slot width.
-const SETTINGS_BUTTON_WIDTH = 56;
-export const CHROME_LAYOUT = {
-	backX: 0,
-	backWidth: 56,
-	forwardX: 56,
-	forwardWidth: 56,
-	/** Refresh button — reloads the current page. Sits to the LEFT of
-	 * Home (between Forward and Home), so the natural left-to-right
-	 * order is Back · Forward · Refresh · Home · Star · URL. */
-	refreshX: 112,
-	refreshWidth: 56,
-	/** Home button — navigates to `DEFAULT_HOME_URL`. */
-	homeX: 168,
-	homeWidth: 56,
-	/** Star button — toggles the current URL in the bookmarks store.
-	 * Sits just left of the URL because its action is "operate on the
-	 * thing in the URL bar". */
-	starX: 236,
-	starWidth: 48,
-	/** Where the URL text starts (after a small visual separator). */
-	urlX: 296,
-	/** Settings button — anchored to the right edge of the chrome strip.
-	 * Opens `brewser://settings/` (settings.html); icon is
-	 * `toolbar.icons.settings`. */
-	settingsX: DEFAULT_CANVAS_WIDTH - CHROME_RIGHT_PADDING - SETTINGS_BUTTON_WIDTH,
-	settingsWidth: SETTINGS_BUTTON_WIDTH,
-} as const;
+// Chrome strip layout pre-2026-06-14 was a pixel-keyed back/forward/
+// refresh/home/star/URL/settings table (`CHROME_LAYOUT`, `CHROME_HEIGHT`).
+// Both ripped when the toolbar moved to HTML-driven themes: layout now
+// lives in each theme's `<style>` block, height comes from
+// `BrowserConfig.toolbarHeight`, and tap dispatch hit-tests the toolbar
+// live root for `data-action` ancestors instead of comparing pixel
+// ranges. See `live-input-dispatch.ts dispatchChromeTap`.
 
 /** On-canvas soft-keyboard layout. All measurements in CSS pixels. */
 export const KEYBOARD_LAYOUT = {

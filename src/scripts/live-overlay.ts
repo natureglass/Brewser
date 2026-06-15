@@ -59,7 +59,7 @@ import {
 	type InlineAtom, type InlineLayout, type LayoutBox,
 } from './live-layout.js';
 import { paintSvgSubtree, type SvgNodeAdapter } from './svg-painter.js';
-import { clearLiveDirty, drainLiveDirty, getKbTreeVersion, requestFullRepaint } from './live-paint-control.js';
+import { clearLiveDirty, drainLiveDirty, getKbTreeVersion, getModalRoots, getModalTreeVersion, getToolbarTreeVersion, hasAnyModalRoot, requestFullRepaint } from './live-paint-control.js';
 
 /** Viewport rectangle for the live overlay. `x` / `y` are the
  * top-left offset into the screen surface; `width` / `height` are
@@ -846,6 +846,12 @@ export function resetLiveOverlayCache(): void {
 	lastLiveContentBottom = 0;
 	lastPaintedRoot = null;
 	clearLiveDirty();
+	// Modal layer: per-root caches are held in a WeakMap keyed by the
+	// modal element identity, so when the host root is recreated on
+	// navigation the old modal LiveElements drop their refs and the
+	// WeakMap drains naturally. resetModalOverlayCache() is a no-op
+	// today but called for symmetry / future explicit needs.
+	resetModalOverlayCache();
 }
 // Phase 1.6.2: fixed-element walk cache keyed by liveTreeVersion. Lets
 // the scroll-hot path skip the tree walk + sort entirely when nothing
@@ -1318,7 +1324,13 @@ export function paintLiveOverlay(
 	// "150 × getComputedLiveStyle" to "1 cache-hit comparison." Saves
 	// 1-3 ms per scroll frame — the difference between 50 and 60 FPS
 	// on Citron.
-	const fixedVersion = getLiveTreeVersion();
+	// 2026-06-14: include `modalTreeVersion` so that a `<browser-modal>`
+	// open / close (which only bumps the modal-only counter to keep the
+	// host cache warm) still triggers a fixed-walk refresh — the modal
+	// root needs to enter cachedFixed when its `display` flips to
+	// `flex`, so the host's per-frame `layoutFixedRoot` produces the
+	// host-coord boxes `paintModalOverlay` reads + the hit-test walks.
+	const fixedVersion = getLiveTreeVersion() + getModalTreeVersion();
 	if (cachedFixedVersion !== fixedVersion) {
 		cachedFixed = [];
 		let order = 0;
@@ -1329,6 +1341,15 @@ export function paintLiveOverlay(
 			if (pos === 'fixed') {
 				cachedFixed.push({ el, cs, order: order++ });
 			}
+			// 2026-06-14 modal layer: don't descend into a
+			// `<browser-modal>` subtree to look for further fixed
+			// descendants — the whole subtree is owned by the modal
+			// paint pass. (The modal root itself IS still collected
+			// above when it's position:fixed, so the host fixed-pass
+			// can run `layoutFixedRoot` on it — which is what the
+			// engine-side touch hit-test reads to route taps inside
+			// the modal. Paint is skipped in the pass loop below.)
+			if (el.getAttribute('data-engine-modal') === 'true') return;
 			for (const c of el.children) collect(c);
 		};
 		collect(root);
@@ -1343,6 +1364,12 @@ export function paintLiveOverlay(
 	const fixed = cachedFixed;
 
 	for (const { el, cs } of fixed) {
+		// 2026-06-14 modal layer: still LAY OUT modal roots below (so
+		// hit-test against the host layout cache finds modal elements
+		// on tap), but skip PAINT — `paintModalOverlay` owns that.
+		// `paintSubtreeLaid` is the only call that touches screen
+		// pixels; gate it on the modal-stamp check.
+		const isModalRoot = el.getAttribute('data-engine-modal') === 'true';
 		const alpha = cs.opacity ?? el.style.opacity ?? 1;
 		// Resolve box width / height from cascade-or-inline, defaulting
 		// to "let layout figure it out" when neither side declares.
@@ -1377,6 +1404,7 @@ export function paintLiveOverlay(
 		const availH = explicitH
 			?? Math.max(0, viewport.height - (csTop ?? 0));
 		layoutFixedRoot(el, x, y, availW, availH);
+		if (isModalRoot) continue;
 		ctx.save();
 		try {
 			ctx.globalAlpha = alpha;
@@ -1540,6 +1568,309 @@ export function resetKeyboardOverlayCache(): void {
 	kbCacheH = 0;
 	kbCacheRoot = null;
 	kbCacheVersion = -1;
+}
+
+// =========================================================================
+// 2026-06-14 HTML-driven toolbar (rip-replace of the engine-drawn chrome).
+//
+// Parallel shape to `paintKeyboardOverlay` above — own offscreen cache,
+// own version counter (`toolbarTreeVersion` from live-paint-control.ts),
+// own scoped vh/vw. The toolbar root is laid out into a `chromeWidth x
+// chromeHeight` rect and blitted into the chrome strip slice
+// (`{x:0, y:0|canvasH-chromeHeight, width:canvasW, height:chromeHeight}`)
+// at the position dictated by `config.json toolbarPosition`.
+//
+// Cache invalidation pairs the shared `liveTreeVersion` with the
+// toolbar-only `toolbarTreeVersion` — same trick the kb paint uses to
+// keep host-page mutations from forcing a toolbar rebuild while still
+// invalidating on real toolbar state pushes (URL change, back/forward
+// enable, star toggle, :active flash).
+//
+// `vh` / `vw` resolution is scoped to `{chromeWidth, chromeHeight}` so
+// the toolbar's CSS `min-height: 100vh` (and the per-theme width-based
+// breakpoints) resolve against the strip's own dims, not the host page
+// viewport.
+// =========================================================================
+let toolbarCacheOffscreen: OffscreenCanvas | null = null;
+let toolbarCacheW = 0;
+let toolbarCacheH = 0;
+let toolbarCacheRoot: LiveElement | null = null;
+let toolbarCacheVersion = -1;
+
+/** Painter for the HTML-driven toolbar. The shell calls this each
+ * frame (in `normal` mode only — fullscreen modes hide the chrome
+ * strip entirely) as part of the repaint sequence. `viewport` is the
+ * target rect on the screen, typically
+ * `{x:0, y:0, width:canvasW, height:chromeHeight}` for a top toolbar
+ * or `{x:0, y:canvasH-chromeHeight, ...}` for a bottom toolbar. */
+export function paintToolbarOverlay(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	root: LiveElement,
+	viewport: LiveViewport,
+): void {
+	const w = Math.max(1, Math.floor(viewport.width));
+	const h = Math.max(1, Math.floor(viewport.height));
+	const version = getLiveTreeVersion() + getToolbarTreeVersion();
+	const needsBuild =
+		!toolbarCacheOffscreen
+		|| toolbarCacheW !== w
+		|| toolbarCacheH !== h
+		|| toolbarCacheRoot !== root
+		|| toolbarCacheVersion !== version;
+	if (needsBuild) {
+		toolbarCacheOffscreen = new OffscreenCanvas(w, h);
+		toolbarCacheW = w;
+		toolbarCacheH = h;
+		toolbarCacheRoot = root;
+		toolbarCacheVersion = version;
+		const cctx = toolbarCacheOffscreen.getContext('2d');
+		if (cctx) {
+			cctx.clearRect(0, 0, w, h);
+			// Scope `vh`/`vw` resolution to the toolbar strip so the
+			// theme's CSS `min-height: 100vh` lays out inside the cache
+			// canvas instead of overflowing it into the host page area.
+			const prevVp = getCssViewport();
+			setCssViewport(w, h);
+			cctx.save();
+			try {
+				setLayoutMeasureCtx(cctx);
+				const bodyBox = layoutFixedRoot(root, 0, 0, w, h);
+				// Layout absolutely-positioned descendants against their
+				// nearest positioned ancestor (or the body), same shape as
+				// the body-flow pass in `paintLiveOverlay`.
+				for (const abs of collectAbsolutes(root)) {
+					const cb = findAbsoluteContainingBlock(abs, root);
+					const cbBox = getLayoutBox(cb);
+					if (!cbBox) continue;
+					layoutAbsoluteRoot(abs, cbBox.x, cbBox.y, cbBox.w, cbBox.h);
+				}
+				const bodyCs = getComputedLiveStyle(root);
+				if (bodyCs.background) {
+					cctx.fillStyle = bodyCs.background;
+					cctx.fillRect(0, 0, w, h);
+				}
+				if (bodyBox) {
+					paintBoxedElement(cctx, root, bodyCs, bodyBox);
+				}
+				// Single-pass synchronous paint of the op list. Toolbar
+				// trees are small (~12 buttons + an input) so chunking
+				// buys nothing here — same shape as the kb paint.
+				const ops: PaintOp[] = [];
+				collectPaintOps(root, ops, /* skipBgOfRoot */ true);
+				for (const op of ops) {
+					try {
+						if (op.kind === 'bg' && op.cs && op.box) {
+							paintBoxedElement(cctx, op.el, op.cs, op.box);
+						} else if (op.kind === 'atom' && op.atom) {
+							paintOneInlineAtom(cctx, op.atom);
+						} else if (op.kind === 'clip-push' && op.box) {
+							cctx.save();
+							cctx.beginPath();
+							cctx.rect(op.box.contentX, op.box.contentY, op.box.contentW, op.box.contentH);
+							cctx.clip();
+						} else if (op.kind === 'clip-pop') {
+							cctx.restore();
+						}
+					} catch (err) {
+						console.debug('[live-overlay] toolbar paint op threw, skipping', op.kind, err);
+					}
+				}
+			} finally {
+				cctx.restore();
+				setLayoutMeasureCtx(ctx);
+				setCssViewport(prevVp.w, prevVp.h);
+			}
+		}
+	}
+	if (toolbarCacheOffscreen) {
+		ctx.save();
+		try {
+			ctx.beginPath();
+			ctx.rect(viewport.x, viewport.y, w, h);
+			ctx.clip();
+			ctx.drawImage(
+				toolbarCacheOffscreen as unknown as CanvasImageSource,
+				0, 0, w, h,
+				viewport.x, viewport.y, w, h,
+			);
+		} finally {
+			ctx.restore();
+		}
+	}
+}
+
+/** Discard the toolbar cache. Called when the html source changes
+ * (theme switch via the Settings page). Not normally needed — the
+ * version-keyed invalidation in `paintToolbarOverlay` covers the
+ * routine cases. */
+export function resetToolbarOverlayCache(): void {
+	toolbarCacheOffscreen = null;
+	toolbarCacheW = 0;
+	toolbarCacheH = 0;
+	toolbarCacheRoot = null;
+	toolbarCacheVersion = -1;
+}
+
+// =========================================================================
+// 2026-06-14 modal layer — `<browser-modal>` paint pass.
+//
+// Parallel shape to `paintKeyboardOverlay` / `paintToolbarOverlay`: per-root
+// offscreen cache keyed on element identity (a WeakMap so a detached modal
+// root's cache is collected), plus an internal version field that's bumped
+// when the modal-only counter advances. Painted on top of the host page
+// (after the body cache blit, the canvas-overlay walk, and the CSS-loading
+// overlay), but BELOW the chrome toolbar so a page bg fillRect can't bleed
+// the modal into the chrome.
+//
+// Per-modal cache rebuild covers the entire visible modal: backdrop +
+// card + every descendant in one synchronous paint. Modal subtrees are
+// small (~30 nodes for the app-detail modal, ~20 for the updates / download
+// modals) so chunking buys nothing — same call shape as the kb/toolbar
+// paint passes.
+//
+// vh/vw scoping mirrors the kb/toolbar — saved/restored around the build
+// so the modal's CSS `position: fixed; top: 0; right: 0; bottom: 0;
+// left: 0` lays out against the host's content viewport (not the chrome
+// strip), and `100vh` inside the modal resolves to that viewport too.
+// =========================================================================
+interface ModalCacheEntry {
+	off: OffscreenCanvas;
+	w: number;
+	h: number;
+	version: number;
+}
+const modalCaches = new WeakMap<LiveElement, ModalCacheEntry>();
+
+/** Painter for `<browser-modal>` roots. The shell calls this after the
+ * body / canvas / CSS-loading overlays paint and before the chrome
+ * toolbar. `viewport` is the host's content viewport (the rect outside
+ * the chrome strip) — modal roots were laid out by the host's
+ * fixed-element pass at viewport-origin screen coords (so the engine's
+ * touch hit-test against the host layout cache can route taps inside
+ * a modal correctly). This paint pass reuses those boxes verbatim and
+ * paints them into a per-modal offscreen cache, translating the ctx by
+ * `-viewport.{x,y}` so screen-coord boxes land at modal-local coords
+ * inside the cache. The cache is then blitted at the viewport origin.
+ *
+ * Walks the modal-roots registry maintained by `live-paint-control.ts`
+ * (populated by `propagateAttached` on attach of each
+ * `data-engine-modal="true"` element). For each visible modal, builds /
+ * blits its own offscreen cache. Hidden modals (CSS display:none — the
+ * default before the page-script flips the `--open` class) emit no
+ * paint work. */
+export function paintModalOverlay(
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+	viewport: LiveViewport,
+): void {
+	if (!hasAnyModalRoot()) return;
+	const w = Math.max(1, Math.floor(viewport.width));
+	const h = Math.max(1, Math.floor(viewport.height));
+	const version = getLiveTreeVersion() + getModalTreeVersion();
+	for (const root of getModalRoots()) {
+		// Visibility gate — closed modals (no `--open` class on the
+		// overlay, so the CSS rule `.app-modal-overlay { display: none }`
+		// wins) emit nothing. Same shape as the host's
+		// `cs.display === 'none'` skip in the fixed-element walk.
+		const cs = getComputedLiveStyle(root);
+		if (cs.display === 'none') continue;
+		// Reuse the layout box the host's fixed-element pass produced
+		// at `(viewport.x, viewport.y)` origin. If it's not there yet
+		// (first frame this modal becomes visible), bail — the next
+		// paint will have it. This keeps the modal layout / hit-test
+		// coords in ONE place (the host layout cache) rather than
+		// double-laying-out into a modal-local space, which would
+		// leave the layout cache holding modal-local boxes that the
+		// host hit-test would then misread.
+		const rootBox = getLayoutBox(root);
+		if (!rootBox || rootBox.w <= 0 || rootBox.h <= 0) continue;
+		let cache = modalCaches.get(root);
+		const needsBuild =
+			!cache
+			|| cache.w !== w
+			|| cache.h !== h
+			|| cache.version !== version;
+		let active: ModalCacheEntry | null = cache ?? null;
+		if (needsBuild) {
+			const off = (cache && cache.w === w && cache.h === h)
+				? cache.off
+				: new OffscreenCanvas(w, h);
+			const cctx = off.getContext('2d');
+			if (!cctx) continue;
+			cctx.clearRect(0, 0, w, h);
+			cctx.save();
+			try {
+				setLayoutMeasureCtx(cctx);
+				// Translate screen-coord boxes to modal-local. Both
+				// the root box and every descendant inside it carry
+				// `(viewport.x, viewport.y)`-offset coordinates from
+				// the host fixed pass; this single ctx.translate maps
+				// the whole subtree into the modal cache's local
+				// space.
+				cctx.translate(-viewport.x, -viewport.y);
+				if (cs.background) {
+					cctx.fillStyle = cs.background;
+					cctx.fillRect(rootBox.x, rootBox.y, rootBox.w, rootBox.h);
+				}
+				paintBoxedElement(cctx, root, cs, rootBox);
+				const ops: PaintOp[] = [];
+				collectPaintOps(root, ops, /* skipBgOfRoot */ true);
+				for (const op of ops) {
+					try {
+						if (op.kind === 'bg' && op.cs && op.box) {
+							paintBoxedElement(cctx, op.el, op.cs, op.box);
+						} else if (op.kind === 'atom' && op.atom) {
+							paintOneInlineAtom(cctx, op.atom);
+						} else if (op.kind === 'clip-push' && op.box) {
+							cctx.save();
+							cctx.beginPath();
+							cctx.rect(op.box.contentX, op.box.contentY, op.box.contentW, op.box.contentH);
+							cctx.clip();
+						} else if (op.kind === 'clip-pop') {
+							cctx.restore();
+						}
+					} catch (err) {
+						console.debug('[live-overlay] modal paint op threw, skipping', op.kind, err);
+					}
+				}
+			} finally {
+				cctx.restore();
+				setLayoutMeasureCtx(ctx);
+			}
+			active = { off, w, h, version };
+			modalCaches.set(root, active);
+		}
+		if (!active) continue;
+		// Blit cache to screen at the content viewport origin.
+		ctx.save();
+		try {
+			ctx.beginPath();
+			ctx.rect(viewport.x, viewport.y, w, h);
+			ctx.clip();
+			ctx.drawImage(
+				active.off as unknown as CanvasImageSource,
+				0, 0, w, h,
+				viewport.x, viewport.y, w, h,
+			);
+		} finally {
+			ctx.restore();
+		}
+	}
+}
+
+/** Discard all modal caches. Called by `resetLiveOverlayCache` on
+ * navigation. The WeakMap GC's per-root entries when their root
+ * detaches, but on a navigation reset the host root itself is
+ * recreated, and modal roots from the prior page would still hold
+ * WeakMap entries until their refs are released — clearing here is
+ * the safe explicit drop. */
+export function resetModalOverlayCache(): void {
+	// WeakMap has no clear() — but a fresh WeakMap is conceptually
+	// equivalent because the old one becomes unreachable. We rebind
+	// indirectly: the next paint call will see no entry for any root
+	// (the old WeakMap is GC'd along with the prior tree's elements
+	// once the page nav clears the live root). No work needed today;
+	// keep this function exported for symmetry with the kb/toolbar
+	// resets, and as a hook for future explicit-flush needs.
 }
 
 // 2026-06-07 pvzge investigation: counter + log throttle for
@@ -2271,6 +2602,13 @@ function collectPaintOps(
 	const opacity = cs.opacity ?? el.style.opacity ?? 1;
 	if (opacity <= 0) return;
 	if (el.style.position === 'fixed' && !skipBgOfRoot) return;
+	// 2026-06-14 modal layer: skip the entire `<browser-modal>` subtree
+	// (data-engine-modal="true" stamp from the resource loader's tag
+	// expansion). Modals paint via `paintModalOverlay` from their own
+	// offscreen cache, with their own version counter — see
+	// `live-paint-control.ts` modal-layer block. Including them in the
+	// host's cache ops was the original logo-ghost bug.
+	if (!skipBgOfRoot && el.getAttribute('data-engine-modal') === 'true') return;
 	const box = getLayoutBox(el);
 	if (!box) {
 		// Table sectioning elements (THEAD / TBODY / TFOOT / TR) don't get

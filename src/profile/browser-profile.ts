@@ -128,6 +128,17 @@ export class BrowserProfile {
 		return `${this.appRoot}${rel}`;
 	}
 
+	/** Absolute SD-card path to a seeded toolbar HTML file. Resolves
+	 * the `toolbar` field from `config.json`
+	 * (`themes/toolbars/<file>.html`) against the app-level root.
+	 * Same absolute-scheme passthrough as `keyboardPath`. The shell
+	 * parses this file once at boot into a scoped live root that the
+	 * engine paints into the chrome strip area every frame. */
+	toolbarPath(rel: string): string {
+		if (/^(?:sdmc:|romfs:)\/\//.test(rel)) return rel;
+		return `${this.appRoot}${rel}`;
+	}
+
 	/** Absolute SD-card path to a seeded style sheet. Resolves the
 	 * `brewserStyle` field from `config.json` (`styles/<file>.css`)
 	 * against the app-level root. Absolute schemes (`sdmc:/…`,

@@ -46,6 +46,21 @@ export function markLiveDirty(el: LiveElement | null | undefined): void {
 	// punt to a full host rebuild — both of which we're explicitly
 	// avoiding by isolating kb mutations.
 	if (kbMutationScopeDepth > 0) return;
+	// Same logic for the HTML-driven toolbar root (a separate live tree
+	// with its own offscreen cache + version counter). Per-nav address-
+	// bar updates + per-tap :active flashes route through
+	// `toolbarTreeVersion` so the host page cache stays warm across
+	// chrome state pushes. See `pushToolbarMutationScope` below.
+	if (toolbarMutationScopeDepth > 0) return;
+	// 2026-06-14 modal layer: elements inside a `<browser-modal>` subtree
+	// (carrying the `inModalLayer` flag set by `propagateAttached`) skip
+	// the host dirty set for the same reason the kb/toolbar do — the
+	// modal has its own offscreen cache and own version counter
+	// (`modalTreeVersion`). Polluting the host dirty set would force a
+	// host-cache rebuild on every modal mutation (and bake screen-coord
+	// modal pixels into the body cache, the original logo-ghost bug).
+	if (modalMutationScopeDepth > 0) return;
+	if (el.inModalLayer) return;
 	dirtyLiveElements.add(el);
 }
 
@@ -182,3 +197,126 @@ export function consumeFullRepaintRequest(): boolean {
 	if (pendingFullRepaint) { pendingFullRepaint = false; return true; }
 	return false;
 }
+
+// =========================================================================
+// 2026-06-14 HTML-driven toolbar (rip-replace of the engine-drawn chrome).
+//
+// Parallel shape to the on-canvas keyboard above: a SECOND live-DOM root
+// parsed once at shell startup from the file named by `config.json`'s
+// `toolbar` field (e.g. `themes/toolbars/light.html`), painted into the
+// chrome strip slice every frame (top or bottom per `toolbarPosition`).
+//
+// Why a separate counter from the kb? Different mutation cadences and
+// invalidation triggers — the kb mutates per-keypress while open, the
+// toolbar mutates per-navigation (URL change, back/forward enable, star
+// toggle) and per-tap (:active flash on chrome buttons). Keeping the
+// counters separate means the kb cache doesn't invalidate when the
+// address bar updates, and vice versa.
+//
+// `toolbarLiveRoot` is the populated root (or `null` if the toolbar HTML
+// failed to parse / wasn't seeded). `toolbarOverlayVisible` is a kill
+// switch the shell uses to suppress paint in fullscreen modes (where
+// the chrome strip isn't drawn).
+// =========================================================================
+let toolbarLiveRoot: LiveElement | null = null;
+let toolbarOverlayVisible = false;
+
+export function setToolbarLiveRoot(root: LiveElement | null): void {
+	toolbarLiveRoot = root;
+}
+export function getToolbarLiveRoot(): LiveElement | null { return toolbarLiveRoot; }
+
+export function setToolbarOverlayVisible(v: boolean): void {
+	toolbarOverlayVisible = !!v;
+	if (!v) pendingFullRepaint = true;
+}
+export function isToolbarOverlayVisible(): boolean { return toolbarOverlayVisible; }
+
+// Mutation scope: same shape as `pushKbMutationScope` above. Wrap any
+// state-push that touches the toolbar tree (address-bar value sync,
+// back/forward disabled toggle, star icon swap, :active flash on a
+// chrome button) in push/pop so the bumps route to `toolbarTreeVersion`
+// instead of the shared `liveTreeVersion`. Without scoping, a
+// renderChrome call on every navigation invalidates the host page
+// cache (forcing a full chunked rebuild of the page that just
+// finished loading), and a chrome-button :active flash invalidates
+// the page cache on every chrome tap.
+let toolbarMutationScopeDepth = 0;
+let toolbarTreeVersion = 0;
+
+export function pushToolbarMutationScope(): void { toolbarMutationScopeDepth++; }
+export function popToolbarMutationScope(): void {
+	if (toolbarMutationScopeDepth > 0) toolbarMutationScopeDepth--;
+}
+export function inToolbarMutationScope(): boolean { return toolbarMutationScopeDepth > 0; }
+export function bumpToolbarTreeVersion(): void { toolbarTreeVersion++; }
+export function getToolbarTreeVersion(): number { return toolbarTreeVersion; }
+
+// =========================================================================
+// 2026-06-14 modal layer — engine-blessed `<browser-modal>` quarantine.
+//
+// Parallel shape to the kb + toolbar above: each modal root has its own
+// offscreen cache + version counter so per-modal mutations (title text,
+// logo src, body innerHTML, --open class flip) don't dirty the host page's
+// `liveTreeVersion` or `dirtyLiveElements`. The host's `liveCacheOffscreen`
+// stays warm across opens/closes — no full chunked rebuild fires when a
+// modal opens, no logo-ghost leak when an async image load races a close.
+//
+// Modal roots live IN the host body subtree (so page-side
+// `document.getElementById('app-modal-overlay')` still resolves), but
+// `paintModalOverlay` paints them from their own caches and `collectPaintOps`
+// / the fixed-element pass both skip the subtree (a `data-engine-modal="true"`
+// attribute is the engine hint, stamped by the resource loader's
+// `<browser-modal>` expansion).
+//
+// Auto-routing: when a LiveElement attached anywhere inside a modal subtree
+// is mutated, `markLiveDirty` skips it and `bumpLiveTreeVersion` reroutes to
+// `bumpModalTreeVersion` — same shape as the kb/toolbar scopes but driven
+// by per-element `inModalLayer` flag (set on attach) rather than an explicit
+// push/pop around mutations, since page-side scripts don't (and shouldn't)
+// know about engine scopes.
+//
+// The explicit `pushModalMutationScope` exists for engine-side internal
+// mutations on modal elements (none today, but kept for symmetry — same
+// reason the kb has it).
+// =========================================================================
+let modalMutationScopeDepth = 0;
+let modalTreeVersion = 0;
+const modalRoots = new Set<LiveElement>();
+
+export function pushModalMutationScope(): void { modalMutationScopeDepth++; }
+export function popModalMutationScope(): void {
+	if (modalMutationScopeDepth > 0) modalMutationScopeDepth--;
+}
+export function inModalMutationScope(): boolean { return modalMutationScopeDepth > 0; }
+export function bumpModalTreeVersion(): void { modalTreeVersion++; }
+export function getModalTreeVersion(): number { return modalTreeVersion; }
+
+/** Register a `<div data-engine-modal="true">` LiveElement as a modal
+ * root. Called by `propagateAttached` in live-dom.ts the first time the
+ * element + the attribute land in the live tree. The paint pass walks
+ * this registry each frame instead of re-scanning the host tree. */
+export function registerModalRoot(el: LiveElement): void {
+	modalRoots.add(el);
+	// A modal newly attached (or freshly hot-swapped via innerHTML) needs
+	// at least one paint to pick up its visibility. Bump the version so
+	// the cache invalidates + repaint kicks in. Cheap.
+	modalTreeVersion++;
+	pendingFullRepaint = true;
+}
+export function unregisterModalRoot(el: LiveElement): void {
+	if (modalRoots.delete(el)) {
+		// Removed from the live tree → painted output should disappear.
+		// Bump version so the modal paint pass skips it on the next paint
+		// (the cache for this root is GC'd via the WeakMap in live-overlay).
+		modalTreeVersion++;
+		pendingFullRepaint = true;
+	}
+}
+export function getModalRoots(): readonly LiveElement[] {
+	// Snapshot — callers iterate without holding a Set reference.
+	return Array.from(modalRoots);
+}
+/** Cheap "does any modal exist at all?" gate for the paint-pass fast-path
+ * skip when the page has no modals. */
+export function hasAnyModalRoot(): boolean { return modalRoots.size > 0; }

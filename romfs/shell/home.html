@@ -39,24 +39,23 @@
     
   </footer>
 </div>
-<!-- Missing-app detail modal. Hidden by default (.app-modal-overlay
-     defaults to `display: none` in main.css); the shared script flips
-     `.app-modal-overlay--open` to show the centered card and reverts
-     on Cancel / B-button / L-back. The modal HTML is shared verbatim
-     with home.html (Featured Apps grid renders missing cards too) —
-     keep the two in sync if either side changes.
+<!-- Missing-app detail modal. The `<browser-modal>` tag expands to a
+     `<div data-engine-modal="true" style="position: fixed" …>` — the
+     engine recognises the stamp and paints the subtree from its own
+     offscreen cache (`paintModalOverlay`), separate from the host
+     page's `liveCacheOffscreen`. Per-modal mutations (open / close
+     class flip, async logo onload, title text updates) route through
+     `modalTreeVersion` instead of the host's `liveTreeVersion`, so the
+     host cache stays warm AND modal pixels can never leak into it
+     (the original logo-ghost bug). See live-paint-control.ts modal-
+     layer block for the full rationale.
 
-     INLINE `style="position: fixed"` is intentional: live-overlay.ts's
-     static-cache builder (`collectPaintOps`) uses the INLINE
-     `el.style.position` to decide whether to exclude an element from
-     the cache, NOT the computed cascade value. Without this, a
-     stylesheet-only `position: fixed` overlay gets BAKED into the body
-     cache on open. Closing then opening again leaves the prior bake's
-     pixels behind the fresh per-frame fixed-pass repaint — the
-     "second modal stacked behind the first" bug. With the inline
-     hint, only the per-frame fixed-element pass paints the modal,
-     and `display:none` on close means it stops painting entirely. -->
-<div id="app-modal-overlay" class="app-modal-overlay" style="position: fixed">
+     Hidden by default — main.css's `.app-modal-overlay { display:
+     none }` rule applies until the page script flips
+     `.app-modal-overlay--open` on Cancel / B-button / L-back. The
+     modal HTML is shared verbatim with apps.html — keep the two in
+     sync if either side changes. -->
+<browser-modal id="app-modal-overlay" class="app-modal-overlay">
   <div class="app-modal-card">
     <!-- Meta strip mirrors the `.app-card__meta` strip on grid cards:
          version chip flush left, license chip flush right, both in a
@@ -86,12 +85,12 @@
       </div>
     </div>
   </div>
-</div>
+</browser-modal>
 
 <!-- Download / Update progress modal. Mirrors apps.html exactly —
      keep the two in sync if either side changes. See apps.html for
      the full rationale on the markup shape. -->
-<div id="download-modal-overlay" class="app-modal-overlay download-modal-overlay" style="position: fixed">
+<browser-modal id="download-modal-overlay" class="app-modal-overlay download-modal-overlay">
   <div id="download-modal-card" class="app-modal-card download-modal-card">
     <h2 id="download-modal-title" class="app-modal-title download-modal-title">Downloading app</h2>
     <div class="download-modal-progress">
@@ -115,7 +114,7 @@
       </div>
     </div>
   </div>
-</div>
+</browser-modal>
 
 <!-- Load download-modal.js FIRST so its globalThis hook is wired
      before missing-app-modal.js runs its click handlers. -->

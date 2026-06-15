@@ -30,7 +30,6 @@ import {
 	DEFAULT_CANVAS_WIDTH,
 	DEFAULT_HOME_URL,
 } from './browser-config.js';
-import { BrowserUI } from './browser-ui.js';
 import {
 	clearAnimationFrames,
 	clearSharedScreenGLBridge,
@@ -44,7 +43,7 @@ import {
 import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLivePageBase, setSwbImgDebugEnabled } from './scripts/live-dom.js';
 import { setMediaColorScheme } from './scripts/live-css.js';
 import { setCssViewport } from './scripts/inline-css.js';
-import { getInputChecked, getInputValue, openKeyboardAndApply, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
+import { getInputChecked, getInputValue, openKeyboardAndApply, setInputValue, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
@@ -64,20 +63,30 @@ import {
 import {
 	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
 	overlayLiveAnimatedCanvases, paintKeyboardOverlay, paintLiveOverlay,
-	patchLiveDirtyRegions, resetLiveOverlayCache, setLiveBuildChunkMs,
+	paintModalOverlay,
+	paintToolbarOverlay,
+	patchLiveDirtyRegions, resetLiveOverlayCache, resetToolbarOverlayCache,
+	setLiveBuildChunkMs,
 	setLiveScrollChunkMs,
 } from './scripts/live-overlay.js';
 import {
+	bumpToolbarTreeVersion,
 	clearPageHasCanvas2dActivity,
 	consumeFullRepaintRequest,
 	getKeyboardLiveRoot,
 	getKeyboardTopY,
+	getToolbarLiveRoot,
 	hasPageCanvas2dActivity,
 	isKeyboardOpen,
 	isKeyboardOverlayVisible,
+	isToolbarOverlayVisible,
+	popToolbarMutationScope,
+	pushToolbarMutationScope,
 	requestFullRepaint,
 	setKeyboardLiveRoot,
 	setKeyboardTopY,
+	setToolbarLiveRoot,
+	setToolbarOverlayVisible,
 } from './scripts/live-paint-control.js';
 import { getLayoutBox } from './scripts/live-layout.js';
 import { isExternalCssLoading, loadHeadLinkStylesheetsWithFlag, populateLiveRoot, populateRootFromTree } from './scripts/html-to-live.js';
@@ -115,11 +124,11 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from './network/network-probe.js';
 import { BrowserPermissionPolicy } from './permissions/browser-permission-policy.js';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_CONFIG, DEFAULT_TOOLBAR, loadConfig, loadToolbar, resolveSearchEngine, type BrowserToolbar, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { DEFAULT_CONFIG, loadConfig, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
-import { loadChromeIcons, loadOptionalImage } from './resources/chrome-icons.js';
+import { loadOptionalImage } from './resources/load-optional-image.js';
 import { LocalSchemeFetchLoader } from './resources/local-scheme-fetch-loader.js';
 import { SwitchUaFetchLoader } from './resources/switch-ua-fetch-loader.js';
 
@@ -138,7 +147,6 @@ export class BrowserShell {
 	private readonly bookmarksStore: BookmarksStore;
 	private readonly webView: WebView;
 	private readonly navigation: BrowserNavigation;
-	private readonly ui: BrowserUI;
 	private readonly keyboard: KeyboardOverlay;
 	private readonly addressBar: AddressBarInput;
 
@@ -159,34 +167,43 @@ export class BrowserShell {
 	 * with it). `null` until {@link loadHtmlKeyboard} runs. */
 	private keyboardParsedTree: HtmlElement | null = null;
 
+	/** Parsed HtmlElement tree for the active toolbar HTML
+	 * (e.g. `themes/toolbars/light.html`). Loaded once at shell
+	 * startup and re-loaded by {@link selectToolbar}; re-populated
+	 * into a fresh `LiveElement('div')` after every host navigation
+	 * reset for the same `<style>` cascade reasons as the keyboard.
+	 * `null` until {@link loadHtmlToolbar} runs. */
+	private toolbarParsedTree: HtmlElement | null = null;
+
+	/** Re-entry guard for the deferred self-heal retry in
+	 * {@link rebuildToolbarLiveRoot}. Without it, the retry's own
+	 * rebuild would schedule another retry (etc.), looping forever.
+	 * Set when the timer is scheduled, cleared inside the timer
+	 * callback. */
+	private toolbarRetryScheduled = false;
+
 	/** Public read-only accessor for the current page URL. Used by
 	 * storage modules (local-storage, indexed-db) to route writes to a
 	 * `dev/` sub-namespace when the active page is under `brewser://dev/`,
 	 * keeping dev test artifacts out of the real user storage roots. */
 	getCurrentPageUrl(): string { return this.currentPageUrl; }
 	private mode: BrowserMode = 'normal';
-	private toolbar: BrowserToolbar = DEFAULT_TOOLBAR;
+	/** Active chrome strip height (px). Cached from `config.json
+	 * toolbarHeight` at boot and refreshed on settings save. Read by
+	 * layoutTopInset, the paint sequence, and `publishChromeRegion` —
+	 * replaces the old `this.chromeHeight` access path that
+	 * died with the engine-drawn `BrowserToolbar` (2026-06-14). */
+	private chromeHeight: number = DEFAULT_CONFIG.toolbarHeight;
+	/** Fallback page background colour for dark theme. Cached from
+	 * `config.json pageBackground` at boot. Used by
+	 * `effectivePageBackground` to fill the content viewport before
+	 * the live-DOM body paints over it. */
+	private pageBackground: string = DEFAULT_CONFIG.pageBackground;
 	/** Active toolbar position. Sourced from `config.json` (not the
-	 * toolbar design) since 2026-06-11 so the user can flip it from Settings
-	 * without re-skinning. Pushed into BrowserUI on every change so
-	 * the next paint flips chrome to the new edge. */
+	 * toolbar design) since 2026-06-11 so the user can flip it from
+	 * Settings without re-skinning. Drives `publishChromeRegion` +
+	 * the paint sequence's choice of overlay rect. */
 	private toolbarPosition: ToolbarPosition = DEFAULT_CONFIG.toolbarPosition;
-	/** Last-applied resolved chrome icon paths. Used to gate toolbar-
-	 * change icon reloads: when the new toolbar's icon paths match the
-	 * already-loaded set, we keep the existing `Image` references on
-	 * BrowserUI rather than fetching the same URLs again. Re-fetching
-	 * the same icon URL during a Settings-page Save flow was painting
-	 * the toolbar with broken/partial Image data on the next chrome
-	 * tick (the Image objects from the first load are still in use by
-	 * the chrome paint; replacing them mid-flight with a second
-	 * concurrent load races the renderer). Initialised lazily on first
-	 * apply. */
-	private lastResolvedIconPaths: string | null = null;
-	/** Last-applied resolved toolbar/keyboard background image paths.
-	 * Same race-avoidance rationale as `lastResolvedIconPaths` — when
-	 * the new toolbar's image paths match the already-applied ones,
-	 * skip the re-fetch. */
-	private lastResolvedBackgroundPaths: string | null = null;
 	/** Wall-clock duration (ms) of the most recent content present.
 	 * Surfaced on `__scrollStats` for the benchmark page. */
 	private lastCpuPresentMs = 0;
@@ -445,20 +462,21 @@ export class BrowserShell {
 					// runtime's auto-appended `NativeFetchLoader` does —
 					// otherwise the permission policy (which only allows
 					// http(s)/blob/data) 403s every local-scheme `Image.src`
-					// inside a WebView session, e.g. when the user picks a
-					// new toolbar on the Settings page and the shell calls
-					// `refreshChromeIcons` against the new icon paths. The
-					// captured native fetch reads the bytes straight off the
-					// SD card / romfs partition via `fetchFile`, which is
-					// what the policy is sitting on top of anyway. Local
-					// reads don't touch the network gate.
+					// inside a WebView session, e.g. when a toolbar HTML
+					// theme references `assets/refresh.png` (resolved
+					// against the page that hosts the toolbar live root)
+					// and the in-tree `<img>` load fetches the file off
+					// the SD card. The captured native fetch reads the
+					// bytes straight off the SD card / romfs partition
+					// via `fetchFile`, which is what the policy is sitting
+					// on top of anyway. Local reads don't touch the network
+					// gate.
 					new LocalSchemeFetchLoader(captureNativeFetch()),
 				],
 			},
 			delegate,
 		);
 		this.navigation = new BrowserNavigation(this.webView, this.historyStore);
-		this.ui = new BrowserUI();
 		this.keyboard = new KeyboardOverlay();
 		this.addressBar = new AddressBarInput();
 		// M2.4: expose the keyboard opener to the live-DOM form widgets
@@ -594,9 +612,9 @@ export class BrowserShell {
 		// arrow keeps `this` bound to the shell.
 		setKeyboardRepaintDriver(() => this.repaintContent());
 		// Apply shell-level preferences from config.json. Done before
-		// loadToolbar so any future config-driven toolbar overrides
-		// can layer on top, and before scanForAutoplayVideos runs (it
-		// reads videoTryHwAccel via openDecoder).
+		// scanForAutoplayVideos runs (it reads videoTryHwAccel via
+		// openDecoder) and before the toolbar live root is built so the
+		// chrome height + position are settled by the first paint.
 		const shellConfig = loadConfig(this.profile.appRoot);
 		setVideoTryHwAccel(shellConfig.videoNVTEGRA);
 		// Stash the WWW budget for onPageStarted to re-apply on each external
@@ -613,20 +631,15 @@ export class BrowserShell {
 		// Anchor at canvas height so the panel sits flush at the bottom
 		// regardless of any future canvas-size change.
 		setKeyboardTopY(nxScreen().height - shellConfig.keyboardHeight);
-		// Load the toolbar design + push it into the UI, keyboard,
-		// and touch dispatcher so the very first chrome paint already
-		// reflects the user's customisations.
-		this.toolbar = loadToolbar(this.profile.appRoot);
-		this.ui.setToolbar(this.toolbar);
-		this.keyboard.setToolbar(this.toolbar);
-		// Toolbar position lives in `config.json` (not the toolbar design)
-		// since 2026-06-11 — cache it on the shell + push into the UI
-		// so chrome paints on the correct edge from the first frame.
+		// Chrome strip metrics: cache the height + position the engine
+		// uses for the chrome rect, then build the HTML-driven toolbar
+		// root so the first chrome paint already has something to blit.
+		this.chromeHeight = shellConfig.toolbarHeight;
+		this.pageBackground = shellConfig.pageBackground;
 		this.toolbarPosition = shellConfig.toolbarPosition;
-		this.ui.setToolbarPosition(this.toolbarPosition);
+		await this.loadHtmlToolbar();
+		setToolbarOverlayVisible(true);
 		this.publishChromeRegion();
-		await this.refreshChromeIcons();
-		await this.refreshToolbarBackgrounds();
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
 		// restricted memory that the live-DOM content cache's
@@ -992,14 +1005,15 @@ export class BrowserShell {
 		// star-slot gate in sync so its tap falls through to the URL bar.
 		const bookmarkable = isBookmarkable(url);
 		setStarEnabled(bookmarkable);
-		this.ui.renderAddressBar({
-			currentURL: url,
+		this.pushToolbarState({
+			url,
 			canGoBack: this.navigation.controller.canGoBack,
 			canGoForward: this.navigation.controller.canGoForward,
-			bookmarked: bookmarkable && url ? this.bookmarksStore.has(url) : false,
+			bookmarked: bookmarkable && !!url ? this.bookmarksStore.has(url) : false,
 			bookmarkable,
 			internetReachable: reachable,
-		}, modeLabel);
+			modeLabel,
+		});
 		// Capture so onTick's chrome-skip gate notices external state
 		// (network reachability + dock/undock) changes between explicit
 		// renderChrome calls.
@@ -1093,7 +1107,7 @@ export class BrowserShell {
 	 * below chrome), 0 when the toolbar is at the bottom.
 	 */
 	private layoutTopInset(): number {
-		return this.toolbarPosition === 'top' ? this.toolbar.toolbar.height : 0;
+		return this.toolbarPosition === 'top' ? this.chromeHeight : 0;
 	}
 
 	/**
@@ -1104,7 +1118,7 @@ export class BrowserShell {
 	 */
 	private maxScroll(): number {
 		const canvas = nxScreen();
-		const chromeHeight = this.toolbar.toolbar.height;
+		const chromeHeight = this.chromeHeight;
 		const visibleHeight = this.mode === 'normal' ? canvas.height - chromeHeight : canvas.height;
 		const contentBottom = getLiveContentBottom();
 		if (contentBottom <= 0) return 0;
@@ -1216,12 +1230,15 @@ export class BrowserShell {
 		_shellInputDiag('handleHtmlResponseLive url=' + url);
 		resetLiveOverlayCache();
 		resetLiveRoot();
-		// Rebuild the HTML-driven keyboard's live root so its `<style>`
-		// blocks re-register with the now-cleared cascade. The kb root
-		// is otherwise orthogonal to the host page — its tree is small,
-		// re-population is cheap, and the keyboard panel reads the same
-		// across navigations.
+		// Rebuild the HTML-driven keyboard + toolbar live roots so their
+		// `<style>` blocks re-register with the now-cleared cascade. The
+		// toolbar rebuild pre-warms its new `<img>` LiveElements with
+		// the previous tree's already-loaded `Image` objects (keyed by
+		// src) so the navigation transition doesn't flash 1-2 s of
+		// broken icons while the new Image objects re-decode — see
+		// `pendingToolbarImgPrewarm` for the mechanism.
 		this.rebuildKeyboardLiveRoot();
+		this.rebuildToolbarLiveRoot();
 		// App-context tracking: if this page is under `brewser://apps/<group>/<id>/...`,
 		// pick up the app's `manifest.json buttonMapping` as a button-router
 		// overlay (so e.g. `"exit": "B"` rebinds B from rightClick to the
@@ -1250,7 +1267,7 @@ export class BrowserShell {
 		// new basis is what every `vh`/`vw` resolves against.
 		{
 			const screen = nxScreen();
-			const chromeH = this.toolbar.toolbar.height;
+			const chromeH = this.chromeHeight;
 			setCssViewport(screen.width, Math.max(1, screen.height - chromeH));
 		}
 		const byParsed = populateLiveRoot(tree);
@@ -1376,7 +1393,7 @@ export class BrowserShell {
 	 */
 	private effectivePageBackground(): string {
 		if (this.colorScheme === 'light') return '#ffffff';
-		return this.toolbar.page.background;
+		return this.pageBackground;
 	}
 
 	/**
@@ -1446,7 +1463,7 @@ export class BrowserShell {
 		// so both insets become 0 and the flash covers everything,
 		// which is the right behaviour for video / fullscreen-canvas /
 		// fullscreen-page shots.
-		const chromeHeight = this.toolbar.toolbar.height;
+		const chromeHeight = this.chromeHeight;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const topInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const bottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
@@ -1534,7 +1551,7 @@ export class BrowserShell {
 			);
 			return;
 		}
-		const chromeHeight = this.toolbar.toolbar.height;
+		const chromeHeight = this.chromeHeight;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
@@ -1603,6 +1620,22 @@ export class BrowserShell {
 		if (isExternalCssLoading()) {
 			this.paintCssLoadingOverlay(ctx, viewport);
 		}
+		// HTML-driven modal layer — painted ON TOP of the host page
+		// content (cache blit + canvas overlay + CSS-loading overlay)
+		// but BELOW the chrome toolbar so a modal's `position: fixed`
+		// fill doesn't bleed into the chrome strip. Each
+		// `<browser-modal>` root has its own offscreen cache + version
+		// counter (see `paintModalOverlay` and the modal-layer block
+		// in live-paint-control.ts). Cheap on pages without modals:
+		// `paintModalOverlay` early-returns when the modal-roots
+		// registry is empty.
+		paintModalOverlay(ctx, viewport);
+		// HTML-driven chrome toolbar — painted in the strip slice the
+		// engine reserved at layout time (`paintTopInset` / `paintBottomInset`).
+		// Sits ABOVE the host page paint so a page bg fillRect on the
+		// strip area can't bleed into the chrome. The kb (below) sits
+		// on top of EVERYTHING since it's a modal panel.
+		this.paintHtmlToolbarIfVisible(ctx, canvas.width, canvas.height);
 		// HTML-driven virtual keyboard — painted ON TOP of the host page's
 		// content (and the CSS-loading overlay above) so it stays modal.
 		// `KEYBOARD_LAYOUT.topY` is the contract the existing canvas
@@ -1634,6 +1667,29 @@ export class BrowserShell {
 			y: topY,
 			width: canvasW,
 			height: Math.max(0, canvasH - topY),
+		});
+	}
+
+	/** Paint the HTML toolbar root into the chrome strip slice when
+	 * `isToolbarOverlayVisible()` is true and the root is populated.
+	 * Only fires in `normal` mode — fullscreen-canvas/-page/-video
+	 * hide the chrome strip entirely and call this from their own
+	 * specialised paint paths if (and only if) they want it. */
+	private paintHtmlToolbarIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (this.mode !== 'normal') return;
+		if (!isToolbarOverlayVisible()) return;
+		const tbRoot = getToolbarLiveRoot();
+		if (!tbRoot) return;
+		const y = this.toolbarPosition === 'top' ? 0 : canvasH - this.chromeHeight;
+		paintToolbarOverlay(ctx, tbRoot, {
+			x: 0,
+			y,
+			width: canvasW,
+			height: this.chromeHeight,
 		});
 	}
 
@@ -1799,7 +1855,7 @@ export class BrowserShell {
 		canvasWidth: number,
 		canvasHeight: number,
 	): void {
-		const chromeHeight = this.toolbar.toolbar.height;
+		const chromeHeight = this.chromeHeight;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
@@ -1972,18 +2028,16 @@ export class BrowserShell {
 			console.debug(`[brewser] write config.json failed: ${error}`);
 			return;
 		}
-		this.toolbar = loadToolbar(this.profile.appRoot);
-		this.ui.setToolbar(this.toolbar);
-		this.keyboard.setToolbar(this.toolbar);
-		this.publishChromeRegion();
-		// Icons may have changed paths between toolbars — refresh them
-		// before the next chrome render. Gated on path change so the
-		// shared-icon case skips the re-fetch.
-		await this.refreshChromeIcons();
-		await this.refreshToolbarBackgrounds();
-		// Reload the current page: re-runs the resource loader (so the
-		// new active toolbar row shows) and re-paints with the new
-		// colours / padding.
+		// Re-read + re-parse the new toolbar HTML into a fresh live
+		// root. The toolbar tree is parsed in-process (no fetch round-
+		// trip) — same shape as `selectKeyboard` below. The first
+		// post-rebuild `renderChrome` happens inside `loadHtmlToolbar`
+		// itself so the new theme paints with current state on the
+		// next tick.
+		await this.loadHtmlToolbar();
+		// Reload the current page so the Settings page's
+		// `<browser-toolbars>` expansion re-runs against the new
+		// active row.
 		await this.runNavigation(() => this.navigation.reload());
 	}
 
@@ -2036,9 +2090,11 @@ export class BrowserShell {
 	 * apply path (`maxHistory`, `autoRotate`, `buttonMapping`) round-
 	 * trip into the file and take effect on next launch.
 	 *
-	 * Toolbar changes go through the same loadToolbar + setToolbar +
-	 * refreshToolbarBackgrounds dance `selectToolbar` does so the
-	 * chrome / keyboard / icons reflect the new design immediately.
+	 * Toolbar HTML changes go through the same `loadHtmlToolbar` dance
+	 * `selectToolbar` does so the new theme paints immediately.
+	 * Toolbar height / page bg / position get pushed straight into the
+	 * shell fields so the next paint picks them up (toolbar cache reset
+	 * for height + position so the strip rebuilds at the new dims).
 	 * Mirrors selectToolbar's write shape: spread the existing config
 	 * forward, overlay the staged edits, then `Switch.writeFileSync` so
 	 * a partial / hand-edited config doesn't lose unknown keys.
@@ -2118,18 +2174,14 @@ export class BrowserShell {
 		// this form. All three round-trip into config.json above and
 		// take effect on next launch.
 
-		// Toolbar + searchEngine are read by the resource loader at
-		// render time, so a reload picks them up. If toolbar actually
-		// changed, push the new design into the UI / keyboard / icons
-		// the same way selectToolbar does — otherwise the chrome would
-		// keep painting in the old colours until next launch.
+		// Toolbar HTML changed → re-read + re-parse + rebuild the live
+		// root so the next paint reflects the new theme. Mirrors
+		// `selectToolbar` minus the explicit reload (saveSettings does
+		// its own reload at the bottom). The `<browser-toolbars>`
+		// expansion in the Settings page re-runs against the new
+		// active row on that reload.
 		if ('toolbar' in staged && staged.toolbar !== prior.toolbar) {
-			this.toolbar = loadToolbar(this.profile.appRoot);
-			this.ui.setToolbar(this.toolbar);
-			this.keyboard.setToolbar(this.toolbar);
-			this.publishChromeRegion();
-			await this.refreshChromeIcons();
-			await this.refreshToolbarBackgrounds();
+			await this.loadHtmlToolbar();
 		}
 		// Keyboard panel HTML is parsed in-process at boot; on change,
 		// re-read + re-parse from the new path and rebuild the kb live
@@ -2137,13 +2189,34 @@ export class BrowserShell {
 		if ('keyboard' in staged && staged.keyboard !== prior.keyboard) {
 			await this.loadHtmlKeyboard();
 		}
-		// Toolbar position: cache on the shell + push to UI so the
-		// chrome strip flips edge on the next paint. layoutTopInset +
-		// the isBottomToolbar reads in the shell all read from
-		// this.toolbarPosition, so updating both fields here is enough.
+		// Toolbar height: cache on the shell + dump the toolbar paint
+		// cache so the strip rebuilds at the new dims. layoutTopInset
+		// + paint-inset math read `this.chromeHeight` so the page area
+		// resizes on the next paint without a full reload.
+		if ('toolbarHeight' in staged && staged.toolbarHeight !== prior.toolbarHeight) {
+			this.chromeHeight = fresh.toolbarHeight;
+			resetToolbarOverlayCache();
+			this.publishChromeRegion();
+		}
+		// Page background: cache so `effectivePageBackground` picks it
+		// up on the next paint. No reload needed.
+		if ('pageBackground' in staged && staged.pageBackground !== prior.pageBackground) {
+			this.pageBackground = fresh.pageBackground;
+		}
+		// Toolbar position: cache on the shell + stamp the new value on
+		// the toolbar live root so theme CSS can flip its layout via
+		// `body[data-toolbar-position="bottom"] { … }`. layoutTopInset
+		// + the isBottomToolbar reads in the shell all read from
+		// this.toolbarPosition, so updating it here is enough.
 		if ('toolbarPosition' in staged && staged.toolbarPosition !== prior.toolbarPosition) {
 			this.toolbarPosition = fresh.toolbarPosition;
-			this.ui.setToolbarPosition(this.toolbarPosition);
+			const tbRoot = getToolbarLiveRoot();
+			if (tbRoot) {
+				pushToolbarMutationScope();
+				try { tbRoot.setAttribute('data-toolbar-position', this.toolbarPosition); }
+				finally { popToolbarMutationScope(); }
+			}
+			resetToolbarOverlayCache();
 			this.publishChromeRegion();
 		}
 
@@ -2228,49 +2301,6 @@ export class BrowserShell {
 		out[key] = getInputValue(el);
 	}
 
-	/** Load (or clear) the toolbar + keyboard background images
-	 * referenced by the current toolbar and hand them to the UI /
-	 * keyboard. Empty / missing / failed paths come back as `null`,
-	 * which the painters treat as "no image — bg colour only". */
-	private async refreshToolbarBackgrounds(): Promise<void> {
-		const toolbarSrc = this.resolveAssetPath(this.toolbar.toolbar.image);
-		const keyboardSrc = this.resolveAssetPath(this.toolbar.keyboard.image);
-		// Same paths as last apply — Image objects are already mounted
-		// on BrowserUI/keyboard, and re-fetching the same URL races the
-		// chrome/keyboard paint while the in-flight Image swap settles.
-		// Cf. `lastResolvedIconPaths` for the matching gate on the icon
-		// PNGs. Empty paths still get cached so a toolbar switching
-		// from "no image" → "no image" stays a no-op.
-		const key = `${toolbarSrc}|${keyboardSrc}`;
-		if (this.lastResolvedBackgroundPaths === key) return;
-		const [toolbarBg, keyboardBg] = await Promise.all([
-			loadOptionalImage(toolbarSrc),
-			loadOptionalImage(keyboardSrc),
-		]);
-		this.ui.setToolbarBackground(toolbarBg);
-		this.keyboard.setPanelBackground(keyboardBg);
-		this.lastResolvedBackgroundPaths = key;
-	}
-
-	/** Resolve the active toolbar's icon paths and, if any path
-	 * differs from the last applied set, reload the `Image` objects
-	 * and push them into the UI. When every path matches the previous
-	 * apply (the common case across toolbar switches — every shipped
-	 * toolbar uses the same `assets/<name>.png` PNGs) the existing
-	 * icon `Image` objects on BrowserUI stay in place, avoiding the
-	 * re-fetch race that was painting broken icons during the Save
-	 * flow on the Settings page. */
-	private async refreshChromeIcons(): Promise<void> {
-		const paths = this.resolveIconPaths();
-		const key = [
-			paths.left, paths.right, paths.refresh, paths.home,
-			paths.settings, paths.bookmarkTrue, paths.bookmarkFalse,
-		].join('|');
-		if (this.lastResolvedIconPaths === key) return;
-		this.ui.setIcons(await loadChromeIcons(paths));
-		this.lastResolvedIconPaths = key;
-	}
-
 	/** Read + parse the active keyboard panel HTML (per `config.json`'s
 	 * `keyboard` field, e.g. `keyboards/default.html`) once at boot and
 	 * stash the parsed tree on `this.keyboardParsedTree`. Also runs the
@@ -2324,13 +2354,265 @@ export class BrowserShell {
 		setKeyboardLiveRoot(kbRoot);
 	}
 
-	/** Resolve a toolbar-supplied asset path against the profile
-	 * root unless it carries an absolute scheme. Empty in → empty
-	 * out, so callers can pass through optional fields directly. */
-	private resolveAssetPath(rel: string): string {
-		if (!rel) return '';
-		if (/^(?:https?:|sdmc:|romfs:)\/\//.test(rel)) return rel;
-		return `${this.profile.storageRoot}${rel}`;
+	/** Read + parse the active toolbar HTML (per `config.json`'s
+	 * `toolbar` field, e.g. `themes/toolbars/light.html`) once at boot
+	 * and stash the parsed tree on `this.toolbarParsedTree`. Also runs
+	 * the first population into a fresh live root so the chrome strip
+	 * has something to paint from the first frame.
+	 *
+	 * Failure (file missing despite seeding, parse exception) leaves
+	 * the tree null + the toolbar root null — the paint pass early-
+	 * returns and the chrome strip renders as the page bg colour with
+	 * no widgets. Non-fatal so the user can still drive the shell via
+	 * controller shortcuts.
+	 *
+	 * Called again from {@link selectToolbar} after the user picks a
+	 * new theme from the Settings page — re-reads from the new path
+	 * and rebuilds the live root in place. Mirrors
+	 * {@link loadHtmlKeyboard}. */
+	private async loadHtmlToolbar(): Promise<void> {
+		const rel = loadConfig(this.profile.appRoot).toolbar;
+		const path = this.profile.toolbarPath(rel);
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.toolbarParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load toolbar '${rel}' failed: ${error}`);
+			return;
+		}
+		// `rebuildToolbarLiveRoot` itself calls `renderChrome` at the
+		// end to push current state into the freshly-populated root,
+		// so no extra call needed here.
+		this.rebuildToolbarLiveRoot();
+	}
+
+	/** (Re)build the toolbar live root from the cached parsed tree.
+	 * Called once after the initial parse and again from
+	 * `handleHtmlResponseLive` after every navigation `resetLiveRoot`
+	 * — the host reset clears the global cascade (`resetLiveCss`), so
+	 * the toolbar's `<style>` registrations need to be replayed in the
+	 * fresh cascade. Rebuilds a brand-new `LiveElement('div')` each
+	 * time and registers it via `setToolbarLiveRoot`; the old root is
+	 * dropped (GC handles it). Scope class `__brewser-toolbar-root`
+	 * keeps the toolbar's CSS from leaking into the host page's
+	 * cascade. Also dumps the paint cache so the new layout doesn't
+	 * blit through. */
+	private rebuildToolbarLiveRoot(): void {
+		if (!this.toolbarParsedTree) return;
+		// Pre-warm map: capture the previous tree's loaded `<img>` Image
+		// objects keyed by src so we can transplant them onto the new
+		// tree's same-src `<img>` slots immediately after build. Without
+		// this, every navigation rebuild reloads every icon from scratch
+		// (visible as 1-2 s of broken-icon placeholders), even though
+		// the bytes are identical and the OS-level file fetch is fast.
+		// Captured BEFORE the new tbRoot replaces the old via
+		// `setToolbarLiveRoot` so `getToolbarLiveRoot()` still points
+		// at the old tree here.
+		const preWarm = new Map<string, HTMLImageElement>();
+		const oldRoot = getToolbarLiveRoot();
+		if (oldRoot) {
+			const collect = (el: LiveElement): void => {
+				if (el.tagName === 'IMG') {
+					const img = el.getLoadedImage();
+					const src = el.getAttribute('src');
+					if (img && src && !preWarm.has(src)) preWarm.set(src, img);
+				}
+				for (const c of el.children) collect(c);
+			};
+			collect(oldRoot);
+		}
+		// Wrap the populate + setAttribute in a toolbar mutation scope so
+		// the ~30 `appendChild` calls inside `populateRootFromTree` (one
+		// per element + one per <style>) don't bump the shared
+		// `liveTreeVersion` and pollute the host page's dirty set. Without
+		// this, every navigation re-registration of the toolbar tree dumps
+		// ~30 entries onto `dirtyLiveElements` and forces the host's
+		// `patchLiveDirtyRegions` to either re-layout detached toolbar
+		// elements against the host's layout cache (fail) or punt to a
+		// full host rebuild — neither produces correct paint but the
+		// `<button><img>` walks during the patch attempt can leave stray
+		// paints in the host overlay.
+		let tbRoot: LiveElement;
+		pushToolbarMutationScope();
+		try {
+			// `div` not `body` — same rationale as the keyboard root.
+			tbRoot = new LiveElement('div');
+			tbRoot.attached = true;
+			populateRootFromTree(tbRoot, this.toolbarParsedTree, '__brewser-toolbar-root');
+			// Stamp the active position on the body root so theme CSS can
+			// switch border/padding/order between top + bottom via
+			// `body[data-toolbar-position="bottom"] { … }` rules without
+			// the engine needing per-theme knowledge.
+			tbRoot.setAttribute('data-toolbar-position', this.toolbarPosition);
+			// Pre-warm step: for every new `<img>` in the rebuilt tree,
+			// look up its src in the captured map and transplant the
+			// loaded Image so the first post-rebuild paint already shows
+			// the icon. The element's own async load (kicked off by
+			// `setAttribute('src', …)` above) still runs and will
+			// overwrite `loadedImage` with a fresh Image when it
+			// settles — same bytes, imperceptible swap.
+			if (preWarm.size > 0) {
+				const warm = (el: LiveElement): void => {
+					if (el.tagName === 'IMG') {
+						const src = el.getAttribute('src');
+						const hit = src ? preWarm.get(src) : undefined;
+						if (hit) el.presetLoadedImage(hit);
+					}
+					for (const c of el.children) warm(c);
+				};
+				warm(tbRoot);
+			}
+			setToolbarLiveRoot(tbRoot);
+			resetToolbarOverlayCache();
+		} finally {
+			popToolbarMutationScope();
+		}
+		// Push current chrome state into the just-rebuilt root so the
+		// first post-rebuild paint already shows the right URL +
+		// back/forward enable + bookmark state. Without this, navigation
+		// rebuilds (which create a fresh `<input id="url">` with empty
+		// value, fresh buttons with no `data-disabled` attrs) leave the
+		// toolbar visually "reset" until the navigation completes and
+		// runNavigation's tail-renderChrome runs — visible as the URL
+		// text disappearing for the duration of the loading page.
+		// renderChrome reads from `this.navigation.currentURL` etc. so
+		// it picks up whatever state is current at rebuild time (during
+		// navigation, that's typically the OLD URL — same behavior real
+		// browsers show during the loading state).
+		this.renderChrome();
+		// Belt-and-suspenders for the "icons missing on first load" case:
+		// at boot the WebView session hasn't yet installed the runtimeFetch
+		// wrappers (BrowserResourceLoader + LocalSchemeFetchLoader), so
+		// the toolbar's `<img src="sdmc:/...">` loads fall through to the
+		// raw nxjs fetch path that doesn't claim sdmc: at shell level —
+		// they 404 and the elements get `imageLoadFailed=true`. Once a
+		// page navigation completes, the next rebuild's imgs load
+		// successfully because the wrappers are now installed.
+		//
+		// If any img errored on this build, schedule a single re-rebuild
+		// after a short delay so the toolbar self-heals into the working
+		// state without waiting for the user to refresh. Guard with a
+		// retry-once flag to avoid infinite loops if loads keep failing
+		// for unrelated reasons (e.g. missing icon files).
+		if (this.toolbarRetryScheduled) return;
+		this.toolbarRetryScheduled = true;
+		setTimeout(() => {
+			this.toolbarRetryScheduled = false;
+			if (this.anyToolbarImgFailed()) {
+				// rebuildToolbarLiveRoot ends with its own renderChrome.
+				this.rebuildToolbarLiveRoot();
+			} else {
+				// All imgs loaded fine — just nudge the cache version so
+				// the rebuild paints them in case the onload→bump path
+				// raced an earlier `consumeFullRepaintRequest()`.
+				bumpToolbarTreeVersion();
+				requestFullRepaint();
+			}
+		}, 500);
+	}
+
+	/** Walk the active toolbar live root checking each `<img>` for a
+	 * failed load (the `loadImage` error path sets `imageLoadFailed`).
+	 * Returns true if any IMG failed — the deferred retry in
+	 * `rebuildToolbarLiveRoot` keys on this to decide between a cheap
+	 * cache-bump (all imgs loaded) and a full rebuild (some failed and
+	 * we need fresh Image objects to retry the loads). */
+	private anyToolbarImgFailed(): boolean {
+		const root = getToolbarLiveRoot();
+		if (!root) return false;
+		let failed = false;
+		const visit = (el: LiveElement): void => {
+			if (failed) return;
+			if (el.tagName === 'IMG' && el.hasImageError()) { failed = true; return; }
+			for (const c of el.children) visit(c);
+		};
+		visit(root);
+		return failed;
+	}
+
+	/** Per-navigation state push into the toolbar live root: address bar
+	 * value, back/forward enable, star icon swap, mode label, network
+	 * dot. Wrapped in {@link pushToolbarMutationScope} so the bumps
+	 * route to `toolbarTreeVersion` instead of the shared
+	 * `liveTreeVersion` — the host page cache stays warm across chrome
+	 * state pushes, only the small toolbar cache rebuilds.
+	 *
+	 * Contract with the toolbar HTML themes (see
+	 * `romfs/themes/toolbars/*.html`):
+	 *
+	 *   - `#url`              — `<input>` whose value is set to the URL
+	 *   - `#backButton`       — gets `[data-disabled="true"]` toggled
+	 *   - `#forwardButton`    — gets `[data-disabled="true"]` toggled
+	 *   - `#bookmarkButton`   — `[data-disabled]` toggled on the BUTTON
+	 *                           per `bookmarkable` (greyed out + tap
+	 *                           no-op on internal `brewser://` pages);
+	 *                           child `<img>` is swapped between
+	 *                           `data-bookmark-true` and
+	 *                           `data-bookmark-false` attrs based on
+	 *                           `bookmarked`
+	 *   - `#modeLabel`        — first text child set to the mode
+	 *                           string ("HANDHELD" / "DOCKED" / "")
+	 *   - `#reachableDot`     — `[data-status]` set to
+	 *                           `up | down | unknown`
+	 *   - body                — `[data-bookmarkable]` set so per-
+	 *                           theme CSS can adjust URL bar width
+	 *                           when the star is hidden
+	 */
+	private pushToolbarState(state: {
+		url: string;
+		canGoBack: boolean;
+		canGoForward: boolean;
+		bookmarked: boolean;
+		bookmarkable: boolean;
+		internetReachable: boolean | undefined;
+		modeLabel: string;
+	}): void {
+		const root = getToolbarLiveRoot();
+		if (!root) return;
+		pushToolbarMutationScope();
+		try {
+			// body-level flags
+			root.setAttribute('data-bookmarkable', state.bookmarkable ? 'true' : 'false');
+			const urlInput = findToolbarById(root, 'url');
+			if (urlInput) setInputValue(urlInput, state.url);
+			const back = findToolbarById(root, 'backButton');
+			if (back) toggleDisabledAttr(back, !state.canGoBack);
+			const fwd = findToolbarById(root, 'forwardButton');
+			if (fwd) toggleDisabledAttr(fwd, !state.canGoForward);
+			const bm = findToolbarById(root, 'bookmarkButton');
+			if (bm) {
+				// Always show the bookmark button; just disable it on
+				// non-bookmarkable pages (internal `brewser://` pages,
+				// any URL without an http(s) scheme). Same visual
+				// treatment as back/forward when there's no history
+				// in that direction.
+				toggleDisabledAttr(bm, !state.bookmarkable);
+				const img = findToolbarImg(bm);
+				if (img) {
+					const next = state.bookmarked
+						? img.getAttribute('data-bookmark-true')
+						: img.getAttribute('data-bookmark-false');
+					if (next && img.getAttribute('src') !== next) {
+						img.setAttribute('src', next);
+					}
+				}
+			}
+			const modeEl = findToolbarById(root, 'modeLabel');
+			if (modeEl) setFirstText(modeEl, state.modeLabel);
+			const dot = findToolbarById(root, 'reachableDot');
+			if (dot) {
+				const status = state.internetReachable === undefined
+					? 'unknown'
+					: state.internetReachable ? 'up' : 'down';
+				if (dot.getAttribute('data-status') !== status) {
+					dot.setAttribute('data-status', status);
+				}
+			}
+		} finally {
+			popToolbarMutationScope();
+		}
 	}
 
 	/** Repaint just one `<video>` element's box on the screen ctx
@@ -2365,7 +2647,7 @@ export class BrowserShell {
 		const box = getLayoutBox(video);
 		if (!box || box.w <= 0 || box.h <= 0) return;
 		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
-		const chromeHeight = this.toolbar.toolbar.height;
+		const chromeHeight = this.chromeHeight;
 		const isBottomToolbar = this.toolbarPosition === 'bottom';
 		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
 		const screenX = box.x;
@@ -2542,32 +2824,13 @@ export class BrowserShell {
 		if (this.mode === 'normal') this.renderChrome();
 	}
 
-	/** Resolve each `toolbar.icons.X` path against the profile root
-	 * unless the user supplied an absolute scheme. Lets a custom
-	 * toolbar point at icons elsewhere (e.g.
-	 * `romfs:/shell/assets/...`, `sdmc:/themes/.../home.png`). */
-	private resolveIconPaths() {
-		const root = this.profile.storageRoot;
-		const resolve = (rel: string) => /^(?:https?:|sdmc:|romfs:)\/\//.test(rel) ? rel : `${root}${rel}`;
-		const i = this.toolbar.icons;
-		return {
-			left: resolve(i.back),
-			right: resolve(i.forward),
-			refresh: resolve(i.refresh),
-			home: resolve(i.home),
-			settings: resolve(i.settings),
-			bookmarkTrue: resolve(i.bookmarkTrue),
-			bookmarkFalse: resolve(i.bookmarkFalse),
-		};
-	}
-
 	/** Tell the touch dispatcher where the chrome strip lives so taps
 	 * in that y-range route to chrome-button branches. Called once at
 	 * startup after the toolbar is loaded; the toolbar position can
 	 * only change via a toolbar edit + relaunch. */
 	private publishChromeRegion(): void {
 		const canvas = nxScreen();
-		const chromeHeight = this.toolbar.toolbar.height;
+		const chromeHeight = this.chromeHeight;
 		if (this.toolbarPosition === 'top') {
 			setChromeRegion(0, chromeHeight);
 		} else {
@@ -2644,6 +2907,60 @@ export class BrowserShell {
 		}
 		ctx.textAlign = 'start';
 		await waitForAnyButton();
+	}
+}
+
+// --- Toolbar live-root helpers ---------------------------------------------
+//
+// Per the contract in `pushToolbarState`, the engine talks to toolbar
+// HTML themes by id-keyed lookups + attribute / value mutations. These
+// helpers are the smallest possible "find one element by some property"
+// + "tweak one bit of state" walkers. Same shape as the kb-overlay's
+// `findUrlInput` / `findLetterTextNode` — recursive walk, leaf-first
+// `#text` matching, defensive null returns. Kept module-local because
+// no other file mutates the toolbar tree (the page resource loader's
+// `<browser-toolbars>` expansion writes to the host body, not the
+// toolbar root).
+
+function findToolbarById(root: LiveElement, id: string): LiveElement | null {
+	if (root.getAttribute?.('id') === id) return root;
+	for (const c of root.children) {
+		const f = findToolbarById(c, id);
+		if (f) return f;
+	}
+	return null;
+}
+
+function findToolbarImg(within: LiveElement): LiveElement | null {
+	if (within.tagName === 'IMG') return within;
+	for (const c of within.children) {
+		const f = findToolbarImg(c);
+		if (f) return f;
+	}
+	return null;
+}
+
+function setFirstText(el: LiveElement, text: string): void {
+	for (const c of el.children) {
+		if (c.tagName === '#text') {
+			const cur = ((c as { data?: string }).data ?? '');
+			if (cur !== text) (c as { data: string }).data = text;
+			return;
+		}
+	}
+	// No text child yet — create one. (Themes that ship `<span></span>`
+	// with no text inside still get populated correctly.)
+	const tn = new LiveElement('#text');
+	(tn as { data: string }).data = text;
+	el.appendChild(tn);
+}
+
+function toggleDisabledAttr(el: LiveElement, on: boolean): void {
+	const has = el.hasAttribute('data-disabled');
+	if (on && !has) {
+		el.setAttribute('data-disabled', 'true');
+	} else if (!on && has) {
+		el.removeAttribute('data-disabled');
 	}
 }
 

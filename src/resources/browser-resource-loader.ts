@@ -279,7 +279,16 @@ export class BrowserResourceLoader implements ResourceLoader {
 	 * empty-state `<p>`). Pages without any of the tags fall through
 	 * unchanged. */
 	private expandCustomTags(html: string): string {
-		let out = html;
+		// 2026-06-14: strip HTML comments BEFORE the custom-tag regexes run.
+		// The author-side comments in `home.html` / `apps.html` reference the
+		// literal `<browser-modal>` token (documenting why the tag exists);
+		// without this strip, the modal expansion regex matches the
+		// occurrence INSIDE the comment, swallowing the real modal's
+		// `id` / `class` attrs into the captured body. The downstream
+		// HTML parser (`html-to-live`) drops comments at parse time anyway,
+		// so removing them here changes no rendered output — only the
+		// custom-tag regexes' view of the source.
+		let out = html.replace(/<!--[\s\S]*?-->/g, '');
 		out = out.replace(
 			/<browser-bookmarks(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-bookmarks\s*>)?/gi,
 			(_match, attrs: string | undefined) => this.renderBookmarks(parseLimit(attrs), parseFormat(attrs)),
@@ -377,6 +386,32 @@ export class BrowserResourceLoader implements ResourceLoader {
 		out = out.replace(
 			/<browser-home-title(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-title\s*>)?/gi,
 			() => htmlEscape(homeSectionTitle(loadConfig(this.appRoot).homeSection)),
+		);
+		// `<browser-modal id="…" class="…" ...>CONTENT</browser-modal>` —
+		// the engine-blessed modal wrapper. Expanded to a `<div>` with
+		// the `data-engine-modal="true"` stamp the live-DOM engine
+		// recognises as a modal-layer root. The expansion:
+		//   - preserves whatever attributes the author wrote (id, class,
+		//     aria-*, data-*, role) so the page's CSS still matches
+		//     (`.app-modal-overlay`, `.updates-modal-overlay`, etc.)
+		//   - merges any author-supplied `style` with the engine's
+		//     `position: fixed` hint (`collectPaintOps` reads the
+		//     INLINE `style.position` to decide cache eligibility, so
+		//     the inline hint must survive)
+		//   - stamps `data-engine-modal="true"` (engine sees the
+		//     attribute on attach via `propagateAttached` and registers
+		//     the element as a modal root)
+		// Self-closing form (`<browser-modal />`) is also accepted — yields
+		// an empty modal root the page can fill later via innerHTML.
+		// See the modal-layer block in live-paint-control.ts for the
+		// full rationale.
+		out = out.replace(
+			/<browser-modal(\s+[^>]*)?\s*\/>|<browser-modal(\s+[^>]*)?\s*>([\s\S]*?)<\/browser-modal\s*>/gi,
+			(_match, selfAttrs: string | undefined, openAttrs: string | undefined, body: string | undefined) => {
+				const attrs = (selfAttrs ?? openAttrs ?? '').trim();
+				const inner = body ?? '';
+				return renderBrowserModal(attrs, inner);
+			},
 		);
 		return out;
 	}
@@ -939,6 +974,63 @@ function renderList(entries: ReadonlyArray<{ url: string; title?: string; descri
 		return `<li><a href="${htmlEscape(e.url)}">${label}${desc}</a></li>`;
 	}).join('');
 	return `<ul class="settings-list">${items}</ul>`;
+}
+
+/** Expand `<browser-modal>` into `<div data-engine-modal="true" ...>` —
+ * the engine-blessed modal-layer root the live-DOM painter recognises
+ * (see the modal-layer block in `src/scripts/live-paint-control.ts`).
+ *
+ * Author attributes (id, class, role, aria-*, data-*) flow through to
+ * the output div unchanged. The author's `style` (if any) is merged
+ * with the engine's `position: fixed` hint — `collectPaintOps` reads
+ * `style.position` from INLINE style (not the computed cascade) to
+ * decide cache eligibility, so the inline hint MUST survive even when
+ * the page's CSS already sets `position: fixed` on the matching class.
+ *
+ * `data-engine-modal="true"` is always stamped: it's how
+ * `propagateAttached` knows to register the element with the
+ * modal-roots registry and propagate `inModalLayer = true` to
+ * descendants (so per-modal mutations route through `modalTreeVersion`
+ * instead of dirtying the host page cache). */
+function renderBrowserModal(rawAttrs: string, body: string): string {
+	const attrs = parseAttrs(rawAttrs);
+	let style = (attrs['style'] ?? '').trim();
+	// Force `position: fixed` into the inline style. Re-using the
+	// author's style verbatim if it already contains the declaration;
+	// otherwise prepending so the rule wins source order if the author
+	// later adds an overriding `position:` (last-wins is the spec
+	// behavior, but we want the engine hint to always be present).
+	if (!/(^|;)\s*position\s*:/i.test(style)) {
+		style = style ? `position: fixed; ${style}` : 'position: fixed';
+	}
+	attrs['style'] = style;
+	attrs['data-engine-modal'] = 'true';
+	// Serialize attrs in stable order so the output diffs cleanly
+	// across builds and tests can string-compare. Keep author-supplied
+	// attrs first (preserves any test-visible ordering they wrote)
+	// then the engine stamps.
+	const parts: string[] = [];
+	for (const [name, value] of Object.entries(attrs)) {
+		parts.push(`${name}="${htmlEscape(value)}"`);
+	}
+	return `<div ${parts.join(' ')}>${body}</div>`;
+}
+
+/** Minimal attribute parser for the `<browser-modal>` expansion. Handles
+ * `name="value"`, `name='value'`, and bareword `name` (treated as
+ * `name=""`). Sufficient for the brewser:// page authoring surface,
+ * which doesn't put angle brackets or weird whitespace inside attribute
+ * values. */
+function parseAttrs(raw: string): Record<string, string> {
+	const out: Record<string, string> = {};
+	const re = /([a-zA-Z_:][a-zA-Z0-9_:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(raw)) !== null) {
+		const name = m[1].toLowerCase();
+		const value = m[2] ?? m[3] ?? m[4] ?? '';
+		out[name] = value;
+	}
+	return out;
 }
 
 function htmlEscape(s: string): string {

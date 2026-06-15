@@ -41,13 +41,23 @@
 // pushInput / push-style intent emission is owned by controller-shortcuts;
 // this module reaches it via a sink registered at boot.
 
-import { CHROME_LAYOUT } from '../browser-config.js';
 import { setPseudoActive } from '../scripts/live-css.js';
 import { findTapIntent } from '../scripts/live-overlay.js';
 import { handleFormTap, isFormWidget } from '../scripts/live-form.js';
-import { requestFullRepaint } from '../scripts/live-paint-control.js';
-import type { LiveElement } from '../scripts/live-dom.js';
+import {
+	getToolbarLiveRoot,
+	popToolbarMutationScope,
+	pushToolbarMutationScope,
+	requestFullRepaint,
+} from '../scripts/live-paint-control.js';
+import {
+	getInternalLiveScrollY,
+	hitTestLive,
+	setInternalLiveScrollY,
+	type LiveElement,
+} from '../scripts/live-dom.js';
 import { playClick } from '../audio/click-sound.js';
+import { nxScreen } from '@switch-web/runtime';
 
 /** Minimum time, in milliseconds, that a pressed element keeps its
  * `:active` state visible after `beginLivePress`. The clear on
@@ -144,38 +154,129 @@ export function pointInChromeStrip(_x: number, y: number): boolean {
 	return y >= chromeY0 && y < chromeY1;
 }
 
-/** Hit-test (x, y) against the chrome strip's button slots and dispatch
- * the matching shell intent. Plays the chrome click sound. Returns true
- * if the point was inside the chrome strip (handled), false otherwise.
+/** Known `data-action` values the toolbar HTML can stamp onto chrome
+ * elements. Anything else (or no `data-action` ancestor at all) falls
+ * back to `address-bar` so a tap on bare strip area still focuses the
+ * URL field — matching the pre-2026-06-14 engine-drawn behaviour. */
+const TOOLBAR_INTENT_BY_ACTION: Record<string, ChromeIntent> = {
+	back: { kind: 'back' },
+	forward: { kind: 'forward' },
+	reload: { kind: 'reload' },
+	home: { kind: 'home' },
+	star: { kind: 'star' },
+	settings: { kind: 'settings' },
+	'address-bar': { kind: 'address-bar' },
+};
+
+/** Walk parents looking for the nearest ancestor that carries either
+ * a `data-action` (chrome button intent) OR an `id` that maps to one
+ * via the toolbar contract. Returns the matching element + its
+ * effective action string + whether the button is disabled (the
+ * shell uses `data-disabled="true"` on greyed-out buttons —
+ * back/forward when there's no history in that direction, bookmark
+ * on a non-bookmarkable page). Disabled buttons still match an
+ * action so the caller can swallow the tap (play the press flash
+ * but skip the intent dispatch) instead of falling through to the
+ * URL-bar default. */
+function findToolbarActionAncestor(
+	el: LiveElement | null,
+): { el: LiveElement; action: string; disabled: boolean } | null {
+	for (let n: LiveElement | null = el; n; n = n.parent) {
+		const da = n.getAttribute?.('data-action');
+		if (da && da in TOOLBAR_INTENT_BY_ACTION) {
+			const disabled = n.getAttribute?.('data-disabled') === 'true';
+			return { el: n, action: da, disabled };
+		}
+	}
+	return null;
+}
+
+/** Hit-test the toolbar live root at the given screen coords. Matches
+ * the kb's `hitTestKbAt` shape — viewport is the chrome strip slice
+ * (its y origin == `chromeY0` so the root's local (0,0) maps to the
+ * top-left of the strip), and the host page's scroll is zero'd out
+ * because the toolbar root doesn't scroll with the page. */
+function hitTestToolbarAt(root: LiveElement, x: number, y: number): LiveElement | null {
+	const screen = nxScreen();
+	const viewport = {
+		x: 0,
+		y: chromeY0,
+		width: screen.width,
+		height: Math.max(0, chromeY1 - chromeY0),
+	};
+	const saved = getInternalLiveScrollY();
+	setInternalLiveScrollY(0);
+	try {
+		return hitTestLive(root, x, y, viewport);
+	} finally {
+		setInternalLiveScrollY(saved);
+	}
+}
+
+/** Hit-test (x, y) against the HTML-driven toolbar live root and
+ * dispatch the matching shell intent. Plays the chrome click sound.
+ * Returns true if the point was inside the chrome strip (handled),
+ * false otherwise.
  *
  * Activates on press (touchstart for touch, A-rising for engine-mouse)
- * — matches the prior behaviour where back/forward fire immediately
- * when the finger lands, not on release. */
+ * — matches the prior engine-drawn behaviour where back/forward fired
+ * immediately when the finger lands, not on release.
+ *
+ * Press visual: the matched action element gets a 120 ms `:active`
+ * flash (same shape as the keyboard's `flashKey`). Wrapped in
+ * `pushToolbarMutationScope` so the bump routes to
+ * `toolbarTreeVersion` and the host page cache stays warm.
+ *
+ * Fallbacks for robustness:
+ *   - Toolbar live root not yet built (boot race) → still treat as
+ *     address-bar so taps don't disappear.
+ *   - Tap hit-tests into the strip but lands on bare panel area (no
+ *     `data-action` ancestor) → address-bar.
+ *   - Tap lands on the URL `<input data-action="address-bar">` →
+ *     address-bar (no `:active` flash on the input — it's text, not
+ *     a button). `starEnabled` still gates the star-button branch:
+ *     local `brewser://` pages disable bookmarking and the toolbar
+ *     HTML hides `#bookmarkButton` via the same flag so the tap
+ *     falls through to the URL bar visually. */
 export function dispatchChromeTap(x: number, y: number): boolean {
 	if (!pointInChromeStrip(x, y)) return false;
-	playClick();
-	const backEnd = CHROME_LAYOUT.backX + CHROME_LAYOUT.backWidth;
-	const forwardEnd = CHROME_LAYOUT.forwardX + CHROME_LAYOUT.forwardWidth;
-	const refreshEnd = CHROME_LAYOUT.refreshX + CHROME_LAYOUT.refreshWidth;
-	const homeEnd = CHROME_LAYOUT.homeX + CHROME_LAYOUT.homeWidth;
-	const starEnd = CHROME_LAYOUT.starX + CHROME_LAYOUT.starWidth;
-	const settingsEnd = CHROME_LAYOUT.settingsX + CHROME_LAYOUT.settingsWidth;
-	if (!intentSink) return true;
-	if (x >= CHROME_LAYOUT.backX && x < backEnd) {
-		intentSink({ kind: 'back' });
-	} else if (x >= CHROME_LAYOUT.forwardX && x < forwardEnd) {
-		intentSink({ kind: 'forward' });
-	} else if (x >= CHROME_LAYOUT.refreshX && x < refreshEnd) {
-		intentSink({ kind: 'reload' });
-	} else if (x >= CHROME_LAYOUT.homeX && x < homeEnd) {
-		intentSink({ kind: 'home' });
-	} else if (starEnabled && x >= CHROME_LAYOUT.starX && x < starEnd) {
-		intentSink({ kind: 'star' });
-	} else if (x >= CHROME_LAYOUT.settingsX && x < settingsEnd) {
-		intentSink({ kind: 'settings' });
-	} else {
-		intentSink({ kind: 'address-bar' });
+	if (!intentSink) { playClick(); return true; }
+	const root = getToolbarLiveRoot();
+	let action = 'address-bar';
+	let pressEl: LiveElement | null = null;
+	let disabled = false;
+	if (root) {
+		const hit = hitTestToolbarAt(root, x, y);
+		const match = findToolbarActionAncestor(hit);
+		if (match) {
+			action = match.action;
+			disabled = match.disabled;
+			// Skip the press flash for the URL input — visually the
+			// input doesn't need :active feedback (the keyboard takes
+			// over the screen on tap), and applying :active to a text
+			// input often shifts its background colour in a way that
+			// reads as flicker.
+			if (match.el.tagName !== 'INPUT') pressEl = match.el;
+		}
 	}
+	// Disabled chrome button (back/forward with no history,
+	// bookmark on a non-bookmarkable page): swallow the tap
+	// silently — no click sound, no press flash, no intent. The
+	// visual treatment (opacity 0.32, cursor: default) already
+	// signals "not available"; firing anything on the tap would
+	// either trigger the wrong action or feel like a misclick.
+	if (disabled) return true;
+	playClick();
+	if (pressEl) {
+		const el = pressEl;
+		pushToolbarMutationScope();
+		try { setPseudoActive(el, true); } finally { popToolbarMutationScope(); }
+		setTimeout(() => {
+			pushToolbarMutationScope();
+			try { setPseudoActive(el, false); } finally { popToolbarMutationScope(); }
+		}, 120);
+	}
+	intentSink(TOOLBAR_INTENT_BY_ACTION[action] ?? { kind: 'address-bar' });
 	return true;
 }
 

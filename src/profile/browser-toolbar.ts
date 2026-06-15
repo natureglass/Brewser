@@ -1,136 +1,30 @@
 /**
- * Design-time configuration loaded from `<profile>/toolbars/…json` —
- * colours, icon paths, toolbar position + height, page padding, hint
- * text. Everything that used to live as inline constants in
- * `browser-ui`, `browser-config`, and the painter is here so a user
- * can re-skin the browser by editing one JSON file on the SD card.
+ * Toolbar design selection + ancillary shell preferences.
  *
- * The shell reads `<profile>/toolbars.json` first — a registry list
- * of `{ title, path }` entries — and loads the first entry's toolbar.
- * Future toolbar-switching UI can update the registry's ordering or
- * add an `active` field; today, "first one wins".
+ * 2026-06-14 rip-replace: the engine-drawn toolbar is gone. The active
+ * toolbar's *visual* spec is now a full HTML document (parallel to the
+ * keyboard, see `[[reference-brewser-template-to-toolbar-rename]]` and
+ * the kb wiring in browser-shell.ts). Colours / icon paths / layout all
+ * live inside the toolbar HTML's `<style>` + `<body>`; this file no
+ * longer carries a `BrowserToolbar` interface.
  *
- * Unknown fields are ignored; missing fields fall back to
- * `DEFAULT_TOOLBAR`. A malformed file logs a debug message and the
- * shell carries on with defaults — there's no scenario where a bad
- * toolbar file can stop the browser from rendering at all.
+ * What survives here:
+ *   - `BrowserConfig` — every shell preference, including the active
+ *     toolbar HTML path (`toolbar`), the chrome strip pixel height
+ *     (`toolbarHeight`), and the dark-theme page-bg fill colour
+ *     (`pageBackground`).
+ *   - `ToolbarEntry` + `loadToolbarRegistry` — the Settings page's
+ *     "Toolbar" radio list.
+ *
+ * Legacy `themes/toolbars/<X>.json` paths in on-disk configs are
+ * rewritten in-memory to `themes/toolbars/<X>.html` by `loadConfig` and
+ * by `loadToolbarRegistry`. On the next `saveSettings` the rewritten
+ * path is persisted, so users who had a `.json` toolbar selected
+ * before the migration end up with the matching `.html` selected
+ * silently.
  */
 
 export type ToolbarPosition = 'top' | 'bottom';
-
-/** Visual design spec for the browser chrome. Despite the name, this
- * covers more than the toolbar strip — it also carries icon paths, page
- * padding, and on-canvas keyboard colours — but the toolbar is the most
- * visible bit so the whole config is referred to as a "toolbar" in the
- * Settings UI. */
-export interface BrowserToolbar {
-	toolbar: {
-		height: number;
-		background: string;
-		/** Optional background image painted across the toolbar rect
-		 * (stretched to fit). Empty string = use `background` only.
-		 * Resolved against the profile root unless absolute. */
-		image: string;
-		border: string;
-		divider: string;
-		urlText: string;
-		hintText: string;
-		hint: string;
-		glyphActive: string;
-		glyphInactive: string;
-		starActive: string;
-	};
-	icons: {
-		back: string;
-		forward: string;
-		refresh: string;
-		home: string;
-		settings: string;
-		bookmarkTrue: string;
-		bookmarkFalse: string;
-	};
-	page: {
-		background: string;
-		/** Distance from the chrome strip (or the canvas edge in
-		 * fullscreen mode) to the first content block. The first
-		 * block's own `marginTop` adds to this. */
-		topPadding: number;
-		/** Horizontal gutter on each side of the content area. */
-		sidePadding: number;
-	};
-	/** On-canvas soft keyboard colours. Layout (row count, key sizes,
-	 * positions) stays hardcoded in `KEYBOARD_LAYOUT`; only colours
-	 * are configurable from here. */
-	keyboard: {
-		panelBorder: string;
-		panelBg: string;
-		/** Optional background image painted across the keyboard panel
-		 * rect (stretched to fit). Empty string = use `panelBg` only.
-		 * Resolved against the profile root unless absolute. */
-		image: string;
-		/** 0 → keys fully opaque (default). 1 → keys fully transparent
-		 * (invisible). Affects the key rectangles AND their labels so
-		 * the keyboard background image shows through proportionally;
-		 * the panel bg, edit preview, and help footer stay opaque. */
-		transparency: number;
-		editBg: string;
-		editText: string;
-		editCursor: string;
-		keyBg: string;
-		keyFocusBg: string;
-		keyText: string;
-		keyActionBg: string;
-		keyActionFocusBg: string;
-		keyActionText: string;
-		helpText: string;
-	};
-}
-
-export const DEFAULT_TOOLBAR: BrowserToolbar = {
-	toolbar: {
-		height: 56,
-		background: '#0d1426',
-		image: '',
-		border: '#1f2c4d',
-		divider: '#1a2440',
-		urlText: '#e0e8f4',
-		hintText: '#7a8aa3',
-		hint: '',
-		glyphActive: '#e0e8f4',
-		glyphInactive: '#3a4866',
-		starActive: '#ffd35e',
-	},
-	icons: {
-		back: 'assets/left.png',
-		forward: 'assets/right.png',
-		refresh: 'assets/refresh.png',
-		home: 'assets/home.png',
-		settings: 'assets/settings.png',
-		bookmarkTrue: 'assets/bookmark_true.png',
-		bookmarkFalse: 'assets/bookmark_false.png',
-	},
-	page: {
-		background: '#0b1220',
-		topPadding: 12,
-		sidePadding: 48,
-	},
-	keyboard: {
-		panelBorder: '#1f2c4d',
-		panelBg: '#080d1a',
-		image: '',
-		transparency: 0,
-		editBg: '#101a30',
-		editText: '#e0e8f4',
-		editCursor: '#7aa2ff',
-		keyBg: '#162038',
-		keyFocusBg: '#2a3a66',
-		keyText: '#dbe5f4',
-		keyActionBg: '#1a2c4a',
-		keyActionFocusBg: '#3a5688',
-		keyActionText: '#ffffff',
-		helpText: '#7a8aa3',
-	},
-};
 
 /** One row in `<profile>/toolbars.json` (also reused by `keyboards.json`
  * and `styles.json` — same `{title, path}` shape). `path` is relative
@@ -139,6 +33,24 @@ export const DEFAULT_TOOLBAR: BrowserToolbar = {
 export interface ToolbarEntry {
 	title: string;
 	path: string;
+}
+
+/** In-memory `.json` → `.html` rewrite for legacy toolbar paths. The
+ * pre-2026-06-14 toolbar was a JSON design spec; the new one is a
+ * full HTML doc at the matching `<name>.html` path. Users with an
+ * older `config.json` (or a hand-edited `toolbars.json`) get
+ * transparently upgraded — the rewrite happens at read time, and the
+ * next `saveSettings` / `selectToolbar` writes the `.html` form back
+ * to disk. Paths that don't match the legacy shape pass through
+ * unchanged. */
+function migrateLegacyToolbarPath(p: string): string {
+	if (typeof p !== 'string' || p.length === 0) return p;
+	if (!p.toLowerCase().endsWith('.json')) return p;
+	// Only rewrite known toolbar-themed paths so a user's hand-rolled
+	// `.json` outside `themes/toolbars/` doesn't silently swap to a
+	// `.html` they never authored.
+	if (!/themes\/toolbars\//i.test(p)) return p;
+	return p.slice(0, -'.json'.length) + '.html';
 }
 
 /** Shell-level preferences from `<profile>/config.json`. The active
@@ -153,10 +65,27 @@ export interface ToolbarEntry {
  * key present in on-disk config (whether user-set or seeded) survives
  * toolbar changes — keep it that way. */
 export interface BrowserConfig {
-	/** Path to the active toolbar JSON (e.g. `toolbars/default.json`).
-	 * Renamed from `template` 2026-06-12; legacy `template` keys are
-	 * read transparently by `loadConfig` for backward compat. */
+	/** Path to the active toolbar HTML (e.g. `themes/toolbars/light.html`).
+	 * Renamed from `template` 2026-06-12; rip-replaced from a `.json`
+	 * design spec to a full HTML doc 2026-06-14. Legacy `.json` paths
+	 * pointing inside `themes/toolbars/` are rewritten to `.html` on
+	 * read by {@link loadConfig}; the next `saveSettings` persists the
+	 * `.html` form. The shell parses the file once at boot into its
+	 * own scoped live root (`__brewser-toolbar-root`) and paints it
+	 * into the chrome strip area each frame. */
 	toolbar: string;
+	/** Chrome strip height in CSS pixels. The toolbar HTML's `<body>`
+	 * uses `min-height: 100vh` so it stretches to fit whatever value
+	 * sits here. Clamped at load time to keep small enough that one
+	 * row of page content stays visible above (top) or below (bottom)
+	 * the strip. Mirrors the {@link keyboardHeight} pattern. */
+	toolbarHeight: number;
+	/** Fallback page background colour for the dark theme (the engine
+	 * fills the content viewport with this before the live-DOM body
+	 * paints over it). Light theme always uses `#ffffff`. Hoisted
+	 * out of the old `BrowserToolbar.page.background` field 2026-06-14
+	 * when the engine-drawn toolbar was ripped out. */
+	pageBackground: string;
 	/** Try NVTEGRA hw-accel video decode first; on first decoder error,
 	 * live-video.ts auto-falls-back to software decode for that
 	 * element. See [[nvtegra-unreliable-on-citron]] — current Citron
@@ -273,11 +202,12 @@ export interface BrowserConfig {
 	 * the baked default so a broken pointer can't blank the chrome. */
 	brewserStyle: string;
 	/** Where the browser chrome strip sits on screen — `'top'` (above
-	 * page content) or `'bottom'` (below it). Hoisted out of
-	 * `BrowserToolbar.toolbar.position` on 2026-06-11 so the toggle
-	 * is a Settings-page preference instead of a per-toolbar baked-in
-	 * value. The shell pushes this into BrowserUI on boot + on Save,
-	 * so the chrome flips position immediately on change. */
+	 * page content) or `'bottom'` (below it). Hoisted out of the
+	 * per-toolbar JSON design on 2026-06-11 so the toggle is a
+	 * Settings-page preference instead of a per-toolbar baked-in
+	 * value. The shell stamps the value as `data-toolbar-position` on
+	 * the toolbar live root so per-theme CSS can switch layout (border
+	 * placement, focus ring direction, etc.) accordingly. */
 	toolbarPosition: ToolbarPosition;
 	/** Which catalog group the home page renders cards for — one of
 	 * `'featured'`, `'community'`, `'experimental'`. The home page has
@@ -340,7 +270,9 @@ export interface BrowserConfig {
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
-	toolbar: 'themes/toolbars/default.json',
+	toolbar: 'themes/toolbars/dark.html',
+	toolbarHeight: 56,
+	pageBackground: '#0b1220',
 	videoNVTEGRA: true,
 	searchEngine: 'DuckDuckGo',
 	wwwRenderChunkMs: 12,
@@ -400,7 +332,18 @@ export function loadConfig(appRoot: string): BrowserConfig {
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
 		return {
-			toolbar: typeof parsed?.toolbar === 'string' ? parsed.toolbar : DEFAULT_CONFIG.toolbar,
+			toolbar: typeof parsed?.toolbar === 'string'
+				? migrateLegacyToolbarPath(parsed.toolbar)
+				: DEFAULT_CONFIG.toolbar,
+			// 120-200 px keeps a single tall slider; 28 is the floor so
+			// the smallest reasonable icon size + breathing room still
+			// fits. Mirrors `keyboardHeight`'s clamp pattern.
+			toolbarHeight: typeof parsed?.toolbarHeight === 'number' && Number.isFinite(parsed.toolbarHeight)
+				? Math.max(28, Math.min(200, Math.trunc(parsed.toolbarHeight)))
+				: DEFAULT_CONFIG.toolbarHeight,
+			pageBackground: typeof parsed?.pageBackground === 'string' && parsed.pageBackground.length > 0
+				? parsed.pageBackground
+				: DEFAULT_CONFIG.pageBackground,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)
@@ -821,8 +764,17 @@ export function resolveSearchEngine(appRoot: string): SearchEngine {
 /** Read a theme registry file (`themes/<name>.json`) and return its
  * validated entries in source order. Missing or malformed file →
  * empty array. Each entry is `{ title, path }` where `path` is
- * relative to the app root unless it carries an absolute scheme. */
-function loadThemeRegistry(appRoot: string, filename: string): ToolbarEntry[] {
+ * relative to the app root unless it carries an absolute scheme.
+ *
+ * `pathMigrator` is applied to every entry's `path` after read so
+ * registries authored against an older path convention (e.g. the
+ * pre-2026-06-14 `themes/toolbars/<X>.json` toolbar JSONs that became
+ * `<X>.html` HTML docs) keep listing the correct file. */
+function loadThemeRegistry(
+	appRoot: string,
+	filename: string,
+	pathMigrator: (p: string) => string = (p) => p,
+): ToolbarEntry[] {
 	let raw: ArrayBuffer | null;
 	try {
 		raw = Switch.readFileSync(`${appRoot}themes/${filename}`);
@@ -833,9 +785,11 @@ function loadThemeRegistry(appRoot: string, filename: string): ToolbarEntry[] {
 	try {
 		const parsed = JSON.parse(decoder.decode(raw));
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter((e): e is ToolbarEntry =>
-			!!e && typeof e.title === 'string' && typeof e.path === 'string',
-		);
+		return parsed
+			.filter((e): e is ToolbarEntry =>
+				!!e && typeof e.title === 'string' && typeof e.path === 'string',
+			)
+			.map((e) => ({ title: e.title, path: pathMigrator(e.path) }));
 	} catch (error) {
 		console.debug(`[brewser] themes/${filename} parse failed: ${error}`);
 		return [];
@@ -845,7 +799,12 @@ function loadThemeRegistry(appRoot: string, filename: string): ToolbarEntry[] {
 /** Theme registries: `<appRoot>themes/{toolbars,keyboards,styles}.json`.
  * The registries drive the Settings page's Toolbar / Keyboard / Style
  * pickers and (for the style registry) the resource loader's
- * `brewser://assets/main.css` redirect. */
+ * `brewser://assets/main.css` redirect. The toolbar registry runs each
+ * `.path` through `migrateLegacyToolbarPath` so users with an older
+ * seeded `toolbars.json` still see the four shipped themes (the seeder
+ * will overwrite it with the `.html` form on next launch since
+ * `seedRomfs` is never-overwrite; this migrator is what bridges the
+ * gap on a profile that was created pre-rip). */
 export function loadKeyboardRegistry(appRoot: string): ToolbarEntry[] {
 	return loadThemeRegistry(appRoot, 'keyboards.json');
 }
@@ -853,55 +812,5 @@ export function loadStyleRegistry(appRoot: string): ToolbarEntry[] {
 	return loadThemeRegistry(appRoot, 'styles.json');
 }
 export function loadToolbarRegistry(appRoot: string): ToolbarEntry[] {
-	return loadThemeRegistry(appRoot, 'toolbars.json');
-}
-
-/** Resolve a toolbar-entry path against the profile root unless it
- * already carries an absolute scheme. */
-function resolveToolbarPath(appRoot: string, rel: string): string {
-	if (/^(?:sdmc:|romfs:)\/\//.test(rel)) return rel;
-	return `${appRoot}${rel}`;
-}
-
-export function loadToolbar(appRoot: string): BrowserToolbar {
-	// Resolution order:
-	//   1. config.json's `toolbar` field — the user-chosen active toolbar.
-	//   2. First entry in toolbars.json — sensible fallback if config is
-	//      missing or its path points at a deleted/broken file.
-	// Each candidate is tried in turn; the first one that reads + parses
-	// successfully wins. If all fall through, `DEFAULT_TOOLBAR` keeps
-	// the browser usable.
-	const config = loadConfig(appRoot);
-	const candidates: string[] = [config.toolbar];
-	const registry = loadToolbarRegistry(appRoot);
-	if (registry[0] && registry[0].path !== config.toolbar) {
-		candidates.push(registry[0].path);
-	}
-	for (const rel of candidates) {
-		const path = resolveToolbarPath(appRoot, rel);
-		let raw: ArrayBuffer | null;
-		try {
-			raw = Switch.readFileSync(path);
-		} catch (_) {
-			continue;
-		}
-		if (!raw) continue;
-		try {
-			const parsed = JSON.parse(decoder.decode(raw)) as Partial<BrowserToolbar>;
-			return mergeToolbar(DEFAULT_TOOLBAR, parsed);
-		} catch (error) {
-			console.debug(`[brewser] toolbar '${rel}' parse failed: ${error}`);
-			continue;
-		}
-	}
-	return DEFAULT_TOOLBAR;
-}
-
-function mergeToolbar(base: BrowserToolbar, override: Partial<BrowserToolbar>): BrowserToolbar {
-	return {
-		toolbar: { ...base.toolbar, ...(override.toolbar ?? {}) },
-		icons: { ...base.icons, ...(override.icons ?? {}) },
-		page: { ...base.page, ...(override.page ?? {}) },
-		keyboard: { ...base.keyboard, ...(override.keyboard ?? {}) },
-	};
+	return loadThemeRegistry(appRoot, 'toolbars.json', migrateLegacyToolbarPath);
 }

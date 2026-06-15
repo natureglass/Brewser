@@ -1293,6 +1293,18 @@ function buildDocumentShim(
 	if (!preserveLiveRoot) resetLiveRoot();
 	const body = getLiveRoot();
 	const documentEl = new LiveElement('html');
+	// 2026-06-14: pre-mark `documentEl` as attached so the
+	// `appendChild(body)` below doesn't trigger a `propagateAttached`
+	// detach-then-attach cycle on the entire body subtree. The old
+	// pre-modal-layer code happened to work because `attached=false`
+	// only suppressed a tree-walk fast path that nothing in this code
+	// path actually relied on; my modal-layer commit promoted the flag
+	// into the registration trigger for `<browser-modal>` roots, so a
+	// stale `propagateAttached(body, false, ...)` now unregisters every
+	// modal in the page and the modal paint pass finds the registry
+	// empty. Matching the same `attached=true` hack `LiveRoot`'s own
+	// constructor and `rebuildKeyboardLiveRoot` use.
+	documentEl.attached = true;
 	const head = new LiveElement('head');
 	// `documentElement` (<html>) owns `<head>` and `<body>`. lil-gui's
 	// stylesheet injection looks for `document.head` then walks its

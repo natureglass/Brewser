@@ -1,4 +1,3 @@
-import { type BrowserToolbar } from '../profile/browser-toolbar.js';
 import { COMBO_BUTTONS } from '../browser-config.js';
 import {
 	getKbTreeVersion,
@@ -295,24 +294,10 @@ function applyLetterCase(letterKeys: LiveElement[], upper: boolean): void {
  *     external `__brewserKeyboardCancel`) resolves with `null`.
  */
 export class KeyboardOverlay {
-	private toolbar: BrowserToolbar | null = null;
-	private panelBackground: Image | null = null;
-
-	setToolbar(toolbar: BrowserToolbar): void {
-		this.toolbar = toolbar;
-	}
-
-	setPanelBackground(image: Image | null): void {
-		this.panelBackground = image;
-	}
-
 	async open(
 		initial = '',
 		callbacks: KeyboardScrollCallbacks = {},
 	): Promise<string | null> {
-		void this.toolbar;
-		void this.panelBackground;
-
 		const root = getKeyboardLiveRoot();
 		// Defensive: if the kb root failed to load (file missing or
 		// parse error at boot), fall back to returning the initial

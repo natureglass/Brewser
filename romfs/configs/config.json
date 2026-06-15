@@ -1,5 +1,5 @@
 {
-  "toolbar": "themes/toolbars/light.json",
+  "toolbar": "themes/toolbars/light.html",
   "keyboard": "themes/keyboards/neon.html",
   "brewserStyle": "themes/styles/neon.css",
   "theme": "dark",
