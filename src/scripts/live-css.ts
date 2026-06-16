@@ -39,7 +39,7 @@
 
 import { generate, parse, walk, type CssNode, type Rule, type Selector } from 'css-tree';
 import { bumpLiveTreeVersion, type LiveElement } from './live-dom.js';
-import { parseLength, resolveFontSizeKeyword, type CssLength } from './inline-css.js';
+import { getCssViewport, parseLength, resolveFontSizeKeyword, type CssLength } from './inline-css.js';
 import { markLiveDirty } from './live-paint-control.js';
 
 // =========================================================================
@@ -3281,6 +3281,18 @@ function assignPseudoEdge(
 
 function parsePxOrNum(value: string, ctx?: { emBase?: number; remBase?: number }): number | undefined {
 	const t = value.trim();
+	// Viewport units. `vh`/`vw` resolve against the content viewport
+	// (set by `setCssViewport`, defaults to 1280×720). Without this,
+	// `max-height: 80vh` in a stylesheet silently parsed to undefined
+	// (the trailing `vh` didn't match the px regex), no max-height
+	// clamp landed in the computed style, and a content-tall card
+	// (e.g. the app-detail modal with many rows) grew past the viewport.
+	// `inline-css.ts`'s parser already handled vh/vw for inline `style=`
+	// attributes; this brings stylesheet parsing in line.
+	const vh = /^(-?\d+(?:\.\d+)?)vh$/.exec(t);
+	if (vh) return parseFloat(vh[1]) * 0.01 * getCssViewport().h;
+	const vw = /^(-?\d+(?:\.\d+)?)vw$/.exec(t);
+	if (vw) return parseFloat(vw[1]) * 0.01 * getCssViewport().w;
 	// em is relative to the element's own (or parent's) font-size; rem to
 	// the root. Default base 16px matches the CSS spec's initial value.
 	const rem = /^(-?\d+(?:\.\d+)?)rem$/.exec(t);

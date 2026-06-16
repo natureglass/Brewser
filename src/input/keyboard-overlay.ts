@@ -409,9 +409,9 @@ export class KeyboardOverlay {
 
 			globals.__brewserKeyboardSubmit = (v: string): void => {
 				// Honor the validator gate even when an external caller
-				// drives the submit (e.g. future keyboard-driver.js page
-				// glue, or a test fixture). Without the gate a number-
-				// only input could commit letter junk via the back door.
+				// drives the submit (e.g. a test fixture). Without the
+				// gate a number-only input could commit letter junk
+				// via the back door.
 				if (!isSubmittable(v)) return;
 				finish(v);
 			};

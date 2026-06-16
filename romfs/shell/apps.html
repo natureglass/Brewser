@@ -123,7 +123,7 @@
       </div>
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
-        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Run</a>
+        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Launch</a>
         <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Download</button>
       </div>
     </div>
@@ -243,13 +243,48 @@
   </div>
 </browser-modal>
 
+<!-- Permission-warnings modal. Opened by missing-app-modal.js on a
+     Launch tap when one or more of the app's `permissions` keys match
+     an entry in `configs/warnings.json`. Lists each matched warning
+     (key + risk badge + warning text). Cancel closes only THIS modal
+     (the app modal stays open behind it); Launch closes THIS modal +
+     navigates to the app URL via the `<a href>` stamped on the Launch
+     button at open time (engine's findTapIntent picks up the href
+     after click dispatch). z-index bumped to 1001 so it consistently
+     paints above the app-detail modal (both share `.app-modal-overlay`
+     which is z-index 1000). -->
+<browser-modal id="warnings-modal-overlay" class="app-modal-overlay warnings-modal-overlay">
+  <div class="app-modal-card warnings-modal-card">
+    <h2 class="app-modal-title warnings-modal-title">Permissions warning</h2>
+    <!-- Scrollable list of matched warnings. Each row is rendered by
+         warnings-modal.js from the matched warnings list. The card
+         bounds its own max-height; this slot claims the leftover
+         space (`flex: 1 1 auto`) and scrolls. -->
+    <div id="warnings-modal-list" class="warnings-modal-list"></div>
+    <div class="app-modal-actions warnings-modal-actions">
+      <div class="app-modal-actions-side"></div>
+      <div class="app-modal-actions-side">
+        <button id="warnings-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+        <!-- Launch is an `<a role="button">` so the engine's
+             findTapIntent walks up to the href on tap and fires a
+             navigate intent (same path the missing-app modal's Play
+             button uses). The href is stamped at open time from the
+             URL captured by missing-app-modal.js. -->
+        <a id="warnings-modal-launch" class="app-modal-btn app-modal-btn--play" role="button">Launch</a>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
 <!-- Script load order matters: download-modal.js installs
      `globalThis.__brewserOpenDownloadModal` synchronously at load;
-     missing-app-modal.js reads it on tap. Load download-modal FIRST
-     so the global is available by the time the missing-app modal's
-     click handlers fire. -->
-<script src="brewser://assets/download-modal.js"></script>
-<script src="brewser://assets/missing-app-modal.js"></script>
-<script src="brewser://assets/updates-modal.js"></script>
+     warnings-modal.js installs `__brewserOpenWarningsModal` +
+     `__brewserGetWarningsForPermissions`. Both must load BEFORE
+     missing-app-modal.js so the globals are available by the time
+     its click handlers fire. -->
+<script src="brewser://scripts/download-modal.js"></script>
+<script src="brewser://scripts/warnings-modal.js"></script>
+<script src="brewser://scripts/missing-app-modal.js"></script>
+<script src="brewser://scripts/updates-modal.js"></script>
 </body>
 </html>

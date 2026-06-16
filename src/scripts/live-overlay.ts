@@ -1852,29 +1852,6 @@ export function paintModalOverlay(
 		} finally { ctx.restore(); }
 		break;
 	}
-		// 2026-06-15 translucent-backdrop pass for `<browser-modal>` -- paint
-		// the overlay root's CSS background DIRECTLY onto the main ctx when
-		// the colour is translucent. The cache-build path below would otherwise
-		// fill the rgba into the OffscreenCanvas cache, which on this engine
-		// does not preserve alpha through the offscreen -> main drawImage
-		// blit: translucent pixels land on screen as opaque (the modal backdrop
-		// reads as solid black instead of a tinted view of the host page).
-		// Painting onto the main ctx blends with the host page already painted
-		// in the preceding shell cache blit, giving the intended dim effect.
-		for (const root of getModalRoots()) {
-			if (isDialogModalMode(root)) continue;
-			const cs0b = getComputedLiveStyle(root);
-			if (cs0b.display === 'none') continue;
-			const bgB = cs0b.background;
-			if (!bgB || !isTranslucentColorValue(bgB)) continue;
-			const rb = getLayoutBox(root);
-			if (!rb || rb.w <= 0 || rb.h <= 0) continue;
-			ctx.save();
-			try {
-				ctx.fillStyle = bgB;
-				ctx.fillRect(rb.x, rb.y, rb.w, rb.h);
-			} finally { ctx.restore(); }
-		}
 	for (const root of getModalRoots()) {
 		// Visibility gate — closed modals (no `--open` class on the
 		// overlay, so the CSS rule `.app-modal-overlay { display: none }`
@@ -1882,6 +1859,37 @@ export function paintModalOverlay(
 		// `cs.display === 'none'` skip in the fixed-element walk.
 		const cs = getComputedLiveStyle(root);
 		if (cs.display === 'none') continue;
+		// 2026-06-15 translucent-backdrop pass for `<browser-modal>` -- paint
+		// the overlay root's CSS background DIRECTLY onto the main ctx when
+		// the colour is translucent. The cache-build path below would otherwise
+		// fill the rgba into the OffscreenCanvas cache, which on this engine
+		// does not preserve alpha through the offscreen -> main drawImage
+		// blit: translucent pixels land on screen as opaque (the modal backdrop
+		// reads as solid black instead of a tinted view of the host page).
+		//
+		// 2026-06-16: interleaved with the cache blit below (was a separate
+		// pre-pass over ALL modal roots before any card blit). With stacked
+		// `<browser-modal>` overlays (e.g. permissions-warning modal on top
+		// of the app-detail modal) the pre-pass painted the upper modal's
+		// backdrop onto the main ctx BEFORE the lower modal's card blit ran,
+		// and the lower card then covered the upper backdrop in its area —
+		// the upper modal appeared backdrop-less over the lower card.
+		// Painting each modal's backdrop right before ITS OWN card blit puts
+		// the upper backdrop on top of the lower card, which is what the
+		// stacked z-index implies.
+		if (!isDialogModalMode(root)) {
+			const bgB = cs.background;
+			if (bgB && isTranslucentColorValue(bgB)) {
+				const rb = getLayoutBox(root);
+				if (rb && rb.w > 0 && rb.h > 0) {
+					ctx.save();
+					try {
+						ctx.fillStyle = bgB;
+						ctx.fillRect(rb.x, rb.y, rb.w, rb.h);
+					} finally { ctx.restore(); }
+				}
+			}
+		}
 		// Reuse the layout box the host's fixed-element pass produced
 		// at `(viewport.x, viewport.y)` origin. If it's not there yet
 		// (first frame this modal becomes visible), bail — the next
@@ -2849,8 +2857,28 @@ function collectPaintOps(
 	// + clipped) each frame by the overlay painter. The flat-op cache builder
 	// can't express clip/scroll, and re-painting the subtree live every frame
 	// is too slow, so the dedicated scroll cache is the cheap middle ground.
+	//
+	// Modal layer caveat (2026-06-16): the modal paint pass at
+	// `paintModalOverlay` calls `collectPaintOps` WITHOUT a `scrollOut`
+	// handler — there's no per-container scroll machinery wired up for
+	// modal subtrees. Without this fallback, scrollable elements inside
+	// a `<browser-modal>` (e.g. `.app-modal-card { overflow-y: auto }`)
+	// had their entire subtree silently dropped, rendering the modal card
+	// frame with no content inside. Fall through to clip-push + walk +
+	// clip-pop when there's no scrollOut sink so the children at least
+	// render (clipped to the container, without scroll handling — close
+	// enough for content that fits the box, which is the common case for
+	// modal cards bounded by max-height).
 	if (!skipBgOfRoot && isScrollOverlayEl(cs)) {
-		if (scrollOut) scrollOut.push(el);
+		if (scrollOut) {
+			scrollOut.push(el);
+			return;
+		}
+		out.push({ kind: 'clip-push', el, box });
+		for (const c of el.children) {
+			collectPaintOps(c, out, false, scrollOut);
+		}
+		out.push({ kind: 'clip-pop', el });
 		return;
 	}
 	// Form widgets and self-painting leaves are rendered entirely by the

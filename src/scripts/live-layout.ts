@@ -1336,12 +1336,50 @@ function layoutFlex(
 		// gives the distribution a chance to shrink the widget against
 		// the (already-clamped, larger) name.
 		const clampedBase = clampMain(cs, isRow, basis, contentW, contentH);
+		// Cross-axis sizing. For row direction (cross-axis = height),
+		// `intrinsicCross` falls back to `intrinsicContentHeight`, which
+		// returns a ONE-LINE measurement for text leaves (see line 2766).
+		// That under-counts every wrappable `<p>` and propagates up: a
+		// container of multi-line paragraphs reports a height equal to
+		// the count of leaf elements × line-height, not the actual
+		// rendered (wrapped) height. The flex parent then sizes the item
+		// to the under-count, the item's own inner layout sees
+		// `leftover < 0`, and any `flex: 1 1 auto` descendant shrinks to
+		// fit — eating its trailing padding + the next sibling's
+		// margin-top in the visible output. (Concrete case: permissions-
+		// warnings modal — the list's last-row padding-bottom + list
+		// margin-bottom + actions margin-top all disappeared because the
+		// card's `intrinsicCross` came out ~90px short, and the inner
+		// shrink consumed the trailing whitespace.)
+		// Fix: when the item has element children AND an EXPLICIT main-
+		// axis size, lay out the subtree at that size to get the REAL
+		// multi-line-aware cross extent — same path the column-direction
+		// `basis` calc above uses (line 1324).
+		// Gated on `m.explicit !== undefined` (not just `clampedBase > 0`)
+		// because a `flex: 1` item resolves to `flex-basis: 0` →
+		// `clampedBase = 0` in phase 1. Calling `layoutLeaf` at width 0
+		// wraps text to one-char-per-line, producing absurd cross extents
+		// that inflate the parent's reported height massively (the
+		// regression that surfaced the moment the flex-1 value spans in
+		// each `.app-modal-row` started going through this branch).
+		// Explicit-width items (the card itself at `width: 720px`) still
+		// get the real multi-line measurement; flex-grow items keep the
+		// cheap `intrinsicCross` fallback, which matches the pre-fix
+		// behavior for them.
+		let crossSize: number;
+		if (c.explicit !== undefined) {
+			crossSize = c.explicit;
+		} else if (isRow && el.children.length > 0 && m.explicit !== undefined) {
+			crossSize = layoutLeaf(el, cs, 0, 0, m.explicit);
+		} else {
+			crossSize = intrinsicCross(el, cs, isRow);
+		}
 		return {
 			el, cs,
 			base: clampedBase,
 			grow: cs.flexGrow ?? 0,
 			shrink: cs.flexShrink ?? 1,
-			crossSize: c.explicit ?? intrinsicCross(el, cs, isRow),
+			crossSize,
 			marginMainStart: m.marginStart,
 			marginMainEnd: m.marginEnd,
 			marginCrossStart: c.marginStart,

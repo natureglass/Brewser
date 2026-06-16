@@ -617,7 +617,7 @@ ul.settings-list li:active {
    The catalog loader stamps `data-missing="true" data-app-detail="…"`
    on every card whose `apps/<group>/<id>/<entry>` file isn't on disk
    (see browser-toolbar.ts `loadCatalogGroup`). The page-side script at
-   `brewser://assets/missing-app-modal.js` intercepts taps on those
+   `brewser://scripts/missing-app-modal.js` intercepts taps on those
    cards and toggles `.app-modal-overlay--open` to show the centered
    detail panel.
 
@@ -1125,6 +1125,60 @@ a.app-modal-btn.app-modal-btn--play { color: #000000; }
 
 .download-modal-card--loading .download-modal-btn-close { display: none; }
 .download-modal-card:not(.download-modal-card--loading) .download-modal-btn-cancel { display: none; }
+
+/* ---- Permissions-warning modal -----------------------------------
+   Stacks ON TOP of the app-detail modal — z-index 1001 (vs 1000 on
+   the base `.app-modal-overlay`). Reuses `.app-modal-card` chrome
+   (max-height + overflow-y: auto for scroll); only the per-row
+   markup needs theme-local rules. */
+.warnings-modal-overlay { z-index: 1001; }
+
+.warnings-modal-card {
+  width: 720px;
+  max-width: 100%;
+  max-height: 600px;
+  padding: 24px 26px 20px;
+}
+
+.warnings-modal-title {
+  margin: 0 0 14px;
+  color: #faff00;
+}
+
+.warnings-modal-list {
+  text-align: left;
+  margin-bottom: 12px;
+}
+
+.warnings-modal-row {
+  padding: 18px 4px;
+  border-top: 1px solid #160d2e;
+}
+.warnings-modal-row:first-child { border-top: none; padding-top: 4px; }
+
+.warnings-modal-row-head {
+  color: #e8f7ff;
+  font-size: 0.95em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.warnings-modal-row-head--low { color: #00ff88; }
+.warnings-modal-row-head--medium { color: #faff00; }
+.warnings-modal-row-head--high { color: #ff5577; }
+
+.warnings-modal-row-warning {
+  margin: 0;
+  color: #b8c8f0;
+  font-size: 0.95em;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.warnings-modal-actions {
+  padding-top: 8px;
+}
 
 /* ---- about.html ----------------------------------------------------
    Migrated from about.html's inline <style>. The 28px 48px text-heavy

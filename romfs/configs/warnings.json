@@ -1,13 +1,52 @@
 {
     "Permissions": {
         "network": {
-            "warning": "Allows Brewser to read and write files in the app's storage."
+            "show": true,
+            "risk": "medium",
+            "description": "Connects to the internet.",
+            "warning": "Allows this app to connect to the internet and send or receive data, which could transmit your information to remote servers or download untrusted content."
         },
-        "storage":{
-            "warning": "Allows Brewser to read and write files in the app's storage."
+        "storage": {
+            "show": false,
+            "risk": "low",
+            "description": "Uses its own private storage.",
+            "warning": "Allows this app to read and write files in its own private storage area."
         },
         "system": {
-            "warning": "Allows Brewser to read and write files anywhere in the console storage."
+            "show": true,
+            "risk": "high",
+            "description": "Accesses all console storage.",
+            "warning": "Allows this app to read and write files anywhere in the console storage, including files belonging to other apps and the system, which could corrupt your data or compromise the console. Grant only to trusted apps."
+        },
+        "filesystem_read": {
+            "show": true,
+            "risk": "medium",
+            "description": "Reads files outside its storage.",
+            "warning": "Allows this app to read files outside its own storage, which could expose your saves, configuration, and other apps' data."
+        },
+        "filesystem_write": {
+            "show": true,
+            "risk": "high",
+            "description": "Modifies files outside its storage.",
+            "warning": "Allows this app to modify or delete files outside its own storage, which could corrupt your saves, other apps, or system files."
+        },
+        "device_info": {
+            "show": true,
+            "risk": "medium",
+            "description": "Reads console identifiers.",
+            "warning": "Allows this app to read identifying information about your console, such as serial number, firmware version, or hardware IDs, which could be used to track your device."
+        },
+        "account": {
+            "show": true,
+            "risk": "medium",
+            "description": "Reads your account info.",
+            "warning": "Allows this app to read your account or profile information, such as username and linked identities, which could expose your identity."
+        },
+        "external_links": {
+            "show": true,
+            "risk": "low",
+            "description": "Opens external links and apps.",
+            "warning": "Allows this app to open external URLs or launch other apps, which could redirect you to untrusted content."
         }
     }
 }

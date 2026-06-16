@@ -89,7 +89,7 @@
       </div>
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
-        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Run</a>
+        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Launch</a>
         <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Download</button>
       </div>
     </div>
@@ -125,9 +125,28 @@
   </div>
 </browser-modal>
 
-<!-- Load download-modal.js FIRST so its globalThis hook is wired
-     before missing-app-modal.js runs its click handlers. -->
-<script src="brewser://assets/download-modal.js"></script>
-<script src="brewser://assets/missing-app-modal.js"></script>
+<!-- Permission-warnings modal. Mirrors apps.html exactly — keep the
+     two in sync if either side changes. See apps.html for the full
+     rationale on the markup shape. -->
+<browser-modal id="warnings-modal-overlay" class="app-modal-overlay warnings-modal-overlay">
+  <div class="app-modal-card warnings-modal-card">
+    <h2 class="app-modal-title warnings-modal-title">Permissions warning</h2>
+    <div id="warnings-modal-list" class="warnings-modal-list"></div>
+    <div class="app-modal-actions warnings-modal-actions">
+      <div class="app-modal-actions-side"></div>
+      <div class="app-modal-actions-side">
+        <button id="warnings-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+        <a id="warnings-modal-launch" class="app-modal-btn app-modal-btn--play" role="button">Launch</a>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
+<!-- Load download-modal.js + warnings-modal.js FIRST so their
+     globalThis hooks are wired before missing-app-modal.js runs its
+     click handlers. -->
+<script src="brewser://scripts/download-modal.js"></script>
+<script src="brewser://scripts/warnings-modal.js"></script>
+<script src="brewser://scripts/missing-app-modal.js"></script>
 </body>
 </html>

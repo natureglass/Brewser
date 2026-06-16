@@ -197,25 +197,45 @@ export class BrowserResourceLoader implements ResourceLoader {
 			// the seeded asset path below — a broken style pointer can't
 			// blank the chrome.
 			if (classification.relPath === 'assets/main.css') {
-				const styleRel = loadConfig(this.appRoot).brewserStyle;
-				if (styleRel) {
-					const stylePath = /^(?:sdmc:|romfs:)\/\//.test(styleRel)
-						? styleRel
-						: `${this.appRoot}${styleRel}`;
+				// 2026-06-16: stylesheet architecture is themes-only. Each
+				// theme under `<appRoot>themes/styles/` is a complete,
+				// self-contained stylesheet — there is no base
+				// `shell/assets/main.css` to fall back to or concat with.
+				// Adding a new selector means editing the relevant theme
+				// file(s). Read `config.brewserStyle` and serve that
+				// theme's bytes verbatim; if the field is missing or the
+				// file is unreadable, default to `themes/styles/dark.css`
+				// so the page always has SOME stylesheet (a broken style
+				// pointer can't blank the chrome).
+				const styleRel = loadConfig(this.appRoot).brewserStyle
+					|| 'themes/styles/dark.css';
+				const stylePath = /^(?:sdmc:|romfs:)\/\//.test(styleRel)
+					? styleRel
+					: `${this.appRoot}${styleRel}`;
+				try {
+					const styleData = Switch.readFileSync(stylePath);
+					if (styleData) {
+						return new Response(decoder.decode(styleData), {
+							status: 200,
+							headers: { 'content-type': classification.mime },
+						});
+					}
+				} catch (_) { /* fall through to the default-theme attempt */ }
+				if (styleRel !== 'themes/styles/dark.css') {
 					try {
-						const styleData = Switch.readFileSync(stylePath);
-						if (styleData) {
-							return new Response(decoder.decode(styleData), {
+						const defaultPath = `${this.appRoot}themes/styles/dark.css`;
+						const defaultData = Switch.readFileSync(defaultPath);
+						if (defaultData) {
+							return new Response(decoder.decode(defaultData), {
 								status: 200,
 								headers: { 'content-type': classification.mime },
 							});
 						}
-					} catch (_) {
-						// Configured path missing — fall through to the baked
-						// `<storageRoot>assets/main.css` so the page still has
-						// SOME stylesheet.
-					}
+					} catch (_) { /* fall through to 404 */ }
 				}
+				// Neither configured theme nor default readable — fall
+				// through to the 404 below (chrome won't have styles, but
+				// page will still render).
 			}
 			try {
 				const resolvedPath = this.resolveContentPath(classification.relPath);

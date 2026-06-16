@@ -50,6 +50,16 @@
 
   var modalOpen = false;
   var currentDetail = null;
+  // Captured app URL for the warnings-modal handoff. Populated in
+  // show() ONLY when the current detail has one or more permissions
+  // that match an entry in `configs/warnings.json` — in that case we
+  // deliberately leave the play <a>'s href unset so the engine's
+  // findTapIntent finds no navigate ancestor on tap, and the click
+  // listener below routes through the warnings modal instead. Cleared
+  // back to '' when the current detail has no matching warnings (the
+  // standard path: href is set on the play button and the engine
+  // navigates directly without any JS in the middle).
+  var pendingLaunchUrl = '';
 
   // Default download glyph — used when the catalog entry doesn't carry
   // a logo URL we can resolve (or carries the placeholder we already
@@ -424,13 +434,32 @@
     if (currentDetail.missing) {
       playBtn.classList.add('app-modal-btn--hidden');
       playBtn.removeAttribute('href');
+      pendingLaunchUrl = '';
       downloadBtn.classList.remove('app-modal-btn--hidden');
       updateBtn.classList.add('app-modal-btn--hidden');
     } else {
-      // findTapIntent walks ancestors for an <a href>; setting href
-      // here means the next tap fires a navigate intent the shell
-      // resolves via the standard navigateTo path.
-      playBtn.setAttribute('href', currentDetail.url || '');
+      // Warnings gate. When the catalog's permissions list contains
+      // one or more keys that map to a warnings.json entry, we DON'T
+      // stamp the href on the play <a> — that's the only mechanism
+      // the engine's findTapIntent uses to fire navigate, so a
+      // missing href silently blocks the standard nav path. The
+      // click listener below then takes over: reads pendingLaunchUrl
+      // and routes the tap into the warnings modal. When no
+      // permissions match (or the warnings table failed to load and
+      // the matcher returns []), we set the href as before and the
+      // engine navigates directly without JS in the middle.
+      var url = currentDetail.url || '';
+      var matcher = globalThis.__brewserGetWarningsForPermissions;
+      var matched = (typeof matcher === 'function')
+        ? matcher(currentDetail.permissions || '')
+        : [];
+      if (matched.length > 0 && url) {
+        playBtn.removeAttribute('href');
+        pendingLaunchUrl = url;
+      } else {
+        playBtn.setAttribute('href', url);
+        pendingLaunchUrl = '';
+      }
       playBtn.classList.remove('app-modal-btn--hidden');
       downloadBtn.classList.add('app-modal-btn--hidden');
       if (hasUpgrade) {
@@ -472,6 +501,26 @@
 
   cancelBtn.addEventListener('click', function (e) {
     close();
+    if (e && e.stopPropagation) e.stopPropagation();
+  });
+
+  // Play (Launch) click → warnings-modal handoff when applicable.
+  // pendingLaunchUrl is set in show() ONLY when this detail's
+  // permissions contain matches in warnings.json AND the href was
+  // therefore deliberately left off. Else this branch is empty and
+  // the engine's findTapIntent walks up to the play <a>'s href and
+  // navigates directly — no JS path in the middle. stopPropagation
+  // keeps the click from bubbling to the overlay backdrop close
+  // handler (target === overlay test would fail anyway, but belt +
+  // suspenders for the launch flow).
+  playBtn.addEventListener('click', function (e) {
+    if (!pendingLaunchUrl) return;
+    var opener = globalThis.__brewserOpenWarningsModal;
+    if (typeof opener !== 'function') {
+      console.debug('[apps] warnings-modal not loaded; falling through');
+      return;
+    }
+    opener(currentDetail || {}, { url: pendingLaunchUrl });
     if (e && e.stopPropagation) e.stopPropagation();
   });
 
@@ -536,7 +585,15 @@
   // is outside the chrome strip and a page mouse listener exists; we
   // installed one just above. preventDefault keeps the (no-op) shell
   // contextmenu path from doing anything else.
+  //
+  // `_brewserHandled` handshake: the permissions-warning modal sits on
+  // top of this one when an app's permissions trigger a warning. Its
+  // contextmenu listener fires FIRST (loaded earlier in the script
+  // chain), sets the flag, and closes itself. We bail when the flag
+  // is set so a single B press peels off only the top modal, leaving
+  // the app modal visible. A second B then closes this modal as usual.
   window.addEventListener('contextmenu', function (e) {
+    if (e && e._brewserHandled) return;
     if (!modalOpen) return;
     close();
     if (e && e.preventDefault) e.preventDefault();
@@ -548,7 +605,13 @@
   // ~L762). Calling preventDefault() signals the shell not to also
   // navigate back, so the modal-open press only closes the modal and
   // a follow-up press still works for normal back nav.
+  //
+  // Same `_brewserHandled` handshake as the contextmenu listener
+  // above — the warnings modal's L handler peels off the top layer
+  // first and flags the event so this listener leaves the app modal
+  // alone.
   window.addEventListener('keydown', function (e) {
+    if (e && e._brewserHandled) return;
     if (!modalOpen) return;
     var key = e && e.key;
     if (key === 'Escape' || key === 'Esc') {
