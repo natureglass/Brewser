@@ -1,5 +1,9 @@
-import { storagePathForOrigin } from '@switch-web/runtime';
-import { BREWSER_APP_ROOT, DEFAULT_PROFILE_ROOT } from '../browser-config.js';
+import {
+	BREWSER_APP_ROOT,
+	DEFAULT_PROFILE_ROOT,
+	storagePathForOrigin,
+	type StorageProfileLike,
+} from '@switch-web/runtime';
 
 /**
  * Per-user profile container. Owns the on-disk storage root for cookies,
@@ -32,7 +36,7 @@ const SEED_SKIP_DIRS: ReadonlySet<string> = new Set([
 	'emojis/',
 ]);
 
-export class BrowserProfile {
+export class BrowserProfile implements StorageProfileLike {
 	readonly name: string;
 	/** Per-profile storage: seeded pages (home.html etc.) sit flat
 	 * at the root, plus `assets/` and per-origin dirs. */
@@ -68,6 +72,15 @@ export class BrowserProfile {
 	/** Per-origin path inside this profile (used by future cookie/local-storage stores). */
 	pathForOrigin(origin: string): string {
 		return storagePathForOrigin(origin, this.storageRoot);
+	}
+
+	/** Pick the storage namespace for a page URL. Implements
+	 * {@link StorageProfileLike} so the runtime's `installLocalStorage`
+	 * / `installIndexedDB` can route brewser:// dev pages into a
+	 * sandboxed `dev/` subdir without runtime code knowing about the
+	 * `brewser://dev/` URL convention. */
+	pickStorageNamespace(currentUrl: string): string {
+		return currentUrl.startsWith('brewser://dev/') ? 'dev' : 'default';
 	}
 
 	/**

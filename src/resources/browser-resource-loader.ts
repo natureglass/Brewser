@@ -381,6 +381,17 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-ratings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-ratings\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).ratings),
 		);
+		// `<browser-config-telemetry>` — expands to the strict-pinned
+		// `config.telemetry` URL (runtime-bundled per
+		// `@switch-web/runtime` `RUNTIME_CONFIG_DEFAULTS`). Stamped onto
+		// `<body data-telemetry-url>` of apps.html / home.html so
+		// missing-app-modal.js can read it from the DOM instead of
+		// fetching `configs/config.json` (which no longer carries the
+		// field anyway — the runtime value is authoritative).
+		out = out.replace(
+			/<browser-config-telemetry(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-telemetry\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).telemetry),
+		);
 		// `<browser-config-<provider>-client-id>` family — expands to
 		// the matching `config.json` `<provider>OAuthClientId` value,
 		// HTML-escaped. Stamped onto each provider's login page <body>

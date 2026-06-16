@@ -319,22 +319,18 @@
   var currentRatingCount = 0;
   var ratingAppId = '';
   var ratingInFlight = false;
-  // Telemetry endpoint cache. Read once from configs/config.json
-  // on first submission and reused for the rest of the session.
-  // `null` means "not fetched yet"; an empty string means "fetched
-  // but unconfigured" (caller treats as a failure).
-  var telemetryUrlCache = null;
-
+  // Telemetry endpoint. The URL is strict-pinned at the runtime layer
+  // (see `@switch-web/runtime`'s `RUNTIME_CONFIG_DEFAULTS.telemetry`)
+  // and surfaced to the page by the resource loader's
+  // `<browser-config-telemetry>` tag expansion, stamped onto
+  // `<body data-telemetry-url>` of both home.html and apps.html (the
+  // two pages that load this script). Reading from the DOM is
+  // synchronous + can't fail with a network error, so the old
+  // fetch-and-cache shape is gone too.
   function readTelemetryUrl() {
-    if (telemetryUrlCache !== null) return Promise.resolve(telemetryUrlCache);
-    return globalThis.fetch('configs/config.json')
-      .then(function (r) { return r && r.ok ? r.json() : null; })
-      .then(function (cfg) {
-        var url = (cfg && typeof cfg.telemetry === 'string') ? cfg.telemetry : '';
-        telemetryUrlCache = url;
-        return url;
-      })
-      .catch(function () { telemetryUrlCache = ''; return ''; });
+    var body = globalThis.document && globalThis.document.body;
+    var url = body && body.getAttribute('data-telemetry-url');
+    return Promise.resolve(typeof url === 'string' ? url : '');
   }
 
   // Best-effort "is the device online right now" probe. Reads the

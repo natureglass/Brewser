@@ -24,6 +24,8 @@
  * silently.
  */
 
+import { RUNTIME_CONFIG_DEFAULTS } from '@switch-web/runtime';
+
 export type ToolbarPosition = 'top' | 'bottom';
 
 /** One row in `<profile>/toolbars.json` (also reused by `keyboards.json`
@@ -221,44 +223,63 @@ export interface BrowserConfig {
 	/** Remote URL the apps.html "Check for Updates" button fetches when
 	 * the user wants to refresh their on-disk `catalogue.json`. The fetched
 	 * bytes are written verbatim to `<appRoot>catalogue.json` after a 2xx
-	 * + JSON-parse check; failure shows an error in the modal. Empty
-	 * string disables the button (the modal opens but the fetch is
-	 * skipped and an error is shown). Routes through SwitchUaFetchLoader
-	 * so the request carries the Switch UA, same as any other http(s)
-	 * fetch the shell makes. */
+	 * + JSON-parse check; failure shows an error in the modal. Routes
+	 * through SwitchUaFetchLoader so the request carries the Switch UA,
+	 * same as any other http(s) fetch the shell makes.
+	 *
+	 * **Strict-pinned** at the runtime layer (see
+	 * `@switch-web/runtime`'s `RUNTIME_CONFIG_DEFAULTS`). User config is
+	 * ignored — a tampered `config.json` cannot redirect the catalog
+	 * refresh to an attacker. */
 	catalogue: string;
-	/** Optional GitHub Contents API endpoint listing every per-app
-	 * artifact manifest (`<id>.json`) the catalog ships. The
-	 * Download / Update flow can fetch this once and verify the tapped
-	 * app has a matching entry before kicking off the per-file download;
-	 * it's a sanity check only — the artifact-URL fetch already 404s
-	 * for unknown apps so callers may skip this. Surfaced to the page
-	 * via the `<browser-config-artifacts>` custom tag. Empty string is
-	 * treated as "no listing available, skip the sanity check". */
+	/** GitHub Contents API endpoint listing every per-app artifact
+	 * manifest (`<id>.json`) the catalog ships. The Download / Update
+	 * flow fetches this once and verifies the tapped app has a matching
+	 * entry before kicking off the per-file download. Surfaced to the
+	 * page via the `<browser-config-artifacts>` custom tag.
+	 *
+	 * **Strict-pinned** at the runtime layer. */
 	artifacts: string;
 	/** Remote URL of the per-app download-count telemetry file. The
 	 * apps.html "Check for Updates" button fetches the bytes alongside
 	 * the catalog and writes them verbatim to
 	 * `<appRoot>configs/downloads.json` (replacing any existing copy).
 	 * Read by missing-app-modal.js to surface a Downloads count on the
-	 * detail card. Empty string disables the refresh — the existing
-	 * on-disk file stays in place. */
+	 * detail card.
+	 *
+	 * **Strict-pinned** at the runtime layer. */
 	downloads: string;
 	/** Remote URL of the per-app rating telemetry file (array of
 	 * `{packageId, count, average}`). Fetched alongside `downloads` by
 	 * the Check-for-Updates flow and written to
 	 * `<appRoot>configs/ratings.json`. Read by missing-app-modal.js to
-	 * surface a star row on the detail card. Empty string disables the
-	 * refresh. */
+	 * surface a star row on the detail card.
+	 *
+	 * **Strict-pinned** at the runtime layer. */
 	ratings: string;
+	/** Endpoint the per-app rating POST lands on (the apps.html / home.html
+	 * star-tap path in missing-app-modal.js). Surfaced to the page via
+	 * `<browser-config-telemetry>` (stamped onto `<body data-telemetry-url>`)
+	 * so the script doesn't have to fetch `configs/config.json` to find
+	 * it.
+	 *
+	 * **Strict-pinned** at the runtime layer — user config is ignored,
+	 * preventing a tampered `config.json` from redirecting telemetry
+	 * POSTs to an attacker-controlled endpoint. */
+	telemetry: string;
 	/** GitHub OAuth App client ID for the Device Authorization Grant
 	 * (Settings → Login). Public client — GitHub's device flow honors
 	 * RFC 8628's public-client model, so no client_secret is needed.
 	 * Register at https://github.com/settings/developers as an OAuth App
-	 * with "Enable Device Flow" ticked. Empty string / "REPLACE_ME"
-	 * disables the Login flow and shows an error stage instead.
-	 * Surfaced to githubLogin.html via the
-	 * `<browser-config-github-client-id/>` custom tag. */
+	 * with "Enable Device Flow" ticked. Surfaced to githubLogin.html via
+	 * the `<browser-config-github-client-id/>` custom tag.
+	 *
+	 * **Override-allowed runtime fallback**: the bundled default in
+	 * `@switch-web/runtime`'s `RUNTIME_CONFIG_DEFAULTS` is used when
+	 * user config is empty / missing. A non-empty value in user config
+	 * wins, so developers can BYO OAuth app without rebuilding the NRO.
+	 * Empty in BOTH user config and the runtime default → the auth
+	 * page's misconfiguration stage. */
 	githubOAuthClientId: string;
 	/** Microsoft Entra application (client) ID for the Device
 	 * Authorization Grant. Register a single-tenant or multi-tenant
@@ -266,21 +287,30 @@ export interface BrowserConfig {
 	 * App registrations, then under Authentication enable
 	 * "Allow public client flows" — that's required for device-code.
 	 * Surfaced to microsoftLogin.html via the
-	 * `<browser-config-microsoft-client-id/>` custom tag. */
+	 * `<browser-config-microsoft-client-id/>` custom tag.
+	 *
+	 * **Override-allowed runtime fallback** — see
+	 * {@link githubOAuthClientId}. */
 	microsoftOAuthClientId: string;
 	/** Google OAuth client ID for the Limited Input Device flow.
 	 * Register in Google Cloud Console > APIs & Services > Credentials
 	 * as an "OAuth 2.0 Client ID" of type "TVs and Limited Input
 	 * devices" (any other client type — desktop, web, mobile — won't
 	 * issue device codes). Surfaced to googleLogin.html via the
-	 * `<browser-config-google-client-id/>` custom tag. */
+	 * `<browser-config-google-client-id/>` custom tag.
+	 *
+	 * **Override-allowed runtime fallback** — see
+	 * {@link githubOAuthClientId}. */
 	googleOAuthClientId: string;
 	/** Twitch OAuth application client ID. Register at
 	 * https://dev.twitch.tv/console with the Device Code Flow enabled.
 	 * (Twitch requires an OAuth Redirect URL to be set — `https://localhost`
 	 * is fine since device flow never redirects.) Surfaced to
 	 * twitchLogin.html via the `<browser-config-twitch-client-id/>` custom
-	 * tag. */
+	 * tag.
+	 *
+	 * **Override-allowed runtime fallback** — see
+	 * {@link githubOAuthClientId}. */
 	twitchOAuthClientId: string;
 }
 
@@ -305,14 +335,20 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	brewserStyle: 'themes/styles/dark.css',
 	toolbarPosition: 'top',
 	homeSection: 'featured',
-	catalogue: '',
-	artifacts: '',
-	downloads: '',
-	ratings: '',
-	githubOAuthClientId: '',
-	microsoftOAuthClientId: '',
-	googleOAuthClientId: '',
-	twitchOAuthClientId: '',
+	// Strict-pinned + override-allowed fields all pull their default
+	// from the runtime bundle (@switch-web/runtime). The strict-pinned
+	// URLs are also returned unconditionally by `loadConfig` (the user
+	// config value, if any, is ignored); the OAuth IDs are the runtime
+	// fallback consulted when user config is empty / missing.
+	catalogue: RUNTIME_CONFIG_DEFAULTS.catalogue,
+	artifacts: RUNTIME_CONFIG_DEFAULTS.artifacts,
+	downloads: RUNTIME_CONFIG_DEFAULTS.downloads,
+	ratings: RUNTIME_CONFIG_DEFAULTS.ratings,
+	telemetry: RUNTIME_CONFIG_DEFAULTS.telemetry,
+	githubOAuthClientId: RUNTIME_CONFIG_DEFAULTS.githubOAuthClientId,
+	microsoftOAuthClientId: RUNTIME_CONFIG_DEFAULTS.microsoftOAuthClientId,
+	googleOAuthClientId: RUNTIME_CONFIG_DEFAULTS.googleOAuthClientId,
+	twitchOAuthClientId: RUNTIME_CONFIG_DEFAULTS.twitchOAuthClientId,
 };
 
 
@@ -418,28 +454,38 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				|| parsed?.homeSection === 'experimental'
 				? parsed.homeSection
 				: DEFAULT_CONFIG.homeSection,
-			catalogue: typeof parsed?.catalogue === 'string'
-				? parsed.catalogue
-				: DEFAULT_CONFIG.catalogue,
-			artifacts: typeof parsed?.artifacts === 'string'
-				? parsed.artifacts
-				: DEFAULT_CONFIG.artifacts,
-			downloads: typeof parsed?.downloads === 'string'
-				? parsed.downloads
-				: DEFAULT_CONFIG.downloads,
-			ratings: typeof parsed?.ratings === 'string'
-				? parsed.ratings
-				: DEFAULT_CONFIG.ratings,
+			// Strict-pinned: runtime value is authoritative. The user's
+			// on-disk `config.json` may still carry these keys from an
+			// older seeded copy (or hand edits), but we deliberately
+			// ignore them — the bundled-runtime value is the canonical
+			// source. See `[[runtime-defaults]]` in
+			// `@switch-web/runtime` for the rationale.
+			catalogue: RUNTIME_CONFIG_DEFAULTS.catalogue,
+			artifacts: RUNTIME_CONFIG_DEFAULTS.artifacts,
+			downloads: RUNTIME_CONFIG_DEFAULTS.downloads,
+			ratings: RUNTIME_CONFIG_DEFAULTS.ratings,
+			telemetry: RUNTIME_CONFIG_DEFAULTS.telemetry,
+			// Override-allowed: a non-empty user value wins; empty /
+			// missing / non-string falls back to the runtime default
+			// (sourced via DEFAULT_CONFIG). Treating empty-string as
+			// "fall back" is the policy difference from the other
+			// string fields — it lets a fresh install ship working
+			// sign-in via the bundled runtime ID without forcing every
+			// installer to provision their own OAuth app.
 			githubOAuthClientId: typeof parsed?.githubOAuthClientId === 'string'
+				&& parsed.githubOAuthClientId.length > 0
 				? parsed.githubOAuthClientId
 				: DEFAULT_CONFIG.githubOAuthClientId,
 			microsoftOAuthClientId: typeof parsed?.microsoftOAuthClientId === 'string'
+				&& parsed.microsoftOAuthClientId.length > 0
 				? parsed.microsoftOAuthClientId
 				: DEFAULT_CONFIG.microsoftOAuthClientId,
 			googleOAuthClientId: typeof parsed?.googleOAuthClientId === 'string'
+				&& parsed.googleOAuthClientId.length > 0
 				? parsed.googleOAuthClientId
 				: DEFAULT_CONFIG.googleOAuthClientId,
 			twitchOAuthClientId: typeof parsed?.twitchOAuthClientId === 'string'
+				&& parsed.twitchOAuthClientId.length > 0
 				? parsed.twitchOAuthClientId
 				: DEFAULT_CONFIG.twitchOAuthClientId,
 		};

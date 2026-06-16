@@ -1,4 +1,4 @@
-import { captureNativeFetch, nxScreen, setNavDebugEnabled, WebView, type WebViewDelegate } from '@switch-web/runtime';
+import { captureNativeFetch, nxScreen, setNavDebugEnabled, STRICT_PINNED_RUNTIME_KEYS, WebPageSession, WebView, type WebViewDelegate } from '@switch-web/runtime';
 
 // Shell-input diagnostic. Writes which `input.kind` the shell saw and
 // before/after the navigateTo dispatch — narrows whether a click ever
@@ -29,22 +29,18 @@ import {
 	DEFAULT_CANVAS_HEIGHT,
 	DEFAULT_CANVAS_WIDTH,
 	DEFAULT_HOME_URL,
-} from './browser-config.js';
+} from '@switch-web/runtime';
 import {
 	clearAnimationFrames,
 	clearSharedScreenGLBridge,
 	copyBridgeToScreen,
-	installPageFetchAndWorker,
-	isWebGLBackedCanvas,
 	pageHasAnimationActivity,
-	runPageScripts,
 	tickAnimationFrames,
-	type PageScriptContext,
-} from './scripts/canvas-runner.js';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, resetLiveRoot, setInputFocusHandler, setLivePageBase, setSwbImgDebugEnabled } from './scripts/live-dom.js';
-import { setMediaColorScheme } from './scripts/live-css.js';
-import { setCssViewport } from './scripts/inline-css.js';
-import { getInputChecked, getInputValue, openKeyboardAndApply, setInputValue, setKeyboardOpener, setLiveFormColorScheme } from './scripts/live-form.js';
+} from '@switch-web/runtime';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
+import { setMediaColorScheme } from '@switch-web/runtime';
+import { isWebGLBackedCanvas } from '@switch-web/runtime';
+import { getInputChecked, getInputValue, openKeyboardAndApply, setInputValue, setKeyboardOpener, setLiveFormColorScheme } from '@switch-web/runtime';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
@@ -52,7 +48,6 @@ import {
 	pageHasAnyPoster,
 	paintVideoControls,
 	paintVideoFrameAt,
-	scanForAutoplayVideos,
 	setVideoTryHwAccel,
 	tickVideo,
 	videoPause,
@@ -60,7 +55,7 @@ import {
 	videoSeekRatio,
 	videoStop,
 	videoToggleMute,
-} from './scripts/live-video.js';
+} from '@switch-web/runtime';
 import {
 	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
 	overlayLiveAnimatedCanvases, paintKeyboardOverlay, paintLiveOverlay,
@@ -69,7 +64,7 @@ import {
 	patchLiveDirtyRegions, resetLiveOverlayCache, resetToolbarOverlayCache,
 	setLiveBuildChunkMs,
 	setLiveScrollChunkMs,
-} from './scripts/live-overlay.js';
+} from '@switch-web/runtime';
 import {
 	bumpToolbarTreeVersion,
 	clearPageHasCanvas2dActivity,
@@ -90,10 +85,10 @@ import {
 	setKeyboardTopY,
 	setToolbarLiveRoot,
 	setToolbarOverlayVisible,
-} from './scripts/live-paint-control.js';
-import { getLayoutBox } from './scripts/live-layout.js';
-import { isExternalCssLoading, loadHeadLinkStylesheetsWithFlag, populateLiveRoot, populateRootFromTree } from './scripts/html-to-live.js';
-import { extractTitle, parseHtml, type HtmlElement } from './html/html-parser.js';
+} from '@switch-web/runtime';
+import { getLayoutBox } from '@switch-web/runtime';
+import { isExternalCssLoading, populateRootFromTree } from '@switch-web/runtime';
+import { extractTitle, parseHtml, type HtmlElement } from '@switch-web/runtime';
 import { AddressBarInput } from './input/address-bar-input.js';
 import {
 	installCanvasTouch,
@@ -108,32 +103,32 @@ import {
 	setTouchDebugEnabled,
 	waitForControllerInput,
 	type BrowserMode,
-} from './input/controller-shortcuts.js';
-import { KeyboardOverlay, setKeyboardRepaintDriver } from './input/keyboard-overlay.js';
-import { installPageTouchForwarder } from './input/page-touch-forwarder.js';
+} from '@switch-web/runtime';
+import { KeyboardOverlay, setKeyboardRepaintDriver } from '@switch-web/runtime';
+import { installPageTouchForwarder } from '@switch-web/runtime';
 import {
 	installPageMouseForwarder,
 	setCursorIdleMs,
-} from './input/page-mouse-forwarder.js';
-import { clearAppButtonOverlay, setAppButtonOverlay, setButtonMapping } from './input/button-router.js';
+} from '@switch-web/runtime';
+import { clearAppButtonOverlay, setAppButtonOverlay, setButtonMapping } from '@switch-web/runtime';
 import {
 	preloadClickSound,
 	setClickSoundEnabled,
 	setClickSoundPath,
-} from './audio/click-sound.js';
+} from '@switch-web/runtime';
 import { BookmarksStore } from './navigation/bookmarks-store.js';
 import { BrowserNavigation } from './navigation/browser-navigation.js';
 import { HistoryStore } from './navigation/history-store.js';
-import { probeNetwork, type NetworkProbeResult } from './network/network-probe.js';
-import { BrowserPermissionPolicy } from './permissions/browser-permission-policy.js';
+import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
+import { BrowserPermissionPolicy } from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
 import { DEFAULT_CONFIG, loadConfig, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
-import { loadOptionalImage } from './resources/load-optional-image.js';
-import { LocalSchemeFetchLoader } from './resources/local-scheme-fetch-loader.js';
-import { SwitchUaFetchLoader } from './resources/switch-ua-fetch-loader.js';
+import { loadOptionalImage } from '@switch-web/runtime';
+import { LocalSchemeFetchLoader } from '@switch-web/runtime';
+import { SwitchUaFetchLoader } from '@switch-web/runtime';
 
 /**
  * Top-level orchestrator for the browser shell.
@@ -154,8 +149,13 @@ export class BrowserShell {
 	private readonly addressBar: AddressBarInput;
 
 	private currentScrollY = 0;
-	private scriptCtx: PageScriptContext | null = null;
-	private currentPageUrl: string = '';
+	/** Runtime-owned per-navigation state — current page URL + the
+	 * `runPageScripts` result. The shell creates one session in the
+	 * constructor and delegates the resetLiveRoot / populate / scripts
+	 * lifecycle to it on every navigation (see {@link handleHtmlResponseLive}).
+	 * Phase 5 of the migration extracted this so headless app NROs can
+	 * render a page without the brewser shell surface area. */
+	private readonly session: WebPageSession;
 	/** Live-DOM cache-build budget for external (http(s)) pages. Stored
 	 * here so `onPageStarted` can re-apply it on each WWW navigation
 	 * (internal `brewser://` pages get a separate "build everything in
@@ -189,7 +189,12 @@ export class BrowserShell {
 	 * storage modules (local-storage, indexed-db) to route writes to a
 	 * `dev/` sub-namespace when the active page is under `brewser://dev/`,
 	 * keeping dev test artifacts out of the real user storage roots. */
-	getCurrentPageUrl(): string { return this.currentPageUrl; }
+	getCurrentPageUrl(): string { return this.session.currentPageUrl; }
+	/** Expose the profile so main.ts can pass it to the runtime's
+	 * `installLocalStorage` / `installIndexedDB`. The profile implements
+	 * `StorageProfileLike` (storageRoot + pickStorageNamespace), so the
+	 * runtime stays agnostic to the brewser:// dev URL convention. */
+	getProfile(): BrowserProfile { return this.profile; }
 	private mode: BrowserMode = 'normal';
 	/** Active chrome strip height (px). Cached from `config.json
 	 * toolbarHeight` at boot and refreshed on settings save. Read by
@@ -222,8 +227,8 @@ export class BrowserShell {
 	 * adapts to the new size. Exit must likewise skip the rerun. */
 	private fullscreenCanvasLive = false;
 	/** A page script that calls `canvas.requestFullscreen()` from its
-	 * top-level body runs BEFORE `this.scriptCtx` is wired up (the
-	 * assignment is `this.scriptCtx = await runPageScripts(...)`, so the
+	 * top-level body runs BEFORE `this.session.scriptCtx` is wired up (the
+	 * assignment is `this.session.scriptCtx = await runPageScripts(...)`, so the
 	 * field is still `null` while scripts execute). `toggleFullscreenCanvas`
 	 * needs `scriptCtx` to look up the target canvas + rerun, so the
 	 * request would otherwise be silently dropped. This field stores the
@@ -295,6 +300,12 @@ export class BrowserShell {
 		this.policy = new BrowserPermissionPolicy();
 		this.profile = new BrowserProfile();
 		this.profile.ensure();
+		// One WebPageSession per shell — owns the per-navigation page
+		// lifecycle (scriptCtx + currentPageUrl). chromeHeight starts at 0
+		// and gets sync'd to the real toolbar height once `run()` has
+		// loaded `config.json` (see the `this.session.setChromeHeight`
+		// calls there and in `handleHtmlResponseLive`).
+		this.session = new WebPageSession({ screen: nxScreen(), chromeHeight: 0 });
 		// Read config.json upfront so the HistoryStore is constructed with
 		// the user's `maxHistory` cap (loadConfig falls back to DEFAULT_CONFIG
 		// on first run before seedRomfs has copied the romfs default in;
@@ -377,7 +388,7 @@ export class BrowserShell {
 					.__swbFullscreenCanvasSize = null;
 				this.navigation.setCurrentTitle(null);
 				this.setMode('normal');
-				this.currentPageUrl = '';
+				this.session.currentPageUrl = '';
 				// Drop any `requestAnimationFrame` callbacks the
 				// previous page queued. Without this an animation
 				// loop on page A would keep firing under page B (and
@@ -512,11 +523,11 @@ export class BrowserShell {
 			if (this.mode === 'fullscreen-canvas') return;
 			// Top-level page-script case: the script body that called
 			// canvas.requestFullscreen() is itself running INSIDE
-			// `runPageScripts`, so `this.scriptCtx` is still null and
-			// `toggleFullscreenCanvas`'s `if (!this.scriptCtx) return;`
+			// `runPageScripts`, so `this.session.scriptCtx` is still null and
+			// `toggleFullscreenCanvas`'s `if (!this.session.scriptCtx) return;`
 			// would silently swallow the request. Queue it; the loader
 			// drains the queue right after assigning scriptCtx.
-			if (!this.scriptCtx) {
+			if (!this.session.scriptCtx) {
 				return new Promise<void>((resolve) => {
 					this.pendingFullscreenCanvasRequest = () => {
 						void this.toggleFullscreenCanvas().then(resolve, resolve);
@@ -989,7 +1000,7 @@ export class BrowserShell {
 		const u = url.trim();
 		if (!u) return u;
 		if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;          // has scheme → absolute
-		const base = this.currentPageUrl;
+		const base = this.session.currentPageUrl;
 		if (/^https?:\/\//i.test(base)) {
 			try {
 				return new URL(u, base).toString();
@@ -1264,8 +1275,11 @@ export class BrowserShell {
 	 */
 	private async handleHtmlResponseLive(url: string, tree: HtmlElement): Promise<void> {
 		_shellInputDiag('handleHtmlResponseLive url=' + url);
-		resetLiveOverlayCache();
-		resetLiveRoot();
+		// Drop the prior page's live tree + paint cache. Done BEFORE the
+		// chrome rebuilds so their fresh `<style>` blocks re-register
+		// against a cleared cascade. WebPageSession.reset is the runtime
+		// extraction of the resetLiveOverlayCache+resetLiveRoot pair.
+		this.session.reset();
 		// Rebuild the HTML-driven keyboard + toolbar live roots so their
 		// `<style>` blocks re-register with the now-cleared cascade. The
 		// toolbar rebuild pre-warms its new `<img>` LiveElements with
@@ -1291,87 +1305,34 @@ export class BrowserShell {
 		} else {
 			clearAppButtonOverlay();
 		}
-		// Page-relative `<img>` base: the SD-card directory of THIS page, so
-		// `./assets/x.png` resolves like a browser would (index.html as base).
-		setLivePageBase(this.computeLivePageBase(url));
-		// Install fetch + Worker wrappers on globalThis BEFORE populateLiveRoot
-		// so engine-side callers triggered during tree population (e.g.
-		// live-css `@font-face` async fetch, iframe loader) see the wrapper
-		// on the first-page nav too. Idempotent — runs once total.
-		installPageFetchAndWorker();
-		// Resolve `vw`/`vh` units against the CONTENT area (the canvas minus
-		// the toolbar chrome), not the full screen. Set BEFORE scripts run +
-		// the first computed-style resolution so a page's `height: 100vh`
-		// fills exactly the visible content area instead of overflowing it by
-		// the toolbar height (which forced a scroll on the Brewser player's
-		// `100vh` grid). resetLiveRoot above cleared the cascade cache, so the
-		// new basis is what every `vh`/`vw` resolves against.
-		{
-			const screen = nxScreen();
-			const chromeH = this.chromeHeight;
-			setCssViewport(screen.width, Math.max(1, screen.height - chromeH));
-		}
-		const byParsed = populateLiveRoot(tree);
-		scanForAutoplayVideos(getLiveRoot());
-		_shellInputDiag('  → populated ' + byParsed.size + ' parsed→live mappings');
-
-		// External `<link rel="stylesheet">` fetches run async — fire and
-		// forget. The page renders immediately with inline `<style>` + UA
-		// defaults; as each sheet arrives, `registerStyleSheet` bumps the
-		// live-tree version so the next paint picks up the new cascade.
-		// Without this, pages like DDG html-mode that put ALL their CSS
-		// in an external sheet rendered with our UA defaults only (green
-		// `<a>` text, no `.frm__select` width, no logo url() image, …).
-		// Also fired for `brewser://` pages so the shared
-		// `brewser://assets/main.css` linked from every per-profile
-		// page actually loads — `loadHeadLinkStylesheets` early-
-		// returns if the parsed tree has zero <link rel=stylesheet>,
-		// so pages without an external sheet pay only a tree walk.
-		if (
-			url.startsWith('http://')
-			|| url.startsWith('https://')
-			|| url.startsWith('brewser://')
-		) {
-			loadHeadLinkStylesheetsWithFlag(tree, url).then(() => {
-				requestFullRepaint();
-			}).catch(() => { /* per-sheet failures already logged */ });
-		}
-
-		const allowScripts = url.startsWith('brewser://');
 		// A queued fullscreen request from any prior page should never
 		// leak across navigations — the new page's scripts will queue
-		// their own if they want it.
+		// their own if they want it. Done BEFORE the session runs scripts
+		// because `__swbRequestFullscreenCanvas`'s queue-and-defer branch
+		// writes this field during script eval; the reset must precede
+		// the writes the new page's scripts may produce.
 		this.pendingFullscreenCanvasRequest = null;
-		// Clear scriptCtx BEFORE running the new page's scripts. Otherwise
-		// it still points at the PREVIOUS page's context throughout the new
-		// page's script execution — and `__swbRequestFullscreenCanvas`'s
-		// `if (!this.scriptCtx)` queue-and-defer branch would never fire,
-		// so a top-level `canvas.requestFullscreen()` call would route to
-		// the stale `toggleFullscreenCanvas` (which would either target the
-		// old page's canvas or no-op via firstCanvas() === null) instead of
-		// being deferred to run against the freshly-loaded page.
-		this.scriptCtx = null;
-		this.scriptCtx = await runPageScripts(tree, {
-			allowScripts,
-			pageUrl: url,
-			preserveLiveRoot: true,
+		// Keep the session in sync with the shell's chrome height so its
+		// internal `setCssViewport` resolves `vh`/`vw` against the visible
+		// content rect, not the full screen.
+		this.session.setChromeHeight(this.chromeHeight);
+		// Hand off the page-lifecycle core: setLivePageBase, install fetch
+		// + Worker wrappers, setCssViewport, populateLiveRoot,
+		// scanForAutoplayVideos, external stylesheet fetches, runPageScripts,
+		// canvas-offscreen wiring, currentPageUrl stamp. Returns the
+		// parsed→live map for any shell-specific post-processing (none
+		// today — Cocos / GameMaker / etc. attach their offscreens via the
+		// session, not a shell hook).
+		const allowExt = url.startsWith('http://') || url.startsWith('https://') || url.startsWith('brewser://');
+		const result = await this.session.populateAndRunScripts(url, tree, {
+			allowScripts: url.startsWith('brewser://'),
+			pageBase: this.computeLivePageBase(url),
+			loadExternalStylesheets: allowExt,
 		});
-
-		// Wire each runner-owned OffscreenCanvas into the live tree so
-		// the painter / per-frame overlay can find it. WebGL-backed
-		// canvases are flagged so the painter skips drawImage; the
-		// per-frame `overlayLiveAnimatedCanvases` does the bridge →
-		// screen direct copy.
-		for (const [parsedCanvas, offscreen] of this.scriptCtx.outputs) {
-			const liveCanvas = byParsed.get(parsedCanvas);
-			if (liveCanvas) {
-				liveCanvas.attachOffscreen(offscreen, isWebGLBackedCanvas(offscreen));
-			}
-		}
+		_shellInputDiag('  → populated ' + result.byParsed.size + ' parsed→live mappings');
 
 		this.fullscreenCanvasOriginalSize = null;
 		this.fullscreenCanvasLive = false;
-		this.currentPageUrl = url;
 		this.currentScrollY = 0;
 
 		// Drain a fullscreen request queued by a top-level script body
@@ -1828,7 +1789,7 @@ export class BrowserShell {
 		// over the bridge content, leaving the user looking at the page
 		// instead of the fullscreen demo.
 		const overlayOpts = { skipFlow: true };
-		if (!this.scriptCtx) {
+		if (!this.session.scriptCtx) {
 			{
 				const fsViewport = { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
 				paintLiveOverlay(ctx, getLiveRoot(), fsViewport, 0, overlayOpts);
@@ -1836,7 +1797,7 @@ export class BrowserShell {
 			}
 			return;
 		}
-		const target = this.scriptCtx.firstCanvas();
+		const target = this.session.scriptCtx.firstCanvas();
 		if (!target) {
 			{
 				const fsViewport = { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
@@ -1845,7 +1806,7 @@ export class BrowserShell {
 			}
 			return;
 		}
-		const offscreen = this.scriptCtx.outputs.get(target);
+		const offscreen = this.session.scriptCtx.outputs.get(target);
 		if (!offscreen) {
 			{
 				const fsViewport = { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
@@ -2169,6 +2130,18 @@ export class BrowserShell {
 			// Missing / unreadable — `next` already carries clamped
 			// defaults + staged edits, so writing it produces a valid
 			// file either way.
+		}
+		// Strict-pinned keys live in the runtime bundle
+		// (`@switch-web/runtime`'s `RUNTIME_CONFIG_DEFAULTS`). `loadConfig`
+		// returns the runtime values regardless of what's on disk, so
+		// the spread of `prior` above injected them into `next`. Strip
+		// them out so we don't bake whatever the runtime says today
+		// into the user's `config.json` — otherwise a future runtime
+		// rebuild that rotates the URL would be silently overridden by
+		// the stale on-disk copy if `loadConfig`'s strict-pin were ever
+		// loosened. The Settings UI doesn't expose these keys anyway.
+		for (const key of STRICT_PINNED_RUNTIME_KEYS) {
+			delete next[key];
 		}
 		try {
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
@@ -2769,8 +2742,8 @@ export class BrowserShell {
 			await this.exitFullscreen();
 			return;
 		}
-		if (!this.scriptCtx) return;
-		const target = this.scriptCtx.firstCanvas();
+		if (!this.session.scriptCtx) return;
+		const target = this.session.scriptCtx.firstCanvas();
 		if (!target) return;
 		const canvas = nxScreen();
 		// Remember the attr-declared size so we can restore it on exit.
@@ -2811,7 +2784,7 @@ export class BrowserShell {
 		// the new size. Await so any async script work finishes before
 		// we paint.
 		const resizes = new Map([[target, { width: canvas.width, height: canvas.height }]]);
-		await this.scriptCtx.rerun(resizes);
+		await this.session.scriptCtx.rerun(resizes);
 		this.repaintAll();
 	}
 
@@ -2835,14 +2808,14 @@ export class BrowserShell {
 	}
 
 	private async restoreCanvasSize(): Promise<void> {
-		if (!this.scriptCtx || !this.fullscreenCanvasOriginalSize) return;
-		const target = this.scriptCtx.firstCanvas();
+		if (!this.session.scriptCtx || !this.fullscreenCanvasOriginalSize) return;
+		const target = this.session.scriptCtx.firstCanvas();
 		if (!target) return;
 		// Same RAF cleanup rationale as on entering fullscreen-canvas.
 		clearAnimationFrames();
 		clearAllVideos();
 		const resizes = new Map([[target, this.fullscreenCanvasOriginalSize]]);
-		await this.scriptCtx.rerun(resizes);
+		await this.session.scriptCtx.rerun(resizes);
 		this.fullscreenCanvasOriginalSize = null;
 	}
 
