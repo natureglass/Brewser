@@ -195,6 +195,12 @@
       try { Switch.writeFileSync(avatarMainPath(ext),  new Uint8Array(0)); } catch (_) {}
       try { Switch.writeFileSync(avatarThumbPath(ext), new Uint8Array(0)); } catch (_) {}
     }
+    // Drop the "one active session" pointer too. See github-auth.js's
+    // clearStoredRecord for the rationale (login.html keys its
+    // logged-in card on `active.json` AND a populated provider record).
+    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.clearActiveProvider === 'function') {
+      globalThis.__swbAuth.clearActiveProvider();
+    }
   }
 
   // ============================================================
@@ -525,6 +531,13 @@
     };
     if (!persistRecord(record)) return;
     await ensureAvatarFresh(record);
+    // Enforce "one service login at a time" — wipe every OTHER
+    // provider's auth artifacts and stamp `active.json` so the central
+    // login dashboard + toolbar avatar slot now point at twitch.
+    if (globalThis.__swbAuth) {
+      globalThis.__swbAuth.wipeOthers('twitch');
+      globalThis.__swbAuth.setActiveProvider('twitch');
+    }
     showSuccess(record);
   }
 
@@ -547,6 +560,14 @@
       });
       persistRecord(refreshed);
       await ensureAvatarFresh(refreshed);
+      // Silent re-verification also re-asserts the active-session
+      // pointer so a user who launches twitchLogin.html directly
+      // (without going through the central dashboard) still ends up
+      // with `active.json` naming twitch.
+      if (globalThis.__swbAuth) {
+        globalThis.__swbAuth.wipeOthers('twitch');
+        globalThis.__swbAuth.setActiveProvider('twitch');
+      }
       return refreshed;
     } catch (e) {
       log('silent verify failed (' + (e && e.message ? e.message : String(e)) + ') — dropping stored record');

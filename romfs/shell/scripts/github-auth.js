@@ -340,6 +340,14 @@
       try { Switch.writeFileSync(avatarMainPath(ext), new Uint8Array(0)); } catch (_) {}
       try { Switch.writeFileSync(avatarThumbPath(ext), new Uint8Array(0)); } catch (_) {}
     }
+    // Drop the "one active session" pointer too — login.html keys its
+    // logged-in card on `active.json` AND a populated provider record,
+    // so if we leave the pointer naming github after wiping our record
+    // the dashboard ends up in an inconsistent half-state until the
+    // next login.
+    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.clearActiveProvider === 'function') {
+      globalThis.__swbAuth.clearActiveProvider();
+    }
   }
 
   // ------------------------------------------------------------------
@@ -770,6 +778,15 @@
     // re-hitting GitHub). Stamps `avatar_local_path` /
     // `avatar_local_thumb_path` on the record and re-persists.
     await ensureAvatarFresh(record);
+    // Enforce "one service login at a time" — wipe every OTHER
+    // provider's auth artifacts and stamp `active.json` so the central
+    // login dashboard + toolbar avatar slot now point at github.
+    // Ordered after the avatar download so a failed download doesn't
+    // leave the user stranded with nothing on disk.
+    if (globalThis.__swbAuth) {
+      globalThis.__swbAuth.wipeOthers('github');
+      globalThis.__swbAuth.setActiveProvider('github');
+    }
     showSuccess(record);
   }
 
@@ -795,6 +812,14 @@
       // save (or the file disappeared). No-op on the steady-state
       // launch where the URL still matches what we already wrote.
       await ensureAvatarFresh(refreshed);
+      // Silent re-verification also re-asserts the active-session
+      // pointer so a user who launches githubLogin.html directly
+      // (without going through the central dashboard) still ends up
+      // with `active.json` naming github.
+      if (globalThis.__swbAuth) {
+        globalThis.__swbAuth.wipeOthers('github');
+        globalThis.__swbAuth.setActiveProvider('github');
+      }
       return refreshed;
     } catch (e) {
       log('silent verify failed (' + (e && e.message ? e.message : String(e)) + ') — dropping stored record');

@@ -898,6 +898,14 @@ export class BrowserShell {
 					case 'settings':
 						await this.navigateTo('brewser://settings/');
 						break;
+					case 'avatar':
+						// Toolbar avatar slot taps go to the central login
+						// dashboard. The dashboard either shows the active
+						// session card (with a Log out button) or the picker
+						// grid; either way it's the right landing place
+						// regardless of whether anyone is currently signed in.
+						await this.navigateTo('brewser://login/');
+						break;
 					case 'star':
 						this.toggleBookmark();
 						break;
@@ -2643,6 +2651,24 @@ export class BrowserShell {
 					dot.setAttribute('data-status', status);
 				}
 			}
+			// Avatar slot — show the active session's cached avatar if
+			// one exists, else the default placeholder. Resolved fresh
+			// each renderChrome so a login / logout reflects in the
+			// chrome strip without a separate notification path. The
+			// disk reads (active.json + the active provider's
+			// auth.json) are tiny and renderChrome only fires on
+			// explicit events (nav, settings save, bookmark toggle),
+			// not per-frame.
+			const avatarBtn = findToolbarById(root, 'avatarButton');
+			if (avatarBtn) {
+				const img = findToolbarImg(avatarBtn);
+				if (img) {
+					const nextSrc = resolveActiveSessionAvatarPath() ?? DEFAULT_TOOLBAR_AVATAR_SRC;
+					if (img.getAttribute('src') !== nextSrc) {
+						img.setAttribute('src', nextSrc);
+					}
+				}
+			}
 		} finally {
 			popToolbarMutationScope();
 		}
@@ -2995,6 +3021,71 @@ function toggleDisabledAttr(el: LiveElement, on: boolean): void {
 	} else if (!on && has) {
 		el.removeAttribute('data-disabled');
 	}
+}
+
+// --- Toolbar avatar slot ----------------------------------------------------
+//
+// Reads the active-session pointer (`auth/active.json`) and the named
+// provider's auth record on each renderChrome to figure out which
+// avatar bitmap the toolbar should display. Same disk shape the
+// page-side `auth-shared.js` writes — kept in sync there. No caching:
+// renderChrome only fires on explicit events (nav, bookmark toggle,
+// settings save), so the disk reads happen at most a few times per
+// minute and the always-fresh lookup means a login from a Login page
+// reflects in the toolbar the moment the user navigates away from it.
+
+const AUTH_DIR_ABS = 'sdmc:/switch/brewser/shell/auth/';
+const ACTIVE_PATH_ABS = `${AUTH_DIR_ABS}active.json`;
+const DEFAULT_TOOLBAR_AVATAR_SRC = 'sdmc:/switch/brewser/shell/assets/avatar_default.png';
+const KNOWN_PROVIDERS = ['github', 'google', 'microsoft', 'twitch'] as const;
+type KnownProvider = typeof KNOWN_PROVIDERS[number];
+
+function readJsonFile(path: string): unknown {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(path);
+	} catch {
+		return null;
+	}
+	if (!raw || raw.byteLength === 0) return null;
+	try {
+		return JSON.parse(new TextDecoder().decode(raw));
+	} catch {
+		return null;
+	}
+}
+
+function fileHasBytes(path: string): boolean {
+	let raw: ArrayBuffer | null;
+	try { raw = Switch.readFileSync(path); }
+	catch { return false; }
+	return !!(raw && raw.byteLength > 0);
+}
+
+/** Pick the on-disk bitmap path for the currently active session, or
+ * `null` when no session is active (or when the named provider's
+ * cached avatar files are all empty/missing — covers the case where
+ * the download failed at login time, or where a provider like
+ * Microsoft has no avatar on the account). 64×64 thumb preferred over
+ * the full bitmap because the toolbar slot is 28×28 — the thumb avoids
+ * a needless downscale. */
+function resolveActiveSessionAvatarPath(): string | null {
+	const active = readJsonFile(ACTIVE_PATH_ABS) as { provider?: unknown } | null;
+	const providerRaw = active?.provider;
+	if (typeof providerRaw !== 'string') return null;
+	if (!(KNOWN_PROVIDERS as readonly string[]).includes(providerRaw)) return null;
+	const provider = providerRaw as KnownProvider;
+	const rec = readJsonFile(`${AUTH_DIR_ABS}${provider}-auth.json`) as {
+		id?: unknown;
+		avatar_local_thumb_path?: unknown;
+		avatar_local_path?: unknown;
+	} | null;
+	if (!rec || typeof rec.id !== 'string' || rec.id.length === 0) return null;
+	const thumb = typeof rec.avatar_local_thumb_path === 'string' ? rec.avatar_local_thumb_path : '';
+	const full  = typeof rec.avatar_local_path       === 'string' ? rec.avatar_local_path       : '';
+	if (thumb && fileHasBytes(thumb)) return thumb;
+	if (full && fileHasBytes(full)) return full;
+	return null;
 }
 
 /**

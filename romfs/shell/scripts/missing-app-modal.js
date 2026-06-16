@@ -199,6 +199,16 @@
     // span carries the dimensions inline so a CSS-class miss can't
     // collapse it.
     //   [average] [5px spacer] [★1..★5] [5px spacer] [(count)]
+    //
+    // Each star carries `data-stars="N"` (1..5) so the delegated
+    // tap handler on #app-modal-rating can route the click into
+    // submitRating(N). The engine's findTapIntent doesn't walk into
+    // <img> as a tap target by default, but the click event still
+    // bubbles up from the live-DOM IMG atom — the listener uses
+    // event.target.getAttribute('data-stars') (or closest match) to
+    // recover the slot. Pointer cursor hint goes on each via inline
+    // style so the row reads as interactive without requiring a
+    // theme-CSS class to land.
     var spacer = '<span style="display:inline-block;width:5px;height:1px;"></span>';
     var html = '<span class="app-modal-rating-average">' + formatAverage(avg) + '</span>';
     html += spacer;
@@ -207,7 +217,9 @@
       if (halves >= (i + 1) * 2) src = 'brewser://assets/star_full.png';
       else if (halves === i * 2 + 1) src = 'brewser://assets/star_half.png';
       else src = 'brewser://assets/star_empty.png';
-      html += '<img class="app-modal-star" style="width:' + STAR_PX + 'px;height:' + STAR_PX + 'px;" src="' + src + '" alt="">';
+      html += '<img class="app-modal-star" data-stars="' + (i + 1)
+        + '" style="width:' + STAR_PX + 'px;height:' + STAR_PX
+        + 'px;cursor:pointer;" src="' + src + '" alt="">';
     }
     html += spacer;
     html += '<span class="app-modal-stats-count">(' + formatCount(count) + ')</span>';
@@ -231,7 +243,316 @@
       + '<span id="app-modal-rating" class="app-modal-row-value app-modal-rating-value">'
       + renderStarsHtml(0, 0)
       + '</span>'
+      + '</div>'
+      // Host slot for the inline rating-submission message ("Sign in
+      // to rate" / "Rating failed. Try again."). Empty by default —
+      // collapses to a zero-height div so the layout is unchanged
+      // when no message is showing. Populated by setRatingMessage()
+      // with a full `.app-modal-row` so the message inherits the same
+      // border/padding cadence as the surrounding metadata rows.
+      + '<div id="app-modal-rating-msg-host"></div>';
+  }
+
+  // Bind per-star click listeners. Required because the engine's
+  // `dispatchEvent` (live-dom.ts) does NOT stamp `event.target` on
+  // synthetic events — it just walks `target = target.parent` to
+  // bubble listeners. So a delegated handler on an ancestor has no
+  // way to recover which star atom was hit. Per-IMG binding with
+  // the stars index closured in is the working pattern (same shape
+  // the catalog-card delegation uses for the data-app-detail JSON).
+  // Re-run after every rating-row innerHTML rewrite — the prior
+  // IMG nodes are garbage-collected each time so their listeners
+  // can't survive.
+  function bindStarListeners() {
+    var rtEl = document.getElementById('app-modal-rating');
+    if (!rtEl) return;
+    var stars = rtEl.querySelectorAll('[data-stars]');
+    for (var i = 0; i < stars.length; i++) {
+      (function (starEl) {
+        var n = parseInt(starEl.getAttribute('data-stars'), 10);
+        if (!(n >= 1 && n <= 5)) return;
+        starEl.addEventListener('click', function (e) {
+          submitRating(n);
+          if (e && e.stopPropagation) e.stopPropagation();
+          if (e && e.preventDefault) e.preventDefault();
+        });
+      })(stars[i]);
+    }
+  }
+
+  // Replace the rating-row inner content. Re-renders the star group
+  // from the current avg/count and clears any prior message in the
+  // host slot (caller may immediately follow up with
+  // setRatingMessage(...) to surface a new one). Re-binds the
+  // per-star click listeners against the freshly-created IMG atoms.
+  function updateRatingDom() {
+    var rtEl = document.getElementById('app-modal-rating');
+    if (!rtEl) return;
+    rtEl.innerHTML = renderStarsHtml(currentRatingAvg, currentRatingCount);
+    bindStarListeners();
+  }
+
+  // Fill or clear the host slot beneath the rating row. `html` is
+  // the inner HTML of the message span (links / styled text); pass
+  // '' (or omit) to clear. The wrapping row keeps the same
+  // `.app-modal-row` structure as everything else in the body so the
+  // separators align.
+  function setRatingMessage(html) {
+    var host = document.getElementById('app-modal-rating-msg-host');
+    if (!host) return;
+    if (!html) { host.innerHTML = ''; return; }
+    host.innerHTML = '<div class="app-modal-row app-modal-rating-msg-row">'
+      + '<span class="app-modal-row-label"></span>'
+      + '<span class="app-modal-row-value">' + html + '</span>'
       + '</div>';
+  }
+
+  // Rating-submission state. `currentRatingAvg/Count` are the values
+  // the modal is currently displaying for the open detail — kept in
+  // sync by loadStats() (post-fetch) and submitRating()
+  // (optimistic-update). `ratingAppId` is the packageId those values
+  // belong to, used to gate async POST callbacks from writing into
+  // the wrong modal if the user swaps detail before the request
+  // settles. `ratingInFlight` is the per-modal guard against
+  // double-tap mid-POST.
+  var currentRatingAvg = 0;
+  var currentRatingCount = 0;
+  var ratingAppId = '';
+  var ratingInFlight = false;
+  // Telemetry endpoint cache. Read once from configs/config.json
+  // on first submission and reused for the rest of the session.
+  // `null` means "not fetched yet"; an empty string means "fetched
+  // but unconfigured" (caller treats as a failure).
+  var telemetryUrlCache = null;
+
+  function readTelemetryUrl() {
+    if (telemetryUrlCache !== null) return Promise.resolve(telemetryUrlCache);
+    return globalThis.fetch('configs/config.json')
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (cfg) {
+        var url = (cfg && typeof cfg.telemetry === 'string') ? cfg.telemetry : '';
+        telemetryUrlCache = url;
+        return url;
+      })
+      .catch(function () { telemetryUrlCache = ''; return ''; });
+  }
+
+  // Best-effort "is the device online right now" probe. Reads the
+  // engine's cached `__browserNetworkStatus` (set by `probeNetwork`
+  // in browser-shell.ts on boot + every 60 s). Returns:
+  //   - `true`  when the cached probe says the HTTPS path is up
+  //   - `false` when the cached probe completed and overallReachable
+  //              is explicitly false
+  //   - `null`  when no probe has landed yet — caller treats as
+  //              "let the fetch decide" rather than blocking the tap.
+  // The 60 s staleness window means a freshly-pulled cable can still
+  // surface as "online"; the fetch-throw catch downstream catches
+  // that case and shows the same toast.
+  function readEngineReachability() {
+    var probe = globalThis.__browserNetworkStatus;
+    if (!probe) return null;
+    if (typeof probe.overallReachable === 'boolean') return probe.overallReachable;
+    return null;
+  }
+
+  // Offline toast. Lives in a persistent host appended to the modal
+  // overlay so it paints in the modal layer (above the page) and
+  // tracks the modal's own visibility — when the user closes the
+  // modal mid-toast the host is still there but visually hidden
+  // behind the closing overlay. The host's innerHTML is rewritten
+  // each show/hide, which is the cache-safe path: setting
+  // `style.display` directly on a LiveElement is a plain field write
+  // that doesn't invalidate the live-DOM paint cache (same reason
+  // the modal overlay uses classList for open/close — see top-of-
+  // file comment), but a fresh innerHTML stamp creates new DOM
+  // nodes and is picked up cleanly.
+  var toastHost = null;
+  var toastTimer = null;
+  function ensureToastHost() {
+    if (toastHost) return toastHost;
+    toastHost = document.createElement('div');
+    toastHost.setAttribute('id', 'app-modal-toast-host');
+    overlay.appendChild(toastHost);
+    return toastHost;
+  }
+  function showOfflineToast(msg) {
+    var host = ensureToastHost();
+    // Single in-flight toast — bump the visible message + reset
+    // the dismiss timer on each call.
+    var safe = esc(msg);
+    host.innerHTML = '<div style="'
+      + 'position:fixed;top:24px;left:50%;transform:translateX(-50%);'
+      + 'padding:12px 22px;border-radius:10px;'
+      + 'background:#1a0d22;border:1px solid #ff5577;'
+      + 'color:#ffe7ec;font-size:14px;font-weight:600;'
+      + 'box-shadow:0 6px 22px rgba(0,0,0,0.45);'
+      + 'z-index:1100;max-width:520px;text-align:center;'
+      + '">' + safe + '</div>';
+    if (toastTimer !== null) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toastTimer = null;
+      if (toastHost) toastHost.innerHTML = '';
+    }, 3200);
+  }
+  function clearOfflineToast() {
+    if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null; }
+    if (toastHost) toastHost.innerHTML = '';
+  }
+  // The friendly message the user sees when the device can't reach
+  // the telemetry server. Kept as a constant so both the pre-flight
+  // short-circuit and the post-fetch network-error catch surface
+  // identical text.
+  var OFFLINE_TOAST_MSG = "You're offline — connect to Wi-Fi to send your rating.";
+
+  // Apply a new rating to the on-disk `configs/ratings.json` after
+  // a successful telemetry POST. Reads the file fresh (so a parallel
+  // updates-modal refresh that landed since loadStats can't be
+  // clobbered), finds or appends the entry for `packageId`, and
+  // recomputes count + average per the spec:
+  //     newCount = oldCount + 1
+  //     newAvg   = (oldAvg * oldCount + stars) / newCount
+  // The file is the local cache for the modal's display next open —
+  // server is the source of truth and the next "Check for Updates"
+  // pull resyncs.
+  function writeLocalRating(packageId, stars) {
+    if (typeof Switch === 'undefined' || !Switch) return;
+    var path = 'sdmc:/switch/brewser/configs/ratings.json';
+    var arr = [];
+    try {
+      var raw = Switch.readFileSync(path);
+      if (raw && raw.byteLength > 0) {
+        var text = new TextDecoder().decode(raw);
+        var parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) arr = parsed;
+      }
+    } catch (err) {
+      console.debug('[apps] ratings.json read failed: ' + (err && err.message ? err.message : String(err)));
+    }
+    var entry = null;
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] && arr[i].packageId === packageId) { entry = arr[i]; break; }
+    }
+    if (entry) {
+      var oldAvg = (typeof entry.average === 'number' && isFinite(entry.average)) ? entry.average : 0;
+      var oldCount = (typeof entry.count === 'number' && isFinite(entry.count)) ? entry.count : 0;
+      var newCount = oldCount + 1;
+      entry.count = newCount;
+      entry.average = (oldAvg * oldCount + stars) / newCount;
+    } else {
+      arr.push({ packageId: packageId, count: 1, average: stars });
+    }
+    try {
+      Switch.writeFileSync(path, JSON.stringify(arr, null, 2));
+    } catch (err) {
+      console.debug('[apps] ratings.json write failed: ' + (err && err.message ? err.message : String(err)));
+    }
+  }
+
+  // Star-tap entry point. `stars` is 1..5. Validates auth, applies
+  // an optimistic UI update (so the row reflects the new score
+  // BEFORE the POST returns), fires the telemetry POST, and either
+  // commits the local file write (on 202) or reverts the UI + shows
+  // an inline error.
+  function submitRating(stars) {
+    var n = stars | 0;
+    if (n < 1 || n > 5) return;
+    if (!ratingAppId) return;
+    if (ratingInFlight) return;
+    // Auth gate. `__swbAuth.readActiveSession()` is synchronous
+    // (file-backed read of `auth/active.json` + the named provider's
+    // record). Missing global = script load order regression; treat
+    // as not-signed-in so we surface the prompt instead of crashing.
+    var session = null;
+    try {
+      if (globalThis.__swbAuth && typeof globalThis.__swbAuth.readActiveSession === 'function') {
+        session = globalThis.__swbAuth.readActiveSession();
+      }
+    } catch (err) {
+      console.debug('[apps] __swbAuth.readActiveSession threw: ' + (err && err.message ? err.message : String(err)));
+    }
+    if (!session || !session.record || typeof session.record.id !== 'string' || session.record.id.length === 0) {
+      setRatingMessage('<a href="brewser://login/" style="color:#7cf;">Sign in to rate</a>');
+      return;
+    }
+    // Pre-flight offline check. If the engine's cached probe is
+    // explicitly false (`overallReachable === false`) we know the
+    // POST will fail — short-circuit with the toast and DON'T fire
+    // the optimistic update. When the probe is missing or `null`
+    // (race with boot, no probe yet) we fall through and let the
+    // fetch decide; a TypeError / no-response catch downstream
+    // shows the same toast.
+    if (readEngineReachability() === false) {
+      showOfflineToast(OFFLINE_TOAST_MSG);
+      return;
+    }
+    var userId = session.record.id;
+    var packageId = ratingAppId;
+    // Capture pre-update state for revert.
+    var prevAvg = currentRatingAvg;
+    var prevCount = currentRatingCount;
+    var newCount = prevCount + 1;
+    var newAvg = (prevAvg * prevCount + n) / newCount;
+    currentRatingAvg = newAvg;
+    currentRatingCount = newCount;
+    updateRatingDom();
+    setRatingMessage('');
+    clearOfflineToast();
+    ratingInFlight = true;
+
+    // Track whether the failure looks like a network drop vs. a
+    // server-side reject. The promise chain throws either way; the
+    // catch branch decides which UI to surface (toast vs. inline
+    // "Rating failed").
+    var networkFailure = false;
+    readTelemetryUrl().then(function (telemetryUrl) {
+      if (!telemetryUrl) throw new Error('telemetry URL not configured');
+      var body = JSON.stringify({
+        packageId: packageId,
+        userId: userId,
+        reqType: 'like',
+        data: ['like', n],
+      });
+      return globalThis.fetch(telemetryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body,
+      }).catch(function (err) {
+        // fetch() itself threw — that's a transport-layer fault
+        // (DNS, TLS, socket, timeout). Tag it so the outer catch
+        // surfaces the offline toast instead of the inline error
+        // (which is reserved for "server said no" cases).
+        networkFailure = true;
+        throw err;
+      });
+    }).then(function (resp) {
+      if (!resp || resp.status !== 202) {
+        // No response object at all → treat as a network fault too
+        // (nxjs's fetch can resolve with null in edge cases the
+        // spec doesn't cover). A non-202 status, by contrast, means
+        // the server reached us and rejected — inline error path.
+        if (!resp) networkFailure = true;
+        throw new Error('HTTP ' + (resp ? resp.status : 'no response'));
+      }
+      writeLocalRating(packageId, n);
+    }).catch(function (err) {
+      console.debug('[apps] rating POST failed: ' + (err && err.message ? err.message : String(err)));
+      // Revert ONLY if the modal still has the same app open. If
+      // the user closed/swapped the modal while the request was in
+      // flight, ratingAppId no longer matches and the DOM update
+      // would land on the wrong card.
+      if (ratingAppId === packageId) {
+        currentRatingAvg = prevAvg;
+        currentRatingCount = prevCount;
+        updateRatingDom();
+        if (networkFailure) {
+          showOfflineToast(OFFLINE_TOAST_MSG);
+        } else {
+          setRatingMessage('<span style="color:#f88;">Rating failed. Try again.</span>');
+        }
+      }
+    }).then(function () {
+      ratingInFlight = false;
+    });
   }
 
   // Token guard for stats fetches. Bumped on every show(); the async
@@ -266,14 +587,23 @@
           if (rt[i] && rt[i].packageId === appId) { entry = rt[i]; break; }
         }
       }
+      var avg = 0;
+      var c = 0;
+      if (entry) {
+        avg = (typeof entry.average === 'number' && isFinite(entry.average)) ? entry.average : 0;
+        c = (typeof entry.count === 'number' && isFinite(entry.count)) ? entry.count : 0;
+      }
+      // Cache the post-fetch state so the star-tap handler can apply
+      // its optimistic delta on top of the real numbers (vs. the
+      // 0/0 placeholder we baked in at show() time).
+      currentRatingAvg = avg;
+      currentRatingCount = c;
       if (rtEl) {
-        if (entry) {
-          var avg = (typeof entry.average === 'number' && isFinite(entry.average)) ? entry.average : 0;
-          var c = (typeof entry.count === 'number' && isFinite(entry.count)) ? entry.count : 0;
-          rtEl.innerHTML = renderStarsHtml(avg, c);
-        } else {
-          rtEl.innerHTML = renderStarsHtml(0, 0);
-        }
+        rtEl.innerHTML = renderStarsHtml(avg, c);
+        // The placeholder stars stamped by show() had listeners
+        // attached, but innerHTML replaces those IMG atoms with
+        // fresh ones — re-bind against the new nodes.
+        bindStarListeners();
       }
     });
   }
@@ -348,6 +678,27 @@
     if (currentDetail.developer) rows.push(row('Developer', currentDetail.developer));
     if (currentDetail.source) rows.push(row('Source', currentDetail.source));
     bodyEl.innerHTML = rows.join('');
+
+    // Reset rating-submission state for the new modal session. The
+    // placeholder 0/0 cached here gets overwritten by loadStats()
+    // once the on-disk ratings.json read resolves; an in-flight POST
+    // from the previous modal session keeps running but its DOM
+    // updates are gated on `ratingAppId === packageId` (set below)
+    // so it can't paint into the wrong card. The toast clear keeps
+    // a previous session's offline toast from re-appearing on
+    // reopen if the auto-dismiss hadn't yet fired.
+    ratingAppId = currentDetail.id || '';
+    currentRatingAvg = 0;
+    currentRatingCount = 0;
+    ratingInFlight = false;
+    clearOfflineToast();
+
+    // Bind the per-star listeners on the placeholder 0/0 row that
+    // statsRowsHtml just stamped into bodyEl. Without this the user
+    // could tap a star before loadStats() resolves and the tap would
+    // silently no-op (no listeners attached yet). loadStats's
+    // re-render path re-binds against the post-fetch stars too.
+    bindStarListeners();
 
     // Kick off the Downloads + Rating fetches AFTER the body innerHTML
     // is written — the async update path re-queries the row spans by
@@ -477,6 +828,10 @@
     overlay.classList.remove('app-modal-overlay--open');
     modalOpen = false;
     currentDetail = null;
+    // Drop any pending offline toast so it doesn't ride the next
+    // open. The timer is also cancelled so it can't fire into a
+    // closed modal.
+    clearOfflineToast();
   }
 
   // Every catalog card (installed AND missing) carries data-app-detail

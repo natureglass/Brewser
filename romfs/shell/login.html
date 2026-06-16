@@ -60,6 +60,90 @@
         font-weight: 700;
         opacity: 0.6;
       }
+
+      /* "Currently logged in" card — shown above the picker grid when
+         active.json names a provider AND that provider's auth.json has
+         a valid record. Hidden via the `.signin-loggedin--hidden` class
+         (the HTML5 `hidden` attribute is NOT honored — the live-CSS
+         engine has no built-in `[hidden] { display: none }` UA rule, so
+         every shell page uses a `--hidden` class pattern instead, see
+         `app-modal-btn--hidden` on apps.html for the same convention).
+         JS toggles the class on boot after reading active.json. */
+      .signin-loggedin {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+        border: 1px solid #7a00cc;
+        border-radius: 12px;
+        background: #160d2e;
+      }
+      .signin-loggedin--hidden { display: none; }
+      .signin-loggedin-avatar {
+        flex: 0 0 auto;
+        width: 96px;
+        height: 96px;
+        border-radius: 48px;
+        overflow: hidden;
+        background: #0b0820;
+        border: 1px solid #7a00cc;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .signin-loggedin-avatar img {
+        display: block;
+        width: 96px;
+        height: 96px;
+        border-radius: 48px;
+      }
+      .signin-loggedin-body {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .signin-loggedin-eyebrow {
+        display: block;
+        color: #7fb8d8;
+        font-size: 0.9em;
+        letter-spacing: 1px;
+        margin-bottom: 4px;
+      }
+      .signin-loggedin-service {
+        display: block;
+        color: #faff00;
+        font-size: 1.6em;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .signin-loggedin-user {
+        display: block;
+        color: #e0e8f4;
+        font-size: 1.1em;
+      }
+      .signin-loggedin-actions {
+        flex: 0 0 auto;
+      }
+      .signin-logout {
+        background: #7a00cc;
+        color: #ffffff;
+        border: 0;
+        padding: 12px 24px;
+        font-size: 1em;
+        font-weight: 600;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .signin-logout:active { background: #5a0099; }
+
+      /* Disabled-tile treatment used when an active session exists.
+         Visual mute via opacity; the picker JS swallows the underlying
+         <a>'s tap so it doesn't navigate. Pointer cursor reverts to
+         default so the disabled state reads consistently. */
+      .signin-tile--disabled {
+        opacity: 0.32;
+        cursor: default;
+      }
     </style>
   </head>
 
@@ -76,7 +160,26 @@
             </header>
         </section>
 
-        <p class="lead">Choose a service to sign in with.</p>
+        <!-- "Currently logged in" card. Starts hidden (the
+             `--hidden` class sets `display: none`); login-picker.js
+             removes the class on boot if active.json + provider record
+             confirm an active session, then populates the avatar /
+             service name / username from the record. -->
+        <section class="signin-loggedin signin-loggedin--hidden" id="signin-loggedin-card">
+          <div class="signin-loggedin-avatar">
+            <img id="signin-loggedin-avatar-img" alt="">
+          </div>
+          <div class="signin-loggedin-body">
+            <span class="signin-loggedin-eyebrow">CURRENTLY LOGGED IN</span>
+            <strong class="signin-loggedin-service" id="signin-loggedin-service"></strong>
+            <span class="signin-loggedin-user" id="signin-loggedin-user"></span>
+          </div>
+          <div class="signin-loggedin-actions">
+            <button type="button" class="signin-logout" id="signin-logout-btn">Log out</button>
+          </div>
+        </section>
+
+        <p class="lead" id="signin-lead">Choose a service to sign in with.</p>
 
         <div class="app-grid signin-grid">
           <a class="app-card signin-tile" id="signin-tile-github" href="brewser://githubLogin/">
@@ -113,6 +216,7 @@
 
     </div>
 
+    <script src="brewser://scripts/auth-shared.js"></script>
     <script src="brewser://scripts/login-picker.js"></script>
 
   </body>

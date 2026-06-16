@@ -120,6 +120,7 @@ export type ChromeIntent =
 	| { kind: 'home' }
 	| { kind: 'star' }
 	| { kind: 'settings' }
+	| { kind: 'avatar' }
 	| { kind: 'address-bar' };
 
 type IntentSink = (intent: LiveTapIntent | ChromeIntent) => void;
@@ -165,6 +166,7 @@ const TOOLBAR_INTENT_BY_ACTION: Record<string, ChromeIntent> = {
 	home: { kind: 'home' },
 	star: { kind: 'star' },
 	settings: { kind: 'settings' },
+	avatar: { kind: 'avatar' },
 	'address-bar': { kind: 'address-bar' },
 };
 

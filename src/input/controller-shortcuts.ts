@@ -138,6 +138,12 @@ export type ControllerInput =
 	| { kind: 'forward' }
 	| { kind: 'home' }
 	| { kind: 'settings' }
+	/** Tap on the toolbar avatar slot — opens the login dashboard
+	 * (brewser://login/) where the user can sign into a service or see
+	 * the current active session. The slot's image is updated each
+	 * `renderChrome` so the engine paints whichever provider's avatar
+	 * matches the current `auth/active.json`. */
+	| { kind: 'avatar' }
 	| { kind: 'star' }
 	| { kind: 'reload' }
 	/** Rising edge of the Minus button on its own (not part of the

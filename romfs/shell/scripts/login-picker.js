@@ -1,29 +1,30 @@
-// Sign-in picker. Drives shell/login.html. For each provider, probes
-// `sdmc:/switch/brewser/shell/auth/<provider>-auth.json` at boot and
-// stamps the tile with the saved display name + avatar thumb when a
-// valid record is present. Stays silent (placeholder + "Not signed in"
-// status) when the file is missing, empty, or the record lacks an `id`.
+// Sign-in picker. Drives shell/login.html.
 //
-// Tapping any tile navigates to that provider's login page; the
-// provider page's own boot script runs `trySilentVerify` against its
-// stored token, so a still-valid login lands directly on the success
-// stage without prompting the user.
+// Two visible states, switched on boot:
+//   - LOGGED OUT: read `active.json`, find no active session → hide the
+//     "Currently logged in" card, leave the grid tiles tappable, stamp
+//     "Not signed in" on each tile's status row.
+//   - LOGGED IN:  read `active.json`, find a matching provider record
+//     → populate the card (service name, avatar, username), reveal it,
+//     dim every grid tile + swallow its tap so the user can't start a
+//     second login until they log out of the current one.
 //
-// Provider config drives both the file path scheme (each provider
-// writes its own `<name>-auth.json` next to the avatar bitmaps) AND
-// the picker's per-tile DOM ids; adding a fifth provider is a single
-// PROVIDERS entry + tile markup in login.html.
+// "Log out" on the card runs the nuclear wipe from auth-shared.js
+// (`__swbAuth.wipeAll`) — overwrites every per-provider auth.json,
+// every avatar variant, every per-provider log file, and the
+// active-session pointer with empty bytes. Nothing the login flow
+// ever writes should remain non-empty under sdmc:/switch/brewser/
+// after that returns.
 
 (function () {
   'use strict';
 
   var AUTH_DIR = 'sdmc:/switch/brewser/shell/auth/';
 
-  // Each provider exposes the same on-disk shape (see github-auth.js's
-  // `record` for the canonical fields):
-  //   id, login, email, name, avatar_url, avatar_local_thumb_path
-  // `name` is the picker's preferred display string; `login` / `email`
-  // fall back when `name` is empty (anonymous-ish accounts).
+  // Per-tile DOM ids + the per-provider `auth/<file>` paths used for
+  // the "previously signed in?" status row (logged-out state only).
+  // The active-session card uses `__swbAuth.readActiveSession` directly
+  // and doesn't need this table.
   var PROVIDERS = [
     { key: 'github',    file: 'github-auth.json'    },
     { key: 'microsoft', file: 'microsoft-auth.json' },
@@ -56,6 +57,9 @@
   }
 
   function displayNameFromRecord(rec) {
+    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.displayNameFromRecord === 'function') {
+      return globalThis.__swbAuth.displayNameFromRecord(rec);
+    }
     if (!rec) return '';
     if (typeof rec.name  === 'string' && rec.name.length  > 0) return rec.name;
     if (typeof rec.login === 'string' && rec.login.length > 0) return rec.login;
@@ -63,41 +67,165 @@
     return '';
   }
 
-  function applyProviderTile(provider) {
-    var statusEl      = document.getElementById('signin-status-' + provider.key);
-    var avatarEl      = document.getElementById('signin-avatar-' + provider.key);
-    var placeholderEl = document.getElementById('signin-placeholder-' + provider.key);
-    if (!statusEl) return;
-    var rec = readJson(AUTH_DIR + provider.file);
-    var hasId = rec && typeof rec.id === 'string' && rec.id.length > 0;
-    if (!hasId) {
-      statusEl.textContent = 'Not signed in';
-      statusEl.classList.remove('signin-status-in');
-      return;
+  function providerLabel(name) {
+    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.providerLabel === 'function') {
+      return globalThis.__swbAuth.providerLabel(name);
     }
-    var name = displayNameFromRecord(rec);
-    statusEl.textContent = name ? 'Signed in as ' + name : 'Signed in';
-    statusEl.classList.add('signin-status-in');
-    // Thumb preferred; full-size avatar is the fallback. Both live next
-    // to <provider>-auth.json; we test each path before assigning so a
-    // stale record (file deleted, format changed) doesn't blank the
-    // tile's placeholder by setting an unloadable src.
-    if (avatarEl) {
-      var thumbPath = typeof rec.avatar_local_thumb_path === 'string' ? rec.avatar_local_thumb_path : '';
-      var fullPath  = typeof rec.avatar_local_path === 'string' ? rec.avatar_local_path : '';
-      var src = '';
-      if (thumbPath && fileExists(thumbPath)) src = thumbPath;
-      else if (fullPath && fileExists(fullPath)) src = fullPath;
-      if (src) {
-        avatarEl.src = src;
-        avatarEl.removeAttribute('hidden');
-        if (placeholderEl) placeholderEl.setAttribute('hidden', '');
+    return name || '';
+  }
+
+  // ------------------------------------------------------------------
+  // Logged-out state: per-tile "Not signed in" stamp. Reset every tile
+  // regardless of any stale provider record on disk — once the picker
+  // enforces one-at-a-time via `active.json`, a non-active provider's
+  // tile should never advertise itself as signed-in.
+  // ------------------------------------------------------------------
+  function resetTileToSignedOut(provider) {
+    var statusEl = document.getElementById('signin-status-' + provider.key);
+    if (!statusEl) return;
+    statusEl.textContent = 'Not signed in';
+    statusEl.classList.remove('signin-status-in');
+  }
+
+  // ------------------------------------------------------------------
+  // Disabled-tile mode: while a session is active, every grid tile is
+  // visually muted AND its underlying <a href> tap is swallowed. We
+  // attach the click listener with `capture: true` so we intercept
+  // BEFORE the navigation handler installed by the live-overlay
+  // engine's <a> walker — preventDefault + stopPropagation drops the
+  // tap before it ever becomes a nav intent.
+  // ------------------------------------------------------------------
+  var disabledHandlerAttached = false;
+  function tileClickSwallower(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
+  }
+  function setTilesDisabled(disabled) {
+    for (var i = 0; i < PROVIDERS.length; i++) {
+      var tile = document.getElementById('signin-tile-' + PROVIDERS[i].key);
+      if (!tile) continue;
+      if (disabled) tile.classList.add('signin-tile--disabled');
+      else tile.classList.remove('signin-tile--disabled');
+      // Capture-phase listener has to be added exactly once per tile;
+      // the engine has no `removeEventListener` that can undo a
+      // capture-true binding mid-page. We attach unconditionally on
+      // first call and key the swallow on the disabled CSS class so a
+      // future logout (re-enable) just re-renders the tile without
+      // toggling event wiring.
+      if (!disabledHandlerAttached) {
+        tile.addEventListener('click', function (e) {
+          var target = e && e.currentTarget;
+          if (target && target.classList && target.classList.contains('signin-tile--disabled')) {
+            tileClickSwallower(e);
+          }
+        }, true);
       }
+    }
+    disabledHandlerAttached = true;
+  }
+
+  // ------------------------------------------------------------------
+  // Populate the "Currently logged in" card from the active provider's
+  // record. Avatar prefers the cached thumb (64×64) then falls back to
+  // the full bitmap; either avoids the slower CDN re-fetch the login
+  // success stage's fallback path does. If neither exists (avatar
+  // download failed at login time) the card slot stays empty — same
+  // visual the per-tile placeholder uses elsewhere.
+  // ------------------------------------------------------------------
+  function populateLoggedInCard(provider, rec) {
+    var card        = document.getElementById('signin-loggedin-card');
+    var avatarImg   = document.getElementById('signin-loggedin-avatar-img');
+    var serviceEl   = document.getElementById('signin-loggedin-service');
+    var userEl      = document.getElementById('signin-loggedin-user');
+    var leadEl      = document.getElementById('signin-lead');
+    if (!card) return;
+    if (serviceEl) serviceEl.textContent = providerLabel(provider);
+    if (userEl) {
+      var name = displayNameFromRecord(rec);
+      userEl.textContent = name || '(no display name)';
+    }
+    if (avatarImg) {
+      var thumb = typeof rec.avatar_local_thumb_path === 'string' ? rec.avatar_local_thumb_path : '';
+      var full  = typeof rec.avatar_local_path       === 'string' ? rec.avatar_local_path       : '';
+      var src = '';
+      if (thumb && fileExists(thumb)) src = thumb;
+      else if (full && fileExists(full)) src = full;
+      if (src) avatarImg.src = src;
+      else avatarImg.removeAttribute('src');
+    }
+    // The card starts with `signin-loggedin--hidden` (display: none) in
+    // the HTML so it never flashes during boot before the picker
+    // decides whether to show it. The live-CSS engine has no built-in
+    // `[hidden]` UA rule, so we toggle a class instead of the
+    // HTML5 `hidden` attribute (matches the `--hidden` class pattern
+    // every other shell page uses, see apps.html app-modal-btn--hidden).
+    card.classList.remove('signin-loggedin--hidden');
+    if (leadEl) {
+      leadEl.textContent = 'Log out first to switch to a different service.';
     }
   }
 
+  function hideLoggedInCard() {
+    var card = document.getElementById('signin-loggedin-card');
+    if (card) card.classList.add('signin-loggedin--hidden');
+    var leadEl = document.getElementById('signin-lead');
+    if (leadEl) leadEl.textContent = 'Choose a service to sign in with.';
+  }
+
+  // ------------------------------------------------------------------
+  // Wiring: the Log out button on the active card. Runs the nuclear
+  // wipe (every provider's auth.json + every avatar variant + every
+  // per-provider log + active.json), then flips the UI back to the
+  // logged-out state without a navigation — the user stays on the
+  // picker so they can sign into a different service immediately.
+  // ------------------------------------------------------------------
+  function wireLogout() {
+    var btn = document.getElementById('signin-logout-btn');
+    if (!btn) return;
+    btn.addEventListener('click', function (e) {
+      if (e && e.preventDefault) e.preventDefault();
+      if (e && e.stopPropagation) e.stopPropagation();
+      if (globalThis.__swbAuth && typeof globalThis.__swbAuth.wipeAll === 'function') {
+        globalThis.__swbAuth.wipeAll();
+      }
+      hideLoggedInCard();
+      setTilesDisabled(false);
+      for (var i = 0; i < PROVIDERS.length; i++) resetTileToSignedOut(PROVIDERS[i]);
+      // Toolbar avatar can't refresh until the next renderChrome (we
+      // don't have a sync handle here). Easiest nudge: navigate back to
+      // home, which forces a renderChrome with the now-empty session
+      // state. Skipping it leaves the stale provider avatar on the
+      // toolbar until the user does anything else navigation-y.
+      if (typeof globalThis.__swbRepaint === 'function') {
+        try { globalThis.__swbRepaint(); } catch (_) {}
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Boot. Two-pass:
+  //   1. Reset every tile status to "Not signed in" so a stale
+  //      per-provider auth.json (one that wasn't fully wiped by some
+  //      earlier code path) doesn't accidentally read as active.
+  //   2. Read `active.json` via the shared helper. If it names a
+  //      provider AND that provider's auth.json holds a valid record,
+  //      flip into logged-in mode. Otherwise stay in the logged-out
+  //      grid.
+  // ------------------------------------------------------------------
   function boot() {
-    for (var i = 0; i < PROVIDERS.length; i++) applyProviderTile(PROVIDERS[i]);
+    for (var i = 0; i < PROVIDERS.length; i++) resetTileToSignedOut(PROVIDERS[i]);
+    wireLogout();
+    var session = null;
+    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.readActiveSession === 'function') {
+      session = globalThis.__swbAuth.readActiveSession();
+    }
+    if (session && session.provider && session.record) {
+      populateLoggedInCard(session.provider, session.record);
+      setTilesDisabled(true);
+    } else {
+      hideLoggedInCard();
+      setTilesDisabled(false);
+    }
   }
 
   boot();

@@ -279,11 +279,14 @@
 <!-- Script load order matters: download-modal.js installs
      `globalThis.__brewserOpenDownloadModal` synchronously at load;
      warnings-modal.js installs `__brewserOpenWarningsModal` +
-     `__brewserGetWarningsForPermissions`. Both must load BEFORE
-     missing-app-modal.js so the globals are available by the time
-     its click handlers fire. -->
+     `__brewserGetWarningsForPermissions`; auth-shared.js installs
+     `globalThis.__swbAuth` (read by the modal's rating-row tap
+     handler to derive the userId for the telemetry POST). All three
+     must load BEFORE missing-app-modal.js so the globals are
+     available by the time its click handlers fire. -->
 <script src="brewser://scripts/download-modal.js"></script>
 <script src="brewser://scripts/warnings-modal.js"></script>
+<script src="brewser://scripts/auth-shared.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>
 <script src="brewser://scripts/updates-modal.js"></script>
 </body>

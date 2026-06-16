@@ -142,11 +142,15 @@
   </div>
 </browser-modal>
 
-<!-- Load download-modal.js + warnings-modal.js FIRST so their
-     globalThis hooks are wired before missing-app-modal.js runs its
-     click handlers. -->
+<!-- Load download-modal.js + warnings-modal.js + auth-shared.js FIRST
+     so their globalThis hooks (`__brewserOpenDownloadModal`,
+     `__brewserOpenWarningsModal`, `__swbAuth`) are wired before
+     missing-app-modal.js runs its click handlers — the rating-row
+     tap path reads `__swbAuth.readActiveSession()` to derive the
+     userId for the telemetry POST. -->
 <script src="brewser://scripts/download-modal.js"></script>
 <script src="brewser://scripts/warnings-modal.js"></script>
+<script src="brewser://scripts/auth-shared.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>
 </body>
 </html>
