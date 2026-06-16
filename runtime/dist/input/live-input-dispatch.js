@@ -43,6 +43,7 @@
 import { setPseudoActive } from '../scripts/live-css.js';
 import { findTapIntent } from '../scripts/live-overlay.js';
 import { handleFormTap, isFormWidget } from '../scripts/live-form.js';
+import { emitAction, hasActionHandler } from './action-bus.js';
 import { getToolbarLiveRoot, popToolbarMutationScope, pushToolbarMutationScope, requestFullRepaint, } from '../scripts/live-paint-control.js';
 import { getInternalLiveScrollY, hitTestLive, setInternalLiveScrollY, } from '../scripts/live-dom.js';
 import { nxScreen } from '../graphics/screen.js';
@@ -103,6 +104,24 @@ const TOOLBAR_INTENT_BY_ACTION = {
     settings: { kind: 'settings' },
     avatar: { kind: 'avatar' },
     'address-bar': { kind: 'address-bar' },
+};
+/** Map from a toolbar `data-action` value to the action-bus action name
+ * the rising-edge dispatcher uses. Lets chrome taps and button-mapping
+ * rising edges fan out through the SAME bus so a single
+ * `subscribeAction(name, ...)` registration catches both input sources.
+ * Names differ in a couple of places — `star` (toolbar) ↔ `bookmark`
+ * (bus) and `address-bar` (toolbar) ↔ `addressBar` (bus) — because
+ * the toolbar HTML mirrors the visible glyph while the bus mirrors
+ * the `BrowserConfig.buttonMapping` schema. */
+const TOOLBAR_ACTION_TO_BUS_ACTION = {
+    back: 'back',
+    forward: 'forward',
+    reload: 'reload',
+    home: 'home',
+    star: 'bookmark',
+    settings: 'settings',
+    avatar: 'avatar',
+    'address-bar': 'addressBar',
 };
 /** Walk parents looking for the nearest ancestor that carries either
  * a `data-action` (chrome button intent) OR an `id` that maps to one
@@ -224,6 +243,20 @@ export function dispatchChromeTap(x, y) {
                 popToolbarMutationScope();
             }
         }, 120);
+    }
+    // Action-bus emit + ControllerInput intent flow side-by-side:
+    //  - Always emit the action through the bus so any registered
+    //    subscriber sees the rising edge.
+    //  - If a subscriber claimed the action, skip the ControllerInput
+    //    sink so a migrated handler doesn't ALSO get the legacy
+    //    `{ kind: 'star' }` (etc.) and fire twice. Unmigrated actions
+    //    (no subscriber) keep flowing through the sink unchanged.
+    // Same skip-when-handled gate as `controller-shortcuts.checkShellRisingEdge`.
+    const busActionName = TOOLBAR_ACTION_TO_BUS_ACTION[action];
+    if (busActionName) {
+        emitAction(busActionName, {});
+        if (hasActionHandler(busActionName))
+            return true;
     }
     intentSink(TOOLBAR_INTENT_BY_ACTION[action] ?? { kind: 'address-bar' });
     return true;

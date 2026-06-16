@@ -10,7 +10,7 @@ import { patchLiveDirtyRegions } from '../scripts/live-overlay.js';
 import { abortLivePress, beginLivePress, dispatchChromeTap, endLivePress, setChromeTapRegion, setChromeTapStarEnabled, setLiveInputIntentSink, } from './live-input-dispatch.js';
 import { setMouseChromeMode, setMouseChromeRegion, tickMouseInput, } from './page-mouse-forwarder.js';
 import { listMappedButtons } from './button-router.js';
-import { emitAction } from './action-bus.js';
+import { emitAction, hasActionHandler } from './action-bus.js';
 const nativeSetTimeout = setTimeout.bind(globalThis);
 function delay(ms) {
     return new Promise((resolve) => nativeSetTimeout(resolve, ms));
@@ -938,13 +938,18 @@ function checkShellRisingEdge(_pad, prev, now) {
         const rose = now[m.idx] && !prev[m.idx];
         if (!rose)
             continue;
-        // Fire the action-bus event for any subscriber (Phase 3 seam).
-        // Runs alongside the legacy ControllerInput pipeline below so
-        // subscribers see EVERY mapped rising edge — runtime-class
-        // (back/forward) and shell-class (bookmark/settings/...) — and
-        // either side can opt in to handling without forcing a wholesale
-        // migration off ControllerInput in this phase.
+        // Fire the action-bus event for any subscriber. Runs FIRST so
+        // the subscriber gets the rising edge even if it shares an
+        // action name with a ControllerInput kind below.
         emitAction(m.action, { label: m.label, buttonIndex: m.idx });
+        // If a host registered a bus handler for this action, the bus
+        // is the canonical dispatch path — don't ALSO queue a
+        // ControllerInput for it, or the shell's switch + the bus
+        // subscriber would both fire (double-dispatch). Hosts that
+        // haven't migrated an action stay on the ControllerInput pull
+        // pipeline by simply not subscribing.
+        if (hasActionHandler(m.action))
+            continue;
         const input = shellActionToControllerInput(m.action);
         if (input)
             return input;

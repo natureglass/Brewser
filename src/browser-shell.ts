@@ -90,6 +90,15 @@ import { getLayoutBox } from '@switch-web/runtime';
 import { isExternalCssLoading, populateRootFromTree } from '@switch-web/runtime';
 import { extractTitle, parseHtml, type HtmlElement } from '@switch-web/runtime';
 import { AddressBarInput } from './input/address-bar-input.js';
+import { captureScreenshot } from './shell/screenshot.js';
+import {
+	computeLivePageBase,
+	extractAppDirFromUrl,
+	loadAppManifestButtonMapping,
+	resolveNavUrl,
+} from './shell/nav-helpers.js';
+import { isSaveButtonDisabled, readStagedSettings } from './shell/staged-settings.js';
+import { subscribeShellAction } from './input/shell-actions.js';
 import {
 	installCanvasTouch,
 	setTouchScrollHandler,
@@ -610,6 +619,22 @@ export class BrowserShell {
 		// through this callback. Same handler as right-stick / D-pad
 		// scrolling so the clamp + repaint path is shared.
 		setTouchScrollHandler((delta) => this.handleScroll(delta));
+		// Action-bus subscribers for chrome actions whose handlers are
+		// safe to fire from the bus's synchronous dispatch:
+		//  - `bookmark` is a sync toggle, no I/O.
+		//  - `screenshot` is sync (`toBlob` already runs on its own
+		//     worker; the disk write is fire-and-forget).
+		// Navigation-class actions (back / forward / reload / home /
+		// settings / exit) still flow through the ControllerInput
+		// switch below because they need the main loop's `await` to
+		// serialize concurrent presses. Adding them to the bus would
+		// drop into emit's fire-and-forget path and race.
+		//
+		// The runtime's `controller-shortcuts.checkShellRisingEdge` sees
+		// the bus subscription via `hasActionHandler` and skips queuing
+		// a ControllerInput for the migrated action — no double-dispatch.
+		subscribeShellAction('bookmark', () => this.toggleBookmark());
+		subscribeShellAction('screenshot', () => this.captureScreenshot());
 
 		await this.paintBootSplash();
 		// Copy missing built-in pages, toolbar icons, and toolbars.json
@@ -917,15 +942,15 @@ export class BrowserShell {
 						// regardless of whether anyone is currently signed in.
 						await this.navigateTo('brewser://login/');
 						break;
-					case 'star':
-						this.toggleBookmark();
-						break;
 					case 'reload':
 						await this.runNavigation(() => this.navigation.reload());
 						break;
-					case 'screenshot':
-						this.captureScreenshot();
-						break;
+					// `case 'star':` (bookmark) + `case 'screenshot':` removed
+					// 2026-06-16 in the chrome-handler → action-bus migration.
+					// `controller-shortcuts.checkShellRisingEdge` no longer
+					// queues a ControllerInput for either; the bus
+					// subscribers wired in `run()` handle the rising edge
+					// directly.
 					case 'navigate': {
 						// Link (`<a href>`) taps: resolve a relative href against
 						// the current page's URL, same page-relative architecture
@@ -997,30 +1022,7 @@ export class BrowserShell {
 	 * tier3 form-submit navigation and for relative `<a href>` on
 	 * external pages. */
 	private resolveNavUrl(url: string): string {
-		const u = url.trim();
-		if (!u) return u;
-		if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;          // has scheme → absolute
-		const base = this.session.currentPageUrl;
-		if (/^https?:\/\//i.test(base)) {
-			try {
-				return new URL(u, base).toString();
-			} catch (_) {
-				return u;
-			}
-		}
-		if (!/^brewser:\/\//i.test(base)) return u;            // no recognised base → leave as-is
-		if (u.startsWith('#')) return base.split('#')[0] + u;  // same-page fragment
-		if (u.startsWith('/')) return `brewser://${u.replace(/^\/+/, '')}`; // root-relative
-		const basePath = base.replace(/^brewser:\/\//i, '').split('?')[0].split('#')[0];
-		const slash = basePath.lastIndexOf('/');
-		const parts = (slash >= 0 ? basePath.slice(0, slash) : '').split('/').filter(Boolean);
-		const [path, tail] = [u.split(/[?#]/)[0], u.slice(u.split(/[?#]/)[0].length)];
-		for (const seg of path.split('/')) {
-			if (seg === '' || seg === '.') continue;
-			if (seg === '..') { parts.pop(); continue; }
-			parts.push(seg);
-		}
-		return `brewser://${parts.join('/')}${tail}`;
+		return resolveNavUrl(url, this.session.currentPageUrl);
 	}
 
 	private async navigateTo(url: string): Promise<void> {
@@ -1182,77 +1184,18 @@ export class BrowserShell {
 	 *     in `pages/`), then `<path>/index.html` (→ base is `<path>/`).
 	 * Non-`brewser://` URLs return '' (no page base). */
 	private computeLivePageBase(url: string): string {
-		// External http(s) pages: return the full page URL so the
-		// live-DOM resource resolver can hand it straight to `new URL`
-		// for spec-correct relative resolution. Crucial for tier3-style
-		// pages like google.com whose logo is referenced as a root-
-		// relative `/images/branding/…gif` — without the page URL as
-		// base, the IMG src reaches the image pipeline as a path with
-		// no scheme/host and 404s. The brewser:// path below keeps its
-		// own directory-style resolution because the runtime fetch
-		// can't see `brewser:` and we need to map to a profile dir.
-		if (/^https?:\/\//i.test(url)) return url;
-		if (!/^brewser:\/\//i.test(url)) return '';
-		const stripped = url.replace(/^brewser:\/\//i, '')
-			.split('?')[0].split('#')[0].replace(/^\/+/, '').replace(/\/+$/, '');
-		// Apps live at the app-level root (shared across profiles); the
-		// apps.html launcher (no slash after `apps`) stays per-profile.
-		// `dev/` is the app-level dev-fixtures + Khronos conformance tree.
-		// Mirror of BrowserResourceLoader.resolveContentPath.
-		const root = (stripped.startsWith('apps/') || stripped.startsWith('dev/'))
-			? this.profile.appRoot
-			: this.profile.storageRoot;
-		if (!stripped) return root;
-		const slash = stripped.lastIndexOf('/');
-		const lastSeg = stripped.slice(slash + 1);
-		const parentDir = slash >= 0 ? stripped.slice(0, slash + 1) : '';
-		// Explicit file → base is its parent directory.
-		if (!url.endsWith('/') && lastSeg.includes('.')) {
-			return `${root}${parentDir}`;
-		}
-		// Directory form: prefer the `<path>.html` candidate (loaded from the
-		// PARENT dir) when that file exists, else `<path>/index.html`.
-		const htmlCandidate = `${root}${stripped}.html`;
-		let htmlExists = false;
-		try {
-			const sw = (globalThis as { Switch?: { readFileSync?: (p: string) => unknown } }).Switch;
-			if (sw && typeof sw.readFileSync === 'function') htmlExists = !!sw.readFileSync(htmlCandidate);
-		} catch (_) { htmlExists = false; }
-		return htmlExists ? `${root}${parentDir}` : `${root}${stripped}/`;
+		return computeLivePageBase(url, {
+			appRoot: this.profile.appRoot,
+			storageRoot: this.profile.storageRoot,
+		});
 	}
 
-	/** If `url` points inside an installed app — i.e. matches
-	 * `brewser://apps/<group>/<id>/...` — return the `apps/<group>/<id>/`
-	 * dir prefix. Otherwise `null`. Used to gate the per-app button-router
-	 * overlay + the context-aware `exit` action. */
 	private extractAppDirFromUrl(url: string): string | null {
-		if (!/^brewser:\/\//i.test(url)) return null;
-		const stripped = url.replace(/^brewser:\/\//i, '')
-			.split('?')[0].split('#')[0].replace(/^\/+/, '');
-		if (!stripped.startsWith('apps/')) return null;
-		const parts = stripped.split('/');
-		// Need at least `apps/<group>/<id>/...` — three segments + a tail.
-		if (parts.length < 4 || !parts[1] || !parts[2]) return null;
-		return `apps/${parts[1]}/${parts[2]}/`;
+		return extractAppDirFromUrl(url);
 	}
 
-	/** Read `<appRoot><appDir>manifest.json` and return its parsed
-	 * `buttonMapping` object (or `null` when absent / malformed). Other
-	 * manifest fields are ignored here — they belong to the launcher's
-	 * catalog rendering, which goes through `catalogue.json` instead. */
 	private loadAppManifestButtonMapping(appDir: string): Record<string, unknown> | null {
-		try {
-			const path = `${this.profile.appRoot}${appDir}manifest.json`;
-			const raw = (globalThis as { Switch?: { readFileSync?: (p: string) => ArrayBuffer | null } })
-				.Switch?.readFileSync?.(path);
-			if (!raw) return null;
-			const parsed = JSON.parse(new TextDecoder().decode(raw));
-			const bm = parsed?.buttonMapping;
-			if (!bm || typeof bm !== 'object' || Array.isArray(bm)) return null;
-			return bm as Record<string, unknown>;
-		} catch (_) {
-			return null;
-		}
+		return loadAppManifestButtonMapping(appDir, this.profile.appRoot);
 	}
 
 	/**
@@ -1416,67 +1359,11 @@ export class BrowserShell {
 	 *     sortable lexicographically.
 	 */
 	private captureScreenshot(): void {
-		const canvas = nxScreen();
-		const dir = `${this.profile.appRoot}screenshots/`;
-		try { Switch.mkdirSync(dir); } catch (_) { /* already exists */ }
-		const ts = new Date().toISOString().replace(/[:.]/g, '-');
-		const path = `${dir}screenshot_${ts}.png`;
-		canvas.toBlob((blob: Blob | null) => {
-			if (!blob) {
-				console.debug('[brewser] screenshot: toBlob returned null');
-				return;
-			}
-			// Flash AFTER toBlob's internal canvas read so the saved PNG
-			// does NOT include the flash. Visual confirmation that the
-			// shot landed; cleared by a single subsequent cache-blit.
-			this.flashScreenshotFeedback();
-			blob.arrayBuffer().then((buf: ArrayBuffer) => {
-				try {
-					Switch.writeFileSync(path, buf);
-					console.debug('[brewser] screenshot saved: ' + path);
-				} catch (e) {
-					console.debug('[brewser] screenshot write failed: '
-						+ (e instanceof Error ? e.message : String(e)));
-				}
-			});
+		captureScreenshot(`${this.profile.appRoot}screenshots/`, {
+			chromeHeight: this.chromeHeight,
+			mode: this.mode,
+			toolbarPosition: this.toolbarPosition,
 		});
-	}
-
-	/**
-	 * Brief white-flash overlay on the screen canvas to confirm a
-	 * successful screenshot. Drawn DIRECTLY on the framebuffer (one
-	 * `fillRect`), then cleared by a single `requestFullRepaint` after
-	 * ~80 ms — the next loop tick blits the live-cache offscreen back
-	 * over the flashed pixels. Critically:
-	 *   - No `bumpLiveTreeVersion`, no `markLiveDirty`, no
-	 *     `patchLiveDirtyRegions` — the live tree / layout state is
-	 *     unchanged, so the next paint takes the cache-blit fast path
-	 *     (not the rebuild path).
-	 *   - No `OffscreenCanvas` allocation, no `getImageData`/`putImageData`
-	 *     round-trip. One fillRect into the screen ctx + one timer.
-	 */
-	private flashScreenshotFeedback(): void {
-		const canvas = nxScreen();
-		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
-		// Clip the flash to the page-content area so the toolbar isn't
-		// touched — mirrors the inset math the slow-path paint uses
-		// (browser-shell.ts ≈ L1103). Fullscreen modes have no chrome,
-		// so both insets become 0 and the flash covers everything,
-		// which is the right behaviour for video / fullscreen-canvas /
-		// fullscreen-page shots.
-		const chromeHeight = this.chromeHeight;
-		const isBottomToolbar = this.toolbarPosition === 'bottom';
-		const topInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
-		const bottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
-		const flashH = canvas.height - topInset - bottomInset;
-		if (flashH <= 0) { setTimeout(() => requestFullRepaint(), 80); return; }
-		ctx.save();
-		try {
-			ctx.fillStyle = 'rgba(255,255,255,0.85)';
-			ctx.fillRect(0, topInset, canvas.width, flashH);
-		} finally { ctx.restore(); }
-		setTimeout(() => requestFullRepaint(), 80);
 	}
 
 	/**
@@ -2109,10 +1996,10 @@ export class BrowserShell {
 		// config.json with identical content, costing an unnecessary
 		// reload. Walk the live root for the button by its action; if
 		// it's missing the page is something else entirely (clean no-op).
-		if (this.isSaveButtonDisabled()) return;
+		if (isSaveButtonDisabled()) return;
 		const configPath = `${this.profile.appRoot}configs/config.json`;
 		const prior = loadConfig(this.profile.appRoot);
-		const staged = this.readStagedSettings();
+		const staged = readStagedSettings();
 		if (Object.keys(staged).length === 0) return; // nothing to commit
 
 		// Spread the on-disk raw object so user-edited unknown keys
@@ -2248,73 +2135,6 @@ export class BrowserShell {
 	 * the live tree at all (some other page issued a `save-settings`
 	 * action — treat as "go ahead", let the no-staged-widgets fallback
 	 * in saveSettings handle it). */
-	private isSaveButtonDisabled(): boolean {
-		const find = (el: LiveElement): LiveElement | null => {
-			if (el.getAttribute('data-action') === 'save-settings') return el;
-			for (const c of el.children) {
-				const found = find(c);
-				if (found) return found;
-			}
-			return null;
-		};
-		const btn = find(getLiveRoot());
-		return !!btn && btn.hasAttribute('disabled');
-	}
-
-	/** Walk the live root collecting every `[data-setting="<key>"]`
-	 * widget and return the staged value per key, clamped + coerced
-	 * to match `loadConfig`'s parser. Radios with the same key collapse
-	 * to the single checked one's value; unknown keys are dropped.
-	 * Numeric out-of-range inputs are clamped (not rejected) so a
-	 * type-in like `9999` in `wwwRenderChunkMs` saves as `1000`. */
-	private readStagedSettings(): Record<string, unknown> {
-		const out: Record<string, unknown> = {};
-		const visit = (el: LiveElement): void => {
-			const key = el.getAttribute('data-setting');
-			if (key) this.captureStaged(out, key, el);
-			for (const c of el.children) visit(c);
-		};
-		visit(getLiveRoot());
-		return out;
-	}
-
-	private captureStaged(out: Record<string, unknown>, key: string, el: LiveElement): void {
-		const tag = el.tagName;
-		const type = (el.getAttribute('type') ?? '').toLowerCase();
-		// Radio groups: only the checked one contributes. An
-		// already-recorded value for the same key (from an earlier
-		// sibling radio) wins, so the first checked radio in document
-		// order is the staged choice.
-		if (tag === 'INPUT' && type === 'radio') {
-			if (getInputChecked(el) && !(key in out)) out[key] = getInputValue(el);
-			return;
-		}
-		if (tag === 'INPUT' && type === 'checkbox') {
-			out[key] = getInputChecked(el);
-			return;
-		}
-		// Numeric inputs: parse + clamp to the same bounds loadConfig
-		// uses, so the on-disk value is always valid even if the user
-		// type-ins something outside the range.
-		if (tag === 'INPUT' && type === 'number') {
-			const raw = parseFloat(getInputValue(el));
-			if (!Number.isFinite(raw)) return;
-			const min = parseFloat(el.getAttribute('min') ?? '');
-			const max = parseFloat(el.getAttribute('max') ?? '');
-			let v = raw;
-			if (Number.isFinite(min)) v = Math.max(min, v);
-			if (Number.isFinite(max)) v = Math.min(max, v);
-			// maxHistory in particular must be an integer; trunc when
-			// the field exposes an integer-shaped range (min/max both
-			// integers and no step="0.xxx" overriding the default 1).
-			if (Number.isInteger(min) && Number.isInteger(max)) v = Math.trunc(v);
-			out[key] = v;
-			return;
-		}
-		// <select> + plain text inputs: pass the raw string through.
-		out[key] = getInputValue(el);
-	}
-
 	/** Read + parse the active keyboard panel HTML (per `config.json`'s
 	 * `keyboard` field, e.g. `keyboards/default.html`) once at boot and
 	 * stash the parsed tree on `this.keyboardParsedTree`. Also runs the
