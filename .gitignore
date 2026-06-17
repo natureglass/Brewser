@@ -8,3 +8,9 @@ brewser.nsp
 icon.jpg
 *.log
 .DS_Store
+# Vendored @switch-web/runtime dist — populated from sibling brewser-runtime/
+# checkout by `node scripts/sync-runtime.mjs` (also wired as a postinstall
+# hook). Excluded so per-runtime-change diffs stay lean. Consumers without
+# the sibling checkout get a warning from postinstall and must populate
+# runtime/ manually before `npm run build`.
+runtime/

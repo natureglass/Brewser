@@ -1,1 +1,0 @@
-{"version":3,"file":"pointer-lock.d.ts","sourceRoot":"","sources":["../../src/polyfills/pointer-lock.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;;;;;;;;;;;;GA0BG;AAwCH;;;yDAGyD;AACzD,wBAAgB,gCAAgC,CAAC,IAAI,EAAE,MAAM,CAAC,MAAM,EAAE,OAAO,CAAC,GAAG,IAAI,CA0BpF;AAID;;;;;GAKG;AACH,wBAAgB,kBAAkB,CAAC,eAAe,EAAE;IAAE,SAAS,EAAE,MAAM,CAAC,MAAM,EAAE,OAAO,CAAC,CAAA;CAAE,GAAG,IAAI,CAShG"}

@@ -18,15 +18,26 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const runtimeSrc = join(root, '..', 'brewser-runtime');
 const runtimeDst = join(root, 'runtime');
 
-if (!existsSync(runtimeSrc)) {
-	console.error(`[sync-runtime] missing source: ${runtimeSrc}`);
+// When invoked as the `postinstall` npm lifecycle hook (added so fresh
+// clones get a populated `runtime/` automatically now that the dir is
+// .gitignored), missing source must NOT abort `npm install` — a consumer
+// who doesn't have the brewser-runtime sibling checkout still needs the
+// install to succeed. When invoked directly via `npm run sync-runtime`,
+// keep the hard failure so the dev sees the real error.
+const isPostinstall = process.env.npm_lifecycle_event === 'postinstall';
+function softExit(msg) {
+	if (isPostinstall) { console.warn(msg + ' (postinstall — continuing)'); process.exit(0); }
+	console.error(msg);
 	process.exit(1);
+}
+
+if (!existsSync(runtimeSrc)) {
+	softExit(`[sync-runtime] missing source: ${runtimeSrc}`);
 }
 
 const distSrc = join(runtimeSrc, 'dist');
 if (!existsSync(distSrc)) {
-	console.error(`[sync-runtime] missing brewser-runtime/dist/ — run \`pnpm build\` in brewser-runtime first.`);
-	process.exit(1);
+	softExit(`[sync-runtime] missing brewser-runtime/dist/ — run \`pnpm build\` in brewser-runtime first.`);
 }
 
 mkdirSync(runtimeDst, { recursive: true });

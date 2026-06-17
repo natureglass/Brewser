@@ -8,7 +8,8 @@
     "nro": "node scripts/build-icon.mjs && node scripts/stage-main.mjs && nxjs-nro && node scripts/unstage-main.mjs",
     "nsp": "nxjs-nsp",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "sync-runtime": "node scripts/sync-runtime.mjs"
+    "sync-runtime": "node scripts/sync-runtime.mjs",
+    "postinstall": "node scripts/sync-runtime.mjs"
   },
   "license": "MIT",
   "author": {

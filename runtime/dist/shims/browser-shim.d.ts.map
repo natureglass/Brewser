@@ -1,1 +1,0 @@
-{"version":3,"file":"browser-shim.d.ts","sourceRoot":"","sources":["../../src/shims/browser-shim.ts"],"names":[],"mappings":"AAEA,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,uBAAuB,CAAC;AAG5D,MAAM,WAAW,kBAAkB;IAClC,MAAM,EAAE,cAAc,CAAC;IACvB,KAAK,EAAE,MAAM,CAAC;IACd,MAAM,EAAE,MAAM,CAAC;CACf;AAoSD,wBAAgB,kBAAkB,CAAC,EAAE,MAAM,EAAE,KAAK,EAAE,MAAM,EAAE,EAAE,kBAAkB,GAAG,IAAI,CA0CtF"}
