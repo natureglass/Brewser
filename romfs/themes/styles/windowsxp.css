@@ -14,7 +14,19 @@
    PERF NOTE: gradients, box-shadows, radial glows and transitions
    were stripped out to stay cheap on the software/low-end GPU path.
    Visuals are now flat solid fills drawn from the same palette, so
-   colour uniformity is preserved while per-frame paint cost drops. */
+   colour uniformity is preserved while per-frame paint cost drops.
+
+   THEME: Windows XP "Luna" (blue). Flat solid approximations of the
+   classic Luna chrome — royal blue (#0a246a / #1c5fd6) for primary
+   buttons, title accents and active tabs; silver / cream surfaces
+   (#ece9d8 / #f4f2ea) with taupe borders (#aca899) for cards, panels
+   and inactive controls; XP green (#3c8f3c) for "go" actions and the
+   license chip; notification orange (#e07b00) for upgrade callouts;
+   and the standard XP red (#c43b2f) for destructive actions. Control
+   corners use XP's tight ~3-4px radius rather than full pills. Tahoma
+   is the primary face to match the era. No gradients/bevels are used
+   (per the PERF NOTE above), so the look is a flat reinterpretation
+   of Luna rather than a pixel-faithful one. */
 
 * {
   box-sizing: border-box;
@@ -24,37 +36,43 @@ body {
   margin: 0;
   min-height: 100vh;
   padding: 28px 48px;
-  background: #05060a;
-  color: #e0e8f4;
-  font-family: Arial, Helvetica, sans-serif;
+  /* `transparent` lets the engine-painted style wallpaper (see
+     `styles.json` -> `background` and `BrowserShell.paintStyleBackground`)
+     show through where the body would otherwise wash it out with a
+     solid colour. The page-bg colour fill the engine does each frame
+     before drawing the wallpaper is the safety net for the no-image
+     case (Amber / Neon ship `background: ""` in `styles.json`). */
+  background: transparent;
+  color: #1a1a1a;
+  font-family: Tahoma, "Segoe UI", Arial, Helvetica, sans-serif;
   font-size: 18px;
 }
 
-h1 { color: #ffd35e; }
-h2 { color: #7aa2ff; }
-a  { color: #7eda9f; }
+h1 { color: #0a246a; }
+h2 { color: #1c4ca8; }
+a  { color: #0046d5; }
 
 .lead {
-  color: #9bb1d6;
+  color: #3a3a3a;
   margin-top: 0;
   margin-bottom: 24px;
 }
 
-.empty { color: #6a7c95; font-style: italic; }
+.empty { color: #6d6a5e; font-style: italic; }
 
 /* Card-grid empty-state — used when <browser-apps> / <browser-featured>
    render no entries. Same <p class="empty"> markup as the list pages,
    but inside .app-grid it gets the card-style backdrop. */
 .app-grid .empty {
-  background-color: #14202d;
+  background-color: #ece9d8;
   padding: 14px 16px;
-  border-left: 3px solid #7aa2ff;
-  color: #9bb1d6;
-  border-radius: 6px;
+  border-left: 3px solid #1c4ca8;
+  color: #3a3a3a;
+  border-radius: 3px;
   font-style: normal;
 }
 
-code, kbd { color: #c2e0ff; }
+code, kbd { color: #0a246a; }
 
 .page-shell {
   width: min(1280px, 100%);
@@ -86,17 +104,17 @@ code, kbd { color: #c2e0ff; }
   min-height: 46px;
   padding: 11px 20px;
   overflow: hidden;
-  color: #eaf2ff;
+  color: #ffffff;
   text-decoration: none;
   font-weight: 700;
   letter-spacing: 0.01em;
-  background: #14202d;
-  border: 1px solid #3a4f7a;
-  border-radius: 999px;
+  background: #1c5fd6;
+  border: 1px solid #0a246a;
+  border-radius: 4px;
 }
 
 .munch-link:focus-visible {
-  outline: 2px solid #7eda9f;
+  outline: 2px solid #ff9c00;
   outline-offset: 3px;
 }
 
@@ -112,15 +130,15 @@ code, kbd { color: #c2e0ff; }
   min-width: 132px;
   min-height: 46px;
   padding: 11px 22px;
-  color: #ffb8b8;
+  color: #ffffff;
   font-family: inherit;
   font-size: inherit;
   font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
-  background: #572c2c;
-  border: 1px solid #7a3338;
-  border-radius: 999px;
+  background: #c43b2f;
+  border: 1px solid #8a2118;
+  border-radius: 4px;
 }
 
 /* Internet search bar — emitted by <browser-search> (loader). */
@@ -136,9 +154,9 @@ code, kbd { color: #c2e0ff; }
   width: min(760px, 100%);
   min-height: 66px;
   padding: 8px;
-  background: #14202d;
-  border: 1px solid #3a4f7a;
-  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #7f9db9;
+  border-radius: 4px;
 }
 
 .search-logo {
@@ -155,13 +173,13 @@ code, kbd { color: #c2e0ff; }
   border: none;
   outline: none;
   background: transparent;
-  color: #eaf2ff;
+  color: #1a1a1a;
   font: inherit;
   padding: 12px 8px;
 }
 
 .search-input::placeholder {
-  color: #9bb1d6;
+  color: #767060;
   opacity: 1;
 }
 
@@ -169,17 +187,17 @@ code, kbd { color: #c2e0ff; }
   flex: 0 0 auto;
   border: none;
   cursor: pointer;
-  color: #0b1220;
-  background: #ffd35e;
+  color: #ffffff;
+  background: #3c8f3c;
   font: inherit;
   font-weight: 800;
   padding: 13px 22px;
-  border-radius: 999px;
+  border-radius: 4px;
 }
 
 .search-button:hover,
 .search-button:focus-visible {
-  background: #7eda9f;
+  background: #4aa83f;
   outline: none;
 }
 
@@ -222,13 +240,13 @@ input[name="apps-tab"] { display: none; }
   min-width: 132px;
   min-height: 44px;
   padding: 10px 22px;
-  color: #9bb1d6;
+  color: #3a3a3a;
   font-weight: 700;
   letter-spacing: 0.01em;
   cursor: pointer;
-  background: #10192a;
-  border: 1px solid #28365c;
-  border-radius: 999px;
+  background: #ece9d8;
+  border: 1px solid #aca899;
+  border-radius: 4px 4px 0 0;
 }
 
 .tab-panel { display: none; }
@@ -241,9 +259,9 @@ input[name="apps-tab"] { display: none; }
 #apps-tab-featured:checked ~ .page-shell .tab-label[for="apps-tab-featured"],
 #apps-tab-community:checked ~ .page-shell .tab-label[for="apps-tab-community"],
 #apps-tab-experimental:checked ~ .page-shell .tab-label[for="apps-tab-experimental"] {
-  color: #0b1220;
-  background: #ffd35e;
-  border-color: #ffd35e;
+  color: #ffffff;
+  background: #1c5fd6;
+  border-color: #0a246a;
 }
 
 #apps-tab-featured:checked ~ .page-shell .tab-panel[data-tab="featured"],
@@ -254,9 +272,9 @@ input[name="apps-tab"] { display: none; }
 
 .apps-check-updates,
 .communityApps {
-  color: #0b1220;
-  background: #ffd35e;
-  border-color: #ffd35e;
+  color: #ffffff;
+  background: #3c8f3c;
+  border: 1px solid #4aa83f;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -268,21 +286,35 @@ input[name="apps-tab"] { display: none; }
   text-decoration: none;
   font-weight: 700;
   letter-spacing: 0.01em;
-  border-radius: 999px;
+  border-radius: 4px;
 }
 
 .apps-check-updates:active,
 .apps-check-updates[aria-pressed="true"],
 .communityApps:active,
 .communityApps[aria-pressed="true"] {
-  background: #f2c13d;
-  border-color: #f2c13d;
-  color: #0b1220;
+  background: #0a246a;
+  border-color: #0a246a;
+  color: #ffffff;
 }
 
 .tab-label:active {
-  background: #0a1220;
-  border-color: #7aa2ff;
+  background: #d4d0c8;
+  border-color: #0a246a;
+}
+
+
+.app-back-container {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 24px 18px;
+  text-align: center;
+  color: #1a1a1a;
+  text-decoration: none;
+  background: #ece9d8;
+  border: 4px solid #1c5fd6;
+  border-radius: 4px;
 }
 
 /* App / Featured grid — 4-column responsive grid of .app-card anchors
@@ -312,11 +344,11 @@ input[name="apps-tab"] { display: none; }
      cap with margin to spare; `overflow: hidden` clips outliers. */
    height: 245px;
   text-align: center;
-  color: #eaf2ff;
+  color: #1a1a1a;
   text-decoration: none;
-  background: #14202d;
-  border: 1px solid #314672;
-  border-radius: 16px;
+  background: #ece9d8;
+  border: 1px solid #aca899;
+  border-radius: 4px;
 }
 
 .app-logo {
@@ -329,7 +361,7 @@ input[name="apps-tab"] { display: none; }
 
 .app-card strong {
   display: block;
-  color: #ffd35e;
+  color: #0a246a;
   font-size: 1.15em;
   margin-bottom: 8px;
   text-align: left;
@@ -345,7 +377,7 @@ input[name="apps-tab"] { display: none; }
    copy that already favors short blurbs.) */
 .app-card span {
   display: block;
-  color: #9bb1d6;
+  color: #4a4a44;
   line-height: 1.35;
   max-height: 4.5em;
   overflow: hidden;
@@ -388,7 +420,7 @@ input[name="apps-tab"] { display: none; }
 .app-meta__license {
   height: 22px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: 3px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -399,9 +431,9 @@ input[name="apps-tab"] { display: none; }
 }
 
 .app-meta__version {
-  color: #c2e0ff;
-  background: #1a2740;
-  border: 1px solid #28365c;
+  color: #ffffff;
+  background: #1c5fd6;
+  border: 1px solid #0a246a;
 }
 
 /* Upgrade-available chip — the renderer emits this when the on-disk
@@ -412,9 +444,9 @@ input[name="apps-tab"] { display: none; }
    chip shrink naturally — `flex-grow: 0` from the shared rule above
    keeps it from stretching across the meta strip. */
 .app-meta__version--upgrade {
-  color: #0b1220;
-  background: #ffd35e;
-  border: 1px solid #ffd35e;
+  color: #ffffff;
+  background: #e07b00;
+  border: 1px solid #b45f00;
   padding: 0 14px;
   /* The chip sits inside the `.app-card__meta` flex strip. The shared
      `.app-meta__version` rule above only sets `flex-grow: 0`, so the
@@ -432,7 +464,7 @@ input[name="apps-tab"] { display: none; }
   flex-shrink: 0;
 }
 
-/* Reset the generic `.app-card span { display: block; color: #9bb1d6;
+/* Reset the generic `.app-card span { display: block; color: #4a4a44;
    line-height: 1.35; text-align: left; ... }` rule above so the version
    chip's inline `<span>v1.0.0</span><svg/><span>v1.0.7</span>` markup
    actually flows on ONE line — without this override the spans paint
@@ -449,7 +481,7 @@ input[name="apps-tab"] { display: none; }
    wins the tiebreak. */
 .app-meta__version--upgrade span {
   display: inline;
-  color: #0b1220;
+  color: #ffffff;
   line-height: 22px;
   max-height: none;
   overflow: visible;
@@ -483,9 +515,9 @@ input[name="apps-tab"] { display: none; }
 }
 
 .app-meta__license {
-  color: #0b1220;
-  background: #7eda9f;
-  border: 1px solid #4ea670;
+  color: #ffffff;
+  background: #3c8f3c;
+  border: 1px solid #2a6b2a;
 }
 
 /* Settings-list rows — used by settings.html (Developer section),
@@ -493,10 +525,10 @@ input[name="apps-tab"] { display: none; }
    loader emits <ul class="settings-list"><li>…</li></ul>. */
 ul.settings-list { list-style-type: none; padding: 0; }
 ul.settings-list li {
-  background-color: #14202d;
+  background-color: #ece9d8;
   padding: 8px 14px;
   margin-top: 4px;
-  border-left: 3px solid #1f2c4d;
+  border-left: 3px solid #1c4ca8;
 }
 /* Anchors inside list rows render in the muted blue-grey so they
    blend with the .url / .desc spans below them — louder green would
@@ -505,11 +537,11 @@ ul.settings-list li {
    + url span still flow as text, and `.desc` already forces its own
    line, so resting layout is unchanged. Needed so the :active press
    background (see "Press indication" below) covers the whole row. */
-ul.settings-list a { color: #9bb1d6; text-decoration: none; display: block; }
-ul.settings-list .url { color: #6a7c95; }
+ul.settings-list a { color: #0046d5; text-decoration: none; display: block; }
+ul.settings-list .url { color: #6d6a5e; }
 ul.settings-list .desc {
   display: block;
-  color: #6a7c95;
+  color: #6d6a5e;
   font-size: 15px;
   margin-top: 2px;
 }
@@ -527,32 +559,32 @@ button.template-row {
   gap: 14px;
   width: 100%;
   text-align: left;
-  background-color: #1f2c4d;
-  color: #e0e8f4;
+  background-color: #f4f2ea;
+  color: #1a1a1a;
   margin-top: 6px;
   padding: 12px 16px;
-  border: 1px solid #2a3a66;
-  border-radius: 10px;
+  border: 1px solid #aca899;
+  border-radius: 4px;
   font: inherit;
   cursor: pointer;
 }
 button.template-row.active {
-  background-color: #14202d;
-  border-color: #7aa2ff;
+  background-color: #ece9d8;
+  border-color: #0a246a;
   cursor: default;
 }
 button.template-row .template-label { flex: 1; }
-button.template-row .path { color: #9bb1d6; }
+button.template-row .path { color: #6d6a5e; }
 button.template-row .radio-indicator {
   flex: 0 0 auto;
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 2px solid #7aa2ff;
+  border: 2px solid #0a246a;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: transparent;
+  background-color: #ffffff;
 }
 button.template-row .radio-dot {
   width: 10px;
@@ -561,7 +593,7 @@ button.template-row .radio-dot {
   background-color: transparent;
 }
 button.template-row.active .radio-dot {
-  background-color: #7aa2ff;
+  background-color: #0a246a;
 }
 
 /* Press indication — visible "depressed" state on tap. Pure colour
@@ -584,32 +616,32 @@ button.template-row.active .radio-dot {
    the press style to inactive rows — the currently-selected row
    (rendered without data-action by the loader) won't flash on tap. */
 .clickable .munch-link:active {
-  background: #0a1220;
-  border-color: #7aa2ff;
+  background: #0a246a;
+  border-color: #0a246a;
 }
 .clear-btn:active {
-  background: #170a10;
-  border-color: #ff5055;
+  background: #8a2118;
+  border-color: #c43b2f;
 }
 .clickable .app-card:active {
-  background: #0a1220;
-  border-color: #7aa2ff;
+  background: #d4d0c8;
+  border-color: #0a246a;
 }
 .search-button:active {
-  background: #4ea670;
+  background: #2a6b2a;
 }
 .tab-label:active {
-  color: #eaf2ff;
-  background: #0c1422;
-  border-color: #7aa2ff;
+  color: #1a1a1a;
+  background: #d4d0c8;
+  border-color: #0a246a;
 }
 button.template-row[data-action]:active {
-  background-color: #0e1830;
-  border-color: #7eda9f;
+  background-color: #d4d0c8;
+  border-color: #3c8f3c;
 }
 ul.settings-list a:active,
 ul.settings-list li:active {
-  background-color: #0e1830;
+  background-color: #d4d0c8;
 }
 
 /* ---- Missing-app modal -------------------------------------------
@@ -633,7 +665,7 @@ ul.settings-list li:active {
 .app-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(8, 13, 26, 0.78);
+  background: rgba(10, 36, 106, 0.55);
   display: none;
   align-items: center;
   justify-content: center;
@@ -645,11 +677,12 @@ ul.settings-list li:active {
 .app-modal-card {
   width: 760px;
   max-width: 100%;
-  background: #14202d;
-  border: 1px solid #314672;
-  border-radius: 16px;
+  background: #ece9d8;
+  border: 1px solid #0a246a;
+  border-top: 4px solid #1c5fd6;
+  border-radius: 4px;
   padding: 24px 26px 20px;
-  color: #eaf2ff;
+  color: #1a1a1a;
   text-align: center;
 }
 
@@ -696,14 +729,14 @@ ul.settings-list li:active {
 }
 
 .app-modal-title {
-  color: #ffd35e;
+  color: #0a246a;
   font-size: 1.5em;
   margin: 0 0 6px;
   text-align: left;
 }
 
 .app-modal-identifier {
-  color: #7a8aa3;
+  color: #6d6a5e;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.85em;
   letter-spacing: 0.02em;
@@ -714,7 +747,7 @@ ul.settings-list li:active {
 .app-modal-identifier:empty { display: none; }
 
 .app-modal-description {
-  color: #cdd9ee;
+  color: #3a3a3a;
   margin: 0;
   text-align: left;
 }
@@ -727,7 +760,7 @@ ul.settings-list li:active {
   align-items: flex-start;
   gap: 12px;
   padding: 8px 0;
-  border-top: 1px solid #1f2c4d;
+  border-top: 1px solid #cbc7b5;
 }
 .app-modal-row:first-child { border-top: none; }
 
@@ -739,7 +772,7 @@ ul.settings-list li:active {
      which is what bit us when "Allowed origins" + a 110px column
      stacked atop "Developer". */
   flex: 0 0 160px;
-  color: #7a8aa3;
+  color: #6d6a5e;
   font-size: 0.9em;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -748,7 +781,7 @@ ul.settings-list li:active {
 
 .app-modal-row-value {
   flex: 1;
-  color: #e0e8f4;
+  color: #1a1a1a;
   word-break: break-word;
 }
 
@@ -778,27 +811,27 @@ ul.settings-list li:active {
   display: none;
   font-weight: 700;
   font-size: 0.95em;
-  color: #9bb1d6;
+  color: #4a4a44;
   font-variant-numeric: tabular-nums;
   padding: 0 4px;
 }
 .app-modal-size.app-modal-size--visible { display: inline-block; }
 /* Insufficient free space — see main.css for the rationale. */
-.app-modal-size.app-modal-size--warn { color: #ff8676; }
+.app-modal-size.app-modal-size--warn { color: #c43b2f; }
 /* Disabled install button — JS adds both `disabled` attr + class. */
 .app-modal-btn[disabled],
 .app-modal-btn.app-modal-btn--disabled {
-  background: #2a3a66;
-  color: #6a7c95;
-  border-color: #2a3a66;
+  background: #d4d0c8;
+  color: #908d80;
+  border-color: #aca899;
   cursor: default;
 }
 
 .app-modal-btn {
-  background: #1f2c4d;
-  color: #e0e8f4;
-  border: 1px solid #2a3a66;
-  border-radius: 10px;
+  background: #f4f2ea;
+  color: #1a1a1a;
+  border: 1px solid #aca899;
+  border-radius: 4px;
   padding: 10px 18px;
   font: inherit;
   font-weight: 700;
@@ -824,8 +857,8 @@ ul.settings-list li:active {
 }
 
 .app-modal-btn:active {
-  background: #0e1830;
-  border-color: #7eda9f;
+  background: #d4d0c8;
+  border-color: #0a246a;
 }
 .app-modal-btn--play:active {
   background: #355E3B;
@@ -833,9 +866,9 @@ ul.settings-list li:active {
   color: #ffffff;
 }
 .app-modal-btn--download:active {
-  background: #7a3338;
+  background: #8a2118;
   border-color: #ff0000;
-  color: #ffb8b8;
+  color: #ffd6d2;
 }
 
 /* Action buttons whose role is gated by `detail.missing`. The script
@@ -851,28 +884,28 @@ ul.settings-list li:active {
 a.app-modal-btn {
   display: inline-block;
   text-decoration: none;
-  color: #e0e8f4;
+  color: #1a1a1a;
 }
 a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 /* Missing-card title styles muted relative to live apps so the
    catalog-vs-installed distinction is visible at a glance. */
 .app-card--missing {
-  background: #2a1820;
-  border-color: #7a3338;
+  background: #f6e3e0;
+  border-color: #c43b2f;
 }
-.app-card--missing strong { color: #cdd9ee; }
+.app-card--missing strong { color: #6d6a5e; }
 
 /* Upgrade-available card — lighter background + slightly warmer
    border so the row reads as a call-to-action next to the standard
-   #14202d cards. Pairs with the yellow `.app-meta__version--upgrade`
+   #ece9d8 cards. Pairs with the orange `.app-meta__version--upgrade`
    chip the renderer pins to the top of the card; the chip palette
    stays loud against the slightly-lighter fill since the new bg keeps
    the same blue family. The `.clickable .app-card:active` rule
    already in this sheet overrides on press. */
 .app-card--upgrade {
-  background: #1c2840;
-  border-color: #3d4f7a;
+  background: #fbf1dc;
+  border-color: #e07b00;
 }
 
 /* ---- Check-for-Updates modal -------------------------------------
@@ -918,8 +951,8 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 .updates-modal-loading-bar {
   width: 100%;
   height: 10px;
-  border-radius: 999px;
-  background: #ffd35e;
+  border-radius: 3px;
+  background: #1c5fd6;
   opacity: 0.4;
   animation: updates-modal-pulse 1.2s linear infinite;
 }
@@ -946,7 +979,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 .updates-modal-section:last-child { margin-bottom: 0; }
 
 .updates-modal-section-title {
-  color: #7a8aa3;
+  color: #6d6a5e;
   font-size: 0.9em;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -965,15 +998,15 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
   justify-content: space-between;
   gap: 12px;
   padding: 10px 4px;
-  border-top: 1px solid #1f2c4d;
-  color: #e0e8f4;
+  border-top: 1px solid #cbc7b5;
+  color: #1a1a1a;
 }
 .updates-modal-row:first-child { border-top: none; }
 
 .updates-modal-row-name {
   flex: 1 1 auto;
   font-weight: 700;
-  color: #eaf2ff;
+  color: #1a1a1a;
   word-break: break-word;
 }
 
@@ -983,7 +1016,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
    `.upgrade-arrow` polygon the grid card / detail modal use. */
 .updates-modal-row-version {
   flex: 0 0 auto;
-  color: #cdd9ee;
+  color: #4a4a44;
   font-size: 0.95em;
   white-space: nowrap;
   display: inline-flex;
@@ -1001,7 +1034,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
   display: none;
   padding: 20px 0;
   text-align: center;
-  color: #7a8aa3;
+  color: #6d6a5e;
 }
 .updates-modal-results--empty .updates-modal-empty { display: block; }
 .updates-modal-results--empty .updates-modal-section { display: none; }
@@ -1018,7 +1051,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
    button); hidden while the card is still in the loading state so
    the message only appears once the check completes. */
 .updates-modal-status {
-  color: #7eda9f;
+  color: #2a6b2a;
   font-weight: 700;
   font-size: 0.95em;
 }
@@ -1062,18 +1095,18 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 .download-modal-progress-track {
   width: 100%;
   height: 12px;
-  border-radius: 999px;
-  background: #1f2c4d;
+  border-radius: 3px;
+  background: #d4d0c8;
   overflow: hidden;
 }
 
 .download-modal-progress-fill {
   height: 100%;
-  border-radius: 999px;
-  background: #ffd35e;
+  border-radius: 3px;
+  background: #1c5fd6;
   width: 0%;
 }
-.download-modal-card--success .download-modal-progress-fill { background: #7eda9f; }
+.download-modal-card--success .download-modal-progress-fill { background: #3c8f3c; }
 
 /* Two-up indicator row — remaining MB on the LEFT, file counter on
    the RIGHT. See main.css for full rationale. */
@@ -1087,7 +1120,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 .download-modal-remaining {
   text-align: left;
-  color: #cdd9ee;
+  color: #3a3a3a;
   font-weight: 700;
   font-size: 0.95em;
   font-variant-numeric: tabular-nums;
@@ -1095,7 +1128,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 .download-modal-counter {
   text-align: right;
-  color: #cdd9ee;
+  color: #3a3a3a;
   font-weight: 700;
   font-size: 0.95em;
   font-variant-numeric: tabular-nums;
@@ -1105,7 +1138,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
   display: none;
   padding: 16px 0 8px;
   text-align: center;
-  color: #ff8676;
+  color: #c43b2f;
   font-weight: 700;
   word-break: break-word;
 }
@@ -1114,13 +1147,13 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 .download-modal-actions { flex: 0 0 auto; }
 
 .download-modal-status {
-  color: #cdd9ee;
+  color: #3a3a3a;
   font-weight: 700;
   font-size: 0.95em;
   word-break: break-word;
 }
-.download-modal-card--success .download-modal-status { color: #7eda9f; }
-.download-modal-card--error .download-modal-status { color: #ff8676; }
+.download-modal-card--success .download-modal-status { color: #2a6b2a; }
+.download-modal-card--error .download-modal-status { color: #c43b2f; }
 
 .download-modal-card--loading .download-modal-btn-close { display: none; }
 .download-modal-card:not(.download-modal-card--loading) .download-modal-btn-cancel { display: none; }
@@ -1141,7 +1174,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 .warnings-modal-title {
   margin: 0 0 14px;
-  color: #ffb86b;
+  color: #b45f00;
 }
 
 .warnings-modal-list {
@@ -1151,25 +1184,25 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 
 .warnings-modal-row {
   padding: 18px 4px;
-  border-top: 1px solid #1f2c4d;
+  border-top: 1px solid #cbc7b5;
 }
 .warnings-modal-row:first-child { border-top: none; padding-top: 4px; }
 
 .warnings-modal-row-head {
-  color: #e0e8f4;
+  color: #1a1a1a;
   font-size: 0.95em;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 6px;
 }
-.warnings-modal-row-head--low { color: #7eda9f; }
-.warnings-modal-row-head--medium { color: #ffb86b; }
-.warnings-modal-row-head--high { color: #ff8676; }
+.warnings-modal-row-head--low { color: #2a6b2a; }
+.warnings-modal-row-head--medium { color: #b45f00; }
+.warnings-modal-row-head--high { color: #c43b2f; }
 
 .warnings-modal-row-warning {
   margin: 0;
-  color: #cdd9ee;
+  color: #3a3a3a;
   font-size: 0.95em;
   line-height: 1.4;
   word-break: break-word;
@@ -1241,10 +1274,10 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
   align-items: center;
   min-height: 34px;
   padding: 7px 12px;
-  color: #c2e0ff;
-  background-color: #14202d;
-  border: 1px solid #314672;
-  border-radius: 999px;
+  color: #0a246a;
+  background-color: #ece9d8;
+  border: 1px solid #aca899;
+  border-radius: 4px;
   font-size: 15px;
   font-weight: 700;
 }
@@ -1254,9 +1287,9 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 .about-card {
-  background: #14202d;
-  border: 1px solid #314672;
-  border-radius: 16px;
+  background: #ece9d8;
+  border: 1px solid #aca899;
+  border-radius: 4px;
   padding: 20px 18px;
 }
 
@@ -1266,7 +1299,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 .about-card p {
-  color: #9bb1d6;
+  color: #3a3a3a;
   line-height: 1.45;
 }
 
@@ -1278,29 +1311,29 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 .about-meta article {
-  background-color: #14202d;
+  background-color: #f4f2ea;
   padding: 14px 16px;
-  border-left: 3px solid #7aa2ff;
-  border-radius: 6px;
+  border-left: 3px solid #1c4ca8;
+  border-radius: 3px;
 }
 
 .about-meta strong {
   display: block;
-  color: #ffd35e;
+  color: #0a246a;
   margin-bottom: 6px;
 }
 
 .about-meta span {
   display: block;
-  color: #9bb1d6;
+  color: #3a3a3a;
   line-height: 1.35;
 }
 
 .about-footer-note {
   margin-top: 34px;
   padding-top: 18px;
-  border-top: 1px solid #28365c;
-  color: #6a7c95;
+  border-top: 1px solid #cbc7b5;
+  color: #6d6a5e;
   font-size: 15px;
   line-height: 1.45;
 }
@@ -1323,9 +1356,9 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 fieldset.settings-group {
-  background-color: #14202d;
-  border: 1px solid #314672;
-  border-radius: 12px;
+  background-color: #ece9d8;
+  border: 1px solid #aca899;
+  border-radius: 4px;
   /* Extra bottom padding (28px vs the 14px top) absorbs the
      border-box-vs-content-box discrepancy on fixed-height inputs —
      live-layout's intrinsicContentHeight returns just `cs.height`
@@ -1338,7 +1371,7 @@ fieldset.settings-group {
 }
 
 fieldset.settings-group legend {
-  color: #ffd35e;
+  color: #0a246a;
   font-weight: 700;
   padding: 0 8px;
 }
@@ -1354,19 +1387,19 @@ fieldset.settings-group legend {
 
 .settings-label {
   display: block;
-  color: #e0e8f4;
+  color: #1a1a1a;
   font-weight: 600;
 }
 
 .settings-hint {
   display: block;
-  color: #9bb1d6;
+  color: #6d6a5e;
   font-size: 14px;
   font-weight: 400;
   margin-top: 2px;
 }
 
-.path { color: #9bb1d6; }
+.path { color: #6d6a5e; }
 
 /* Numeric / text inputs. Live-form.ts paints these via the
    form-widget painter; we set explicit colours so the placeholder
@@ -1377,10 +1410,10 @@ fieldset.settings-group legend {
    pinning the height makes the input box paint at its full size. */
 .settings-form input[type="number"],
 .settings-form input[type="text"] {
-  background: #0e1830;
-  color: #e0e8f4;
-  border: 1px solid #2a3a66;
-  border-radius: 8px;
+  background: #ffffff;
+  color: #1a1a1a;
+  border: 1px solid #7f9db9;
+  border-radius: 4px;
   padding: 0 12px;
   font: inherit;
   width: 260px;
@@ -1395,10 +1428,10 @@ fieldset.settings-group legend {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  background: #0e1830;
-  border: 1px solid #2a3a66;
-  border-radius: 10px;
-  color: #e0e8f4;
+  background: #f4f2ea;
+  border: 1px solid #aca899;
+  border-radius: 4px;
+  color: #1a1a1a;
   margin-top: 6px;
   cursor: pointer;
 }
@@ -1451,9 +1484,9 @@ fieldset.settings-group legend {
   align-items: center;
   gap: 14px;
   padding: 10px 12px;
-  background: #0e1830;
-  border: 1px solid #2a3a66;
-  border-radius: 10px;
+  background: #f4f2ea;
+  border: 1px solid #aca899;
+  border-radius: 4px;
   margin-top: 6px;
   cursor: pointer;
 }
@@ -1461,10 +1494,10 @@ fieldset.settings-group legend {
 .settings-toggle input[type="checkbox"] {
   width: 30px;
   height: 30px;
-  background: #1a2440;
-  color: #7eda9f;
-  border: 1px solid #7aa2ff;
-  border-radius: 6px;
+  background: #ffffff;
+  color: #3c8f3c;
+  border: 1px solid #7f9db9;
+  border-radius: 3px;
   flex: 0 0 auto;
 }
 
@@ -1482,9 +1515,9 @@ fieldset.settings-group legend {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: #14202d;
-  border: 1px solid #314672;
-  border-radius: 14px;
+  background: #ece9d8;
+  border: 1px solid #aca899;
+  border-radius: 4px;
 }
 
 /* `flex-grow: 1` on the status text expands it to fill all the spare
@@ -1495,31 +1528,32 @@ fieldset.settings-group legend {
    pinned to the right regardless of how long the status text is. */
 .settings-status {
   flex-grow: 1;
-  color: #9bb1d6;
+  color: #6d6a5e;
   font-size: 15px;
 }
 
 .settings-save {
-  border: none;
+  border: 1px solid #0a246a;
   cursor: pointer;
-  color: #0b1220;
-  background: #ffd35e;
+  color: #ffffff;
+  background: #1c5fd6;
   font: inherit;
   font-weight: 800;
   padding: 10px 22px;
-  border-radius: 999px;
+  border-radius: 4px;
 }
 
 .settings-save:active {
-  background: #4ea670;
+  background: #0a246a;
 }
 
 /* Disabled Save = no unsaved changes. Pure colour delta so the
    software-painter doesn't need a transition; cursor flips to `default`
    to communicate "nothing to do." */
 .settings-save[disabled] {
-  background: #2a3a66;
-  color: #6a7c95;
+  background: #d4d0c8;
+  color: #908d80;
+  border-color: #aca899;
   cursor: default;
 }
 
@@ -1558,90 +1592,90 @@ fieldset.settings-group legend {
 @media (prefers-color-scheme: light) {
 
   body {
-    background: #f4f6fa;
-    color: #1a1a1f;
+    background: #5a7edc;
+    color: #1a1a1a;
   }
 
-  h1 { color: #b45309; }
-  h2 { color: #1d4ed8; }
-  a  { color: #15803d; }
+  h1 { color: #0a246a; }
+  h2 { color: #0a246a; }
+  a  { color: #3c8f3c; }
 
-  .lead { color: #4b5563; }
-  .empty { color: #6b7280; }
+  .lead { color: #3a3a3a; }
+  .empty { color: #6d6a5e; }
 
   .app-grid .empty {
     background-color: #ffffff;
-    border-left-color: #1d4ed8;
-    color: #4b5563;
+    border-left-color: #0a246a;
+    color: #3a3a3a;
   }
 
-  code, kbd { color: #0369a1; }
+  code, kbd { color: #0a246a; }
 
   /* Pill nav (.munch-link) */
   .munch-link {
-    color: #1a1a1f;
+    color: #1a1a1a;
     background: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
-  .munch-link:focus-visible { outline-color: #15803d; }
+  .munch-link:focus-visible { outline-color: #3c8f3c; }
   .clickable .munch-link:active {
-    background: #eef2f7;
-    border-color: #1d4ed8;
+    background: #ece9d8;
+    border-color: #0a246a;
   }
 
   /* Destructive pill */
   .clear-btn {
-    color: #b91c1c;
-    background: #fee2e2;
-    border-color: #fca5a5;
+    color: #c43b2f;
+    background: #f6e3e0;
+    border-color: #c43b2f;
   }
   .clear-btn:active {
-    background: #fecaca;
-    border-color: #b91c1c;
+    background: #efc9c4;
+    border-color: #c43b2f;
   }
 
   /* Search bar */
   .search-form {
     background: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
-  .search-input { color: #1a1a1f; }
-  .search-input::placeholder { color: #9ca3af; }
+  .search-input { color: #1a1a1a; }
+  .search-input::placeholder { color: #767060; }
   .search-button:hover,
-  .search-button:focus-visible { background: #16a34a; color: #ffffff; }
-  .search-button:active { background: #15803d; color: #ffffff; }
+  .search-button:focus-visible { background: #4aa83f; color: #ffffff; }
+  .search-button:active { background: #3c8f3c; color: #ffffff; }
 
   /* Apps page tabs */
   .tab-label {
-    color: #4b5563;
-    background: #eef2f7;
-    border-color: #cbd5e1;
+    color: #3a3a3a;
+    background: #ece9d8;
+    border-color: #aca899;
   }
   .tab-label:active {
-    color: #0b1220;
-    background: #fef3c7;
-    border-color: #1d4ed8;
+    color: #ffffff;
+    background: #d4d0c8;
+    border-color: #0a246a;
   }
   /* Active tab keeps the yellow palette — dark text on yellow reads
      fine against the light page bg too. */
 
   /* App / Featured grid cards */
   .app-card {
-    color: #1a1a1f;
+    color: #1a1a1a;
     background: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
-  .app-card strong { color: #1d4ed8; }
-  .app-card span { color: #4b5563; }
+  .app-card strong { color: #0a246a; }
+  .app-card span { color: #3a3a3a; }
   .clickable .app-card:active {
-    background: #eef2f7;
-    border-color: #1d4ed8;
+    background: #ece9d8;
+    border-color: #0a246a;
   }
   .app-card--missing {
     background: #fef5f5;
     border-color: #ff0000;
   }
-  .app-card--missing strong { color: #6b7280; }
+  .app-card--missing strong { color: #6d6a5e; }
   .app-card--upgrade {
     background: #fef9e7;
     border-color: #f59e0b;
@@ -1649,147 +1683,148 @@ fieldset.settings-group legend {
 
   /* Card meta chips */
   .app-meta__version {
-    color: #1d4ed8;
-    background: #eaf0ff;
-    border-color: #cbd5e1;
+    color: #ffffff;
+    background: #1c5fd6;
+    border-color: #0a246a;
   }
   .app-meta__license {
-    color: #064e3b;
-    background: #d1fae5;
-    border-color: #16a34a;
+    color: #ffffff;
+    background: #3c8f3c;
+    border-color: #2a6b2a;
   }
-  /* Upgrade chip keeps its bright-yellow callout — same readability
+  /* Upgrade chip keeps its orange callout — same readability
      story as the Save button + active tab. */
 
   /* Settings list rows (Developer section, history.html, bookmarks.html) */
   ul.settings-list li {
     background-color: #ffffff;
-    border-left-color: #1d4ed8;
+    border-left-color: #0a246a;
   }
-  ul.settings-list a { color: #1d4ed8; }
-  ul.settings-list .url { color: #6b7280; }
-  ul.settings-list .desc { color: #6b7280; }
+  ul.settings-list a { color: #0a246a; }
+  ul.settings-list .url { color: #6d6a5e; }
+  ul.settings-list .desc { color: #6d6a5e; }
   ul.settings-list a:active,
-  ul.settings-list li:active { background-color: #eef2f7; }
+  ul.settings-list li:active { background-color: #ece9d8; }
 
   /* Template rows (legacy <browser-templates>) */
   button.template-row {
-    background-color: #eef2f7;
-    color: #1a1a1f;
-    border-color: #cbd5e1;
+    background-color: #ece9d8;
+    color: #1a1a1a;
+    border-color: #1c5fd6;
+    border-radius: 4px;
   }
   button.template-row.active {
     background-color: #ffffff;
-    border-color: #1d4ed8;
+    border: 4px solid #0a246a;
   }
-  button.template-row .path { color: #6b7280; }
-  button.template-row .radio-indicator { border-color: #1d4ed8; }
-  button.template-row.active .radio-dot { background-color: #1d4ed8; }
+  button.template-row .path { color: #6d6a5e; }
+  button.template-row .radio-indicator { border-color: #0a246a; }
+  button.template-row.active .radio-dot { background-color: #0a246a; }
   button.template-row[data-action]:active {
-    background-color: #f1f4f9;
-    border-color: #15803d;
+    background-color: #f4f2ea;
+    border-color: #3c8f3c;
   }
 
   /* App-modal */
   .app-modal-overlay { background: rgba(15, 23, 42, 0.45); }
   .app-modal-card {
     background: #ffffff;
-    border-color: #cbd5e1;
-    color: #1a1a1f;
+    border-color: #aca899;
+    color: #1a1a1a;
   }
-  .app-modal-title { color: #1d4ed8; }
-  .app-modal-identifier { color: #6b7280; }
-  .app-modal-description { color: #4b5563; }
-  .app-modal-row { border-top-color: #e5e7eb; }
-  .app-modal-row-label { color: #6b7280; }
-  .app-modal-row-value { color: #1a1a1f; }
+  .app-modal-title { color: #0a246a; }
+  .app-modal-identifier { color: #6d6a5e; }
+  .app-modal-description { color: #3a3a3a; }
+  .app-modal-row { border-top-color: #cbc7b5; }
+  .app-modal-row-label { color: #6d6a5e; }
+  .app-modal-row-value { color: #1a1a1a; }
   .app-modal-btn {
-    background: #eef2f7;
-    color: #1a1a1f;
-    border-color: #cbd5e1;
+    background: #ece9d8;
+    color: #1a1a1a;
+    border-color: #aca899;
   }
   .app-modal-btn:active {
-    background: #f1f4f9;
-    border-color: #15803d;
+    background: #f4f2ea;
+    border-color: #3c8f3c;
   }
   /* Play / Download buttons keep their saturated green / red so the
      primary CTA stays loud against the white card. */
-  a.app-modal-btn { color: #1a1a1f; }
-  .app-modal-size { color: #4b5563; }
-  .app-modal-size.app-modal-size--warn { color: #b91c1c; }
+  a.app-modal-btn { color: #1a1a1a; }
+  .app-modal-size { color: #3a3a3a; }
+  .app-modal-size.app-modal-size--warn { color: #c43b2f; }
   .app-modal-btn[disabled],
   .app-modal-btn.app-modal-btn--disabled {
-    background: #e5e7eb;
-    color: #9ca3af;
-    border-color: #e5e7eb;
+    background: #cbc7b5;
+    color: #767060;
+    border-color: #cbc7b5;
   }
 
   /* Check-for-Updates modal */
-  .updates-modal-section-title { color: #6b7280; }
+  .updates-modal-section-title { color: #6d6a5e; }
   .updates-modal-row {
-    border-top-color: #e5e7eb;
-    color: #1a1a1f;
+    border-top-color: #cbc7b5;
+    color: #1a1a1a;
   }
-  .updates-modal-row-name { color: #1a1a1f; }
-  .updates-modal-row-version { color: #4b5563; }
-  .updates-modal-empty { color: #6b7280; }
-  .updates-modal-status { color: #15803d; }
+  .updates-modal-row-name { color: #1a1a1a; }
+  .updates-modal-row-version { color: #3a3a3a; }
+  .updates-modal-empty { color: #6d6a5e; }
+  .updates-modal-status { color: #3c8f3c; }
 
   /* Download / Update progress modal */
-  .download-modal-progress-track { background: #e5e7eb; }
-  .download-modal-counter { color: #1a1a1f; }
-  .download-modal-remaining { color: #1a1a1f; }
-  .download-modal-status { color: #1a1a1f; }
-  .download-modal-card--success .download-modal-status { color: #15803d; }
-  .download-modal-card--error .download-modal-status { color: #b91c1c; }
-  .download-modal-card--error .download-modal-error { color: #b91c1c; }
+  .download-modal-progress-track { background: #cbc7b5; }
+  .download-modal-counter { color: #1a1a1a; }
+  .download-modal-remaining { color: #1a1a1a; }
+  .download-modal-status { color: #1a1a1a; }
+  .download-modal-card--success .download-modal-status { color: #3c8f3c; }
+  .download-modal-card--error .download-modal-status { color: #c43b2f; }
+  .download-modal-card--error .download-modal-error { color: #c43b2f; }
 
   /* about.html */
   .about-badge {
-    color: #0369a1;
+    color: #0a246a;
     background-color: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
   .about-card {
     background: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
-  .about-card p { color: #4b5563; }
+  .about-card p { color: #3a3a3a; }
   .about-meta article {
     background-color: #ffffff;
-    border-left-color: #1d4ed8;
+    border-left-color: #0a246a;
   }
-  .about-meta strong { color: #1d4ed8; }
-  .about-meta span { color: #4b5563; }
+  .about-meta strong { color: #0a246a; }
+  .about-meta span { color: #3a3a3a; }
   .about-footer-note {
-    border-top-color: #e5e7eb;
-    color: #6b7280;
+    border-top-color: #cbc7b5;
+    color: #6d6a5e;
   }
 
   /* settings.html / <browser-settings> */
   fieldset.settings-group {
     background-color: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
-  fieldset.settings-group legend { color: #1d4ed8; }
-  .settings-label { color: #1a1a1f; }
-  .settings-hint { color: #6b7280; }
-  .path { color: #6b7280; }
+  fieldset.settings-group legend { color: #0a246a; }
+  .settings-label { color: #1a1a1a; }
+  .settings-hint { color: #6d6a5e; }
+  .path { color: #6d6a5e; }
 
   .settings-form input[type="number"],
   .settings-form input[type="text"] {
     background: #ffffff;
-    color: #1a1a1f;
-    border-color: #cbd5e1;
+    color: #1a1a1a;
+    border-color: #aca899;
   }
 
   .settings-radio {
-    background: #f1f4f9;
-    border-color: #cbd5e1;
-    color: #1a1a1f;
+    background: #f4f2ea;
+    border-color: #aca899;
+    color: #1a1a1a;
   }
   /* paintRadio reads `cs.color` for the inner dot. Without this
-     override the dot inherits `#1a1a1f` from `.settings-radio` above
+     override the dot inherits `#1a1a1a` from `.settings-radio` above
      and reads as near-black against the painter's default dark
      `#2c3e50` radio backdrop — invisible. Pin to white so the dot
      pops on the dark inner fill. */
@@ -1797,25 +1832,25 @@ fieldset.settings-group legend {
     color: #ffffff;
   }
   .settings-toggle {
-    background: #f1f4f9;
-    border-color: #cbd5e1;
+    background: #f4f2ea;
+    border-color: #aca899;
   }
   .settings-toggle input[type="checkbox"] {
     background: #ffffff;
-    color: #16a34a;
-    border-color: #1d4ed8;
+    color: #4aa83f;
+    border-color: #0a246a;
   }
 
   .settings-savebar {
     background: #ffffff;
-    border-color: #cbd5e1;
+    border-color: #aca899;
   }
-  .settings-status { color: #6b7280; }
+  .settings-status { color: #6d6a5e; }
   /* Save button keeps its yellow CTA palette — already readable on
      both surfaces; the disabled state needs a light-friendly swap. */
-  .settings-save:active { background: #16a34a; color: #ffffff; }
+  .settings-save:active { background: #4aa83f; color: #ffffff; }
   .settings-save[disabled] {
-    background: #e5e7eb;
-    color: #9ca3af;
+    background: #cbc7b5;
+    color: #767060;
   }
 }

@@ -587,6 +587,12 @@ export class BrowserResourceLoader implements ResourceLoader {
 
 		const checked = (b: boolean) => b ? ' checked' : '';
 
+		// 2026-06-17 perf trim: drop the inner `<span class="settings-radio-label">`
+		// (text directly inside the `<label>` is fine — the `flex: 1` it
+		// carried was decorative; the row uses `display: flex; gap: 12px`
+		// already). Saves one node per row × ~23 stacked-list rows. Same
+		// trim applies to the inline-radios block below. See the
+		// `kb-on-Settings perf drop` memory entry.
 		const toolbarRows = toolbars.length === 0
 			? '<p class="empty">No toolbars registered. Edit <code>toolbars.json</code> to add one.</p>'
 			: toolbars.map((e) => {
@@ -595,7 +601,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-toolbar" value="${path}" data-setting="toolbar"${checked(e.path === config.toolbar)}>`
-					+ `<span class="settings-radio-label">${title}</span>`
+					+ title
 					+ '</label>'
 				);
 			}).join('');
@@ -608,7 +614,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-keyboard" value="${path}" data-setting="keyboard"${checked(e.path === config.keyboard)}>`
-					+ `<span class="settings-radio-label">${title}</span>`
+					+ title
 					+ '</label>'
 				);
 			}).join('');
@@ -621,7 +627,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-brewserStyle" value="${path}" data-setting="brewserStyle"${checked(e.path === config.brewserStyle)}>`
-					+ `<span class="settings-radio-label">${title}</span>`
+					+ title
 					+ '</label>'
 				);
 			}).join('');
@@ -630,8 +636,8 @@ export class BrowserResourceLoader implements ResourceLoader {
 			'<div class="settings-row">'
 			+ '<span class="settings-label">Theme</span>'
 			+ '<div class="settings-radios">'
-			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="light" data-setting="theme"${checked(config.theme === 'light')}> <span>Light</span></label>`
-			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="dark" data-setting="theme"${checked(config.theme === 'dark')}> <span>Dark</span></label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="light" data-setting="theme"${checked(config.theme === 'light')}> Light</label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-theme" value="dark" data-setting="theme"${checked(config.theme === 'dark')}> Dark</label>`
 			+ '</div>'
 			+ '</div>'
 		);
@@ -640,8 +646,8 @@ export class BrowserResourceLoader implements ResourceLoader {
 			'<div class="settings-row">'
 			+ '<span class="settings-label">Toolbar position</span>'
 			+ '<div class="settings-radios">'
-			+ `<label class="settings-radio inline"><input type="radio" name="setting-toolbarPosition" value="top" data-setting="toolbarPosition"${checked(config.toolbarPosition === 'top')}> <span>Top</span></label>`
-			+ `<label class="settings-radio inline"><input type="radio" name="setting-toolbarPosition" value="bottom" data-setting="toolbarPosition"${checked(config.toolbarPosition === 'bottom')}> <span>Bottom</span></label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-toolbarPosition" value="top" data-setting="toolbarPosition"${checked(config.toolbarPosition === 'top')}> Top</label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-toolbarPosition" value="bottom" data-setting="toolbarPosition"${checked(config.toolbarPosition === 'bottom')}> Bottom</label>`
 			+ '</div>'
 			+ '</div>'
 		);
@@ -657,7 +663,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			return (
 				'<label class="settings-radio">'
 				+ `<input type="radio" name="setting-homeSection" value="${group}" data-setting="homeSection"${checked(config.homeSection === group)}>`
-				+ `<span class="settings-radio-label">${htmlEscape(label)}</span>`
+				+ htmlEscape(label)
 				+ '</label>'
 			);
 		}).join('');
@@ -675,7 +681,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-searchEngine" value="${title}" data-setting="searchEngine"${checked(e.title === config.searchEngine)}>`
-					+ `<span class="settings-radio-label">${title}</span>`
+					+ title
 					+ '</label>'
 				);
 			}).join('');
@@ -687,35 +693,46 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</div>'
 		);
 
+		// 2026-06-17 perf trim: drop the outer `.settings-row.settings-row-toggle`
+		// wrapper div — the `.settings-toggle` label already has its own
+		// `margin-top: 6px` so the row spacing survives. Saves one node
+		// per toggle × 5. (The .settings-label inner span stays — both
+		// title and hint live inside it as a vertical stack, and dropping
+		// the wrapper would lose the column flex container for the hint.)
 		const toggleRow = (key: string, label: string, value: boolean, hint: string): string => (
-			'<div class="settings-row settings-row-toggle">'
-			+ `<label class="settings-toggle">`
+			'<label class="settings-toggle">'
 			+ `<input type="checkbox" name="setting-${key}" data-setting="${key}"${checked(value)}>`
 			+ `<span class="settings-label">${htmlEscape(label)}<span class="settings-hint">${htmlEscape(hint)}</span></span>`
 			+ '</label>'
-			+ '</div>'
 		);
 
+		// 2026-06-17 perf trim: drop the `.settings-templates` wrapper
+		// divs around the radio lists. They were just `display: flex;
+		// flex-direction: column` — but the rows already stack
+		// vertically inside the parent fieldset's default block layout
+		// (the .settings-radio rows are display:flex inline-flex items
+		// laid out by their own `margin-top: 6px`). Saves 5 wrapper
+		// nodes.
 		return (
 			'<div class="settings-form">'
 			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Toolbar</legend>'
-			+ '<div class="settings-templates">' + toolbarRows + '</div>'
+			+ toolbarRows
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Keyboard</legend>'
-			+ '<div class="settings-templates">' + keyboardRows + '</div>'
+			+ keyboardRows
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Style</legend>'
-			+ '<div class="settings-templates">' + styleRows + '</div>'
+			+ styleRows
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Home Page</legend>'
-			+ '<div class="settings-templates">' + homeSectionRows + '</div>'
+			+ homeSectionRows
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Appearance</legend>'
@@ -724,7 +741,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Search engine</legend>'
-			+ '<div class="settings-templates">' + searchRows + '</div>'
+			+ searchRows
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'

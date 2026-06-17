@@ -58,9 +58,20 @@
         return parts.join('|');
       }
       var baseline = snapshot();
+      // 2026-06-17 perf: idempotent recompute. Previously this function
+      // ALWAYS called setAttribute + textContent regardless of whether
+      // the dirty state actually flipped. The 200ms polling tick below
+      // then kicked off 5Hz of liveTreeVersion bumps → 5Hz of
+      // patchLiveDirtyRegions storms on the heavy Settings DOM (~30ms
+      // per patch). Tracking the last result and bailing when unchanged
+      // collapses idle steady-state to a pure cache blit (~9ms/frame =
+      // 100+ FPS instead of the patch-storm 30 FPS the user observed).
+      var lastDirty = null;
 
       function recompute() {
         var dirty = snapshot() !== baseline;
+        if (dirty === lastDirty) return;
+        lastDirty = dirty;
         if (dirty) {
           saveBtn.removeAttribute('disabled');
           if (status) status.textContent = 'Unsaved changes.';

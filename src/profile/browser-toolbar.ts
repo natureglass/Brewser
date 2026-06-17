@@ -31,10 +31,28 @@ export type ToolbarPosition = 'top' | 'bottom';
 /** One row in `<profile>/toolbars.json` (also reused by `keyboards.json`
  * and `styles.json` — same `{title, path}` shape). `path` is relative
  * to the profile root unless it carries an absolute scheme (`sdmc:/…`,
- * `romfs:/…`). */
+ * `romfs:/…`).
+ *
+ * `background` is the optional per-style wallpaper path painted by the
+ * shell between the per-frame page-bg fillRect and `paintLiveOverlay`
+ * (see `BrowserShell.paintStyleBackground`). Used today only by
+ * `styles.json`; toolbar + keyboard registries simply leave it
+ * undefined. Same path-resolution rules as `path` — bare values are
+ * relative to the profile root; absolute schemes pass through. Empty
+ * string / undefined = no background image for that entry.
+ *
+ * `height` is the optional per-toolbar chrome strip height in CSS
+ * pixels. Used by the toolbar registry only — selecting a toolbar (via
+ * the Settings page or `selectToolbar`) caches this value into
+ * `config.json`'s `toolbarHeight` so the strip resizes to whatever the
+ * picked theme expects. Undefined / non-number = no auto-resize on
+ * switch (the existing `toolbarHeight` is preserved). Same clamp band
+ * as `loadConfig`'s `toolbarHeight` parse (28-200 px). */
 export interface ToolbarEntry {
 	title: string;
 	path: string;
+	background?: string;
+	height?: number;
 }
 
 /** In-memory `.json` → `.html` rewrite for legacy toolbar paths. The
@@ -203,6 +221,21 @@ export interface BrowserConfig {
 	 * up loading the picked style. Missing / unreadable falls back to
 	 * the baked default so a broken pointer can't blank the chrome. */
 	brewserStyle: string;
+	/** Cached path to the wallpaper image for the active style. Sourced
+	 * from `styles.json`'s `background` field for the entry matching
+	 * `brewserStyle`; resolved + persisted on every `saveSettings` that
+	 * stages a `brewserStyle` change (see `BrowserShell.saveSettings`).
+	 * Same path-resolution rules as `brewserStyle` itself — bare values
+	 * are relative to the profile root, absolute schemes pass through.
+	 * Empty string = no background.
+	 *
+	 * Cached in `config.json` (instead of derived at every paint from
+	 * `styles.json`) so the boot path doesn't have to crack a second
+	 * JSON file before the first frame, and the shell's boot lookup is
+	 * a single field read. The trade-off: a hand edit of `styles.json`'s
+	 * `background` field won't take effect until the user toggles their
+	 * style in Settings (which re-resolves + re-persists this cache). */
+	styleBackground: string;
 	/** Where the browser chrome strip sits on screen — `'top'` (above
 	 * page content) or `'bottom'` (below it). Hoisted out of the
 	 * per-toolbar JSON design on 2026-06-11 so the toggle is a
@@ -333,6 +366,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	keyboardHeight: 400,
 	keyboard: 'themes/keyboards/default.html',
 	brewserStyle: 'themes/styles/dark.css',
+	styleBackground: '',
 	toolbarPosition: 'top',
 	homeSection: 'featured',
 	// Strict-pinned + override-allowed fields all pull their default
@@ -446,6 +480,14 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			brewserStyle: typeof parsed?.brewserStyle === 'string' && parsed.brewserStyle.length > 0
 				? parsed.brewserStyle
 				: DEFAULT_CONFIG.brewserStyle,
+			// Permissive empty-string passthrough — unlike `brewserStyle`,
+			// "no background" is a valid persisted value (Amber + Neon
+			// ship with `background: ""` in `styles.json`). The shell
+			// treats empty as "skip the drawImage" rather than falling
+			// back to the default theme's image.
+			styleBackground: typeof parsed?.styleBackground === 'string'
+				? parsed.styleBackground
+				: DEFAULT_CONFIG.styleBackground,
 			toolbarPosition: parsed?.toolbarPosition === 'top' || parsed?.toolbarPosition === 'bottom'
 				? parsed.toolbarPosition
 				: DEFAULT_CONFIG.toolbarPosition,
@@ -858,7 +900,25 @@ function loadThemeRegistry(
 			.filter((e): e is ToolbarEntry =>
 				!!e && typeof e.title === 'string' && typeof e.path === 'string',
 			)
-			.map((e) => ({ title: e.title, path: pathMigrator(e.path) }));
+			.map((e) => {
+				const out: ToolbarEntry = { title: e.title, path: pathMigrator(e.path) };
+				// Forward the optional `background` field (currently only
+				// `styles.json` uses it; toolbar + keyboard registries
+				// leave it absent). Treated as an opaque path string —
+				// resolution happens at paint time in the shell.
+				if (typeof e.background === 'string') out.background = e.background;
+				// Forward the optional `height` field (currently only
+				// `toolbars.json` uses it; styles + keyboards leave it
+				// absent). Clamped here to the same 28-200 px band
+				// `loadConfig` applies to `toolbarHeight` so a malformed
+				// registry value can't blow the chrome layout once it
+				// rides through `selectToolbar` / `saveSettings` into
+				// `config.json`.
+				if (typeof e.height === 'number' && Number.isFinite(e.height)) {
+					out.height = Math.max(28, Math.min(200, Math.trunc(e.height)));
+				}
+				return out;
+			});
 	} catch (error) {
 		console.debug(`[brewser] themes/${filename} parse failed: ${error}`);
 		return [];

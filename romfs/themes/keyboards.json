@@ -2,5 +2,6 @@
   { "title": "Dark", "path": "themes/keyboards/dark.html" },
   { "title": "Light", "path": "themes/keyboards/light.html" },
   { "title": "Amber", "path": "themes/keyboards/amber.html" },
-  { "title": "Neon", "path": "themes/keyboards/neon.html" }
+  { "title": "Neon", "path": "themes/keyboards/neon.html" },
+  { "title": "WindowsXP", "path": "themes/keyboards/windowsxp.html" }
 ]

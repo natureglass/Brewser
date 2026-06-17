@@ -2,6 +2,7 @@
   "toolbar": "themes/toolbars/light.html",
   "keyboard": "themes/keyboards/neon.html",
   "brewserStyle": "themes/styles/neon.css",
+  "styleBackground": "",
   "theme": "dark",
   "toolbarHeight": 64,
   "toolbarPosition": "top",

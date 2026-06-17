@@ -1,6 +1,7 @@
 [
-  { "title": "Dark", "path": "themes/toolbars/dark.html" },
-  { "title": "Light", "path": "themes/toolbars/light.html" },
-  { "title": "Amber", "path": "themes/toolbars/amber.html" },
-  { "title": "Neon", "path": "themes/toolbars/neon.html" }
+  { "title": "Dark", "path": "themes/toolbars/dark.html", "height": 64 },
+  { "title": "Light", "path": "themes/toolbars/light.html", "height": 64 },
+  { "title": "Amber", "path": "themes/toolbars/amber.html", "height": 64 },
+  { "title": "Neon", "path": "themes/toolbars/neon.html", "height": 64 },
+  { "title": "WindowsXP", "path": "themes/toolbars/windowsxp.html", "height": 64 }
 ]

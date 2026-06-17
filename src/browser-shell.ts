@@ -131,7 +131,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
 import { BrowserPermissionPolicy } from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_CONFIG, loadConfig, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { DEFAULT_CONFIG, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -216,6 +216,18 @@ export class BrowserShell {
 	 * `effectivePageBackground` to fill the content viewport before
 	 * the live-DOM body paints over it. */
 	private pageBackground: string = DEFAULT_CONFIG.pageBackground;
+	/** Decoded wallpaper image painted between the per-frame viewport
+	 * clear and `paintLiveOverlay` (`paintStyleBackground`). Sourced
+	 * from `config.json`'s `styleBackground` (a cached snapshot of the
+	 * active `styles.json` entry's `background` field) and loaded
+	 * asynchronously at boot + on every `brewserStyle` change in
+	 * Settings. `null` when no background is configured (the typical
+	 * case for Amber / Neon) or while the decode is still in flight. */
+	private backgroundImage: HTMLImageElement | null = null;
+	/** Source path the current `backgroundImage` was loaded from, kept
+	 * so a no-op style change (radio re-stages the same value) doesn't
+	 * re-decode the same PNG. Empty when no image is configured. */
+	private backgroundImageRel: string = '';
 	/** Active toolbar position. Sourced from `config.json` (not the
 	 * toolbar design) since 2026-06-11 so the user can flip it from
 	 * Settings without re-skinning. Drives `publishChromeRegion` +
@@ -679,6 +691,14 @@ export class BrowserShell {
 		await this.loadHtmlToolbar();
 		setToolbarOverlayVisible(true);
 		this.publishChromeRegion();
+		// Per-style wallpaper. Cached value in `config.styleBackground`
+		// is authoritative when non-empty; an empty cache backfills from
+		// the active style's `styles.json` entry so a fresh install with
+		// no persisted value still gets the registry-default image
+		// without forcing a Settings save. Fire-and-forget (Promise) —
+		// the first paint may run without it and the image decode kicks
+		// off a repaint via `requestFullRepaint` once it lands.
+		void this.loadStyleBackground(this.resolveBootStyleBackground(shellConfig));
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
 		// restricted memory that the live-DOM content cache's
@@ -1483,6 +1503,12 @@ export class BrowserShell {
 			0, paintTopInset,
 			canvas.width, canvas.height - paintTopInset - paintBottomInset,
 		);
+		// Per-style wallpaper sits between the page-bg colour fill and
+		// the live-DOM cache blit, so the image covers the colour fill
+		// and a page with a translucent `body` background lets the
+		// image show through (themes opt in by setting `body { background:
+		// transparent }`). No-op when the active style has no image.
+		this.paintStyleBackground(ctx, viewport);
 		const t0 = performance.now();
 		paintLiveOverlay(ctx, getLiveRoot(), viewport, effectiveScrollY);
 		// Skip the walk on otherwise-static pages. `hasPageCanvas2dActivity`
@@ -1887,6 +1913,16 @@ export class BrowserShell {
 	 */
 	private async selectToolbar(path: string): Promise<void> {
 		const configPath = `${this.profile.appRoot}configs/config.json`;
+		// Per-toolbar height: look up the registry entry first so we can
+		// stamp `toolbarHeight` into the same write below. Mirrors the
+		// `brewserStyle → styleBackground` cache the Settings-page Save
+		// path uses (see `saveSettings`) — the source of truth is
+		// `toolbars.json`, cached into `config.json` so the boot path
+		// reads a single field instead of cracking a second JSON. A
+		// missing / non-numeric `height` leaves the existing
+		// `toolbarHeight` untouched.
+		const entry = loadToolbarRegistry(this.profile.appRoot).find((e) => e.path === path);
+		const nextHeight = typeof entry?.height === 'number' ? entry.height : undefined;
 		try {
 			// Read the raw existing config and merge `toolbar` onto it
 			// so every other key survives — today that's
@@ -1912,10 +1948,19 @@ export class BrowserShell {
 				// a minimal one with sane defaults baked in.
 				next = { ...loadConfig(this.profile.appRoot), toolbar: path };
 			}
+			if (nextHeight !== undefined) next.toolbarHeight = nextHeight;
 			Switch.writeFileSync(configPath, JSON.stringify(next, null, 2));
 		} catch (error) {
 			console.debug(`[brewser] write config.json failed: ${error}`);
 			return;
+		}
+		// Apply the height change at runtime so the next paint reflects
+		// the new strip size without waiting for a restart. Mirrors the
+		// `'toolbarHeight' in staged` block in `saveSettings`.
+		if (nextHeight !== undefined && nextHeight !== this.chromeHeight) {
+			this.chromeHeight = nextHeight;
+			resetToolbarOverlayCache();
+			this.publishChromeRegion();
 		}
 		// Re-read + re-parse the new toolbar HTML into a fresh live
 		// root. The toolbar tree is parsed in-process (no fetch round-
@@ -2001,6 +2046,42 @@ export class BrowserShell {
 		const prior = loadConfig(this.profile.appRoot);
 		const staged = readStagedSettings();
 		if (Object.keys(staged).length === 0) return; // nothing to commit
+
+		// Style-background cache. The Settings page exposes a radio for
+		// `brewserStyle` but not for `styleBackground` (the wallpaper
+		// follows the style; the user doesn't pick it independently).
+		// Whenever `brewserStyle` is staged, look up its registry entry
+		// and inject the resolved `background` into `staged` so the
+		// existing merge + write path persists it alongside the style
+		// itself. The `'brewserStyle' in staged` guard (rather than a
+		// diff check) keeps the cache self-healing — a user who edits
+		// `styles.json`'s `background` field by hand only needs to
+		// Settings → Save once to refresh the cache, no style toggle
+		// required.
+		if ('brewserStyle' in staged && typeof staged.brewserStyle === 'string') {
+			const entry = loadStyleRegistry(this.profile.appRoot)
+				.find((e) => e.path === staged.brewserStyle);
+			staged.styleBackground = entry?.background ?? '';
+		}
+		// Toolbar-height cache. Parallel to `brewserStyle → styleBackground`
+		// above: each row in `toolbars.json` can carry a `height` field
+		// (clamped by `loadToolbarRegistry`) and selecting a toolbar
+		// re-stamps `config.toolbarHeight` from it so the strip resizes
+		// to whatever the picked theme expects. Empty / missing `height`
+		// in the registry entry → leave `toolbarHeight` untouched (no
+		// auto-resize), so a theme that doesn't care preserves the
+		// user's existing value. The existing
+		// `'toolbarHeight' in staged && staged.toolbarHeight !== prior.toolbarHeight`
+		// block below picks the injected value up and runs the same
+		// chromeHeight + cache-reset + publishChromeRegion path a manual
+		// height edit would take.
+		if ('toolbar' in staged && typeof staged.toolbar === 'string') {
+			const entry = loadToolbarRegistry(this.profile.appRoot)
+				.find((e) => e.path === staged.toolbar);
+			if (typeof entry?.height === 'number') {
+				staged.toolbarHeight = entry.height;
+			}
+		}
 
 		// Spread the on-disk raw object so user-edited unknown keys
 		// survive — same shape `selectToolbar` uses.
@@ -2103,6 +2184,15 @@ export class BrowserShell {
 		// up on the next paint. No reload needed.
 		if ('pageBackground' in staged && staged.pageBackground !== prior.pageBackground) {
 			this.pageBackground = fresh.pageBackground;
+		}
+		// Style wallpaper: kick off the decode for the freshly-persisted
+		// `styleBackground` (set above when `brewserStyle` was staged).
+		// `loadStyleBackground` dedupes on the source path, so a save
+		// that picks the same style as before is a no-op; an actual
+		// change clears the old image and decodes the new one, requesting
+		// a repaint when it lands.
+		if ('styleBackground' in staged && staged.styleBackground !== prior.styleBackground) {
+			void this.loadStyleBackground(fresh.styleBackground);
 		}
 		// Toolbar position: cache on the shell + stamp the new value on
 		// the toolbar live root so theme CSS can flip its layout via
@@ -2220,6 +2310,78 @@ export class BrowserShell {
 		// end to push current state into the freshly-populated root,
 		// so no extra call needed here.
 		this.rebuildToolbarLiveRoot();
+	}
+
+	/** Pick the effective `styleBackground` path at boot. `config.json`'s
+	 * persisted cache wins when non-empty; an empty cache falls back to
+	 * `styles.json`'s `background` field for the entry matching the
+	 * active `brewserStyle`. This backfill makes a fresh install (or
+	 * an old config that predates the `styleBackground` key) still
+	 * surface the shipped registry default without forcing the user to
+	 * toggle their style in Settings just to populate the cache. */
+	private resolveBootStyleBackground(config: ReturnType<typeof loadConfig>): string {
+		if (config.styleBackground) return config.styleBackground;
+		const entry = loadStyleRegistry(this.profile.appRoot)
+			.find((e) => e.path === config.brewserStyle);
+		return entry?.background ?? '';
+	}
+
+	/** Decode the wallpaper image at `rel` (resolved through
+	 * `profile.stylePath`, so bare paths sit under the profile root and
+	 * `sdmc:/…`/`romfs:/…` pass through). Skips work when the path is
+	 * unchanged from the current cache, so the no-op `saveSettings`
+	 * (radio re-stages the same style) doesn't re-decode. On success,
+	 * triggers a single `requestFullRepaint` so the new image lands on
+	 * the next paint tick; on empty path or decode failure, clears the
+	 * cached image so the per-frame `fillRect` shows through unmodified. */
+	private async loadStyleBackground(rel: string): Promise<void> {
+		if (rel === this.backgroundImageRel) return;
+		this.backgroundImageRel = rel;
+		if (!rel) {
+			this.backgroundImage = null;
+			requestFullRepaint();
+			return;
+		}
+		const src = this.profile.stylePath(rel);
+		const img = await loadOptionalImage(src);
+		// If another style change raced in while we awaited, abandon
+		// this load — the newer call has already set `backgroundImageRel`
+		// to a different path and we'd otherwise stomp its image.
+		if (this.backgroundImageRel !== rel) return;
+		this.backgroundImage = img;
+		requestFullRepaint();
+	}
+
+	/** Paint the cached wallpaper inside `viewport` using cover-fit
+	 * (center-crop) sizing. Source rect is computed in image space to
+	 * match the dst aspect ratio; `drawImage(img, sx, sy, sw, sh, …)`
+	 * lets the engine scale + crop in a single op without a `ctx.clip`
+	 * stack frame. No-op when no image is loaded — caller already
+	 * filled the viewport with the page-bg colour, so we just leave
+	 * that fill in place. */
+	private paintStyleBackground(
+		ctx: CanvasRenderingContext2D,
+		viewport: { x: number; y: number; width: number; height: number },
+	): void {
+		const img = this.backgroundImage;
+		if (!img) return;
+		const iw = img.naturalWidth;
+		const ih = img.naturalHeight;
+		if (iw <= 0 || ih <= 0) return;
+		if (viewport.width <= 0 || viewport.height <= 0) return;
+		const dstAspect = viewport.width / viewport.height;
+		const srcAspect = iw / ih;
+		let sx = 0, sy = 0, sw = iw, sh = ih;
+		if (srcAspect > dstAspect) {
+			// Source is wider than dst — crop the sides.
+			sw = ih * dstAspect;
+			sx = (iw - sw) / 2;
+		} else {
+			// Source is taller (or matched) — crop top/bottom.
+			sh = iw / dstAspect;
+			sy = (ih - sh) / 2;
+		}
+		ctx.drawImage(img, sx, sy, sw, sh, viewport.x, viewport.y, viewport.width, viewport.height);
 	}
 
 	/** (Re)build the toolbar live root from the cached parsed tree.
