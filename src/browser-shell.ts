@@ -316,7 +316,18 @@ export class BrowserShell {
 	 * paint pump stops itself if this drifts too far in the past
 	 * (overlay no longer painting → don't burn CPU). */
 	private cssLoadingOverlayLastPaintMs = 0;
-
+	/** Reference to the nxjs runtime's `requestAnimationFrame`, captured
+	 * BEFORE the first page navigation. brewser-runtime's `runPageScripts`
+	 * calls `ensureRAFInstalled` which replaces `globalThis.requestAnimationFrame`
+	 * with a queue that's only drained by `tickAnimationFrames` from the
+	 * controller-input tick handler — which doesn't run until AFTER the
+	 * boot splash + first navigate complete. The nxjs version, in
+	 * contrast, is drained every main-loop iteration via `$.onFrame →
+	 * callRafCallbacks` (in nxjs's `packages/runtime/src/index.ts`), so
+	 * rAFs scheduled via this reference fire reliably during the boot
+	 * splash even while a navigation runs in parallel. */
+	private readonly nativeRaf: (cb: () => void) => number =
+		globalThis.requestAnimationFrame as unknown as (cb: () => void) => number;
 	constructor() {
 		this.policy = new BrowserPermissionPolicy();
 		this.profile = new BrowserProfile();
@@ -648,7 +659,13 @@ export class BrowserShell {
 		subscribeShellAction('bookmark', () => this.toggleBookmark());
 		subscribeShellAction('screenshot', () => this.captureScreenshot());
 
-		await this.paintBootSplash();
+		// Splash is rendered C-side by `nx_render_loading_image` (nxjs-source
+		// main.c) from `romfs:/loading.jpg` BEFORE JS init begins — fires
+		// ~+50ms after NRO launch and is held by the display engine until
+		// the first page navigation paints. That covers the entire boot
+		// window (seedRomfs, plInitialize, JS module eval, page build) with
+		// no visible black-screen gap. The previous JS-side `paintBootSplash`
+		// was redundant once the C-side path existed.
 		// Copy missing built-in pages, toolbar icons, and toolbars.json
 		// from romfs into the profile dir. Cheap on every launch
 		// (existence check + skip for files that already exist) so the
@@ -726,7 +743,45 @@ export class BrowserShell {
 		void probeNetwork().then(stashNetworkStatus);
 		setInterval(() => { void probeNetwork().then(stashNetworkStatus); }, 60_000);
 
-		await this.navigateTo(DEFAULT_HOME_URL);
+		// Boot splash + home navigation, parallelised.
+		//
+		// Strategy: kick off `navigateTo(home)` BEFORE running the splash
+		// so its (slow on cold-cache Citron) fetch + parse + live-DOM
+		// build + first repaintAll happens UNDER the splash. Critically,
+		// the navigate's terminal `repaintAll` is NOT suppressed — letting
+		// it run is what builds the live-DOM cache. While it's running
+		// (synchronous, can be 1-2 s on the home grid), the JS thread is
+		// busy and the C-side main loop is blocked too, so Citron keeps
+		// presenting the LAST presented frame — which is the splash from
+		// our paintSplash tick. The user sees a "frozen splash" for the
+		// duration of the cache build instead of black; visually
+		// indistinguishable from the splash dwell. Once JS unblocks, our
+		// next paintSplash tick overwrites canvas->data with the splash
+		// again (the home page pixels the build just wrote are discarded
+		// from canvas->data, but the live-DOM cache stays warm).
+		//
+		// After dwell + fade, the explicit `repaintAll` below is a fast
+		// cache-blit (no rebuild) — home page appears immediately, no
+		// black gap.
+		//
+		// `showSplash: false` bypasses everything for fastest boot. C-side
+		// `nx_render_loading_image` may still flash loading.jpg briefly
+		// during init; delete `romfs:/shell/assets/loading.jpg` to
+		// suppress that too.
+		if (shellConfig.showSplash) {
+			const navPromise = this.navigateTo(DEFAULT_HOME_URL);
+			await this.runBootSplashFade(shellConfig.splashMinMs, shellConfig.splashFadeMs);
+			// Wait for navigate to finish in case its repaintAll hasn't
+			// fired yet (rare — usually completes mid-dwell). If it fires
+			// here, the user sees a brief frozen-fade-end before the
+			// repaintAll below paints home. Better than the black gap
+			// from before.
+			await navPromise;
+			// Warm-cache repaint. Should be ~10 ms (cache blit only).
+			this.repaintAll();
+		} else {
+			await this.navigateTo(DEFAULT_HOME_URL);
+		}
 
 		try {
 			while (true) {
@@ -2852,38 +2907,94 @@ export class BrowserShell {
 		}
 	}
 
-	/** First thing drawn at boot: the brand background + centered logo,
-	 * so the 1–2 s of profile seeding + first-page build reads as a splash
-	 * instead of a black screen. The Switch holds this presented frame
-	 * through the (blocking) init that follows; the welcome page's first
-	 * paint replaces it. `await`ed in `run()` so the logo's async decode
-	 * completes before that blocking work begins. Logo loads from romfs
-	 * (mounted at boot, before asset seeding); it must be RGBA — the PNG
-	 * decoder renders RGB as invisible (see Brewser_logo.png). */
-	private async paintBootSplash(): Promise<void> {
+	/** Hold the boot splash for `splashMinMs` of visible JS-side render
+	 * time, then fade to black over `splashFadeMs` before the home page
+	 * paints.
+	 *
+	 * Painting uses `requestAnimationFrame` rather than a `setTimeout`
+	 * loop. Critical for boot: the navigate's terminal `repaintAll`
+	 * (writing the home page to `canvas->data`) runs DURING
+	 * `nx_process_pending_jobs` on the C side — but the rAF runner is
+	 * invoked from the runtime's `$.onFrame` callback, which runs AFTER
+	 * `nx_process_pending_jobs` and BEFORE the framebuffer present each
+	 * main-loop iteration. So even when the navigate overwrites
+	 * canvas->data with home pixels in the same iteration, our rAF
+	 * callback paints splash on top before `framebufferEnd` — no flash.
+	 *
+	 * `splashMinMs` measures from when this function STARTS, not from
+	 * boot — that's the only stable reference point, since boot-side
+	 * time varies wildly with seedRomfs + config parse + HTML parse
+	 * I/O on cold-cache emulator runs.
+	 *
+	 * `splashFadeMs <= 0` skips the fade (instant cut from splash to
+	 * home). */
+	private async runBootSplashFade(splashMinMs: number, splashFadeMs: number): Promise<void> {
+		// Allocate canvas → `nx_framebuffer_init` fires → C-side blits
+		// stashed splash bytes into canvas->data.
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
-		ctx.fillStyle = '#00010a';
-		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		const logo = await loadOptionalImage('romfs:/shell/assets/Brewser_logo.png');
-		const li = logo as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
-		const lw = li ? (li.naturalWidth || li.width || 0) : 0;
-		const lh = li ? (li.naturalHeight || li.height || 0) : 0;
-		if (logo && lw > 0 && lh > 0) {
-			const maxDim = 256;
-			const scale = Math.min(1, maxDim / Math.max(lw, lh));
-			const w = Math.round(lw * scale);
-			const h = Math.round(lh * scale);
-			ctx.drawImage(logo, Math.round((canvas.width - w) / 2), Math.round((canvas.height - h) / 2), w, h);
-		} else {
-			// Fallback wordmark if the logo can't be decoded.
-			ctx.fillStyle = '#ffd35e';
-			ctx.font = 'bold 36px system-ui';
-			ctx.textBaseline = 'middle';
-			ctx.textAlign = 'center';
-			ctx.fillText('Brewser', canvas.width / 2, canvas.height / 2);
-			ctx.textAlign = 'start';
+		const splash = await loadOptionalImage('romfs:/shell/assets/loading.jpg');
+		const si = splash as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
+		const lw = si ? (si.naturalWidth || si.width || 0) : 0;
+		const lh = si ? (si.naturalHeight || si.height || 0) : 0;
+		const dx = lw > 0 ? Math.round((canvas.width - lw) / 2) : 0;
+		const dy = lh > 0 ? Math.round((canvas.height - lh) / 2) : 0;
+
+		// Phase state driven by the async timing flow below; consulted by
+		// the rAF callback to decide what to paint each frame.
+		type Phase = 'dwell' | 'fade' | 'done';
+		let phase: Phase = 'dwell';
+		let fadeStart = 0;
+
+		// Capture the nxjs-runtime rAF reference locally — `this.nativeRaf`
+		// was set in the constructor BEFORE brewser-runtime's
+		// `ensureRAFInstalled` (fires during the navigate that's running
+		// in parallel with this splash) replaced the global. Using the
+		// global directly here would queue into the brewser-runtime
+		// queue, which isn't drained until the controller-input loop
+		// starts — i.e. AFTER the splash. With `this.nativeRaf`, our
+		// rAF lands in the nxjs queue that `$.onFrame` drains every
+		// main-loop iteration.
+		const raf = this.nativeRaf;
+
+		const rafCallback = (): void => {
+			if (phase === 'done') return;
+			// Splash backdrop.
+			ctx.fillStyle = '#000';
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			if (splash && lw > 0 && lh > 0) {
+				ctx.drawImage(splash, dx, dy, lw, lh);
+			}
+			// Fade-out overlay.
+			if (phase === 'fade') {
+				const dt = Date.now() - fadeStart;
+				const t = dt >= splashFadeMs ? 1 : dt / splashFadeMs;
+				if (t > 0) {
+					ctx.fillStyle = `rgba(0,0,0,${t})`;
+					ctx.fillRect(0, 0, canvas.width, canvas.height);
+				}
+			}
+			// Re-arm. The runtime's rAF is one-shot, so we need to keep
+			// rescheduling until phase flips to 'done'.
+			raf(rafCallback);
+		};
+
+		// Initial synchronous splash paint so the FIRST present after this
+		// (which may happen before any rAF fires, e.g. if `loadOptionalImage`
+		// resolved synchronously) shows a real splash, not the C-side
+		// blit's bytes that the navigate's repaintAll might overwrite first.
+		rafCallback();
+
+		// Dwell — async timer, no paint here (rAF handles painting).
+		await new Promise<void>((resolve) => setTimeout(resolve, splashMinMs));
+
+		if (splashFadeMs > 0) {
+			phase = 'fade';
+			fadeStart = Date.now();
+			await new Promise<void>((resolve) => setTimeout(resolve, splashFadeMs));
 		}
+
+		phase = 'done';
 	}
 
 	/**

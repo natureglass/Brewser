@@ -5,6 +5,7 @@
   "styleBackground": "",
   "theme": "dark",
   "toolbarHeight": 64,
+  "momentumScrolling": true,
   "toolbarPosition": "top",
   "searchEngine": "DuckDuckGo",
   "videoNVTEGRA": true,
@@ -17,6 +18,9 @@
   "keyboardHeight": 400,
   "navDebug": false,
   "swbImgDebug": false,
+  "showSplash": true,
+  "splashMinMs": 1500,
+  "splashFadeMs": 250,
   "homeSection": "featured",
   "buttonMapping": {
     "leftClick": "A",

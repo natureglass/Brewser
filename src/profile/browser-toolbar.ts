@@ -179,6 +179,30 @@ export interface BrowserConfig {
 	 * broken page can't fill the SD card. Gates `_imgDiag` in
 	 * `scripts/live-dom.ts`. */
 	swbImgDebug: boolean;
+	/** Whether to run the JS-side boot splash dwell + fade-out before
+	 * the home page paints. When `false`, the shell skips
+	 * `runBootSplashFade` entirely and goes straight to
+	 * `navigateTo(home)` — the C-side `nx_render_loading_image` may still
+	 * present `romfs:/shell/assets/loading.jpg` for a brief moment at
+	 * boot (it's part of the nxjs runtime, not gated by config); delete
+	 * or rename that file in romfs to suppress the C-side splash too.
+	 * Default `true`. */
+	showSplash: boolean;
+	/** Minimum visible duration (ms) of the JS-side boot splash before the
+	 * fade-out starts. The shell allocates the canvas, blits the stashed
+	 * C-side splash bytes in via `nx_framebuffer_init`, then repaints the
+	 * splash (`romfs:/shell/assets/loading.jpg`) continuously for this
+	 * many ms — independent of how long boot prelude work (seedRomfs,
+	 * config parse, HTML parse) took. Larger = more time to read the
+	 * splash but slower app launch. Clamped to [0, 10000]; default 1500. */
+	splashMinMs: number;
+	/** Fade-out duration (ms) from splash → black between the dwell above
+	 * and the home page paint. After the dwell, the shell allocates the
+	 * canvas, blits the stashed splash into it, then animates a black
+	 * overlay from alpha 0→1 over this many ms. Set to 0 to skip the
+	 * fade (instant cut from splash to home). Clamped to [0, 5000];
+	 * default 500. */
+	splashFadeMs: number;
 	/** Joycon button → engine action override map. Keys are Switch
 	 * face / shoulder labels (A, B, X, Y, L, R, ZL, ZR, MINUS, PLUS,
 	 * L_STICK, R_STICK, UP, DOWN, LEFT, RIGHT, HOME, CAPTURE,
@@ -362,6 +386,9 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	autoRotate: true,
 	navDebug: false,
 	swbImgDebug: false,
+	showSplash: true,
+	splashMinMs: 1500,
+	splashFadeMs: 500,
 	buttonMapping: {},
 	keyboardHeight: 400,
 	keyboard: 'themes/keyboards/default.html',
@@ -460,6 +487,15 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			swbImgDebug: typeof parsed?.swbImgDebug === 'boolean'
 				? parsed.swbImgDebug
 				: DEFAULT_CONFIG.swbImgDebug,
+			showSplash: typeof parsed?.showSplash === 'boolean'
+				? parsed.showSplash
+				: DEFAULT_CONFIG.showSplash,
+			splashMinMs: typeof parsed?.splashMinMs === 'number' && Number.isFinite(parsed.splashMinMs)
+				? Math.max(0, Math.min(10000, Math.trunc(parsed.splashMinMs)))
+				: DEFAULT_CONFIG.splashMinMs,
+			splashFadeMs: typeof parsed?.splashFadeMs === 'number' && Number.isFinite(parsed.splashFadeMs)
+				? Math.max(0, Math.min(5000, Math.trunc(parsed.splashFadeMs)))
+				: DEFAULT_CONFIG.splashFadeMs,
 			// `buttonMapping` is a permissive bag — the button-router
 			// validates each key/value at apply time. Just pass it
 			// through as-is when the JSON has an object there;
