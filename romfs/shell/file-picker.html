@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File Picker</title>
+<style>
+  body {
+    --fp-backdrop: rgba(8, 12, 20, 0.78);
+    --fp-panel-bg: #141a25;
+    --fp-panel-border: #2c3a52;
+    --fp-header-bg: #1d2738;
+    --fp-text: #e3eaf6;
+    --fp-text-dim: #8794ad;
+    --fp-accent: #7aa2ff;
+    --fp-row-hover: #1a2333;
+    --fp-row-selected: #243352;
+    --fp-row-divider: #1f293a;
+    --fp-icon-folder: #ffd47e;
+    --fp-icon-file: #a3b1cf;
+    --fp-btn-bg: #1d2c43;
+    --fp-btn-bg-active: #25395a;
+    --fp-btn-bg-primary: #2d5cd2;
+    --fp-btn-bg-primary-active: #4276ed;
+    --fp-btn-bg-disabled: #1a2030;
+    --fp-btn-text: #e3eaf6;
+    --fp-btn-text-disabled: #5a6479;
+    --fp-crumb-bg: #1a2333;
+    --fp-crumb-bg-active: #243352;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--fp-backdrop);
+    color: var(--fp-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 18px;
+  }
+
+  .fp-panel {
+    width: 1024px;
+    height: 600px;
+    background: var(--fp-panel-bg);
+    border: 1px solid var(--fp-panel-border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .fp-header {
+    background: var(--fp-header-bg);
+    padding: 18px 24px 14px 24px;
+    border-bottom: 1px solid var(--fp-panel-border);
+  }
+
+  .fp-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--fp-text);
+    margin-bottom: 10px;
+  }
+
+  .fp-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    font-size: 16px;
+  }
+
+  .fp-crumb {
+    padding: 4px 10px;
+    background: var(--fp-crumb-bg);
+    border-radius: 6px;
+    color: var(--fp-text);
+  }
+
+  .fp-crumb--active {
+    background: var(--fp-crumb-bg-active);
+    color: var(--fp-accent);
+    font-weight: 600;
+  }
+
+  .fp-crumb-sep {
+    color: var(--fp-text-dim);
+    padding: 0 2px;
+  }
+
+  .fp-list {
+    flex: 1;
+    overflow-y: scroll;
+    padding: 8px 0;
+  }
+
+  .fp-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--fp-row-divider);
+    color: var(--fp-text);
+  }
+
+  .fp-row--selected {
+    background: var(--fp-row-selected);
+  }
+
+  .fp-row--dimmed {
+    color: var(--fp-text-dim);
+  }
+
+  .fp-row--dimmed .fp-name {
+    color: var(--fp-text-dim);
+  }
+
+  .fp-row--up {
+    color: var(--fp-text-dim);
+    font-style: italic;
+  }
+
+  .fp-row:active {
+    background: var(--fp-row-hover);
+  }
+
+  .fp-icon {
+    width: 28px;
+    text-align: center;
+    font-size: 20px;
+    color: var(--fp-icon-file);
+  }
+
+  .fp-row--dir .fp-icon {
+    color: var(--fp-icon-folder);
+  }
+
+  .fp-name {
+    flex: 1;
+    color: var(--fp-text);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .fp-size {
+    color: var(--fp-text-dim);
+    font-size: 14px;
+    min-width: 90px;
+    text-align: right;
+  }
+
+  .fp-check {
+    width: 28px;
+    text-align: center;
+    font-size: 20px;
+    color: var(--fp-text-dim);
+  }
+
+  .fp-check--on {
+    color: var(--fp-accent);
+  }
+
+  .fp-empty {
+    padding: 32px 24px;
+    text-align: center;
+    color: var(--fp-text-dim);
+    font-style: italic;
+  }
+
+  .fp-footer {
+    background: var(--fp-header-bg);
+    padding: 14px 24px;
+    border-top: 1px solid var(--fp-panel-border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .fp-accept-hint {
+    flex: 1;
+    color: var(--fp-text-dim);
+    font-size: 14px;
+  }
+
+  .fp-btn {
+    padding: 10px 22px;
+    border-radius: 8px;
+    background: var(--fp-btn-bg);
+    color: var(--fp-btn-text);
+    font-size: 16px;
+    font-weight: 500;
+    border: 1px solid var(--fp-panel-border);
+  }
+
+  .fp-btn:active {
+    background: var(--fp-btn-bg-active);
+  }
+
+  .fp-btn--primary {
+    background: var(--fp-btn-bg-primary);
+    border-color: var(--fp-btn-bg-primary);
+  }
+
+  .fp-btn--primary:active {
+    background: var(--fp-btn-bg-primary-active);
+  }
+
+  .fp-btn[data-disabled] {
+    background: var(--fp-btn-bg-disabled);
+    color: var(--fp-btn-text-disabled);
+    border-color: var(--fp-row-divider);
+  }
+</style>
+</head>
+<body>
+  <div class="fp-panel">
+    <div class="fp-header">
+      <div class="fp-title" id="fp-title"><span>Select a file</span></div>
+      <div class="fp-breadcrumb" id="fp-breadcrumb"></div>
+    </div>
+    <div class="fp-list" id="fp-list"></div>
+    <div class="fp-footer">
+      <div class="fp-accept-hint" id="fp-accept-hint"></div>
+      <div class="fp-btn" id="fp-cancel" data-action="cancel"><span>Cancel</span></div>
+      <div class="fp-btn fp-btn--primary" id="fp-open" data-action="open"><span>Open</span></div>
+    </div>
+  </div>
+</body>
+</html>

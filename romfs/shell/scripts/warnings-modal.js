@@ -68,6 +68,31 @@
         + (err && err.message ? err.message : String(err)));
     });
 
+  // User-configured severity gate (`config.warnings`). Stamped onto
+  // `<body data-warnings>` by browser-resource-loader's
+  // `<browser-config-warnings>` expansion (comma-separated list of
+  // enabled severities). Read synchronously at script load so
+  // getMatchedWarnings always sees the user's current gate — the prior
+  // `fetch('configs/config.json')` path was exposed to a fetch-vs-tap
+  // race that could let stale defaults filter the first launch tap.
+  // Missing attribute (older page, fresh install pre-stamp) → fall
+  // back to all-three "show everything"; missing attr is NOT the same
+  // as empty string (the empty-string case is the user explicitly
+  // opting out of every severity, which we honor literally).
+  var enabledRisks = (function () {
+    var raw = (document.body && document.body.getAttribute('data-warnings'));
+    if (raw == null) return { low: true, medium: true, high: true };
+    var next = { low: false, medium: false, high: false };
+    var parts = String(raw).split(',');
+    for (var i = 0; i < parts.length; i++) {
+      var v = parts[i].trim();
+      if (v === 'low' || v === 'medium' || v === 'high') next[v] = true;
+    }
+    console.debug('[warnings-modal] enabled risks: '
+      + 'low=' + next.low + ' medium=' + next.medium + ' high=' + next.high);
+    return next;
+  })();
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -107,9 +132,17 @@
       var key = keys[i];
       var entry = warningTable[key];
       if (entry && typeof entry === 'object' && typeof entry.warning === 'string') {
+        var risk = typeof entry.risk === 'string' ? entry.risk : '';
+        // Severity gate: drop entries whose risk is one of the three
+        // gated severities but unchecked in Settings. Unknown-risk
+        // entries (empty string or an out-of-set value) always pass —
+        // hiding them silently on a malformed warnings.json edit would
+        // be worse than showing them uncategorized.
+        if ((risk === 'low' || risk === 'medium' || risk === 'high')
+          && !enabledRisks[risk]) continue;
         out.push({
           key: key,
-          risk: typeof entry.risk === 'string' ? entry.risk : '',
+          risk: risk,
           description: typeof entry.description === 'string' ? entry.description : '',
           warning: entry.warning,
         });

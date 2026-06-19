@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Picker</title>
+<style>
+  body {
+    --cp-backdrop: rgba(8, 12, 20, 0.78);
+    --cp-panel-bg: #141a25;
+    --cp-panel-border: #2c3a52;
+    --cp-header-bg: #1d2738;
+    --cp-text: #e3eaf6;
+    --cp-text-dim: #8794ad;
+    --cp-accent: #7aa2ff;
+    --cp-track-bg: #0f1520;
+    --cp-btn-bg: #1d2c43;
+    --cp-btn-bg-active: #25395a;
+    --cp-btn-bg-primary: #2d5cd2;
+    --cp-btn-bg-primary-active: #4276ed;
+    --cp-btn-text: #e3eaf6;
+    --cp-preview-underlay: #666b78;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--cp-backdrop);
+    color: var(--cp-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 18px;
+  }
+
+  .cp-panel {
+    width: 620px;
+    height: 540px;
+    background: var(--cp-panel-bg);
+    border: 1px solid var(--cp-panel-border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .cp-header {
+    background: var(--cp-header-bg);
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--cp-panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .cp-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--cp-text);
+  }
+
+  .cp-preview-wrap {
+    display: flex;
+    width: 92px;
+    height: 32px;
+    border: 1px solid var(--cp-panel-border);
+    border-radius: 6px;
+    background: var(--cp-preview-underlay);
+    overflow: hidden;
+  }
+
+  .cp-preview-opaque {
+    flex: 1;
+    height: 100%;
+  }
+
+  .cp-preview-alpha {
+    flex: 1;
+    height: 100%;
+  }
+
+  .cp-body {
+    flex: 1;
+    display: flex;
+    padding: 14px 20px 10px 20px;
+    gap: 14px;
+  }
+
+  .cp-spectrum {
+    flex: 1;
+    height: 240px;
+    border: 1px solid var(--cp-panel-border);
+    border-radius: 6px;
+    position: relative;
+  }
+
+  .cp-hue {
+    width: 28px;
+    height: 240px;
+    border: 1px solid var(--cp-panel-border);
+    border-radius: 6px;
+    position: relative;
+    background: linear-gradient(to bottom, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+  }
+
+  .cp-spectrum-dot {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    background: transparent;
+    transform: translate(-50%, -50%);
+  }
+
+  .cp-hue-dot {
+    position: absolute;
+    width: 32px;
+    height: 10px;
+    border: 2px solid #ffffff;
+    border-radius: 4px;
+    background: transparent;
+    transform: translate(-50%, -50%);
+  }
+
+  .cp-sliders {
+    padding: 4px 20px 6px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cp-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .cp-slider-label {
+    width: 18px;
+    color: var(--cp-text-dim);
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    font-family: "Lucida Console", Monaco, monospace;
+  }
+
+  .cp-slider-bar {
+    flex: 1;
+    height: 18px;
+    background: var(--cp-track-bg);
+    border: 1px solid var(--cp-panel-border);
+    border-radius: 4px;
+    position: relative;
+  }
+
+  .cp-slider-thumb {
+    position: absolute;
+    width: 6px;
+    height: 22px;
+    background: #ffffff;
+    border: 1px solid #000000;
+    border-radius: 2px;
+    transform: translate(-50%, -50%);
+  }
+
+  .cp-slider-value {
+    width: 36px;
+    text-align: right;
+    color: var(--cp-text);
+    font-size: 14px;
+    font-family: "Lucida Console", Monaco, monospace;
+  }
+
+  .cp-hex-row {
+    padding: 4px 20px 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .cp-hex-label {
+    width: 36px;
+    color: var(--cp-text-dim);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: "Lucida Console", Monaco, monospace;
+  }
+
+  .cp-hex-bar {
+    flex: 1;
+    padding: 10px 14px;
+    background: var(--cp-track-bg);
+    border: 1px solid var(--cp-panel-border);
+    border-radius: 6px;
+    color: var(--cp-text);
+    font-family: "Lucida Console", Monaco, monospace;
+    font-size: 16px;
+  }
+
+  .cp-hex-bar:active {
+    background: var(--cp-btn-bg-active);
+  }
+
+  .cp-footer {
+    background: var(--cp-header-bg);
+    padding: 12px 20px;
+    border-top: 1px solid var(--cp-panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .cp-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    background: var(--cp-btn-bg);
+    color: var(--cp-btn-text);
+    font-size: 15px;
+    font-weight: 500;
+    border: 1px solid var(--cp-panel-border);
+  }
+
+  .cp-btn:active {
+    background: var(--cp-btn-bg-active);
+  }
+
+  .cp-btn--primary {
+    background: var(--cp-btn-bg-primary);
+    border-color: var(--cp-btn-bg-primary);
+  }
+
+  .cp-btn--primary:active {
+    background: var(--cp-btn-bg-primary-active);
+  }
+</style>
+</head>
+<body data-action="cancel">
+  <div class="cp-panel" data-action="ignore">
+    <div class="cp-header">
+      <div class="cp-title"><span>Pick a color</span></div>
+      <div class="cp-preview-wrap">
+        <div class="cp-preview-opaque" id="cp-preview-opaque"></div>
+        <div class="cp-preview-alpha" id="cp-preview-alpha"></div>
+      </div>
+    </div>
+    <div class="cp-body">
+      <div class="cp-spectrum" id="cp-spectrum" data-action="sv">
+        <div class="cp-spectrum-dot" id="cp-spectrum-dot"></div>
+      </div>
+      <div class="cp-hue" id="cp-hue" data-action="hue">
+        <div class="cp-hue-dot" id="cp-hue-dot"></div>
+      </div>
+    </div>
+    <div class="cp-sliders">
+      <div class="cp-slider-row">
+        <div class="cp-slider-label"><span>R</span></div>
+        <div class="cp-slider-bar" id="cp-r-track" data-action="slider:r">
+          <div class="cp-slider-thumb" id="cp-r-thumb"></div>
+        </div>
+        <div class="cp-slider-value" id="cp-r-value"><span>0</span></div>
+      </div>
+      <div class="cp-slider-row">
+        <div class="cp-slider-label"><span>G</span></div>
+        <div class="cp-slider-bar" id="cp-g-track" data-action="slider:g">
+          <div class="cp-slider-thumb" id="cp-g-thumb"></div>
+        </div>
+        <div class="cp-slider-value" id="cp-g-value"><span>0</span></div>
+      </div>
+      <div class="cp-slider-row">
+        <div class="cp-slider-label"><span>B</span></div>
+        <div class="cp-slider-bar" id="cp-b-track" data-action="slider:b">
+          <div class="cp-slider-thumb" id="cp-b-thumb"></div>
+        </div>
+        <div class="cp-slider-value" id="cp-b-value"><span>0</span></div>
+      </div>
+      <div class="cp-slider-row">
+        <div class="cp-slider-label"><span>A</span></div>
+        <div class="cp-slider-bar" id="cp-a-track" data-action="slider:a">
+          <div class="cp-slider-thumb" id="cp-a-thumb"></div>
+        </div>
+        <div class="cp-slider-value" id="cp-a-value"><span>255</span></div>
+      </div>
+    </div>
+    <div class="cp-hex-row">
+      <div class="cp-hex-label"><span>HEX</span></div>
+      <div class="cp-hex-bar" id="cp-hex-bar" data-action="edit-hex">
+        <span id="cp-hex-text">#000000ff</span>
+      </div>
+    </div>
+    <div class="cp-footer">
+      <div class="cp-btn" data-action="cancel"><span>Cancel</span></div>
+      <div class="cp-btn cp-btn--primary" data-action="ok"><span>OK</span></div>
+    </div>
+  </div>
+</body>
+</html>

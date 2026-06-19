@@ -1,6 +1,6 @@
 {
   "name": "brewser",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Switch homebrew browser shell built on @switch-web/runtime. Currently a minimal scaffold.",
   "scripts": {

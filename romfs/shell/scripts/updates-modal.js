@@ -90,6 +90,17 @@
   // and the on-disk file is left untouched.
   var DOWNLOADS_PATH = APP_ROOT + 'configs/downloads.json';
   var RATINGS_PATH = APP_ROOT + 'configs/ratings.json';
+  // Newly-released runtime/shell/nx.js versions are downloaded into
+  // `versions.json` and compared against `current.json` (the immutable
+  // "I shipped with these versions" snapshot seeded from
+  // `romfs/configs/current.json`). Any field-by-field mismatch
+  // appends a "New Brewser Version available" line to the modal
+  // summary. `current.json` is NEVER overwritten by this flow —
+  // overwriting it would make the next check always read equal and
+  // never surface an upgrade. `versions.json` is downloaded on every
+  // Check-for-Updates press, so a stale copy can't hide a new release.
+  var VERSIONS_PATH = APP_ROOT + 'configs/versions.json';
+  var CURRENT_PATH = APP_ROOT + 'configs/current.json';
   // The three catalog groups walked when computing the diff. Mirror
   // `CATALOG_GROUPS` in src/profile/browser-toolbar.ts — keep in sync
   // if a new group is ever added on the engine side.
@@ -351,6 +362,98 @@
     }
   }
 
+  // Download `versions.json` from the configured URL, persist it under
+  // `<appRoot>configs/versions.json`, then compare it field-by-field
+  // against the seeded `<appRoot>configs/current.json` baseline.
+  // Returns `true` iff any field differs (the modal then appends the
+  // "New Brewser Version available" line). Best-effort throughout:
+  // every failure path logs + returns `false` so a versions-check miss
+  // can't cascade into a catalogue refresh failure. `current.json` is
+  // never written by this flow — overwriting it would make every
+  // future check read equal and silently hide new releases.
+  async function checkVersionsForUpdate(remoteUrl) {
+    if (!remoteUrl) {
+      console.debug('[updates-modal] versions URL not configured; skipping check');
+      return false;
+    }
+    var fetchedText;
+    try {
+      var resp = await globalThis.fetch(remoteUrl);
+      if (!resp.ok) {
+        console.debug('[updates-modal] versions HTTP ' + resp.status + ' for ' + remoteUrl);
+        return false;
+      }
+      fetchedText = await resp.text();
+    } catch (err) {
+      console.debug('[updates-modal] versions fetch failed: ' + (err && err.message ? err.message : String(err)));
+      return false;
+    }
+    var fetchedParsed;
+    try {
+      fetchedParsed = JSON.parse(fetchedText);
+      if (!fetchedParsed || typeof fetchedParsed !== 'object') {
+        console.debug('[updates-modal] versions JSON is not an object; refusing write');
+        return false;
+      }
+    } catch (err) {
+      console.debug('[updates-modal] versions is not valid JSON; refusing write: ' + (err && err.message ? err.message : String(err)));
+      return false;
+    }
+    try {
+      Switch.writeFileSync(VERSIONS_PATH, fetchedText);
+      console.debug('[updates-modal] versions.json refreshed (' + fetchedText.length + ' bytes)');
+    } catch (err) {
+      console.debug('[updates-modal] versions write failed: ' + (err && err.message ? err.message : String(err)));
+      // Comparison can still proceed against the in-memory parse even
+      // if the write failed — don't bail.
+    }
+    // Read the immutable seeded baseline. `Switch.readFileSync` returns
+    // null (not throw) on a missing file — see
+    // [[reference-brewser-switch-readfilesync-returns-null]]. Missing
+    // current.json on disk means we have no baseline to compare against
+    // (fresh install before the seedRomfs walker copied it across, or a
+    // user manually deleted it), so silently skip the "new version"
+    // signal — better than asserting an upgrade we can't verify.
+    var currentData = null;
+    try { currentData = Switch.readFileSync(CURRENT_PATH); }
+    catch (_) { currentData = null; }
+    if (!currentData) {
+      console.debug('[updates-modal] current.json missing on disk; skipping version diff');
+      return false;
+    }
+    var currentParsed;
+    try {
+      currentParsed = JSON.parse(new TextDecoder().decode(currentData));
+      if (!currentParsed || typeof currentParsed !== 'object') {
+        console.debug('[updates-modal] current.json is not an object; skipping version diff');
+        return false;
+      }
+    } catch (err) {
+      console.debug('[updates-modal] current.json parse failed: ' + (err && err.message ? err.message : String(err)));
+      return false;
+    }
+    // Strict string inequality on every key present in the fetched
+    // versions.json. A field-by-field test (not a semver compare) is
+    // the contract — "is this exactly the same set of bits I shipped
+    // with?". Keys present in `current` but missing from `fetched` are
+    // ignored (the server is authoritative for what's currently
+    // released; a dropped field means that component isn't tracked
+    // anymore). A new key in `fetched` (a component that didn't exist
+    // when this install shipped) counts as a mismatch — current's
+    // implicit value is "" which won't equal the fetched string.
+    for (var key in fetchedParsed) {
+      if (!Object.prototype.hasOwnProperty.call(fetchedParsed, key)) continue;
+      var fetchedVal = fetchedParsed[key];
+      var currentVal = Object.prototype.hasOwnProperty.call(currentParsed, key)
+        ? currentParsed[key] : '';
+      if (String(fetchedVal) !== String(currentVal)) {
+        console.debug('[updates-modal] version mismatch on "' + key + '": current=' + String(currentVal) + ' fetched=' + String(fetchedVal));
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Walk the fetched catalog and bucket each entry as missing (the
   // launcher file isn't on disk under `apps/<group>/<id>/<entry>`) or
   // updated (manifest.json's `version` differs from the catalog's
@@ -538,11 +641,19 @@
       // batch before flipping out of the loading state.
       var downloadsUrl = triggerBtn.getAttribute('data-downloads-url') || '';
       var ratingsUrl = triggerBtn.getAttribute('data-ratings-url') || '';
-      await Promise.all([
+      var versionsUrl = triggerBtn.getAttribute('data-versions-url') || '';
+      // Versions check runs alongside the other refreshes — independent
+      // remote (versions.json lives in the apps repo, not telemetry),
+      // independent failure mode. `Promise.all` is safe here only
+      // because every task swallows its own errors; if any of these
+      // ever start rejecting, switch to `Promise.allSettled`.
+      var results = await Promise.all([
         seedMissingLogos(buckets.missing, url),
         refreshConfigFile(downloadsUrl, DOWNLOADS_PATH, 'downloads.json'),
         refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json'),
+        checkVersionsForUpdate(versionsUrl),
       ]);
+      var newBrewserVersionAvailable = !!results[3];
       // Repaint upgrade chips on already-installed cards whose
       // manifest version trails the new catalog. Synchronous DOM
       // mutation — runs after the logo downloads so all card-side
@@ -564,7 +675,18 @@
       }
       populate(buckets);
       card.classList.remove('updates-modal-card--loading');
-      statusEl.innerHTML = 'Local Catalog is now synced!';
+      // Append a second line to the modal summary when the
+      // freshly-downloaded versions.json differs from the seeded
+      // current.json baseline. `<br>` keeps the original "Local Catalog
+      // is now synced!" intact + readable on its own line. The append
+      // is purely visual — no per-frame work since the fixed-position
+      // overlay is repainted from the cache (see
+      // [[reference-brewser-fixed-overlay-paint-cost]]).
+      var statusHtml = 'Local Catalog is now synced!';
+      if (newBrewserVersionAvailable) {
+        statusHtml += '<br>New Brewser Version available';
+      }
+      statusEl.innerHTML = statusHtml;
     } finally {
       fetchInFlight = false;
     }

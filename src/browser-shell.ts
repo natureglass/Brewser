@@ -40,7 +40,8 @@ import {
 import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
 import { setMediaColorScheme } from '@switch-web/runtime';
 import { isWebGLBackedCanvas } from '@switch-web/runtime';
-import { getInputChecked, getInputValue, openKeyboardAndApply, setInputValue, setKeyboardOpener, setLiveFormColorScheme } from '@switch-web/runtime';
+import { getInputChecked, getInputValue, openKeyboardAndApply, setColorPickerOpener, setDateInputDefaultPlaceholder, setDatePickerOpener, setFilePickerOpener, setFilePickerStartDirResolver, setInputValue, setKeyboardOpener, setLiveFormColorScheme, setNumberPickerOpener, setSelectModalOpener, setTimePickerOpener } from '@switch-web/runtime';
+import { ColorPickerOverlay, DatePickerOverlay, FilePickerOverlay, NumberPickerOverlay, setColorPickerRepaintDriver, setDatePickerRepaintDriver, setFilePickerRepaintDriver, setNumberPickerRepaintDriver, SelectModalOverlay, setSelectModalRepaintDriver, setTimePickerRepaintDriver, TimePickerOverlay } from '@switch-web/runtime';
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
@@ -58,7 +59,7 @@ import {
 } from '@switch-web/runtime';
 import {
 	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
-	overlayLiveAnimatedCanvases, paintKeyboardOverlay, paintLiveOverlay,
+	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
 	patchLiveDirtyRegions, resetLiveOverlayCache, resetToolbarOverlayCache,
@@ -70,19 +71,43 @@ import {
 	clearPageHasCanvas2dActivity,
 	closeTopmostModalModeDialog,
 	consumeFullRepaintRequest,
+	getColorPickerLiveRoot,
+	getDatePickerLiveRoot,
+	getFilePickerLiveRoot,
 	getModalModeDialogs,
 	getKeyboardLiveRoot,
 	getKeyboardTopY,
+	getNumberPickerLiveRoot,
+	getSelectModalLiveRoot,
+	getTimePickerLiveRoot,
 	getToolbarLiveRoot,
 	hasPageCanvas2dActivity,
+	isColorPickerOpen,
+	isColorPickerOverlayVisible,
+	isDatePickerOpen,
+	isDatePickerOverlayVisible,
+	isFilePickerOpen,
+	isFilePickerOverlayVisible,
 	isKeyboardOpen,
 	isKeyboardOverlayVisible,
+	isNumberPickerOpen,
+	isNumberPickerOverlayVisible,
+	isSelectModalOpen,
+	isSelectModalOverlayVisible,
+	isTimePickerOpen,
+	isTimePickerOverlayVisible,
 	isToolbarOverlayVisible,
 	popToolbarMutationScope,
 	pushToolbarMutationScope,
 	requestFullRepaint,
+	setColorPickerLiveRoot,
+	setDatePickerLiveRoot,
+	setFilePickerLiveRoot,
 	setKeyboardLiveRoot,
 	setKeyboardTopY,
+	setNumberPickerLiveRoot,
+	setSelectModalLiveRoot,
+	setTimePickerLiveRoot,
 	setToolbarLiveRoot,
 	setToolbarOverlayVisible,
 } from '@switch-web/runtime';
@@ -138,6 +163,7 @@ import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
 import { loadOptionalImage } from '@switch-web/runtime';
 import { LocalSchemeFetchLoader } from '@switch-web/runtime';
 import { SwitchUaFetchLoader } from '@switch-web/runtime';
+import { loadCursorRegistry } from '@switch-web/runtime';
 
 /**
  * Top-level orchestrator for the browser shell.
@@ -155,6 +181,12 @@ export class BrowserShell {
 	private readonly webView: WebView;
 	private readonly navigation: BrowserNavigation;
 	private readonly keyboard: KeyboardOverlay;
+	private readonly filePicker: FilePickerOverlay;
+	private readonly selectModal: SelectModalOverlay;
+	private readonly datePicker: DatePickerOverlay;
+	private readonly timePicker: TimePickerOverlay;
+	private readonly colorPicker: ColorPickerOverlay;
+	private readonly numberPicker: NumberPickerOverlay;
 	private readonly addressBar: AddressBarInput;
 
 	private currentScrollY = 0;
@@ -178,6 +210,29 @@ export class BrowserShell {
 	 * the cascade and the keyboard's `<style>` registrations along
 	 * with it). `null` until {@link loadHtmlKeyboard} runs. */
 	private keyboardParsedTree: HtmlElement | null = null;
+
+	/** Parsed HtmlElement tree for `romfs/shell/file-picker.html`, loaded
+	 * once at shell startup. Re-populated into a fresh
+	 * `LiveElement('div')` after every host navigation reset for the
+	 * same `<style>` cascade reasons as the keyboard. `null` until
+	 * {@link loadHtmlFilePicker} runs. */
+	private filePickerParsedTree: HtmlElement | null = null;
+
+	/** Parsed HtmlElement tree for `romfs/shell/select-modal.html`, loaded
+	 * once at shell startup. Same cascade-reset reasoning as the file
+	 * picker above. `null` until {@link loadHtmlSelectModal} runs. */
+	private selectModalParsedTree: HtmlElement | null = null;
+
+	/** Parsed HtmlElement tree for `romfs/shell/date-picker.html`. */
+	private datePickerParsedTree: HtmlElement | null = null;
+
+	/** Parsed HtmlElement tree for `romfs/shell/time-picker.html`. */
+	private timePickerParsedTree: HtmlElement | null = null;
+
+	/** Parsed HtmlElement tree for `romfs/shell/color-picker.html`. */
+	private colorPickerParsedTree: HtmlElement | null = null;
+	/** Parsed HtmlElement tree for `romfs/shell/number-picker.html`. */
+	private numberPickerParsedTree: HtmlElement | null = null;
 
 	/** Parsed HtmlElement tree for the active toolbar HTML
 	 * (e.g. `themes/toolbars/light.html`). Loaded once at shell
@@ -303,6 +358,15 @@ export class BrowserShell {
 	 * unaffected — only external pages without an explicit `<body>` bg
 	 * are influenced. */
 	private colorScheme: 'light' | 'dark' = 'light';
+	/** Momentum-scroll on/off. Mirrors `config.momentumScrolling`; live-
+	 * updated by `saveSettings`. When false, `handleScroll` skips velocity
+	 * capture and `tickMomentum` short-circuits (one bool compare per tick). */
+	private momentumEnabled: boolean = DEFAULT_CONFIG.momentumScrolling;
+	/** Current scroll velocity in px-per-active-poll-tick (signed: positive
+	 * = downward content travel, matches `handleScroll`'s delta sign). Set
+	 * by `handleScroll` from user input, decayed each non-input tick by
+	 * `tickMomentum`. Zero = no coast in flight. */
+	private momentumVelocityPxPerTick: number = 0;
 	/** Reference to the registered UA-injecting fetch loader, kept so
 	 * `setColorScheme` can update the outgoing Client-Hint header
 	 * without rebuilding the loader. Null when network is disabled. */
@@ -372,6 +436,7 @@ export class BrowserShell {
 		setClickSoundEnabled(startupConfig.clickSounds);
 		setClickSoundPath(this.profile.assetPath('click.wav'));
 		void preloadClickSound();
+		this.momentumEnabled = startupConfig.momentumScrolling;
 		this.colorScheme = startupConfig.theme;
 		// Push the colour-scheme preference into the CSS cascade up front so
 		// the first stylesheet parse evaluates `@media (prefers-color-scheme:
@@ -380,6 +445,10 @@ export class BrowserShell {
 		// explicit `background`/`color` on its inputs / buttons.
 		setMediaColorScheme(this.colorScheme);
 		setLiveFormColorScheme(this.colorScheme);
+		// Date-input placeholder hint from `config.json local` (e.g.
+		// `dd/mm/yyyy`). Time-input default is locale-agnostic and stays
+		// at the engine default `-- : --`.
+		setDateInputDefaultPlaceholder(startupConfig.local);
 		this.historyStore = new HistoryStore({
 			path: this.profile.historyPath(),
 			maxEntries: startupConfig.maxHistory,
@@ -414,6 +483,7 @@ export class BrowserShell {
 				// could land on the new page still flagged as fullscreen-
 				// canvas while no canvas exists to paint.
 				this.currentScrollY = 0;
+				this.momentumVelocityPxPerTick = 0;
 				this.fullscreenCanvasOriginalSize = null;
 				this.fullscreenCanvasLive = false;
 				(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
@@ -524,6 +594,12 @@ export class BrowserShell {
 		);
 		this.navigation = new BrowserNavigation(this.webView, this.historyStore);
 		this.keyboard = new KeyboardOverlay();
+		this.filePicker = new FilePickerOverlay();
+		this.selectModal = new SelectModalOverlay();
+		this.datePicker = new DatePickerOverlay();
+		this.timePicker = new TimePickerOverlay();
+		this.colorPicker = new ColorPickerOverlay();
+		this.numberPicker = new NumberPickerOverlay();
 		this.addressBar = new AddressBarInput();
 		// M2.4: expose the keyboard opener to the live-DOM form widgets
 		// so `<input type=text>` taps can spawn the same on-canvas
@@ -536,6 +612,32 @@ export class BrowserShell {
 			onScroll: (delta) => this.handleScroll(delta),
 			validate: options?.validate,
 		}));
+		// 2026-06-17 file picker overlay — opener + start-dir resolver.
+		// The opener wraps `FilePickerOverlay.open` so live-form stays
+		// scheme-agnostic. The start-dir resolver maps the current page
+		// URL onto an sdmc path: when the active page is a `brewser://apps/
+		// <group>/<id>/...` URL, the picker starts in
+		// `<appRoot>apps/<group>/<id>/`; non-app brewser:// pages start
+		// in the storage root; external HTTPS pages start at sdmc root.
+		setFilePickerOpener((options) => this.filePicker.open(options));
+		setFilePickerStartDirResolver(() => this.resolveFilePickerStartDir());
+		// 2026-06-18 select modal — opener wires `<select>` taps to the
+		// fullscreen-ish modal dropdown that replaced the cycle-on-tap
+		// stand-in.
+		setSelectModalOpener((options) => this.selectModal.open(options));
+		// 2026-06-18 date + time pickers — openers wire `<input type="date">`
+		// and `<input type="time">` taps to the calendar / hour+minute
+		// overlays.
+		setDatePickerOpener((options) => this.datePicker.open(options));
+		setTimePickerOpener((options) => this.timePicker.open(options));
+		// 2026-06-18 color picker — opener wires `<input type="color">` taps
+		// to the spectrum + RGBA-sliders overlay (replaces the cycle-palette
+		// stand-in).
+		setColorPickerOpener((options) => this.colorPicker.open(options));
+		// 2026-06-18 number picker — opener wires `<input type="number">` taps
+		// to the ± stepper / direct-edit overlay (replaces the keyboard
+		// fall-through).
+		setNumberPickerOpener((options) => this.numberPicker.open(options));
 		// Wire `<input>.focus()` calls from page scripts (Cocos Creator's
 		// EditBox does `document.createElement('input')` + appendChild +
 		// focus()) into the same KeyboardOverlay path that live-DOM form
@@ -679,6 +781,27 @@ export class BrowserShell {
 		// main shell loop is suspended on its promise. Single-arg
 		// arrow keeps `this` bound to the shell.
 		setKeyboardRepaintDriver(() => this.repaintContent());
+		// 2026-06-17 file picker overlay — same shape as the kb above.
+		// Parsed once, painted on top of everything while
+		// `<input type="file">` taps are in flight.
+		await this.loadHtmlFilePicker();
+		setFilePickerRepaintDriver(() => this.repaintContent());
+		// 2026-06-18 select modal — same shape as the file picker. Parsed
+		// once, painted on top of everything while a `<select>` tap session
+		// is in flight.
+		await this.loadHtmlSelectModal();
+		setSelectModalRepaintDriver(() => this.repaintContent());
+		// 2026-06-18 date + time pickers — same shape.
+		await this.loadHtmlDatePicker();
+		setDatePickerRepaintDriver(() => this.repaintContent());
+		await this.loadHtmlTimePicker();
+		setTimePickerRepaintDriver(() => this.repaintContent());
+		// 2026-06-18 color picker — same shape.
+		await this.loadHtmlColorPicker();
+		setColorPickerRepaintDriver(() => this.repaintContent());
+		// 2026-06-18 number picker — same shape.
+		await this.loadHtmlNumberPicker();
+		setNumberPickerRepaintDriver(() => this.repaintContent());
 		// Apply shell-level preferences from config.json. Done before
 		// scanForAutoplayVideos runs (it reads videoTryHwAccel via
 		// openDecoder) and before the toolbar live root is built so the
@@ -716,6 +839,15 @@ export class BrowserShell {
 		// the first paint may run without it and the image decode kicks
 		// off a repaint via `requestFullRepaint` once it lands.
 		void this.loadStyleBackground(this.resolveBootStyleBackground(shellConfig));
+		// Pre-decode the system cursor sprites + animated APNG frames from
+		// `themes/cursors.json` so `<body>`'s computed `cursor:` value can
+		// swap the on-screen cursor through the page-mouse-forwarder. Fire-
+		// and-forget — until the registry lands the cursor falls back to
+		// the coded default arrow.
+		void loadCursorRegistry(
+			this.profile.stylePath('themes/cursors.json'),
+			(rel) => this.profile.stylePath(rel),
+		);
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
 		// restricted memory that the live-DOM content cache's
@@ -880,6 +1012,17 @@ export class BrowserShell {
 						}
 						if (info.scrolledThisTick) {
 							return false; // build-continuation deferred to next idle tick
+						}
+						// Momentum-scroll coast: user input stopped this tick but
+						// `handleScroll` left residual velocity behind. Decay one
+						// step, apply, and report active so the loop polls at
+						// the scroll cadence rather than the idle cadence — the
+						// content keeps moving until friction zeros velocity or
+						// it hits a scroll boundary. Short-circuits cheaply when
+						// momentum is off or velocity is zero (one bool compare
+						// + one float compare in `tickMomentum`).
+						if (this.tickMomentum()) {
+							return true;
 						}
 						// Idle tick. Drive an in-progress live-DOM content build
 						// straight from here instead of trusting the chunked
@@ -1189,11 +1332,55 @@ export class BrowserShell {
 	}
 
 	private handleScroll(delta: number): void {
+		// User-input scroll sink: apply first, then track velocity for
+		// the momentum coast only when the scroll actually moved (a
+		// boundary-clamped no-op or mode-gated drop must NOT leave
+		// velocity behind to re-emerge later). Multiple touchmove
+		// events per tick stream through this — the IIR smoother
+		// (alpha = 0.5) keeps the velocity from spiking on the last
+		// micro-move before finger release while still tracking a real
+		// flick within 2–3 samples.
+		const applied = this.applyScrollDelta(delta);
+		if (applied && this.momentumEnabled) {
+			this.momentumVelocityPxPerTick =
+				0.5 * this.momentumVelocityPxPerTick + 0.5 * delta;
+		}
+	}
+
+	/**
+	 * Apply a scroll delta to `currentScrollY` + repaint. Returns true
+	 * iff the position actually changed (false = mode-gated or already
+	 * at boundary). Callers: user input via `handleScroll`, and
+	 * momentum-decay via `tickMomentum` (which bypasses velocity capture
+	 * so the decayed step doesn't re-baseline velocity).
+	 */
+	private applyScrollDelta(delta: number): boolean {
 		// Scrolling is meaningless in fullscreen-canvas (no layout flow)
 		// and in video-fullscreen (the page underneath isn't visible —
 		// scrolling its hidden position would surprise the user on exit).
-		if (this.mode === 'fullscreen-canvas') return;
-		if (this.mode === 'video-fullscreen') return;
+		if (this.mode === 'fullscreen-canvas') return false;
+		if (this.mode === 'video-fullscreen') return false;
+		// 2026-06-17 file picker overlay: the picker is fullscreen
+		// modal — scrolling the host page underneath while it's up
+		// would visibly slide content behind the picker. The picker
+		// owns its own internal scroll for `#fp-list` via the right-
+		// stick / touch-swipe paths; the shell's d-pad / right-stick
+		// shell-loop scroll routes (which call handleScroll → here)
+		// would otherwise leak through because the shell-side input
+		// loop keeps polling while the picker's open() promise is in
+		// flight.
+		if (isFilePickerOpen()) return false;
+		// 2026-06-18 select modal — same shape as the file picker gate.
+		// Modal owns its own internal scroll for `#sm-list`; shell-loop
+		// scroll routes shouldn't leak through and slide the page behind it.
+		if (isSelectModalOpen()) return false;
+		// 2026-06-18 date + time pickers — same shape.
+		if (isDatePickerOpen()) return false;
+		if (isTimePickerOpen()) return false;
+		// 2026-06-18 color picker — same shape.
+		if (isColorPickerOpen()) return false;
+		// 2026-06-18 number picker — same shape.
+		if (isNumberPickerOpen()) return false;
 		// 2026-06-15: while any `<dialog>.showModal()`-opened dialog is
 		// visible (still has the `open` attribute), scrolling the host
 		// page is a spec violation — the modal-blocking semantics make
@@ -1201,10 +1388,10 @@ export class BrowserShell {
 		// `show()` (non-modal) dialogs aren't tagged → don't enter this
 		// branch. Cheap check; iterates a usually-empty Set.
 		for (const d of getModalModeDialogs()) {
-			if (d.getAttribute('open') !== null) return;
+			if (d.getAttribute('open') !== null) return false;
 		}
 		const next = Math.max(0, Math.min(this.maxScroll(), this.currentScrollY + delta));
-		if (next === this.currentScrollY) return;
+		if (next === this.currentScrollY) return false;
 		const t0 = performance.now();
 		this.currentScrollY = next;
 		// HTML keyboard is up: route through the clipped-to-above-topY
@@ -1223,6 +1410,36 @@ export class BrowserShell {
 		// scroll smoothness numbers.
 		scrollStats.presentCallCount = this.cpuPresentCallCount;
 		recordScrollSample(t0, performance.now() - t0, this.lastCpuPresentMs);
+		return true;
+	}
+
+	/**
+	 * Momentum decay step. Called from `onTick` when the user didn't
+	 * scroll this iteration. Returns true iff there's still residual
+	 * velocity worth ticking (caller uses the bool to keep the input
+	 * loop on the active-poll cadence). Exponential per-tick decay
+	 * (0.93 → ~480 ms to die at the active-poll rate). A boundary hit
+	 * (`applyScrollDelta` returns false because we're already at scroll
+	 * 0 or `maxScroll`) zeros velocity so we don't burn ticks pushing
+	 * against the clamp.
+	 */
+	private tickMomentum(): boolean {
+		if (!this.momentumEnabled) return false;
+		if (this.momentumVelocityPxPerTick === 0) return false;
+		const decayed = this.momentumVelocityPxPerTick * 0.93;
+		if (Math.abs(decayed) < 0.5) {
+			this.momentumVelocityPxPerTick = 0;
+			return false;
+		}
+		this.momentumVelocityPxPerTick = decayed;
+		const step = Math.round(decayed);
+		// Sub-pixel velocity: keep decaying without spending a paint.
+		if (step === 0) return true;
+		if (!this.applyScrollDelta(step)) {
+			this.momentumVelocityPxPerTick = 0;
+			return false;
+		}
+		return true;
 	}
 
 	/**
@@ -1269,6 +1486,23 @@ export class BrowserShell {
 		return extractAppDirFromUrl(url);
 	}
 
+	/** Pick the file picker's start directory based on the active page
+	 * URL (per Q2: "the location of the app that initiates this picker").
+	 *
+	 *   - `brewser://apps/<group>/<id>/...` → `<appRoot>apps/<group>/<id>/`
+	 *     i.e. the on-disk dir the app was loaded from.
+	 *   - any other `brewser://...` page → `<storageRoot>` (the shell
+	 *     pages' parent dir).
+	 *   - external https://... → `<appRoot>` (sane sdmc-side default
+	 *     since we have no on-disk equivalent for an external page). */
+	private resolveFilePickerStartDir(): string {
+		const url = this.session.currentPageUrl;
+		const appDir = extractAppDirFromUrl(url);
+		if (appDir) return `${this.profile.appRoot}${appDir}`;
+		if (/^brewser:\/\//i.test(url)) return this.profile.storageRoot;
+		return this.profile.appRoot;
+	}
+
 	private loadAppManifestButtonMapping(appDir: string): Record<string, unknown> | null {
 		return loadAppManifestButtonMapping(appDir, this.profile.appRoot);
 	}
@@ -1306,6 +1540,12 @@ export class BrowserShell {
 		// broken icons while the new Image objects re-decode — see
 		// `pendingToolbarImgPrewarm` for the mechanism.
 		this.rebuildKeyboardLiveRoot();
+		this.rebuildFilePickerLiveRoot();
+		this.rebuildSelectModalLiveRoot();
+		this.rebuildDatePickerLiveRoot();
+		this.rebuildTimePickerLiveRoot();
+		this.rebuildColorPickerLiveRoot();
+		this.rebuildNumberPickerLiveRoot();
 		this.rebuildToolbarLiveRoot();
 		// App-context tracking: if this page is under `brewser://apps/<group>/<id>/...`,
 		// pick up the app's `manifest.json buttonMapping` as a button-router
@@ -1352,6 +1592,7 @@ export class BrowserShell {
 		this.fullscreenCanvasOriginalSize = null;
 		this.fullscreenCanvasLive = false;
 		this.currentScrollY = 0;
+		this.momentumVelocityPxPerTick = 0;
 
 		// Drain a fullscreen request queued by a top-level script body
 		// (e.g. apps/com.natureglass.webgl1demo/index.html that calls
@@ -1613,6 +1854,23 @@ export class BrowserShell {
 		// the panel owns the area below. See `paintKeyboardOverlay` JSDoc
 		// for cache + vh/vw scoping notes.
 		this.paintHtmlKeyboardIfVisible(ctx, canvas.width, canvas.height);
+		// HTML-driven file picker — painted ON TOP of everything (host
+		// page, modal layer, toolbar, kb) because it's a fullscreen
+		// system modal. While it's up the kb shouldn't be (the picker's
+		// poll loop owns the gamepad), but the paint order would be
+		// well-defined either way.
+		this.paintHtmlFilePickerIfVisible(ctx, canvas.width, canvas.height);
+		// HTML-driven select modal — same paint slot semantics as the
+		// file picker. Mutually exclusive with the picker at the input-
+		// router level, but the paint order is well-defined either way.
+		this.paintHtmlSelectModalIfVisible(ctx, canvas.width, canvas.height);
+		// 2026-06-18 date + time pickers — same paint slot semantics.
+		this.paintHtmlDatePickerIfVisible(ctx, canvas.width, canvas.height);
+		this.paintHtmlTimePickerIfVisible(ctx, canvas.width, canvas.height);
+		// 2026-06-18 color picker — same paint slot semantics.
+		this.paintHtmlColorPickerIfVisible(ctx, canvas.width, canvas.height);
+		// 2026-06-18 number picker — same paint slot semantics.
+		this.paintHtmlNumberPickerIfVisible(ctx, canvas.width, canvas.height);
 		setLiveViewport(viewport, effectiveScrollY);
 		this.lastCpuPresentMs = performance.now() - t0;
 		this.cpuPresentCallCount++;
@@ -1637,6 +1895,119 @@ export class BrowserShell {
 			y: topY,
 			width: canvasW,
 			height: Math.max(0, canvasH - topY),
+		});
+	}
+
+	/** Paint the HTML file picker root fullscreen when
+	 * `isFilePickerOverlayVisible()` is true and the root is populated.
+	 * Defensively no-op if either is false. Mirrors
+	 * {@link paintHtmlKeyboardIfVisible} but uses the full canvas
+	 * viewport since the picker is a system-modal overlay. */
+	private paintHtmlFilePickerIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isFilePickerOverlayVisible()) return;
+		const root = getFilePickerLiveRoot();
+		if (!root) return;
+		paintFilePickerOverlay(ctx, root, {
+			x: 0,
+			y: 0,
+			width: canvasW,
+			height: canvasH,
+		});
+	}
+
+	/** Paint the HTML select modal root fullscreen when
+	 * `isSelectModalOverlayVisible()` is true and the root is populated.
+	 * Mirrors {@link paintHtmlFilePickerIfVisible}. */
+	private paintHtmlSelectModalIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isSelectModalOverlayVisible()) return;
+		const root = getSelectModalLiveRoot();
+		if (!root) return;
+		paintSelectModalOverlay(ctx, root, {
+			x: 0,
+			y: 0,
+			width: canvasW,
+			height: canvasH,
+		});
+	}
+
+	/** Paint the HTML date picker root fullscreen when
+	 * `isDatePickerOverlayVisible()` is true and the root is populated.
+	 * Mirrors {@link paintHtmlSelectModalIfVisible}. */
+	private paintHtmlDatePickerIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isDatePickerOverlayVisible()) return;
+		const root = getDatePickerLiveRoot();
+		if (!root) return;
+		paintDatePickerOverlay(ctx, root, {
+			x: 0,
+			y: 0,
+			width: canvasW,
+			height: canvasH,
+		});
+	}
+
+	/** Paint the HTML time picker root fullscreen when
+	 * `isTimePickerOverlayVisible()` is true and the root is populated. */
+	private paintHtmlTimePickerIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isTimePickerOverlayVisible()) return;
+		const root = getTimePickerLiveRoot();
+		if (!root) return;
+		paintTimePickerOverlay(ctx, root, {
+			x: 0,
+			y: 0,
+			width: canvasW,
+			height: canvasH,
+		});
+	}
+
+	/** Paint the HTML color picker root fullscreen when
+	 * `isColorPickerOverlayVisible()` is true and the root is populated. */
+	private paintHtmlColorPickerIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isColorPickerOverlayVisible()) return;
+		const root = getColorPickerLiveRoot();
+		if (!root) return;
+		paintColorPickerOverlay(ctx, root, {
+			x: 0,
+			y: 0,
+			width: canvasW,
+			height: canvasH,
+		});
+	}
+
+	/** Paint the HTML number picker root fullscreen when
+	 * `isNumberPickerOverlayVisible()` is true and the root is populated. */
+	private paintHtmlNumberPickerIfVisible(
+		ctx: CanvasRenderingContext2D,
+		canvasW: number,
+		canvasH: number,
+	): void {
+		if (!isNumberPickerOverlayVisible()) return;
+		const root = getNumberPickerLiveRoot();
+		if (!root) return;
+		paintNumberPickerOverlay(ctx, root, {
+			x: 0,
+			y: 0,
+			width: canvasW,
+			height: canvasH,
 		});
 	}
 
@@ -2137,6 +2508,29 @@ export class BrowserShell {
 				staged.toolbarHeight = entry.height;
 			}
 		}
+		// Permission-warning severities. The Settings page exposes one
+		// checkbox per severity (`warningLow` / `warningMedium` /
+		// `warningHigh`) because `readStagedSettings` is per-widget and
+		// a single array-valued widget would need bespoke handling. Read
+		// any of the three that landed in `staged`, fill in the others
+		// from `prior.warnings` so a partial stage doesn't clobber
+		// unchanged severities, then compose the canonical-order array
+		// and drop the three intermediate keys so they don't bake into
+		// config.json. Same shape as the `brewserStyle → styleBackground`
+		// cache injection above.
+		if ('warningLow' in staged || 'warningMedium' in staged || 'warningHigh' in staged) {
+			const pick = (key: 'warningLow' | 'warningMedium' | 'warningHigh', risk: 'low' | 'medium' | 'high'): boolean => (
+				key in staged ? !!staged[key] : prior.warnings.includes(risk)
+			);
+			const next: ('low' | 'medium' | 'high')[] = [];
+			if (pick('warningLow', 'low')) next.push('low');
+			if (pick('warningMedium', 'medium')) next.push('medium');
+			if (pick('warningHigh', 'high')) next.push('high');
+			staged.warnings = next;
+			delete staged.warningLow;
+			delete staged.warningMedium;
+			delete staged.warningHigh;
+		}
 
 		// Spread the on-disk raw object so user-edited unknown keys
 		// survive — same shape `selectToolbar` uses.
@@ -2184,6 +2578,16 @@ export class BrowserShell {
 		}
 		if ('clickSounds' in staged) {
 			setClickSoundEnabled(fresh.clickSounds);
+		}
+		if ('local' in staged) {
+			setDateInputDefaultPlaceholder(fresh.local);
+		}
+		if ('momentumScrolling' in staged) {
+			this.momentumEnabled = fresh.momentumScrolling;
+			// Zero out any in-flight velocity when the user turns the feature
+			// off mid-coast, so the page stops dead instead of finishing the
+			// decay cycle.
+			if (!this.momentumEnabled) this.momentumVelocityPxPerTick = 0;
 		}
 		if ('videoNVTEGRA' in staged) {
 			setVideoTryHwAccel(fresh.videoNVTEGRA);
@@ -2331,6 +2735,157 @@ export class BrowserShell {
 		kbRoot.attached = true;
 		populateRootFromTree(kbRoot, this.keyboardParsedTree, '__brewser-kb-root');
 		setKeyboardLiveRoot(kbRoot);
+	}
+
+	/** Read + parse `romfs/shell/file-picker.html` (mirrors
+	 * {@link loadHtmlKeyboard}). Picker chrome is fixed (no per-style
+	 * variants) so the path is hard-coded against the storage root. */
+	private async loadHtmlFilePicker(): Promise<void> {
+		const path = `${this.profile.storageRoot}file-picker.html`;
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.filePickerParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load file picker failed: ${error}`);
+			return;
+		}
+		this.rebuildFilePickerLiveRoot();
+	}
+
+	/** (Re)build the file picker live root from the cached parsed tree.
+	 * Called once after the initial parse and again from
+	 * `handleHtmlResponseLive` after every navigation `resetLiveRoot`
+	 * (same reset reasoning as {@link rebuildKeyboardLiveRoot}). */
+	private rebuildFilePickerLiveRoot(): void {
+		if (!this.filePickerParsedTree) return;
+		const root = new LiveElement('div');
+		root.attached = true;
+		populateRootFromTree(root, this.filePickerParsedTree, '__brewser-file-picker-root');
+		setFilePickerLiveRoot(root);
+	}
+
+	/** Read + parse `romfs/shell/select-modal.html` (mirrors
+	 * {@link loadHtmlFilePicker}). Chrome is fixed (no per-style variants)
+	 * so the path is hard-coded against the storage root. */
+	private async loadHtmlSelectModal(): Promise<void> {
+		const path = `${this.profile.storageRoot}select-modal.html`;
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.selectModalParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load select modal failed: ${error}`);
+			return;
+		}
+		this.rebuildSelectModalLiveRoot();
+	}
+
+	/** (Re)build the select modal live root from the cached parsed tree.
+	 * Called once after the initial parse and again from
+	 * `handleHtmlResponseLive` after every navigation `resetLiveRoot`
+	 * (same reset reasoning as {@link rebuildFilePickerLiveRoot}). */
+	private rebuildSelectModalLiveRoot(): void {
+		if (!this.selectModalParsedTree) return;
+		const root = new LiveElement('div');
+		root.attached = true;
+		populateRootFromTree(root, this.selectModalParsedTree, '__brewser-select-modal-root');
+		setSelectModalLiveRoot(root);
+	}
+
+	/** Read + parse `romfs/shell/date-picker.html` (mirrors
+	 * {@link loadHtmlFilePicker}). */
+	private async loadHtmlDatePicker(): Promise<void> {
+		const path = `${this.profile.storageRoot}date-picker.html`;
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.datePickerParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load date picker failed: ${error}`);
+			return;
+		}
+		this.rebuildDatePickerLiveRoot();
+	}
+
+	private rebuildDatePickerLiveRoot(): void {
+		if (!this.datePickerParsedTree) return;
+		const root = new LiveElement('div');
+		root.attached = true;
+		populateRootFromTree(root, this.datePickerParsedTree, '__brewser-date-picker-root');
+		setDatePickerLiveRoot(root);
+	}
+
+	/** Read + parse `romfs/shell/time-picker.html`. */
+	private async loadHtmlTimePicker(): Promise<void> {
+		const path = `${this.profile.storageRoot}time-picker.html`;
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.timePickerParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load time picker failed: ${error}`);
+			return;
+		}
+		this.rebuildTimePickerLiveRoot();
+	}
+
+	private rebuildTimePickerLiveRoot(): void {
+		if (!this.timePickerParsedTree) return;
+		const root = new LiveElement('div');
+		root.attached = true;
+		populateRootFromTree(root, this.timePickerParsedTree, '__brewser-time-picker-root');
+		setTimePickerLiveRoot(root);
+	}
+
+	/** Read + parse `romfs/shell/color-picker.html`. */
+	private async loadHtmlColorPicker(): Promise<void> {
+		const path = `${this.profile.storageRoot}color-picker.html`;
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.colorPickerParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load color picker failed: ${error}`);
+			return;
+		}
+		this.rebuildColorPickerLiveRoot();
+	}
+
+	private rebuildColorPickerLiveRoot(): void {
+		if (!this.colorPickerParsedTree) return;
+		const root = new LiveElement('div');
+		root.attached = true;
+		populateRootFromTree(root, this.colorPickerParsedTree, '__brewser-color-picker-root');
+		setColorPickerLiveRoot(root);
+	}
+
+	/** Read + parse `romfs/shell/number-picker.html`. */
+	private async loadHtmlNumberPicker(): Promise<void> {
+		const path = `${this.profile.storageRoot}number-picker.html`;
+		try {
+			const raw = Switch.readFileSync(path);
+			if (!raw) return;
+			const html = new TextDecoder().decode(raw);
+			this.numberPickerParsedTree = parseHtml(html);
+		} catch (error) {
+			console.debug(`[brewser] load number picker failed: ${error}`);
+			return;
+		}
+		this.rebuildNumberPickerLiveRoot();
+	}
+
+	private rebuildNumberPickerLiveRoot(): void {
+		if (!this.numberPickerParsedTree) return;
+		const root = new LiveElement('div');
+		root.attached = true;
+		populateRootFromTree(root, this.numberPickerParsedTree, '__brewser-number-picker-root');
+		setNumberPickerLiveRoot(root);
 	}
 
 	/** Read + parse the active toolbar HTML (per `config.json`'s

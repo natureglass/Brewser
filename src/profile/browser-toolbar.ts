@@ -163,6 +163,11 @@ export interface BrowserConfig {
 	 * does not act on it today — flipping it from the Settings page is a
 	 * no-op until a consumer is wired up. */
 	autoRotate: boolean;
+	/** When true, scroll input (right-stick, D-pad, swipe) leaves
+	 * residual velocity behind on release; the shell tick decays it
+	 * with friction so the content coasts to a stop instead of stopping
+	 * dead. Off makes every scroll input a pure 1:1 delta. */
+	momentumScrolling: boolean;
 	/** Enable navigation-flow diagnostic logging to
 	 * `sdmc:/switch/brewser/logs/shell-nav-diag.log`. Off by default;
 	 * flip on when investigating a hung navigation, a click that didn't
@@ -277,6 +282,21 @@ export interface BrowserConfig {
 	 * `<browser-home-apps>` / `<browser-home-title>` custom tag
 	 * expansions at home.html render time. */
 	homeSection: CatalogGroup;
+	/** Date-format hint used as the placeholder for empty
+	 * `<input type="date">` fields that don't carry an explicit
+	 * `placeholder` attribute. Free-form string — typically `dd/mm/yyyy`
+	 * (Europe), `mm/dd/yyyy` (US), or `yyyy-mm-dd` (ISO). Surfaced to the
+	 * runtime via `setDateInputDefaultPlaceholder`. */
+	local: string;
+	/** Which severities of permission warning should appear when an app
+	 * launches. Subset of `['low','medium','high']`; warnings-modal.js
+	 * filters the rendered list against this set. Empty array suppresses
+	 * the modal entirely (catalog → launch is silent). Default is the
+	 * full set — show everything until the user opts out. The Settings
+	 * page exposes three checkboxes (`warningLow` / `warningMedium` /
+	 * `warningHigh`) that compose into this array on save (see
+	 * `BrowserShell.saveSettings`). */
+	warnings: ('low' | 'medium' | 'high')[];
 	/** Remote URL the apps.html "Check for Updates" button fetches when
 	 * the user wants to refresh their on-disk `catalogue.json`. The fetched
 	 * bytes are written verbatim to `<appRoot>catalogue.json` after a 2xx
@@ -384,6 +404,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	clickSounds: true,
 	mouseIdleMs: 3000,
 	autoRotate: true,
+	momentumScrolling: true,
 	navDebug: false,
 	swbImgDebug: false,
 	showSplash: true,
@@ -396,6 +417,8 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	styleBackground: '',
 	toolbarPosition: 'top',
 	homeSection: 'featured',
+	local: 'dd/mm/yyyy',
+	warnings: ['low', 'medium', 'high'],
 	// Strict-pinned + override-allowed fields all pull their default
 	// from the runtime bundle (@switch-web/runtime). The strict-pinned
 	// URLs are also returned unconditionally by `loadConfig` (the user
@@ -481,6 +504,9 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			autoRotate: typeof parsed?.autoRotate === 'boolean'
 				? parsed.autoRotate
 				: DEFAULT_CONFIG.autoRotate,
+			momentumScrolling: typeof parsed?.momentumScrolling === 'boolean'
+				? parsed.momentumScrolling
+				: DEFAULT_CONFIG.momentumScrolling,
 			navDebug: typeof parsed?.navDebug === 'boolean'
 				? parsed.navDebug
 				: DEFAULT_CONFIG.navDebug,
@@ -532,6 +558,24 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				|| parsed?.homeSection === 'experimental'
 				? parsed.homeSection
 				: DEFAULT_CONFIG.homeSection,
+			local: typeof parsed?.local === 'string' && parsed.local.length > 0
+				? parsed.local
+				: DEFAULT_CONFIG.local,
+			// Permission-warning severity gate. Accept any array; filter
+			// to the three valid risk strings, dedupe (preserve canonical
+			// low/medium/high order), and fall back to the default when
+			// the on-disk value is missing, non-array, or filters down to
+			// nothing useful. An array that filters to `[]` is preserved
+			// — the user explicitly opted out of every severity.
+			warnings: Array.isArray(parsed?.warnings)
+				? (() => {
+					const valid = new Set<'low' | 'medium' | 'high'>();
+					for (const v of parsed.warnings) {
+						if (v === 'low' || v === 'medium' || v === 'high') valid.add(v);
+					}
+					return (['low', 'medium', 'high'] as const).filter((r) => valid.has(r));
+				})()
+				: DEFAULT_CONFIG.warnings,
 			// Strict-pinned: runtime value is authoritative. The user's
 			// on-disk `config.json` may still carry these keys from an
 			// older seeded copy (or hand edits), but we deliberately

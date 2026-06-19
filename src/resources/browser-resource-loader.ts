@@ -1,5 +1,6 @@
 import {
 	notFoundResponse,
+	RUNTIME_CONFIG_DEFAULTS,
 	type ResourceLoader,
 	type ResourceRequest,
 } from '@switch-web/runtime';
@@ -381,6 +382,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-ratings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-ratings\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).ratings),
 		);
+		// `<browser-config-versions>` — expands to the bundled-runtime
+		// `versions` URL. Stamped onto the apps.html Check-for-Updates
+		// button as `data-versions-url` so updates-modal.js can download
+		// `versions.json` alongside the catalogue, persist it under
+		// `<appRoot>configs/versions.json`, and compare it field-by-field
+		// against the seeded `<appRoot>configs/current.json` baseline.
+		// Read directly from `RUNTIME_CONFIG_DEFAULTS` rather than via
+		// `loadConfig` — versions is the one strict-pinned URL that
+		// isn't surfaced through `BrowserConfig` since nothing on the
+		// engine side consumes it (the page-script is the only reader),
+		// so threading it through the config interface would be dead
+		// indirection.
+		out = out.replace(
+			/<browser-config-versions(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-versions\s*>)?/gi,
+			() => htmlEscape(RUNTIME_CONFIG_DEFAULTS.versions),
+		);
 		// `<browser-config-telemetry>` — expands to the strict-pinned
 		// `config.telemetry` URL (runtime-bundled per
 		// `@switch-web/runtime` `RUNTIME_CONFIG_DEFAULTS`). Stamped onto
@@ -391,6 +408,20 @@ export class BrowserResourceLoader implements ResourceLoader {
 		out = out.replace(
 			/<browser-config-telemetry(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-telemetry\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).telemetry),
+		);
+		// `<browser-config-warnings>` — expands to the active
+		// `config.warnings` array joined as a comma-separated string
+		// (e.g. `"low,medium,high"` or `"medium,high"` or empty when the
+		// user disabled every severity). Stamped onto
+		// `<body data-warnings>` of apps.html / home.html so
+		// warnings-modal.js reads the user's severity gate synchronously
+		// at script load — same DOM-attribute pattern the telemetry URL
+		// and OAuth client IDs use. Synchronous read removes the
+		// fetch-vs-tap race the prior `globalThis.fetch('configs/config.json')`
+		// path was exposed to.
+		out = out.replace(
+			/<browser-config-warnings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-warnings\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).warnings.join(',')),
 		);
 		// `<browser-config-<provider>-client-id>` family — expands to
 		// the matching `config.json` `<provider>OAuthClientId` value,
@@ -652,6 +683,39 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</div>'
 		);
 
+		// Date-format placeholder for `<input type="date">` empty fields.
+		// Round-trips as the `local` config key; pushed into the runtime
+		// via `setDateInputDefaultPlaceholder` at boot + on save.
+		const dateFormatRow = (
+			'<div class="settings-row">'
+			+ '<span class="settings-label">Local Date Format</span>'
+			+ '<div class="settings-radios">'
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-local" value="dd/mm/yyyy" data-setting="local"${checked(config.local === 'dd/mm/yyyy')}> dd/mm/yyyy</label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-local" value="mm/dd/yyyy" data-setting="local"${checked(config.local === 'mm/dd/yyyy')}> mm/dd/yyyy</label>`
+			+ `<label class="settings-radio inline"><input type="radio" name="setting-local" value="yyyy/mm/dd" data-setting="local"${checked(config.local === 'yyyy/mm/dd')}> yyyy/mm/dd</label>`
+			+ '</div>'
+			+ '</div>'
+		);
+
+		// Permission-warning severity gate. Each checkbox carries a
+		// boolean `data-setting`; `BrowserShell.saveSettings` reads the
+		// three booleans and composes `config.warnings` as a string array
+		// in canonical low/medium/high order, then strips the three keys
+		// so they don't bake into config.json. Reusing the
+		// `.settings-radio inline` class for the labels — visually checkbox
+		// or radio share the same chrome here, and the live-form widget
+		// dispatch keys off the `type=checkbox` attribute anyway. */
+		const warningsRow = (
+			'<div class="settings-row">'
+			+ '<span class="settings-label">App warnings<span class="settings-hint">severities shown in the Permissions Warning modal when launching an app</span></span>'
+			+ '<div class="settings-radios">'
+			+ `<label class="settings-radio inline"><input type="checkbox" name="setting-warningLow" data-setting="warningLow"${checked(config.warnings.includes('low'))}> Low</label>`
+			+ `<label class="settings-radio inline"><input type="checkbox" name="setting-warningMedium" data-setting="warningMedium"${checked(config.warnings.includes('medium'))}> Medium</label>`
+			+ `<label class="settings-radio inline"><input type="checkbox" name="setting-warningHigh" data-setting="warningHigh"${checked(config.warnings.includes('high'))}> High</label>`
+			+ '</div>'
+			+ '</div>'
+		);
+
 		// Home page section picker — drives the `<browser-home-apps>` +
 		// `<browser-home-title>` expansions on home.html via the
 		// `homeSection` config field. The home page has no in-page tab
@@ -735,13 +799,20 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ homeSectionRows
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
+			+ '<legend>Search engine</legend>'
+			+ searchRows
+			+ '</fieldset>'
+			+ '</div>'
+			+ '<div class="settings-row-pair">'
+			+ '<fieldset class="settings-group">'
 			+ '<legend>Appearance</legend>'
 			+ themeRow
 			+ toolbarPositionRow
+			+ dateFormatRow
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
-			+ '<legend>Search engine</legend>'
-			+ searchRows
+			+ '<legend>System</legend>'
+			+ warningsRow
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'
@@ -757,6 +828,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ toggleRow('videoNVTEGRA', 'NVTEGRA hardware video decode', config.videoNVTEGRA, 'try the hw decoder first, fall back to software per element')
 			+ toggleRow('autoRotate', 'Auto-rotate canvas', config.autoRotate, 'reserved — no consumer wired up today, value round-trips through Save')
 			+ toggleRow('clickSounds', 'Click sounds', config.clickSounds, 'short click.wav on link / button / chrome activation')
+			+ toggleRow('momentumScrolling', 'Momentum scrolling', config.momentumScrolling, 'scroll content coasts to a stop with friction after right-stick release / finger lift')
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<fieldset class="settings-group">'

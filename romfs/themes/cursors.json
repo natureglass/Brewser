@@ -1,0 +1,162 @@
+[
+    {
+        "name": "alias",
+        "image": "themes/cursors/alias.png",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "all-scroll",
+        "image": "themes/cursors/all-scroll.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "col-resize",
+        "image": "themes/cursors/col-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "copy",
+        "image": "themes/cursors/copy.png",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "crosshair",
+        "image": "themes/cursors/crosshair.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "default",
+        "image": "themes/cursors/default.png",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "e-resize",
+        "image": "themes/cursors/e-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "ew-resize",
+        "image": "themes/cursors/ew-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "grab",
+        "image": "themes/cursors/grab.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "grabbing",
+        "image": "themes/cursors/grabbing.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "help",
+        "image": "themes/cursors/help.png",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "move",
+        "image": "themes/cursors/move.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "ne-resize",
+        "image": "themes/cursors/ne-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "nesw-resize",
+        "image": "themes/cursors/nesw-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "no-drop",
+        "image": "themes/cursors/no-drop.png",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "not-allowed",
+        "image": "themes/cursors/not-allowed.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "n-resize",
+        "image": "themes/cursors/n-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "ns-resize",
+        "image": "themes/cursors/ns-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "nw-resize",
+        "image": "themes/cursors/nw-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "nwse-resize",
+        "image": "themes/cursors/nwse-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "pointer",
+        "image": "themes/cursors/pointer.png",
+        "x": 43, "y": 32
+    },
+    {
+        "name": "progress",
+        "image": "themes/cursors/progress.apng",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "row-resize",
+        "image": "themes/cursors/row-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "se-resize",
+        "image": "themes/cursors/se-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "s-resize",
+        "image": "themes/cursors/s-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "sw-resize",
+        "image": "themes/cursors/sw-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "text",
+        "image": "themes/cursors/text.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "wait",
+        "image": "themes/cursors/wait.apng",
+        "x": 31, "y": 29
+    },
+    {
+        "name": "w-resize",
+        "image": "themes/cursors/w-resize.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "cell",
+        "image": "themes/cursors/cell.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "zoom-in",
+        "image": "themes/cursors/zoom-in.png",
+        "x": 48, "y": 48
+    },
+    {
+        "name": "zoom-out",
+        "image": "themes/cursors/zoom-out.png",
+        "x": 48, "y": 48
+    }
+]

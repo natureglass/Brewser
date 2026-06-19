@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Select Modal</title>
+<style>
+  body {
+    --sm-backdrop: rgba(8, 12, 20, 0.78);
+    --sm-panel-bg: #141a25;
+    --sm-panel-border: #2c3a52;
+    --sm-header-bg: #1d2738;
+    --sm-text: #e3eaf6;
+    --sm-text-dim: #8794ad;
+    --sm-accent: #7aa2ff;
+    --sm-row-selected: #243352;
+    --sm-row-divider: #1f293a;
+    --sm-btn-bg: #1d2c43;
+    --sm-btn-bg-active: #25395a;
+    --sm-btn-bg-primary: #2d5cd2;
+    --sm-btn-bg-primary-active: #4276ed;
+    --sm-btn-text: #e3eaf6;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--sm-backdrop);
+    color: var(--sm-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 18px;
+  }
+
+  .sm-panel {
+    width: 560px;
+    height: 480px;
+    background: var(--sm-panel-bg);
+    border: 1px solid var(--sm-panel-border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sm-header {
+    background: var(--sm-header-bg);
+    padding: 18px 24px 14px 24px;
+    border-bottom: 1px solid var(--sm-panel-border);
+  }
+
+  .sm-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--sm-text);
+  }
+
+  .sm-list {
+    flex: 1;
+    overflow-y: scroll;
+    padding: 8px 0;
+  }
+
+  .sm-group {
+    padding: 10px 24px 6px 24px;
+    color: var(--sm-text-dim);
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .sm-option {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--sm-row-divider);
+    color: var(--sm-text);
+  }
+
+  .sm-option--selected {
+    background: var(--sm-row-selected);
+  }
+
+  .sm-option:active {
+    background: var(--sm-row-selected);
+  }
+
+  .sm-option-label {
+    color: var(--sm-text);
+  }
+
+  .sm-empty {
+    padding: 32px 24px;
+    text-align: center;
+    color: var(--sm-text-dim);
+    font-style: italic;
+  }
+
+  .sm-footer {
+    background: var(--sm-header-bg);
+    padding: 14px 24px;
+    border-top: 1px solid var(--sm-panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .sm-btn {
+    padding: 10px 22px;
+    border-radius: 8px;
+    background: var(--sm-btn-bg);
+    color: var(--sm-btn-text);
+    font-size: 16px;
+    font-weight: 500;
+    border: 1px solid var(--sm-panel-border);
+  }
+
+  .sm-btn:active {
+    background: var(--sm-btn-bg-active);
+  }
+
+  .sm-btn--primary {
+    background: var(--sm-btn-bg-primary);
+    border-color: var(--sm-btn-bg-primary);
+  }
+
+  .sm-btn--primary:active {
+    background: var(--sm-btn-bg-primary-active);
+  }
+
+  .sm-btn--hidden {
+    display: none;
+  }
+</style>
+</head>
+<body data-action="cancel">
+  <div class="sm-panel" data-action="ignore">
+    <div class="sm-header">
+      <div class="sm-title" id="sm-title"><span>Select an option</span></div>
+    </div>
+    <div class="sm-list" id="sm-list"></div>
+    <div class="sm-footer">
+      <div class="sm-btn" id="sm-cancel" data-action="cancel"><span>Cancel</span></div>
+      <div class="sm-btn sm-btn--primary sm-btn--hidden" id="sm-done" data-action="done"><span>Done</span></div>
+    </div>
+  </div>
+</body>
+</html>
