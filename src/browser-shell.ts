@@ -37,7 +37,7 @@ import {
 	pageHasAnimationActivity,
 	tickAnimationFrames,
 } from '@switch-web/runtime';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setCssViewport, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
 import { setMediaColorScheme } from '@switch-web/runtime';
 import { isWebGLBackedCanvas } from '@switch-web/runtime';
 import { getInputChecked, getInputValue, openKeyboardAndApply, setColorPickerOpener, setDateInputDefaultPlaceholder, setDatePickerOpener, setFilePickerOpener, setFilePickerStartDirResolver, setInputValue, setKeyboardOpener, setLiveFormColorScheme, setNumberPickerOpener, setSelectModalOpener, setTimePickerOpener } from '@switch-web/runtime';
@@ -669,6 +669,16 @@ export class BrowserShell {
 				});
 			}
 			await this.toggleFullscreenCanvas();
+		};
+		// Companion to __swbRequestFullscreenCanvas for non-canvas apps that
+		// want their HTML page to fill the screen (chrome strip hidden). The
+		// sensors dashboard uses this to start fullscreen on launch. Unlike
+		// the canvas case, fullscreen-page mode doesn't need scriptCtx (no
+		// canvas resize, no rerun), so we don't need the pending-queue dance.
+		(globalThis as { __swbRequestFullscreenPage?: () => Promise<void> })
+			.__swbRequestFullscreenPage = async () => {
+			if (this.mode === 'fullscreen-page') return;
+			await this.toggleFullscreenPage();
 		};
 		(globalThis as { __swbExitFullscreen?: () => Promise<void> })
 			.__swbExitFullscreen = async () => {
@@ -1631,14 +1641,24 @@ export class BrowserShell {
 	}
 
 	/**
-	 * Painter-side scroll offset added on top of `currentScrollY` so
-	 * the layout (which was computed with `topInset = layoutTopInset()`)
-	 * is shifted up to fill the chrome area when fullscreen-page is
-	 * engaged. With a bottom toolbar the layout has no top prefix, so
-	 * no shift is needed.
+	 * Painter-side scroll offset on top of `currentScrollY`.
+	 *
+	 * Historical: the comment used to claim this shifts the body cache
+	 * up to fill the chrome area in fullscreen-page mode, on the
+	 * assumption the layout had baked-in `topInset = layoutTopInset()`.
+	 * That's never been true in the current runtime — `paintLiveOverlay`
+	 * calls `layoutFixedRoot(root, 0, 0, viewport.width, viewport.height)`
+	 * (live-overlay.ts:1026) with body anchored at (0, 0). In normal
+	 * mode the paint viewport's `y = chromeHeight` already places body
+	 * below the chrome strip on screen; in fullscreen-page mode the
+	 * paint viewport's `y = 0` places body at the top of the screen,
+	 * naturally filling the reclaimed strip. The 56 px adjust the old
+	 * code added on top of that produced a net −56 px shift that
+	 * clipped the top of the page. Returning 0 leaves the cache blit
+	 * aligned with the body's layout origin in all modes.
 	 */
 	private paintScrollAdjust(): number {
-		return this.mode === 'fullscreen-page' ? this.layoutTopInset() : 0;
+		return 0;
 	}
 
 	/**
@@ -3324,6 +3344,20 @@ export class BrowserShell {
 		// the layout's snapshot of that canvas reverts to its attribute
 		// size before we re-enter normal layout flow.
 		if (this.mode === 'fullscreen-canvas') await this.restoreCanvasSize();
+		// Widen the CSS viewport to the full screen so `100vh` / `100vw`
+		// resolve against 720 (not 720 − chromeHeight). The page was
+		// originally laid out with cssVpH = screen.height − chromeHeight
+		// (see WebPageSession.populateAndRunScripts), which makes a
+		// `.wrap { height: 100vh }` element 664 px tall. Without this
+		// rewrite, fullscreen-page mode paints content from 0..664 and
+		// leaves the bottom 56 px empty, while paintScrollAdjust shifts
+		// everything up by chromeHeight so the top of the page clips off.
+		// The paint viewport's height change (664→720) is what triggers
+		// `paintLiveOverlay`'s viewportChanged → full rebuild, so the
+		// new vh value gets picked up immediately on the next frame —
+		// no explicit tree-version bump needed.
+		const screen = nxScreen();
+		setCssViewport(screen.width, screen.height);
 		this.setMode('fullscreen-page');
 		this.clampScroll();
 		this.repaintAll();
@@ -3382,10 +3416,17 @@ export class BrowserShell {
 
 	private async exitFullscreen(): Promise<void> {
 		const wasFullscreenCanvas = this.mode === 'fullscreen-canvas';
+		const wasFullscreenPage = this.mode === 'fullscreen-page';
 		const wasLive = this.fullscreenCanvasLive;
 		this.fullscreenCanvasLive = false;
 		(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
 			.__swbFullscreenCanvasSize = null;
+		// Undo the fullscreen-page CSS viewport widen so vh resolves back
+		// to the chrome-trimmed area for normal-mode layout.
+		if (wasFullscreenPage) {
+			const screen = nxScreen();
+			setCssViewport(screen.width, Math.max(1, screen.height - this.chromeHeight));
+		}
 		// Flip mode (and the global) BEFORE restoreCanvasSize's rerun so
 		// the re-executed page scripts see 'normal' and revert to their
 		// layout-box sizing.
