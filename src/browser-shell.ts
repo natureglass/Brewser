@@ -23,7 +23,6 @@ function _shellInputDiag(label: string): void {
 	} catch { /* swallow */ }
 }
 
-
 import {
 	BROWSER_INTERNAL_ORIGIN,
 	DEFAULT_CANVAS_HEIGHT,
@@ -58,7 +57,7 @@ import {
 	videoToggleMute,
 } from '@switch-web/runtime';
 import {
-	getLiveContentBottom, isLiveCacheBuilding, isLiveCacheReady,
+	flushPendingScreenBlitsToScreen, getLiveContentBottom, hasAnyScrollOverlay, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
 	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
@@ -343,6 +342,16 @@ export class BrowserShell {
 	 * it has, the persistent pixels under the video are stale and the
 	 * slow path must run instead. */
 	private lastRepaintedScrollY: number = Number.NaN;
+	/** Live tree version + viewport last fully painted. The canvas-only
+	 * fast path (animated canvas region overwritten by overlay-walk while
+	 * the rest of the page is byte-identical to the previous frame) uses
+	 * these to skip paintLiveOverlay entirely when nothing else moved.
+	 * Saves the ~7-8 ms/frame cache `drawImage(viewport×height)` blit on
+	 * inline-WebGL pages where the page itself only mutates through the
+	 * bridge. -1 / NaN sentinels force the slow path on first paint. */
+	private lastRepaintedLiveVersion: number = -1;
+	private lastRepaintedViewportW: number = -1;
+	private lastRepaintedViewportH: number = -1;
 	/** Live tree version the idle-tick path last repainted. Page-script
 	 * timer mutations (setTimeout/setInterval) bump the tree version but
 	 * fire no rAF / video frame / tap, so without comparing against this
@@ -1717,12 +1726,17 @@ export class BrowserShell {
 	 * `copyBridgeToScreen` the shared screen GL bridge FBO
 	 * (WebGL-backed).
 	 *
-	 * The per-frame `fillRect` of the page background is defensive.
-	 * The cache builder fillRects body's bg color across the whole
-	 * cache before chunked ops run, but Citron still produces
-	 * stacking artifacts without this per-frame backstop — root cause
-	 * not yet pinned. Cost: ~10 ms per frame; this is the ~21 FPS gap
-	 * on the Three.js cube demo. Reclaim is open work.
+	 * The per-frame `fillRect` of the page background is now gated on
+	 * `liveCacheCoversViewportOpaque(viewport.height)` — it only runs
+	 * when the cache can't guarantee opaque coverage on its own
+	 * (chunked build still in progress, body has no own bg color, or
+	 * the cache is shorter than the viewport). For the steady state of
+	 * any opaque-body page that fully fits its cache, this skips
+	 * entirely. Reclaims the ~10 ms/frame previously attributed to the
+	 * ~21 FPS gap on inline-WebGL pages (Three.js cube demo, sensors
+	 * dashboard). The cache's own one-time bg fill at build start
+	 * covers the "no transparent edges" property that this backstop
+	 * was originally defending.
 	 */
 	private repaintContent(opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean } = {}): void {
 		// Old canvas-keyboard era: this returned early on
@@ -1814,11 +1828,93 @@ export class BrowserShell {
 			this.cpuPresentCallCount++;
 			return;
 		}
-		ctx.fillStyle = this.effectivePageBackground();
-		ctx.fillRect(
-			0, paintTopInset,
-			canvas.width, canvas.height - paintTopInset - paintBottomInset,
-		);
+		// Canvas-only fast path: the page is doing rAF / 2D-canvas activity
+		// but nothing in the live tree changed since the last full paint —
+		// no DOM mutation, no scroll, no viewport change. The persistent
+		// screen-canvas pixels from the previous slow-path frame are
+		// byte-identical to what a full paint would produce, except inside
+		// the animated-canvas regions. Skip paintLiveOverlay (the cache
+		// `drawImage(viewport.width × height)` blit at its tail measured
+		// ~7-8 ms/frame on the sensors dashboard via [brewser:paint-timing])
+		// and just call the canvas overlay walk, which writes fresh pixels
+		// into each animated canvas's region on top of the prior frame.
+		// Same shape as videoOnlyFast above but auto-detected: the next
+		// page mutation (tap → :active, text update, image load, anything
+		// that bumps liveTreeVersion) trips the version guard and the
+		// slow path repaints everything. Pages with fixed-element overlays
+		// that animate independently (e.g. lil-gui FPS counter) bump the
+		// version every frame on their own, so the guard fails naturally
+		// and the fast path bypasses without a special case.
+		// `fullscreen-canvas` and `video-fullscreen` early-return at the
+		// top of repaintContentInner, so by the time we reach this gate
+		// mode is always `normal` or `fullscreen-page`. Both share the
+		// same paintLiveOverlay + cache-blit path — the fast path is
+		// equally safe for either.
+		const canCanvasFastPath = (this.mode === 'normal' || this.mode === 'fullscreen-page')
+			&& !opts.videoOnlyFast
+			&& (pageHasAnimationActivity() || hasPageCanvas2dActivity())
+			&& effectiveScrollY === this.lastRepaintedScrollY
+			&& viewport.width === this.lastRepaintedViewportW
+			&& viewport.height === this.lastRepaintedViewportH
+			&& getLiveTreeVersion() === this.lastRepaintedLiveVersion
+			&& isLiveCacheReady()
+			// Bail when any scroll overlay exists on the page. The fast
+			// path's path for re-blitting scroll overlays (cache-slice
+			// underbliter + offscreen drawImage) produced visible garbage
+			// on spectraplay's playlist that proved hard to isolate;
+			// falling back to the slow path here trades the ~5 ms/frame
+			// gain for correctness on pages with `overflow:auto/scroll`.
+			// Pages with no scroll overlay (sensors, Three.js demos)
+			// keep the perf win.
+			&& !hasAnyScrollOverlay();
+		if (canCanvasFastPath) {
+			const t0 = performance.now();
+			// Push any cache-region patches that landed since the last
+			// paint (image completions via `patchLiveImagePixelsOnly` —
+			// album art on spectraplay's library, app icons on home, etc.)
+			// from cache to screen. The slow path's full cache blit handles
+			// this implicitly; the fast path skips that blit, so without
+			// this drain the cache holds the new pixels but the screen
+			// stays on the placeholder pixels until the next full repaint
+			// (visible as "images appear only on exit modal").
+			flushPendingScreenBlitsToScreen(ctx, viewport, effectiveScrollY);
+			// `blitCacheUnder` is the load-bearing correctness piece for
+			// transparent inline canvases (spectraplay's audio visualizer
+			// uses `getContext('webgl2', { alpha: true })` + clearColor with
+			// vizBgAlpha=0). The bridge composite at [webgl_egl.c:4196]
+			// preserves dst pixels for alpha=0 source — without the cache
+			// underneath, "dst" is the previous frame's leftover canvas
+			// pixels (ghost trails). One small drawImage per canvas region
+			// (~38K-115K pixels for typical pages) vs the 921K-pixel full
+			// cache blit that the slow path does.
+			overlayLiveAnimatedCanvases(
+				ctx, getLiveRoot(), viewport, effectiveScrollY,
+				copyBridgeToScreen,
+				{ blitCacheUnder: true },
+			);
+			this.lastCpuPresentMs = performance.now() - t0;
+			this.cpuPresentCallCount++;
+			return;
+		}
+		// Per-frame full-viewport backstop. Used to run unconditionally
+		// (~10 ms/frame on Citron — the dominant cost on inline-WebGL
+		// pages, e.g. the sensors dashboard parked at 38/60 fps; the
+		// Three.js cube demo at 39/60 fps). Now gated on the cache being
+		// unable to cover the viewport opaquely on its own: when the cache
+		// exists, its chunked build is complete, it was filled with body's
+		// bg at build start, and it's at least as tall as the viewport,
+		// the cache blit below overwrites every painted pixel and this
+		// fillRect is redundant. The cache's own bg fill happens once per
+		// rebuild at the build site in live-overlay.ts, so the per-frame
+		// cost moves from "always 10 ms" to "0 ms in the steady state of
+		// any opaque-body page that fully fits its cache."
+		if (!liveCacheCoversViewportOpaque(viewport.height)) {
+			ctx.fillStyle = this.effectivePageBackground();
+			ctx.fillRect(
+				0, paintTopInset,
+				canvas.width, canvas.height - paintTopInset - paintBottomInset,
+			);
+		}
 		// Per-style wallpaper sits between the page-bg colour fill and
 		// the live-DOM cache blit, so the image covers the colour fill
 		// and a page with a translucent `body` background lets the
@@ -1895,6 +1991,9 @@ export class BrowserShell {
 		this.lastCpuPresentMs = performance.now() - t0;
 		this.cpuPresentCallCount++;
 		this.lastRepaintedScrollY = effectiveScrollY;
+		this.lastRepaintedLiveVersion = getLiveTreeVersion();
+		this.lastRepaintedViewportW = viewport.width;
+		this.lastRepaintedViewportH = viewport.height;
 	}
 
 	/** Paint the HTML keyboard root below `KEYBOARD_LAYOUT.topY` when
@@ -2255,6 +2354,9 @@ export class BrowserShell {
 		this.lastCpuPresentMs = performance.now() - t0;
 		this.cpuPresentCallCount++;
 		this.lastRepaintedScrollY = effectiveScrollY;
+		this.lastRepaintedLiveVersion = getLiveTreeVersion();
+		this.lastRepaintedViewportW = viewport.width;
+		this.lastRepaintedViewportH = viewport.height;
 	}
 
 	/**
