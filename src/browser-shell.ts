@@ -57,8 +57,8 @@ import {
 	videoToggleMute,
 } from '@switch-web/runtime';
 import {
-	flushPendingScreenBlitsToScreen, getLiveContentBottom, hasAnyScrollOverlay, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
-	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintSelectModalOverlay, paintTimePickerOverlay,
+	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
+	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
 	patchLiveDirtyRegions, resetLiveOverlayCache, resetToolbarOverlayCache,
@@ -1870,15 +1870,18 @@ export class BrowserShell {
 			&& viewport.height === this.lastRepaintedViewportH
 			&& getLiveTreeVersion() === this.lastRepaintedLiveVersion
 			&& isLiveCacheReady()
-			// Bail when any scroll overlay exists on the page. The fast
-			// path's path for re-blitting scroll overlays (cache-slice
-			// underbliter + offscreen drawImage) produced visible garbage
-			// on spectraplay's playlist that proved hard to isolate;
-			// falling back to the slow path here trades the ~5 ms/frame
-			// gain for correctness on pages with `overflow:auto/scroll`.
-			// Pages with no scroll overlay (sensors, Three.js demos)
-			// keep the perf win.
-			&& !hasAnyScrollOverlay()
+			// 2026-06-20 speedtest fps fix: ALLOW the fast path even when
+			// the page has scroll overlays (`overflow: auto/scroll`). The
+			// fast path now calls `paintScrollOverlaysToScreen` with the
+			// `blitCacheUnder: true` option just below — that's the
+			// translucent-background-compound-alpha fix that closed the
+			// spectraplay playlist regression. Refusing the fast path
+			// outright was a workaround from before `blitCacheUnder`
+			// existed; the per-overlay cache-slice blit + offscreen
+			// drawImage costs ~1 ms per scroll container vs the slow
+			// path's ~7 ms full-viewport cache blit, so the fast path
+			// still wins handily on speedtest (`.log { overflow: auto }`
+			// makes it a scroll-overlay page).
 			// Bail when any system-modal overlay is up — the slow path is
 			// the only place that paints the kb / select modal / file
 			// picker / date+time+color+number pickers (lines 1972-1989
@@ -1905,6 +1908,18 @@ export class BrowserShell {
 			// stays on the placeholder pixels until the next full repaint
 			// (visible as "images appear only on exit modal").
 			flushPendingScreenBlitsToScreen(ctx, viewport, effectiveScrollY);
+			// 2026-06-20 fast-path scroll-overlay support: scrollable
+			// containers were previously a hard-bail for the fast path;
+			// now we re-blit them per frame with `blitCacheUnder: true`
+			// so any translucent-background scrolling list keeps the
+			// cache underneath fresh (the spectraplay-playlist regression
+			// fix). Per-overlay cost is one cache-slice drawImage + the
+			// container's offscreen drawImage (~1 ms each for typical
+			// list sizes). No-op when the page has no scroll overlays. */
+			paintScrollOverlaysToScreen(
+				ctx, viewport, effectiveScrollY,
+				{ blitCacheUnder: true },
+			);
 			// `blitCacheUnder` is the load-bearing correctness piece for
 			// transparent inline canvases (spectraplay's audio visualizer
 			// uses `getContext('webgl2', { alpha: true })` + clearColor with
@@ -1960,6 +1975,17 @@ export class BrowserShell {
 			|| pageHasAnyPoster()
 			|| hasPageCanvas2dActivity()
 		) {
+			// 2026-06-20: the slow path's `paintLiveOverlay` cache blit
+			// just overwrote the canvas region with stale cache pixels
+			// (the cache holds the post-script `readbackWebGLEntries`
+			// snapshot, taken before any rAF rendered the dial). Force
+			// the bridge readback below so the live FBO contents repaint
+			// the canvas region on top — without this, every slow-path
+			// repaint (modal open/close, dirty mutation, version bump)
+			// would erase the dial. The fast path retains its own idle
+			// skip via the same flag; we only force it true ahead of
+			// the slow path's cache-blit-stomp. */
+			forceBridgeReadbackNextPaint();
 			overlayLiveAnimatedCanvases(
 				ctx, getLiveRoot(), viewport, effectiveScrollY,
 				copyBridgeToScreen,
