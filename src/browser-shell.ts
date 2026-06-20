@@ -1817,7 +1817,19 @@ export class BrowserShell {
 		// cache isn't fully built (would starve the chunked builder).
 		const canFastPath = opts.videoOnlyFast
 			&& effectiveScrollY === this.lastRepaintedScrollY
-			&& isLiveCacheReady();
+			&& isLiveCacheReady()
+			// Same modal-visible bail as the canvas fast path below — see
+			// the comment block on `canCanvasFastPath`. A `<select>` open
+			// over a video page (small but possible: a settings overlay
+			// during playback) would render behind the video frame without
+			// this gate.
+			&& !isKeyboardOverlayVisible()
+			&& !isFilePickerOverlayVisible()
+			&& !isSelectModalOverlayVisible()
+			&& !isDatePickerOverlayVisible()
+			&& !isTimePickerOverlayVisible()
+			&& !isColorPickerOverlayVisible()
+			&& !isNumberPickerOverlayVisible();
 		if (canFastPath) {
 			const t0 = performance.now();
 			overlayLiveAnimatedCanvases(
@@ -1866,7 +1878,22 @@ export class BrowserShell {
 			// gain for correctness on pages with `overflow:auto/scroll`.
 			// Pages with no scroll overlay (sensors, Three.js demos)
 			// keep the perf win.
-			&& !hasAnyScrollOverlay();
+			&& !hasAnyScrollOverlay()
+			// Bail when any system-modal overlay is up — the slow path is
+			// the only place that paints the kb / select modal / file
+			// picker / date+time+color+number pickers (lines 1972-1989
+			// below), so on a page with an animating inline canvas (the
+			// speedtest dial, a Three.js demo) the fast path would skip
+			// the modal paint and the canvas would render OVER the modal.
+			// `paintModalOverlay` (custom `<browser-modal>` roots) is also
+			// only painted by the slow path; gated too for symmetry. */
+			&& !isKeyboardOverlayVisible()
+			&& !isFilePickerOverlayVisible()
+			&& !isSelectModalOverlayVisible()
+			&& !isDatePickerOverlayVisible()
+			&& !isTimePickerOverlayVisible()
+			&& !isColorPickerOverlayVisible()
+			&& !isNumberPickerOverlayVisible();
 		if (canCanvasFastPath) {
 			const t0 = performance.now();
 			// Push any cache-region patches that landed since the last

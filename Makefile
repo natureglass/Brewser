@@ -30,11 +30,26 @@ COLLECT_CURRENT   := scripts/collect_current.py
 NRO               := brewser.nro
 NRO_LOG           := .nro-build.log
 
-.PHONY: all sync-runtime current-json build nro sdmc mirror-only clean help
+.PHONY: all runtime-build sync-runtime current-json build nro sdmc mirror-only clean help
 
 all: sdmc
 
-sync-runtime:
+# Build the sibling brewser-runtime workspace so its `dist/` is fresh
+# before `sync-runtime` copies it. Without this, `make sdmc` would happily
+# vendor a stale dist and the NRO would ship pre-edit runtime code — the
+# kind of silent-staleness bug that's painful to track down.
+# Skipped if `BREWSER_RUNTIME_DIR` is missing (consumers without the
+# sibling checkout still need `make` to succeed via the postinstall path).
+BREWSER_RUNTIME_DIR ?= ../brewser-runtime
+runtime-build:
+	@if [ -d "$(BREWSER_RUNTIME_DIR)" ]; then \
+		echo "Building $(BREWSER_RUNTIME_DIR)/dist/..."; \
+		cd "$(BREWSER_RUNTIME_DIR)" && npm run build; \
+	else \
+		echo "[runtime-build] $(BREWSER_RUNTIME_DIR) missing — skipping (will vendor whatever dist/ is currently there)"; \
+	fi
+
+sync-runtime: runtime-build
 	@npm run sync-runtime
 
 # File target: re-runs only when an upstream package.json (or the
@@ -84,9 +99,11 @@ clean:
 
 help:
 	@echo "Targets:"
-	@echo "  make             Full chain (sync-runtime + current-json + build + nro + sdmc)"
+	@echo "  make             Full chain (runtime-build + sync-runtime + current-json + build + nro + sdmc)"
+	@echo "  make runtime-build"
+	@echo "                   Build ../brewser-runtime so its dist/ is fresh"
 	@echo "  make sync-runtime"
-	@echo "                   Vendor ../brewser-runtime/dist into runtime/"
+	@echo "                   Vendor ../brewser-runtime/dist into runtime/ (depends on runtime-build)"
 	@echo "  make current-json"
 	@echo "                   Refresh $(CURRENT_JSON) from upstream package.json files"
 	@echo "  make build       esbuild bundle (depends on sync-runtime)"
