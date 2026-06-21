@@ -52,12 +52,19 @@ export function resolveNavUrl(url: string, currentPageUrl: string): string {
 	const slash = basePath.lastIndexOf('/');
 	const parts = (slash >= 0 ? basePath.slice(0, slash) : '').split('/').filter(Boolean);
 	const [path, tail] = [u.split(/[?#]/)[0], u.slice(u.split(/[?#]/)[0].length)];
+	// Preserve the trailing slash from a directory-style href (e.g.
+	// `./demo/`). Without this, `currentPageUrl` becomes the file-form
+	// `brewser://.../demo` after the link load; a subsequent
+	// `<a href="../index.html">` then treats `demo` as a sibling file and
+	// pops one directory too many (the parent's `index.html` becomes the
+	// grandparent's). Same rule as RFC 3986 §5.2 reference resolution.
+	const trailing = path.endsWith('/') ? '/' : '';
 	for (const seg of path.split('/')) {
 		if (seg === '' || seg === '.') continue;
 		if (seg === '..') { parts.pop(); continue; }
 		parts.push(seg);
 	}
-	return `brewser://${parts.join('/')}${tail}`;
+	return `brewser://${parts.join('/')}${trailing}${tail}`;
 }
 
 /**
