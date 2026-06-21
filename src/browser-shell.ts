@@ -34,6 +34,7 @@ import {
 	clearSharedScreenGLBridge,
 	copyBridgeToScreen,
 	pageHasAnimationActivity,
+	requestPaintTick,
 	tickAnimationFrames,
 } from '@switch-web/runtime';
 import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setCssViewport, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
@@ -2261,21 +2262,21 @@ export class BrowserShell {
 	 * no need to keep the loop hot). */
 	private ensureCssLoadingOverlayPaintPump(): void {
 		if (this.cssLoadingOverlayPumpTid !== null) return;
-		const rafCarrier = globalThis as unknown as {
-			requestAnimationFrame?: (cb: (t: number) => void) => number;
-		};
 		const pump = (): void => {
 			this.cssLoadingOverlayPumpTid = null;
 			if (performance.now() - this.cssLoadingOverlayLastPaintMs > 3000) return;
-			// Queue an empty rAF so the shell's `onTick` hits the
-			// `animFired` branch and runs `repaintContent` — that's the
-			// route that actually presents pixels. A bare
-			// `requestFullRepaint` only sets a flag the idle-tick branch
-			// may not service when nothing else is moving (the engine-
-			// side draw→submit gap noted in
+			// Engine-internal paint tick. Routes the same way as
+			// `globalThis.requestAnimationFrame` (push onto rAF queue →
+			// next tick's `animFired` branch runs `repaintContent`) but
+			// does NOT set `pageHasAnimated`. Setting that sticky flag
+			// here locked pages with NO actual canvas (about.html) into
+			// the canvas fast path forever — the loading overlay's
+			// black fill stayed on screen until the user scrolled. A
+			// bare `requestFullRepaint` alone isn't enough — the idle
+			// branch may not service it when nothing else is moving
+			// (the engine-side draw→submit gap noted in
 			// [[feedback-swb-idle-paint-needs-touch]]).
-			try { rafCarrier.requestAnimationFrame?.(() => { /* presence is the point */ }); }
-			catch (_) { /* swallow */ }
+			try { requestPaintTick(); } catch (_) { /* swallow */ }
 			requestFullRepaint();
 			this.cssLoadingOverlayPumpTid = setTimeout(pump, 40);
 		};

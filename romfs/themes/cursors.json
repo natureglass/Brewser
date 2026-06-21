@@ -137,7 +137,7 @@
     {
         "name": "wait",
         "image": "themes/cursors/wait.apng",
-        "x": 31, "y": 29
+        "x": 48, "y": 48
     },
     {
         "name": "w-resize",
