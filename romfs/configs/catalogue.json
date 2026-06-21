@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-15T07:35:39Z",
+  "generated": "2026-06-21T06:00:45Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -74,6 +74,7 @@
         "controller"
       ],
       "permissions": [
+        "network",
         "storage"
       ],
       "compatibility": [
@@ -86,7 +87,7 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 1180370478
+      "sizeBytes": 1180370488
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -102,8 +103,8 @@
         "controller"
       ],
       "permissions": [
-        "storage",
-        "filesystem"
+        "network",
+        "storage"
       ],
       "compatibility": [
         "switch"
@@ -112,10 +113,13 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
+      "data": [
+        "assets"
+      ],
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 112963
+      "sizeBytes": 121247
     },
     {
       "id": "com.natureglass.streamcast",
@@ -177,7 +181,7 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 9315928
+      "sizeBytes": 22021140
     },
     {
       "id": "com.natureglass.itchio",
@@ -226,7 +230,7 @@
       ],
       "permissions": [
         "network",
-        "system"
+        "device_info"
       ],
       "compatibility": [
         "switch"
@@ -238,7 +242,7 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 60319
+      "sizeBytes": 71614
     },
     {
       "id": "com.natureglass.speedtest",
@@ -268,13 +272,13 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 30679
+      "sizeBytes": 37415
     },
     {
-      "id": "com.natureglass.threejsdemos",
-      "name": "ThreeJS Demos",
+      "id": "com.natureglass.webgl1threejsdemos",
+      "name": "WebGL1 ThreeJS Demos",
       "version": "1.0.0",
-      "description": "A collection of demos showcasing the capabilities of ThreeJS on the Nintendo Switch.",
+      "description": "A collection of demos showcasing the capabilities of WebGL1 ThreeJS on the Nintendo Switch.",
       "logo": "assets/threejsdemos_logo.png",
       "entry": "index.html",
       "category": "app",
@@ -298,7 +302,37 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 28454370
+      "sizeBytes": 28404574
+    },
+    {
+      "id": "com.natureglass.webgl2threejsdemos",
+      "name": "WebGL2 ThreeJS Demos",
+      "version": "1.0.0",
+      "description": "A collection of demos showcasing the capabilities of WebGL2 ThreeJS on the Nintendo Switch.",
+      "logo": "assets/threejsdemos_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
+      "sizeBytes": 28404574
     }
   ],
   "community": [
