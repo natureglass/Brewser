@@ -3593,6 +3593,35 @@ export class BrowserShell {
 		// needs restoreCanvasSize.
 		if (wasFullscreenCanvas && !wasLive) await this.restoreCanvasSize();
 		this.clampScroll();
+		// 2026-06-21: live-canvas exit defers content repaint by one tick.
+		// `data-fullscreen-live` opts out of the rerun path — the page's
+		// own animate() reverts `canvas.width/height` (and renderer.setSize)
+		// from `syncCanvasSize` reading `__swbBrowserMode === 'normal'`.
+		// That hasn't happened yet — we're still inside the input handler
+		// that fired `lr-combo`; the page's next rAF callback only runs on
+		// the next `onTick`. Calling repaintAll right here would lay out
+		// the page using the stale fullscreen 1280×720 canvas dimensions
+		// (`LiveCanvas.getDisplaySize` reads `_width/_height` from the
+		// element). With `.canvas-frame` containing a 720px-tall canvas,
+		// `.layout-row` balloons, `.bottom-row` ends up at y≈870 — past the
+		// viewport — and the user sees an apparently broken page (body
+		// elements painted off-screen) until the next tick corrects layout.
+		// LiveElement's canvas width setter deliberately doesn't bump
+		// `liveTreeVersion` (per the 2026-06-20 perf-fix in live-dom.ts) so
+		// the cache wouldn't auto-invalidate on the dim revert either.
+		// Defer: reset the cache + request a paint. The next onTick
+		// `tickAnimationFrames` fires the page's rAF first (reverts dims),
+		// then `repaintContent` consumes the request and rebuilds the cache
+		// with correct dims. Chrome painted now so the toolbar appears
+		// immediately instead of waiting one frame. Screen retains its
+		// last fullscreen-canvas frame underneath the chrome for that one
+		// frame — visually cleaner than a broken-layout flash.
+		if (wasFullscreenCanvas && wasLive) {
+			resetLiveOverlayCache();
+			this.renderChrome();
+			requestFullRepaint();
+			return;
+		}
 		this.repaintAll();
 	}
 
