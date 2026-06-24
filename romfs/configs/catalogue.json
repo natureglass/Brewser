@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-21T06:00:45Z",
+  "generated": "2026-06-24T17:28:51Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -302,7 +302,7 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 28404574
+      "sizeBytes": 17359232
     },
     {
       "id": "com.natureglass.webgl2threejsdemos",
@@ -332,7 +332,33 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 28404574
+      "sizeBytes": 20899462
+    },
+    {
+      "id": "com.natureglass.webglreport",
+      "name": "WebGL Report",
+      "version": "1.0.0",
+      "description": "Surface WebGL 1 and WebGL 2 capabilities, extensions, and limits exposed by the bridge. Port of CesiumGS/webglreport.",
+      "logo": "assets/webglreport_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "Apache-2.0",
+      "buttonMapping": {
+        "exit": "B"
+      },
+      "sizeBytes": 166619
     }
   ],
   "community": [
