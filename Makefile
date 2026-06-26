@@ -30,7 +30,16 @@ COLLECT_CURRENT   := scripts/collect_current.py
 NRO               := brewser.nro
 NRO_LOG           := .nro-build.log
 
-.PHONY: all runtime-build sync-runtime current-json build nro sdmc mirror-only clean help
+# nxjs runtime build + overlay. nxjs-source produces nxjs.nro, which the
+# `nxjs-nro` packager (invoked by `npm run nro`) pulls from
+# node_modules/@nx.js/nro/dist/ as the runtime image. Without an explicit
+# overlay step, edits to nxjs C/TS source never reach brewser.nro.
+# Skipped if ../nxjs-source is missing (consumers without the sibling checkout).
+NXJS_SOURCE_DIR   ?= ../nxjs-source
+NXJS_SOURCE_NRO   := $(NXJS_SOURCE_DIR)/nxjs.nro
+NXJS_OVERLAY      := node_modules/@nx.js/nro/dist/nxjs.nro
+
+.PHONY: all runtime-build sync-runtime current-json build nro sdmc mirror-only clean help nxjs-runtime
 
 all: sdmc
 
@@ -63,12 +72,40 @@ current-json: $(CURRENT_JSON)
 build: sync-runtime
 	@npm run build
 
+# Build nxjs.nro from ../nxjs-source and overlay it into brewser's
+# node_modules so the next `npm run nro` packs the freshly-built runtime
+# instead of the vendored copy. Always invokes the nxjs Makefile (it's
+# incremental — recompiles only changed translation units). `cmp -s`
+# skips the cp when bytes haven't changed (cheap stat-only check after
+# a no-op nxjs make).
+nxjs-runtime:
+	@if [ -d "$(NXJS_SOURCE_DIR)" ]; then \
+		echo "Building $(NXJS_SOURCE_DIR) (nxjs.nro)..."; \
+		$(MAKE) -C "$(NXJS_SOURCE_DIR)" || { \
+			echo "ERROR: nxjs-source build failed — aborting before brewser packaging picks up stale nxjs.nro"; \
+			exit 1; \
+		}; \
+		if [ -f "$(NXJS_SOURCE_NRO)" ]; then \
+			if cmp -s "$(NXJS_SOURCE_NRO)" "$(NXJS_OVERLAY)" 2>/dev/null; then \
+				echo "[nxjs-runtime] $(NXJS_OVERLAY) already up to date"; \
+			else \
+				echo "Overlaying $(NXJS_SOURCE_NRO) -> $(NXJS_OVERLAY)"; \
+				cp "$(NXJS_SOURCE_NRO)" "$(NXJS_OVERLAY)" || exit 1; \
+			fi; \
+		else \
+			echo "ERROR: $(NXJS_SOURCE_NRO) not produced by nxjs make"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "[nxjs-runtime] $(NXJS_SOURCE_DIR) missing - skipping (using vendored $(NXJS_OVERLAY))"; \
+	fi
+
 # `npm run nro` writes brewser.nro. Citron keeps an exclusive lock on
 # the NRO while the app is open, so the write fails with EBUSY. We
 # capture all output, replay it, and on a non-zero exit specifically
 # match EBUSY to surface a clear "close Citron" message. Non-EBUSY
 # failures fall through with the original npm output preserved.
-nro: build current-json
+nro: build current-json nxjs-runtime
 	@npm run nro > $(NRO_LOG) 2>&1; \
 	status=$$?; \
 	cat $(NRO_LOG); \
@@ -106,8 +143,10 @@ help:
 	@echo "                   Vendor ../brewser-runtime/dist into runtime/ (depends on runtime-build)"
 	@echo "  make current-json"
 	@echo "                   Refresh $(CURRENT_JSON) from upstream package.json files"
+	@echo "  make nxjs-runtime"
+	@echo "                   Build ../nxjs-source and overlay nxjs.nro into node_modules"
 	@echo "  make build       esbuild bundle (depends on sync-runtime)"
-	@echo "  make nro         Package $(NRO) (depends on build + current-json)"
+	@echo "  make nro         Package $(NRO) (depends on build + current-json + nxjs-runtime)"
 	@echo "  make sdmc        Build + mirror romfs/ to Citron SDMC"
 	@echo "  make mirror-only Mirror romfs/ to SDMC without rebuilding"
 	@echo "  make clean       Remove build/, runtime/, $(NRO)"

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-24T17:28:51Z",
+  "generated": "2026-06-25T12:23:42Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -332,7 +332,35 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 20899462
+      "sizeBytes": 24281241
+    },
+    {
+      "id": "com.natureglass.webglconformtest",
+      "name": "WebGL Conformance Tests",
+      "version": "1.0.0",
+      "description": "Runs the full Khronos WebGL 1 and WebGL 2 conformance test suites in-app against the bridge's GL implementation.",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "B"
+      },
+      "sizeBytes": 8828055
     },
     {
       "id": "com.natureglass.webglreport",
@@ -358,7 +386,7 @@
       "buttonMapping": {
         "exit": "B"
       },
-      "sizeBytes": 166619
+      "sizeBytes": 52402
     }
   ],
   "community": [

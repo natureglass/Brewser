@@ -726,7 +726,7 @@ interface RawCatalogEntry {
 	id: string;
 	name: string;
 	description?: string;
-	logo: string;
+	logo?: string;
 	entry: string;
 	version?: string;
 	license?: string;
@@ -790,8 +790,9 @@ export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry
 		// entry file is still absent. If the logo file isn't on disk
 		// (older sync, fetch failed, no logo specified) we fall back
 		// to the generic placeholder — same as before this change.
-		const logoRel = stripLeadingSlashes(e.logo);
-		const hasLogo = appFileExists(`${appRoot}apps/${group}/${e.id}/${logoRel}`);
+		const logoRel = typeof e.logo === 'string' ? stripLeadingSlashes(e.logo) : '';
+		const hasLogo = logoRel !== ''
+			&& appFileExists(`${appRoot}apps/${group}/${e.id}/${logoRel}`);
 		const logo = hasLogo
 			? `brewser://apps/${group}/${e.id}/${logoRel}`
 			: MISSING_APP_LOGO_URL;
@@ -885,8 +886,9 @@ function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry
 			!!e && typeof e === 'object'
 			&& typeof (e as RawCatalogEntry).id === 'string'
 			&& typeof (e as RawCatalogEntry).name === 'string'
-			&& typeof (e as RawCatalogEntry).logo === 'string'
 			&& typeof (e as RawCatalogEntry).entry === 'string'
+			&& (typeof (e as RawCatalogEntry).logo === 'string'
+				|| typeof (e as RawCatalogEntry).logo === 'undefined')
 			&& (typeof (e as RawCatalogEntry).description === 'string'
 				|| typeof (e as RawCatalogEntry).description === 'undefined'),
 		);
