@@ -5,7 +5,7 @@
   "description": "Switch homebrew browser shell built on @switch-web/runtime. Currently a minimal scaffold.",
   "scripts": {
     "build": "esbuild --bundle --sourcemap --sources-content=false --target=es2022 --format=esm --outdir=build src/main.ts",
-    "nro": "node scripts/build-icon.mjs && node scripts/stage-main.mjs && nxjs-nro && node scripts/unstage-main.mjs",
+    "nro": "node scripts/build-icon.mjs && node scripts/stage-main.mjs && nxjs-nro --fat && node scripts/unstage-main.mjs",
     "nsp": "nxjs-nsp",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "sync-runtime": "node scripts/sync-runtime.mjs",
@@ -17,13 +17,13 @@
     "email": "alexdaskalakis@hotmail.com"
   },
   "dependencies": {
-    "@switch-web/runtime": "file:./runtime",
+    "@switch-web/runtime": "link:./runtime",
     "css-tree": "^3.2.1"
   },
   "devDependencies": {
-    "@nx.js/nro": "^0.0.70",
-    "@nx.js/nsp": "^0.0.70",
-    "@nx.js/runtime": "^0.0.70",
+    "@nx.js/nro": "link:../nxjs-source-v8/packages/nro",
+    "@nx.js/nsp": "link:../nxjs-source-v8/packages/nsp",
+    "@nx.js/runtime": "link:../nxjs-source-v8/packages/runtime",
     "@types/css-tree": "^2.3.11",
     "esbuild": "^0.27.3"
   },

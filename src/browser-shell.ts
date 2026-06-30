@@ -142,6 +142,7 @@ import { KeyboardOverlay, setKeyboardRepaintDriver } from '@switch-web/runtime';
 import { installPageTouchForwarder } from '@switch-web/runtime';
 import {
 	installPageMouseForwarder,
+	paintCursorOverlay,
 	setCursorIdleMs,
 } from '@switch-web/runtime';
 import { clearAppButtonOverlay, setAppButtonOverlay, setButtonMapping } from '@switch-web/runtime';
@@ -156,7 +157,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
 import { BrowserPermissionPolicy } from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { DEFAULT_CONFIG, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { type BrowserConfig, DEFAULT_CONFIG, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -173,6 +174,21 @@ import { loadCursorRegistry } from '@switch-web/runtime';
  *     (to clear the keyboard pixels from the canvas).
  *   - **L + R + Minus** held ~1s → exit the shell.
  */
+interface SplashHandle {
+	/** Resolves once the fade-out has completed (alpha 1 reached) and
+	 * the splash rAF loop has self-terminated. Caller awaits this
+	 * after `beginFade()` before calling the warm-cache `repaintAll()`
+	 * that paints the home page on top — guarantees the splash's last
+	 * frame is fully black, so the home-paint replaces black with
+	 * content (no flash of black between splash-fade-end and home-
+	 * paint). */
+	finishedFading: Promise<void>;
+	/** Flips the splash into the fade-out phase. Idempotent. If
+	 * `splashFadeMs <= 0`, jumps straight to `done` and resolves
+	 * `finishedFading` immediately. */
+	beginFade(): void;
+}
+
 export class BrowserShell {
 	private readonly policy: BrowserPermissionPolicy;
 	private readonly profile: BrowserProfile;
@@ -197,6 +213,15 @@ export class BrowserShell {
 	 * Phase 5 of the migration extracted this so headless app NROs can
 	 * render a page without the brewser shell surface area. */
 	private readonly session: WebPageSession;
+	/** Synchronous config snapshot captured in the constructor so `run()`
+	 * can hoist the boot-splash trigger to its first statement WITHOUT
+	 * an awaiting `loadConfig` call beforehand. The splash's first paint
+	 * MUST be reachable with no pre-paint await — the whole bug being
+	 * fixed is "splash awaits image load before painting and the parallel
+	 * navigate's synchronous grid-build takes the JS thread first". A
+	 * synchronous `loadConfig` (Switch.readFileSync) is fine here; an
+	 * async one would reintroduce the same bug. */
+	private readonly startupConfig: BrowserConfig;
 	/** Live-DOM cache-build budget for external (http(s)) pages. Stored
 	 * here so `onPageStarted` can re-apply it on each WWW navigation
 	 * (internal `brewser://` pages get a separate "build everything in
@@ -416,7 +441,14 @@ export class BrowserShell {
 		// the user's `maxHistory` cap (loadConfig falls back to DEFAULT_CONFIG
 		// on first run before seedRomfs has copied the romfs default in;
 		// either way maxHistory ends up at the same value).
-		const startupConfig = loadConfig(this.profile.appRoot);
+		//
+		// Also stashed on `this` so `run()` can hoist `startBootSplash`
+		// to its first statement (the splash needs `showSplash` /
+		// `splashMinMs` / `splashFadeMs` BEFORE any awaiting step;
+		// re-doing `loadConfig` from `run()` would be sync too but
+		// stashing avoids the double read and makes the splash's "no
+		// pre-paint await" contract explicit at the class boundary).
+		const startupConfig = this.startupConfig = loadConfig(this.profile.appRoot);
 		// Wire the user-editable joycon button mapping. Empty values in
 		// `config.json buttonMapping` fall through to engine defaults
 		// (A=leftClick, B=rightClick, X=forward, Y=reload,
@@ -738,6 +770,20 @@ export class BrowserShell {
 	}
 
 	async run(): Promise<void> {
+		// Boot splash: HOISTED to the first statement of run() so its
+		// synchronous first paint commits to canvas->data BEFORE any of
+		// the awaiting setup work below (seedRomfs, 8× loadHtml*,
+		// modal/toolbar parses, navigateTo + grid build) takes the JS
+		// thread. Reads `this.startupConfig` (sync-captured in the
+		// constructor) so no awaiting `loadConfig` precedes the paint.
+		// `startBootSplash`'s first `rafCallback()` runs synchronously
+		// inside its own body — see its contract comment.
+		const splashHandle: SplashHandle | null = this.startupConfig.showSplash
+			? this.startBootSplash(
+					this.startupConfig.splashMinMs,
+					this.startupConfig.splashFadeMs,
+				)
+			: null;
 		this.webView.initialize();
 		// Touch listener must be installed after the WebView has touched up
 		// the canvas; it stays installed for the whole shell lifetime. It
@@ -895,40 +941,38 @@ export class BrowserShell {
 		void probeNetwork().then(stashNetworkStatus);
 		setInterval(() => { void probeNetwork().then(stashNetworkStatus); }, 60_000);
 
-		// Boot splash + home navigation, parallelised.
+		// Home navigation + fade gating.
 		//
-		// Strategy: kick off `navigateTo(home)` BEFORE running the splash
-		// so its (slow on cold-cache Citron) fetch + parse + live-DOM
-		// build + first repaintAll happens UNDER the splash. Critically,
-		// the navigate's terminal `repaintAll` is NOT suppressed — letting
-		// it run is what builds the live-DOM cache. While it's running
-		// (synchronous, can be 1-2 s on the home grid), the JS thread is
-		// busy and the C-side main loop is blocked too, so Citron keeps
-		// presenting the LAST presented frame — which is the splash from
-		// our paintSplash tick. The user sees a "frozen splash" for the
-		// duration of the cache build instead of black; visually
-		// indistinguishable from the splash dwell. Once JS unblocks, our
-		// next paintSplash tick overwrites canvas->data with the splash
-		// again (the home page pixels the build just wrote are discarded
-		// from canvas->data, but the live-DOM cache stays warm).
+		// The splash is ALREADY running (hoisted to run()-entry above)
+		// and has been painting its frame every rAF tick from the
+		// instant Skia was initialized — covering the entire span
+		// above (seedRomfs, 8× loadHtml*, modal/toolbar parses, applet
+		// warning, etc.). Now we just need to start the home navigate,
+		// hold the splash through the dwell minimum AND the navigate's
+		// terminal repaintAll cache build, then fade and hand off.
 		//
-		// After dwell + fade, the explicit `repaintAll` below is a fast
-		// cache-blit (no rebuild) — home page appears immediately, no
-		// black gap.
+		// Fade gating: `await Promise.all([navPromise, dwellMin])`
+		// guarantees BOTH (a) the home live-DOM cache is built (so
+		// `repaintAll()` after the fade is a fast cache-blit, not a
+		// rebuild) AND (b) the user has seen the splash for at least
+		// `splashMinMs`. The fade's final frame paints alpha=1 black,
+		// then `repaintAll` blits home on top — no flash of black
+		// between fade-end and home-paint (the splash rAF self-
+		// terminates on `phase === 'done'`, so it won't repaint the
+		// black layer after `repaintAll` lands).
 		//
-		// `showSplash: false` bypasses everything for fastest boot. C-side
-		// `nx_render_loading_image` may still flash loading.jpg briefly
-		// during init; delete `romfs:/shell/assets/loading.jpg` to
-		// suppress that too.
-		if (shellConfig.showSplash) {
+		// `showSplash: false` bypasses all of the above for fastest
+		// boot (no rAF cost, no fade). C-side
+		// `nx_render_loading_image` (if present in the runtime build)
+		// may still flash loading.jpg briefly during init.
+		if (splashHandle) {
 			const navPromise = this.navigateTo(DEFAULT_HOME_URL);
-			await this.runBootSplashFade(shellConfig.splashMinMs, shellConfig.splashFadeMs);
-			// Wait for navigate to finish in case its repaintAll hasn't
-			// fired yet (rare — usually completes mid-dwell). If it fires
-			// here, the user sees a brief frozen-fade-end before the
-			// repaintAll below paints home. Better than the black gap
-			// from before.
-			await navPromise;
+			const dwellMin = new Promise<void>((resolve) =>
+				setTimeout(resolve, this.startupConfig.splashMinMs),
+			);
+			await Promise.all([navPromise, dwellMin]);
+			splashHandle.beginFade();
+			await splashHandle.finishedFading;
 			// Warm-cache repaint. Should be ~10 ms (cache blit only).
 			this.repaintAll();
 		} else {
@@ -1091,16 +1135,25 @@ export class BrowserShell {
 							this.renderChrome();
 							return true;
 						}
-						// Cursor moved or button edge fired. The cursor
-						// is composited at C-side present time
-						// (`composite_cursor_overlay` in main.c) using
-						// the bitmap + (x, y) `tickMouseInput` just
-						// pushed via `setCursorOverlayPosition`. No JS
-						// paint or full repaint is needed here —
-						// keeping the loop active is the only reason
-						// we still return `true`, so the next vsync
-						// memcpy picks up the new position.
+						// Cursor moved or button edge fired. V8 migration:
+						// the QuickJS-era engine compositor that read the
+						// cursor's (x, y) at present time is gone
+						// (NXJS_PATCHES_NEEDED.md #4 dropped); the cursor
+						// is now drawn Skia-side as the last step of
+						// `repaintContent` via `paintCursorOverlay`. So
+						// a cursor move REQUIRES a content repaint — both
+						// to render the cursor at the new position AND to
+						// restore the area under the prior position from
+						// the live-cache blit (the cursor was destructive
+						// when drawn; without the redraw the prior
+						// position would leave a trail). repaintContent's
+						// steady-state cost on an idle page is a single
+						// cache `drawImage` (~1-3 ms per the
+						// repaintContent JSDoc), cheap enough to run on
+						// every cursor-move tick. Animated cursors also
+						// need this every tick so the spinner advances.
 						if (mouseTick.cursorChanged) {
+							this.repaintContent();
 							return true;
 						}
 						return false;
@@ -1752,10 +1805,19 @@ export class BrowserShell {
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
 		this.repaintContentInner(ctx, canvas, opts);
-		// No cursor work needed — the engine composites the overlay onto
-		// `display_buffer` at present time, so what we just painted into
-		// canvas->data is exactly what the user sees underneath the
-		// cursor.
+		// V8 migration: the QuickJS-era native cursor compositor
+		// (`composite_cursor_overlay` in nxjs-source/source/main.c) was
+		// dropped (NXJS_PATCHES_NEEDED.md #4), so the cursor has no
+		// engine-side draw path. Paint it Skia-side here as the LAST
+		// step of every screen-paint exit, so the cursor overlays the
+		// page content + toolbar chrome + every modal/picker/keyboard
+		// overlay. The next `repaintContent` tick restores the area
+		// under the prior cursor position from the live-cache blit,
+		// preventing cursor trails. `paintCursorOverlay` honors
+		// `cursor.visible` and early-returns if the native binding ever
+		// ships (so #4 re-port would resume the fast path without
+		// rewiring here).
+		paintCursorOverlay(ctx, canvas);
 	}
 
 	private repaintContentInner(
@@ -1871,6 +1933,16 @@ export class BrowserShell {
 			&& viewport.height === this.lastRepaintedViewportH
 			&& getLiveTreeVersion() === this.lastRepaintedLiveVersion
 			&& isLiveCacheReady()
+			// (Was a `!isCursorVisible()` clause here gating against the
+			// runtime cursor's trail bug — see git history. Removed now
+			// that the engine cursor compositor ships via
+			// NXJS_PATCHES_NEEDED.md #4 re-port: cursor pixels live on
+			// the EGL back-buffer SkSurface only, not on `s_canvas`, so
+			// the fast path skipping `paintLiveOverlay`'s cache blit
+			// has no cursor-trail risk to defend against. Removing the
+			// gate restores the ~5-7 ms/frame the slow-path force was
+			// costing on rAF/canvas-activity pages — Three.js demos
+			// stay at 60 fps during cursor-active windows again.)
 			// 2026-06-20 speedtest fps fix: ALLOW the fast path even when
 			// the page has scroll overlays (`overflow: auto/scroll`). The
 			// fast path now calls `paintScrollOverlaysToScreen` with the
@@ -3688,94 +3760,148 @@ export class BrowserShell {
 		}
 	}
 
-	/** Hold the boot splash for `splashMinMs` of visible JS-side render
-	 * time, then fade to black over `splashFadeMs` before the home page
-	 * paints.
+	/** Start the boot splash IMMEDIATELY with a synchronous first paint
+	 * and return a handle the caller drives.
 	 *
-	 * Painting uses `requestAnimationFrame` rather than a `setTimeout`
-	 * loop. Critical for boot: the navigate's terminal `repaintAll`
-	 * (writing the home page to `canvas->data`) runs DURING
-	 * `nx_process_pending_jobs` on the C side — but the rAF runner is
-	 * invoked from the runtime's `$.onFrame` callback, which runs AFTER
-	 * `nx_process_pending_jobs` and BEFORE the framebuffer present each
-	 * main-loop iteration. So even when the navigate overwrites
-	 * canvas->data with home pixels in the same iteration, our rAF
-	 * callback paints splash on top before `framebufferEnd` — no flash.
+	 * The whole bug being fixed: the old `runBootSplashFade` did
+	 * `await loadOptionalImage(...)` BEFORE its first `rafCallback()`
+	 * paint. That yield gave the parallel navigate's synchronous
+	 * grid-build (1-2 s on the home grid) the JS thread first — so the
+	 * splash's first paint was racing the build it was supposed to
+	 * cover, and losing. This refactor makes the first paint
+	 * SYNCHRONOUS (just a black backdrop — no image needed for the
+	 * first frame; the rAF callback null-guards `if (splashImg && ...)`)
+	 * and fires `loadOptionalImage` fire-and-forget so the image lands
+	 * a frame or two later without blocking anything.
 	 *
-	 * `splashMinMs` measures from when this function STARTS, not from
-	 * boot — that's the only stable reference point, since boot-side
-	 * time varies wildly with seedRomfs + config parse + HTML parse
-	 * I/O on cold-cache emulator runs.
+	 * CRITICAL CONTRACT: NO `await` between the entry of this method
+	 * and the first `rafCallback()` invocation. Re-introducing one
+	 * yields the JS thread before the splash paint commits to
+	 * `canvas->data`, and the parallel navigate's sync chunk paints
+	 * black or grid pixels first → the original bug returns.
 	 *
-	 * `splashFadeMs <= 0` skips the fade (instant cut from splash to
-	 * home). */
-	private async runBootSplashFade(splashMinMs: number, splashFadeMs: number): Promise<void> {
-		// Allocate canvas → `nx_framebuffer_init` fires → C-side blits
-		// stashed splash bytes into canvas->data.
+	 * Painting uses `this.nativeRaf` — the nxjs-runtime rAF queue
+	 * drained by `$.onFrame` every main-loop iteration BEFORE
+	 * framebuffer present. The brewser-runtime rAF (installed by
+	 * `ensureRAFInstalled` during the parallel navigate) routes into a
+	 * different queue that isn't drained until the controller-input
+	 * loop starts — AFTER the splash — which is why the constructor
+	 * captures `this.nativeRaf` at class-init time, before any page
+	 * code can swap the global.
+	 *
+	 * Returns a `SplashHandle`: `beginFade()` flips into the fade
+	 * phase; `finishedFading` resolves once the fade overlay reaches
+	 * alpha 1 (or immediately if `splashFadeMs <= 0`). Caller gates
+	 * the fade on BOTH `navigateTo` completing AND `splashMinMs`
+	 * dwell — see `run()` for the wiring.
+	 *
+	 * `splashFadeMs <= 0` skips the fade entirely (instant cut). */
+	private startBootSplash(splashMinMs: number, splashFadeMs: number): SplashHandle {
+		void splashMinMs; // Caller enforces dwell via Promise.all; documented in signature.
+		// Allocate canvas → `nx_framebuffer_init` fires → Skia screen
+		// surface initialized. This is the trigger for the engine-side
+		// `[skia] GPU screen surface ... ready` log; nothing earlier in
+		// the runtime invokes the screen's `getContext`, so Skia is
+		// uninitialized until this line.
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
-		const splash = await loadOptionalImage('romfs:/shell/assets/loading.jpg');
-		const si = splash as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number } | null;
-		const lw = si ? (si.naturalWidth || si.width || 0) : 0;
-		const lh = si ? (si.naturalHeight || si.height || 0) : 0;
-		const dx = lw > 0 ? Math.round((canvas.width - lw) / 2) : 0;
-		const dy = lh > 0 ? Math.round((canvas.height - lh) / 2) : 0;
 
-		// Phase state driven by the async timing flow below; consulted by
-		// the rAF callback to decide what to paint each frame.
+		// Per-frame paint state. The image starts null and gets filled
+		// in by the fire-and-forget `loadOptionalImage` continuation
+		// below; the rAF callback null-guards the `drawImage` so the
+		// first frame (and any frame before the image lands) paints a
+		// pure-black backdrop.
+		let splashImg: unknown = null;
+		let lw = 0;
+		let lh = 0;
+		let dx = 0;
+		let dy = 0;
+
 		type Phase = 'dwell' | 'fade' | 'done';
 		let phase: Phase = 'dwell';
 		let fadeStart = 0;
+		let resolveFinished: (() => void) | null = null;
+		const finishedFading = new Promise<void>((resolve) => {
+			resolveFinished = resolve;
+		});
 
-		// Capture the nxjs-runtime rAF reference locally — `this.nativeRaf`
-		// was set in the constructor BEFORE brewser-runtime's
-		// `ensureRAFInstalled` (fires during the navigate that's running
-		// in parallel with this splash) replaced the global. Using the
-		// global directly here would queue into the brewser-runtime
-		// queue, which isn't drained until the controller-input loop
-		// starts — i.e. AFTER the splash. With `this.nativeRaf`, our
-		// rAF lands in the nxjs queue that `$.onFrame` drains every
-		// main-loop iteration.
 		const raf = this.nativeRaf;
-
 		const rafCallback = (): void => {
 			if (phase === 'done') return;
-			// Splash backdrop.
 			ctx.fillStyle = '#000';
 			ctx.fillRect(0, 0, canvas.width, canvas.height);
-			if (splash && lw > 0 && lh > 0) {
-				ctx.drawImage(splash, dx, dy, lw, lh);
+			if (splashImg && lw > 0 && lh > 0) {
+				ctx.drawImage(splashImg as CanvasImageSource, dx, dy, lw, lh);
 			}
-			// Fade-out overlay.
 			if (phase === 'fade') {
 				const dt = Date.now() - fadeStart;
-				const t = dt >= splashFadeMs ? 1 : dt / splashFadeMs;
+				const t = splashFadeMs > 0 ? Math.min(1, dt / splashFadeMs) : 1;
 				if (t > 0) {
 					ctx.fillStyle = `rgba(0,0,0,${t})`;
 					ctx.fillRect(0, 0, canvas.width, canvas.height);
 				}
+				if (dt >= splashFadeMs) {
+					phase = 'done';
+					if (resolveFinished) resolveFinished();
+					return; // don't re-arm
+				}
 			}
-			// Re-arm. The runtime's rAF is one-shot, so we need to keep
-			// rescheduling until phase flips to 'done'.
 			raf(rafCallback);
 		};
 
-		// Initial synchronous splash paint so the FIRST present after this
-		// (which may happen before any rAF fires, e.g. if `loadOptionalImage`
-		// resolved synchronously) shows a real splash, not the C-side
-		// blit's bytes that the navigate's repaintAll might overwrite first.
+		// SYNCHRONOUS first paint — NO `await` precedes this line. The
+		// frame committed here is what the next C-side `framebufferEnd`
+		// presents, covering the entire post-Skia interval before
+		// `seedRomfs` / `loadHtml*` / `navigateTo` / the grid build can
+		// take the JS thread.
 		rafCallback();
 
-		// Dwell — async timer, no paint here (rAF handles painting).
-		await new Promise<void>((resolve) => setTimeout(resolve, splashMinMs));
-
-		if (splashFadeMs > 0) {
-			phase = 'fade';
-			fadeStart = Date.now();
-			await new Promise<void>((resolve) => setTimeout(resolve, splashFadeMs));
+		// Boot-timing diagnostic: emit the JS-side splash-first-paint
+		// timestamp. Pairs with the C-side `[skia]` log's
+		// `(+%llu ms since t0)` so the user can compute the post-Skia
+		// → first-splash-paint delta. Should be <1 frame (~16 ms) on
+		// any working build; if it's seconds, the synchronous-first-
+		// paint contract regressed. Reads the boot epoch stashed by
+		// `main.ts` very early — falls back to a `splash-first-paint`
+		// log without timing if the global isn't there (shouldn't
+		// happen in shipping builds; harmless if it does).
+		const bootT0 = (globalThis as { __bootT0?: number }).__bootT0;
+		if (typeof bootT0 === 'number') {
+			console.debug(`[boot] splash-first-paint (+${Date.now() - bootT0}ms since js-t0)`);
+		} else {
+			console.debug('[boot] splash-first-paint');
 		}
 
-		phase = 'done';
+		// Async image load — fire and forget. The rAF callback picks
+		// up the image automatically once these vars are populated;
+		// until then it paints the black backdrop alone (which is what
+		// the user sees for the first few frames, then the logo fades
+		// in via the next rAF tick).
+		void loadOptionalImage('romfs:/shell/assets/loading.jpg').then((img) => {
+			if (!img) return;
+			const si = img as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number };
+			const w = si.naturalWidth || si.width || 0;
+			const h = si.naturalHeight || si.height || 0;
+			if (w <= 0 || h <= 0) return;
+			lw = w;
+			lh = h;
+			dx = Math.round((canvas.width - lw) / 2);
+			dy = Math.round((canvas.height - lh) / 2);
+			splashImg = img;
+		});
+
+		const beginFade = (): void => {
+			if (phase !== 'dwell') return;
+			if (splashFadeMs <= 0) {
+				phase = 'done';
+				if (resolveFinished) resolveFinished();
+				return;
+			}
+			phase = 'fade';
+			fadeStart = Date.now();
+		};
+
+		return { finishedFading, beginFade };
 	}
 
 	/**

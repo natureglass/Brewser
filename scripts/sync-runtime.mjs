@@ -12,10 +12,14 @@
 // dist + .d.ts artifacts.
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const runtimeSrc = join(root, '..', 'brewser-runtime');
+const runtimeSrc = process.env.BREWSER_RUNTIME_DIR
+	? (isAbsolute(process.env.BREWSER_RUNTIME_DIR)
+		? process.env.BREWSER_RUNTIME_DIR
+		: resolve(root, process.env.BREWSER_RUNTIME_DIR))
+	: join(root, '..', 'brewser-runtime');
 const runtimeDst = join(root, 'runtime');
 
 // When invoked as the `postinstall` npm lifecycle hook (added so fresh

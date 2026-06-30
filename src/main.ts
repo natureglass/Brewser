@@ -1,6 +1,18 @@
 import { installPolyfills } from '@switch-web/runtime';
 import { BrowserShell } from './browser-shell.js';
 
+// Boot timing anchor for the boot-splash residual diagnostic. Captured at
+// the very top of the JS entry — first line of execution after import
+// resolution — so the splash's `[boot] splash-first-paint (+Nms since
+// js-t0)` log can quantify the JS-side post-import-to-first-paint
+// interval. Pairs with the C-side `[boot] t0` + `[skia] GPU screen
+// surface ready (+Nms since t0)` logs to give the user T_Skia (the
+// pre-Skia black ceiling = engine boot + V8 init + module eval, the
+// part that needs a framebuffer-level patch to cover) and T_splash
+// (post-Skia interval, should be sub-frame with the splash hoist fix).
+(globalThis as { __bootT0?: number }).__bootT0 = Date.now();
+console.debug(`[boot] js-t0 = ${Date.now()}`);
+
 async function main() {
 	// Shell is constructed BEFORE the polyfill install block so the
 	// storage drivers receive its profile + currentPageUrl closure —
