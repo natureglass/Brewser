@@ -19,7 +19,7 @@
   "navDebug": false,
   "swbImgDebug": false,
   "showSplash": true,
-  "splashMinMs": 1500,
+  "splashMinMs": 500,
   "splashFadeMs": 250,
   "local": "dd/mm/yyyy",
   "homeSection": "featured",
