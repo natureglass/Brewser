@@ -13,6 +13,24 @@ import { BrowserShell } from './browser-shell.js';
 (globalThis as { __bootT0?: number }).__bootT0 = Date.now();
 console.debug(`[boot] js-t0 = ${Date.now()}`);
 
+// Suppress the nx.js runtime's default "PLUS → $.exit()" behavior so
+// Brewser's own action-bus can handle PLUS according to its buttonMapping
+// (e.g. an app whose `manifest.json buttonMapping` says `"exit": "PLUS"`
+// wants the exit action to walk one nav step back to the launcher, NOT
+// hard-kill the whole Brewser process). Without this, the runtime's
+// `$.onFrame(plusDown => dispatchEvent(beforeunload) → $.exit())` handler
+// (packages/runtime/src/index.ts) always wins because it fires BEFORE
+// the shell's per-tick action-bus dispatch — the process ends before
+// browser-shell's `case 'exit'` even runs.
+//
+// preventDefault is idempotent for `beforeunload`; page scripts that
+// register their own listeners still see the event and can do their own
+// cleanup. This wrapper guarantees `defaultPrevented=true` so the
+// runtime doesn't self-exit, and Brewser's shell decides on context.
+globalThis.addEventListener('beforeunload', (event) => {
+	event.preventDefault();
+});
+
 async function main() {
 	// Shell is constructed BEFORE the polyfill install block so the
 	// storage drivers receive its profile + currentPageUrl closure —

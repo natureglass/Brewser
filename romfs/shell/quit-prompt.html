@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Quit Brewser?</title>
+  <link rel="stylesheet" href="brewser://assets/main.css">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #0a0f1a;
+      color: #eaf2ff;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .quit-card {
+      width: 720px;
+      max-width: calc(100vw - 96px);
+      padding: 48px 56px 40px;
+      background: #14202d;
+      border: 1px solid #314672;
+      border-radius: 18px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 30px;
+      font-weight: 700;
+      margin: 0 0 16px;
+    }
+    p.lead {
+      color: #9bb1d6;
+      font-size: 16px;
+      margin: 0 0 34px;
+      line-height: 1.5;
+    }
+    .actions {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 220px;
+      padding: 16px 28px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 12px;
+      border: 1px solid #2f4d80;
+      cursor: pointer;
+      color: #eaf2ff;
+      background: #1f3a64;
+    }
+    button.yes {
+      background: #dc2626;
+      border-color: #ef4444;
+    }
+    button.no:focus,
+    button.yes:focus {
+      outline: 2px solid #60a5fa;
+      outline-offset: 2px;
+    }
+    .hint {
+      margin-top: 26px;
+      font-size: 13px;
+      color: #6b7c9a;
+    }
+  </style>
+</head>
+<body>
+  <div class="quit-card">
+    <h1>Quit Brewser?</h1>
+    <p class="lead">Do you really want to exit Brewser?</p>
+    <div class="actions">
+      <button class="no" id="quit-no" autofocus>No, stay</button>
+      <button class="yes" id="quit-yes">Yes, quit</button>
+    </div>
+    <div class="hint">Press A on the highlighted button, or B to cancel.</div>
+  </div>
+  <script>
+    (function () {
+      // Enter fullscreen-page mode so the browser toolbar is hidden.
+      try {
+        var reqFs = globalThis.__swbRequestFullscreenPage;
+        if (typeof reqFs === 'function') reqFs();
+      } catch (_) { /* swallow */ }
+
+      // Yes = hard-quit via nx.js's native exit.
+      var yesBtn = document.getElementById('quit-yes');
+      if (yesBtn) {
+        yesBtn.addEventListener('click', function () {
+          try {
+            if (typeof Switch !== 'undefined' && typeof Switch.exit === 'function') {
+              Switch.exit();
+            }
+          } catch (_) { /* swallow */ }
+        });
+      }
+      // No = walk one nav step back via the shell's silent-dismiss API,
+      // which combines fullscreen-page mode-flip and goBack without the
+      // intermediate paint that otherwise briefly showed the toolbar on
+      // top of the still-visible prompt. Falls back to the regular
+      // __swbNavigateBack if the silent variant isn't exposed by the
+      // running shell build.
+      var noBtn = document.getElementById('quit-no');
+      if (noBtn) {
+        noBtn.addEventListener('click', function () {
+          try {
+            var back = globalThis.__swbNavigateBackSilent ||
+                       globalThis.__swbNavigateBack;
+            if (typeof back === 'function') back();
+          } catch (_) { /* swallow */ }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -738,6 +738,29 @@ export class BrowserShell {
 			if (this.mode !== 'normal') await this.exitFullscreen();
 			await this.runNavigation(() => this.navigation.goBack());
 		};
+		// Silent variant used by the quit-prompt page (romfs/shell/quit-
+		// prompt.html) when the user picks "No, stay". Combines mode-flip
+		// and goBack without the intermediate `repaintAll` that
+		// exitFullscreen() does — the intermediate paint made the toolbar
+		// briefly appear on top of the (still-visible) quit prompt before
+		// the navigation swapped in the previous page, which the user
+		// perceived as the toolbar "popping up and pushing everything
+		// down." Skipping the intermediate paint means the very next
+		// visible frame is the previous page in normal mode, no flicker.
+		(globalThis as { __swbNavigateBackSilent?: () => Promise<void> })
+			.__swbNavigateBackSilent = async () => {
+			if (this.mode === 'fullscreen-page') {
+				const scr = nxScreen();
+				setCssViewport(scr.width, Math.max(1, scr.height - this.chromeHeight));
+				this.setMode('normal');
+				this.clampScroll();
+				// intentional: NO repaintAll here — the goBack below
+				// triggers a fresh repaint at the previous page.
+			} else if (this.mode !== 'normal') {
+				await this.exitFullscreen();
+			}
+			await this.runNavigation(() => this.navigation.goBack());
+		};
 		// Page-script-callable reload — exits any fullscreen mode then
 		// re-runs the current navigation. Used by updates-modal.js after
 		// it writes a fresh `catalogue.json` so the apps grid re-renders
@@ -1173,6 +1196,14 @@ export class BrowserShell {
 						// at all. `close()` dispatches the spec `close`
 						// event so page listeners still observe the
 						// dismissal.
+						// If our confirm-to-quit modal is already open, PLUS is a
+						// no-op. Without this guard, the closeTopmostModalModeDialog
+						// gate below would close the modal on rising-edge #1 and the
+						// next PLUS press would re-open it — user perceives a rapid
+						// close/reopen thrash. B still cancels (via the back-case
+						// closeTopmostModalModeDialog gate); the "No, stay" click
+						// still works.
+						if (document.getElementById("__swb_quit_prompt")) break;
 						if (closeTopmostModalModeDialog()) break;
 						// Context-aware. While an app page is active (URL
 						// under `brewser://apps/<group>/<id>/...`), "exit"
@@ -1185,7 +1216,16 @@ export class BrowserShell {
 							await this.runNavigation(() => this.navigation.goBack());
 							break;
 						}
-						return;
+						// Shell context: inject a native <dialog> modal into the
+						// current page live-DOM instead of navigating away. The
+						// runtime paintModalOverlay paints a spec-shaped 55%-dark
+						// backdrop over the page viewport on showModal(), so the
+						// underlying launcher / home / settings page stays visible-
+						// dimmed underneath. Yes -> Switch.exit(); No -> dialog.close()
+						// which also happens on the standard B action via
+						// closeTopmostModalModeDialog at the top of this case.
+						this.openQuitConfirmModal();
+						break;
 					case 'address-bar':
 						await this.promptAndNavigate();
 						break;
@@ -1370,6 +1410,79 @@ export class BrowserShell {
 		const title = this.navigation.currentTitle || url;
 		this.bookmarksStore.toggle({ url, title, addedAt: Date.now() });
 		this.renderChrome();
+	}
+
+	/** Shell-context PLUS → confirm-to-quit modal.
+	 *
+	 * Injects a native `<dialog>` into the current page's live-DOM and
+	 * calls `showModal()`. The runtime's `paintModalOverlay`
+	 * (live-overlay.ts:3028) paints a spec-shaped `rgba(8, 13, 26, 0.55)`
+	 * backdrop over the page viewport whenever a dialog is in modal-mode,
+	 * so the underlying launcher/home/settings page stays visible-dimmed
+	 * underneath — which the page-navigation approach couldn't do
+	 * (`repaintContentInner` black-fills before painting a new page, so
+	 * there's no previous-page pixels to peek through).
+	 *
+	 * Buttons: `Yes, quit` → `Switch.exit()` (bypasses the `beforeunload`
+	 * suppressor in main.ts since it's direct, not via the runtime's
+	 * `onFrame` handler). `No, stay` → `dialog.close()` which fires the
+	 * spec `close` event; the listener removes the injected node from
+	 * the DOM so a subsequent PLUS re-injects fresh. B (rightClick /
+	 * `back`) closes it via the standard `closeTopmostModalModeDialog`
+	 * gate that already sits at the top of the `case 'exit'` and
+	 * `case 'back'` branches. A single guarded-by-id prevents stacking. */
+	private openQuitConfirmModal(): void {
+		if (document.getElementById('__swb_quit_prompt')) return;
+		const dialog = document.createElement('dialog') as unknown as HTMLDialogElement;
+		dialog.id = '__swb_quit_prompt';
+		// Make the dialog itself fill the viewport with a transparent
+		// background, then flex-center the card inside. CSS `transform`
+		// isn't reliably applied by the runtime's live layout engine, so
+		// classic 50%/50% + translate(-50%, -50%) centering left the
+		// modal in the top-left. Flexbox on the dialog is honored (both
+		// spectraplay + several shell pages use it) so this is the
+		// simpler + more robust centering path.
+		dialog.setAttribute('style',
+			'position:fixed;top:0;left:0;width:100vw;height:100vh;' +
+			'margin:0;padding:0;background:transparent;border:none;' +
+			'color:#eaf2ff;display:flex;align-items:center;' +
+			'justify-content:center;');
+		dialog.innerHTML =
+			'<div style="width:640px;padding:44px 48px 36px;background:#14202d;' +
+			'border:1px solid #314672;border-radius:16px;text-align:center;' +
+			'box-shadow:0 24px 72px rgba(0,0,0,0.6);">' +
+			'<h1 style="font-size:28px;font-weight:700;margin:0 0 14px;">Quit Brewser?</h1>' +
+			'<p style="color:#9bb1d6;font-size:15px;margin:0 0 30px;line-height:1.5;">' +
+			'Do you really want to exit Brewser?</p>' +
+			'<div style="display:flex;gap:18px;justify-content:center;">' +
+			'<button id="__swb_quit_no" autofocus style="min-width:200px;padding:14px 24px;' +
+			'font-size:15px;font-weight:600;border-radius:10px;border:1px solid #2f4d80;' +
+			'background:#1f3a64;color:#eaf2ff;cursor:pointer;">No, stay</button>' +
+			'<button id="__swb_quit_yes" style="min-width:200px;padding:14px 24px;' +
+			'font-size:15px;font-weight:600;border-radius:10px;border:1px solid #ef4444;' +
+			'background:#dc2626;color:#eaf2ff;cursor:pointer;">Yes, quit</button>' +
+			'</div>' +
+			'<div style="margin-top:22px;font-size:12px;color:#6b7c9a;">' +
+			'Press A on the highlighted button, or B to cancel.</div>' +
+			'</div>';
+		document.body.appendChild(dialog);
+		const cleanup = () => {
+			try { dialog.parentNode?.removeChild(dialog); } catch (_) { /* swallow */ }
+		};
+		dialog.addEventListener('close', cleanup);
+		const yes = document.getElementById('__swb_quit_yes');
+		if (yes) yes.addEventListener('click', () => {
+			try {
+				const s = (globalThis as { Switch?: { exit?: () => void } }).Switch;
+				if (s && typeof s.exit === 'function') s.exit();
+			} catch (_) { /* swallow */ }
+		});
+		const no = document.getElementById('__swb_quit_no');
+		if (no) no.addEventListener('click', () => {
+			try { dialog.close(); } catch (_) { /* swallow */ }
+		});
+		try { dialog.showModal(); } catch (_) { /* swallow */ }
+		this.repaintAll();
 	}
 
 	private async promptAndNavigate(): Promise<void> {
