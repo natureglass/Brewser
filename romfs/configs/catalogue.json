@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-06-25T12:23:42Z",
+  "generated": "2026-07-02T16:28:50Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -26,9 +26,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 50488
+      "sizeBytes": 50491
     },
     {
       "id": "com.natureglass.playdock",
@@ -55,9 +55,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 8217
+      "sizeBytes": 8220
     },
     {
       "id": "com.natureglass.pvzge",
@@ -85,132 +85,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "GPL-3.0",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 1180370488
-    },
-    {
-      "id": "com.natureglass.spectraplay",
-      "name": "SpectraPlay",
-      "version": "1.0.0",
-      "description": "Enjoy music directly on your console with this media player.",
-      "logo": "assets/audioplayer_logo.png",
-      "entry": "index.html",
-      "category": "app",
-      "features": [
-        "audio",
-        "canvas",
-        "controller"
-      ],
-      "permissions": [
-        "network",
-        "storage"
-      ],
-      "compatibility": [
-        "switch"
-      ],
-      "allowed_origins": [],
-      "developer": "Alex Daskalakis",
-      "source": "https://github.com/natureglass/Brewser-apps",
-      "license": "MIT",
-      "data": [
-        "assets"
-      ],
-      "buttonMapping": {
-        "exit": "B"
-      },
-      "sizeBytes": 121247
-    },
-    {
-      "id": "com.natureglass.streamcast",
-      "name": "Streamcast - Twitch Steams",
-      "version": "1.0.0",
-      "description": "Scroll through Twitch videos directly on your console.",
-      "logo": "assets/twitch_logo.png",
-      "entry": "index.html",
-      "category": "app",
-      "features": [
-        "video",
-        "controller"
-      ],
-      "permissions": [
-        "network",
-        "storage"
-      ],
-      "compatibility": [
-        "switch"
-      ],
-      "allowed_origins": [
-        "https://itch.io"
-      ],
-      "developer": "Alex Daskalakis",
-      "source": "https://github.com/natureglass/Brewser-apps",
-      "license": "MIT",
-      "buttonMapping": {
-        "exit": "B"
-      },
-      "sizeBytes": 46036
-    }
-  ],
-  "experimental": [
-    {
-      "id": "com.natureglass.domhtmlcss",
-      "name": "DOM HTML CSS",
-      "version": "1.0.0",
-      "description": "An experimental app that demonstrates the use of DOM, HTML, and CSS in a Nintendo Switch homebrew web app.",
-      "logo": "assets/domhtmlcss_logo.png",
-      "entry": "index.html",
-      "category": "app",
-      "features": [
-        "webgl",
-        "webgl2",
-        "canvas",
-        "controller"
-      ],
-      "permissions": [
-        "storage"
-      ],
-      "compatibility": [
-        "switch",
-        "web"
-      ],
-      "allowed_origins": [],
-      "developer": "Alex Daskalakis",
-      "source": "https://github.com/natureglass/Brewser-apps",
-      "license": "MIT",
-      "buttonMapping": {
-        "exit": "B"
-      },
-      "sizeBytes": 22021140
-    },
-    {
-      "id": "com.natureglass.itchio",
-      "name": "itch.io Games",
-      "version": "1.0.0",
-      "description": "Browse newest browser-playable games from itch.io.",
-      "logo": "assets/itchio_logo.png",
-      "entry": "index.html",
-      "category": "app",
-      "features": [
-        "controller"
-      ],
-      "permissions": [
-        "network",
-        "storage"
-      ],
-      "compatibility": [
-        "switch"
-      ],
-      "allowed_origins": [
-        "https://itch.io"
-      ],
-      "developer": "Alex Daskalakis",
-      "source": "https://github.com/natureglass/Brewser-apps",
-      "license": "MIT",
-      "buttonMapping": {
-        "exit": "B"
-      },
-      "sizeBytes": 47824
+      "sizeBytes": 1180370491
     },
     {
       "id": "com.natureglass.sensors",
@@ -240,28 +117,60 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 71614
+      "sizeBytes": 71617
     },
     {
-      "id": "com.natureglass.speedtest",
-      "name": "Speed Test",
+      "id": "com.natureglass.spectraplay",
+      "name": "SpectraPlay",
       "version": "1.0.0",
-      "description": "Test your internet speed directly on your console.",
-      "logo": "assets/speedtest_logo.png",
+      "description": "Enjoy music directly on your console with this media player.",
+      "logo": "assets/audioplayer_logo.png",
       "entry": "index.html",
       "category": "app",
       "features": [
+        "audio",
         "canvas",
         "controller"
       ],
       "permissions": [
-        "network"
+        "network",
+        "storage"
       ],
       "compatibility": [
-        "switch",
-        "web"
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "data": [
+        "assets"
+      ],
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 121250
+    },
+    {
+      "id": "com.natureglass.streamcast",
+      "name": "Streamcast - Twitch Steams",
+      "version": "1.0.0",
+      "description": "Scroll through Twitch videos directly on your console.",
+      "logo": "assets/twitch_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "video",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
       ],
       "allowed_origins": [
         "https://itch.io"
@@ -270,9 +179,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 37415
+      "sizeBytes": 46039
     },
     {
       "id": "com.natureglass.webgl1threejsdemos",
@@ -300,9 +209,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 17359232
+      "sizeBytes": 17361177
     },
     {
       "id": "com.natureglass.webgl2threejsdemos",
@@ -330,15 +239,107 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 24281241
+      "sizeBytes": 24301040
+    }
+  ],
+  "experimental": [
+    {
+      "id": "com.natureglass.domhtmlcss",
+      "name": "DOM HTML CSS",
+      "version": "1.0.0",
+      "description": "An experimental app that demonstrates the use of DOM, HTML, and CSS in a Nintendo Switch homebrew web app.",
+      "logo": "assets/domhtmlcss_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 22021143
+    },
+    {
+      "id": "com.natureglass.itchio",
+      "name": "itch.io Games",
+      "version": "1.0.0",
+      "description": "Browse newest browser-playable games from itch.io.",
+      "logo": "assets/itchio_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [
+        "https://itch.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 47827
+    },
+    {
+      "id": "com.natureglass.speedtest",
+      "name": "Speed Test",
+      "version": "1.0.0",
+      "description": "Test your internet speed directly on your console.",
+      "logo": "assets/speedtest_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "network"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://itch.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 37418
     },
     {
       "id": "com.natureglass.webglconformtest",
       "name": "WebGL Conformance Tests",
       "version": "1.0.0",
       "description": "Runs the full Khronos WebGL 1 and WebGL 2 conformance test suites in-app against the bridge's GL implementation.",
+      "logo": "assets/webglconformtest_logo.png",
       "entry": "index.html",
       "category": "app",
       "features": [
@@ -358,9 +359,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 8828055
+      "sizeBytes": 9427964
     },
     {
       "id": "com.natureglass.webglreport",
@@ -384,9 +385,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "Apache-2.0",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 52402
+      "sizeBytes": 52405
     }
   ],
   "community": [
@@ -412,9 +413,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 70666
+      "sizeBytes": 70669
     },
     {
       "id": "com.natureglass.webgl2demo",
@@ -438,9 +439,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "buttonMapping": {
-        "exit": "B"
+        "exit": "PLUS"
       },
-      "sizeBytes": 61951
+      "sizeBytes": 62062
     }
   ]
 }
