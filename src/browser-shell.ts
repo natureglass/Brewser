@@ -988,8 +988,16 @@ export class BrowserShell {
 		// boot (no rAF cost, no fade). C-side
 		// `nx_render_loading_image` (if present in the runtime build)
 		// may still flash loading.jpg briefly during init.
+		// `config.autorunApp` overrides the boot target when non-empty
+		// (e.g. `/apps/experimental/foo/index.html` → the shell launches
+		// straight into that app instead of the home page). Leading-slash
+		// paths resolve against the `brewser://` origin; absolute schemes
+		// pass through. Any parse issue falls back to home. The Home
+		// button still targets `DEFAULT_HOME_URL` so autorun doesn't
+		// trap the user in the app.
+		const bootUrl = resolveAutorunUrl(shellConfig.autorunApp) ?? DEFAULT_HOME_URL;
 		if (splashHandle) {
-			const navPromise = this.navigateTo(DEFAULT_HOME_URL);
+			const navPromise = this.navigateTo(bootUrl);
 			const dwellMin = new Promise<void>((resolve) =>
 				setTimeout(resolve, this.startupConfig.splashMinMs),
 			);
@@ -999,7 +1007,7 @@ export class BrowserShell {
 			// Warm-cache repaint. Should be ~10 ms (cache blit only).
 			this.repaintAll();
 		} else {
-			await this.navigateTo(DEFAULT_HOME_URL);
+			await this.navigateTo(bootUrl);
 		}
 
 		try {
@@ -4139,6 +4147,21 @@ function readJsonFile(path: string): unknown {
 	} catch {
 		return null;
 	}
+}
+
+/** Normalise a `config.autorunApp` value into a full URL suitable for
+ * {@link BrowserShell.navigateTo}. Empty/whitespace → `null` (autorun
+ * disabled, caller falls back to `DEFAULT_HOME_URL`). A leading slash
+ * resolves to the `brewser://` origin (`/apps/foo/index.html` →
+ * `brewser://apps/foo/index.html`). Any string that already carries a
+ * URL scheme (`brewser://…`, `http(s)://…`, `sdmc:/…`) passes through
+ * unchanged. Everything else is treated as a bare `brewser://`-relative
+ * path with the leading slash implied. */
+function resolveAutorunUrl(raw: string): string | null {
+	const s = raw.trim();
+	if (!s) return null;
+	if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return s;
+	return `brewser://${s.replace(/^\/+/, '')}`;
 }
 
 function fileHasBytes(path: string): boolean {

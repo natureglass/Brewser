@@ -24,6 +24,7 @@
   "local": "dd/mm/yyyy",
   "homeSection": "featured",
   "warnings": ["medium","high"],
+  "autorunApp": "/apps/experimental/com.natureglass.webglconformtest/full-webgl1-conformance/index.html",
   "buttonMapping": {
     "leftClick": "A",
     "rightClick": "B",

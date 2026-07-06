@@ -3,8 +3,8 @@ node_modules/
 build/
 romfs/main.js
 romfs/main.js.map
-brewser.nro
-brewser.nsp
+*.nro
+*.nsp
 icon.jpg
 *.log
 .DS_Store

@@ -282,6 +282,17 @@ export interface BrowserConfig {
 	 * `<browser-home-apps>` / `<browser-home-title>` custom tag
 	 * expansions at home.html render time. */
 	homeSection: CatalogGroup;
+	/** Optional autorun target. When non-empty, the shell navigates to
+	 * this URL at boot instead of {@link DEFAULT_HOME_URL}. Root-relative
+	 * paths (`/apps/experimental/foo/index.html`) resolve against the
+	 * `brewser://` origin; absolute URLs with a scheme (`brewser://…`,
+	 * `http(s)://…`) pass through unchanged. Empty string = disabled
+	 * (default), boot navigates to the home page as before. The Home
+	 * button (chrome + button-router action) always targets
+	 * `DEFAULT_HOME_URL` regardless of this field — autorun only affects
+	 * the initial boot navigation, so the user can still reach the home
+	 * page via the toolbar after launch. */
+	autorunApp: string;
 	/** Date-format hint used as the placeholder for empty
 	 * `<input type="date">` fields that don't carry an explicit
 	 * `placeholder` attribute. Free-form string — typically `dd/mm/yyyy`
@@ -417,6 +428,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	styleBackground: '',
 	toolbarPosition: 'top',
 	homeSection: 'featured',
+	autorunApp: '',
 	local: 'dd/mm/yyyy',
 	warnings: ['low', 'medium', 'high'],
 	// Strict-pinned + override-allowed fields all pull their default
@@ -558,6 +570,13 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				|| parsed?.homeSection === 'experimental'
 				? parsed.homeSection
 				: DEFAULT_CONFIG.homeSection,
+			// Free-form path/URL. Empty string means "no autorun" (boot
+			// navigates to the home page as usual). The consumer in
+			// `browser-shell.ts` normalises a leading-slash path to a
+			// `brewser://` URL; absolute schemes pass through.
+			autorunApp: typeof parsed?.autorunApp === 'string'
+				? parsed.autorunApp
+				: DEFAULT_CONFIG.autorunApp,
 			local: typeof parsed?.local === 'string' && parsed.local.length > 0
 				? parsed.local
 				: DEFAULT_CONFIG.local,

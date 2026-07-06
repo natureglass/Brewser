@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-02T16:28:50Z",
+  "generated": "2026-07-03T17:04:40Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -274,6 +274,32 @@
         "exit": "PLUS"
       },
       "sizeBytes": 22021143
+    },
+    {
+      "id": "com.natureglass.gl-probes",
+      "name": "GL Probes",
+      "version": "0.1.0",
+      "description": "Functional round-trip probes for the WebGL bridge — validates every phase-1.5 method family (buffer, framebuffer, 3D texture, uint uniform, non-square matrix, clear buffer, drawRange) plus batch-1 extension paths (compressed 2D, anisotropic). Emits [gl-probe] log lines and writes a report file to sdmc:/switch/brewser/logs/.",
+      "logo": "assets/gl_probes_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "Apache-2.0",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 60382
     },
     {
       "id": "com.natureglass.itchio",
