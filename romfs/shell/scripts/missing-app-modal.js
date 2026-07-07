@@ -507,6 +507,7 @@
         userId: userId,
         reqType: 'like',
         data: ['like', n],
+        platform: 'switch',
       });
       return globalThis.fetch(telemetryUrl, {
         method: 'POST',
