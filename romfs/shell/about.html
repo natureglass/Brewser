@@ -3,6 +3,24 @@
 <head>
   <title>About Brewser</title>
   <link rel="stylesheet" href="brewser://assets/main.css">
+  <style>
+    .donations-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 16px;
+    }
+    donations {
+      display: block;
+      width: 200px;
+      height: 200px;
+    }
+    .donations-caption {
+      margin-top: 8px;
+      font-style: italic;
+      text-align: center;
+    }
+  </style>
 </head>
 
 <body>
@@ -133,6 +151,11 @@
           alexdaskalakis@hotmail.com
         </a>
       </p>
+
+      <div class="donations-wrap">
+        <donations></donations>
+        <p class="donations-caption">Buy me a coffee</p>
+      </div>
     </section>
 
     <section class="about-section about-card">
