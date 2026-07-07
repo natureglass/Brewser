@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generated": "2026-07-03T17:04:40Z",
+  "generated": "2026-07-07T09:43:20Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
-      "name": "TikTok",
+      "name": "Lumaclips - TikTok Videos",
       "version": "1.0.0",
       "description": "Scroll through TikTok videos directly on your console.",
       "logo": "assets/tiktok_logo.png",
@@ -28,13 +28,13 @@
       "buttonMapping": {
         "exit": "PLUS"
       },
-      "sizeBytes": 50491
+      "sizeBytes": 50510
     },
     {
       "id": "com.natureglass.playdock",
-      "name": "Unity Play",
+      "name": "Playdock - Unity Demos",
       "version": "1.0.0",
-      "description": "Play Unity games directly on your console.",
+      "description": "Unity comunity games directly on your console.",
       "logo": "assets/unity_logo.png",
       "entry": "index.html",
       "category": "app",
@@ -57,7 +57,7 @@
       "buttonMapping": {
         "exit": "PLUS"
       },
-      "sizeBytes": 8220
+      "sizeBytes": 8236
     },
     {
       "id": "com.natureglass.pvzge",
@@ -278,8 +278,8 @@
     {
       "id": "com.natureglass.gl-probes",
       "name": "GL Probes",
-      "version": "0.1.0",
-      "description": "Functional round-trip probes for the WebGL bridge — validates every phase-1.5 method family (buffer, framebuffer, 3D texture, uint uniform, non-square matrix, clear buffer, drawRange) plus batch-1 extension paths (compressed 2D, anisotropic). Emits [gl-probe] log lines and writes a report file to sdmc:/switch/brewser/logs/.",
+      "version": "0.15.0",
+      "description": "Functional round-trip probes for the WebGL bridge. v0.9.0: strict-mode gate (URL ?strict=1) + PASS-QUIRK-RELAXED summary tally + three phase-1.5-MED-HIGH TF probes (TF_CAPTURE 3-vertex SEPARATE_ATTRIBS + memcmp readback; TF_PAUSE_RESUME pause skips id=200; TF_ERR nested beginTransformFeedback → INVALID_OPERATION). Extends v0.8.0's QUERY driver-quirk relaxation with #54 reclassified as Citron-observed / hardware-pending — same status now applied to any relaxed pass. Total 21 probes across LOW/LOW-MED/MED/MED-HIGH families + batch-1 EXT paths.",
       "logo": "assets/gl_probes_logo.png",
       "entry": "index.html",
       "category": "app",
@@ -299,7 +299,7 @@
       "buttonMapping": {
         "exit": "PLUS"
       },
-      "sizeBytes": 60382
+      "sizeBytes": 118123
     },
     {
       "id": "com.natureglass.itchio",
@@ -361,6 +361,62 @@
       "sizeBytes": 37418
     },
     {
+      "id": "com.natureglass.unity-demos",
+      "name": "Unity Demos",
+      "version": "1.0.0",
+      "description": "Diagnostic harness that loads a curated set of real Unity WebGL debug builds (JohannesDeml/UnityWebGL-LoadingTest) one at a time and writes a per-run NDJSON log to sdmc:/switch/brewser/logs/unity-demos/ capturing loader/framework console output, uncaught errors, missing-API interceptor hits (KNOWN-GAP vs NEW-GAP), load milestones, capacity failures, heartbeats, and a preliminary/final verdict. Measurement tool only — no engine changes. Under Citron's jitless wasm mode every demo terminates at WASM-UNAVAILABLE after the loader-stage shim gaps are harvested; on hardware JIT the full path runs and gives real first-frame timings. Godot leg deferred (see README §Godot).",
+      "logo": "assets/unity-demos_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "wasm",
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 195169772
+    },
+    {
+      "id": "com.natureglass.wasmprobe",
+      "name": "WASM Probe",
+      "version": "1.0.0",
+      "description": "Track-A DrumBrake smoke test (NXJS_PATCHES_NEEDED.md #74). Compiles + instantiates + executes minimal WebAssembly modules covering exports, imports, Memory grow/detach re-view, Table + funcref indirect calls, catchable traps (unreachable + OOB), and instantiateStreaming. Reports PASS/FAIL per case + engine-tier summary. Runs unchanged on JIT (Liftoff) and jitless-DrumBrake paths; on the current pre-Track-B monolith reports engine tier as unavailable and all execution tests as FAIL cleanly (fail-soft — no crash).",
+      "logo": "assets/wasmprobe_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "wasm"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 21968
+    },
+    {
       "id": "com.natureglass.webglconformtest",
       "name": "WebGL Conformance Tests",
       "version": "1.0.0",
@@ -387,13 +443,13 @@
       "buttonMapping": {
         "exit": "PLUS"
       },
-      "sizeBytes": 9427964
+      "sizeBytes": 9668015
     },
     {
       "id": "com.natureglass.webglreport",
       "name": "WebGL Report",
-      "version": "1.0.0",
-      "description": "Surface WebGL 1 and WebGL 2 capabilities, extensions, and limits exposed by the bridge. Port of CesiumGS/webglreport.",
+      "version": "1.1.0",
+      "description": "Surface WebGL 1 and WebGL 2 capabilities, extensions, and limits exposed by the bridge. Port of CesiumGS/webglreport with brewser-specific audit + UNSUPPORTED_BY_DRIVER classification + per-name WebGL2 spec-fn coverage.",
       "logo": "assets/webglreport_logo.png",
       "entry": "index.html",
       "category": "app",
@@ -413,7 +469,7 @@
       "buttonMapping": {
         "exit": "PLUS"
       },
-      "sizeBytes": 52405
+      "sizeBytes": 61069
     }
   ],
   "community": [
