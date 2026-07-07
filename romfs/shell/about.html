@@ -4,6 +4,29 @@
   <title>About Brewser</title>
   <link rel="stylesheet" href="brewser://assets/main.css">
   <style>
+    .about-row {
+      display: flex;
+      flex-direction: row;
+      gap: 16px;
+      align-items: stretch;
+    }
+    .about-row > .libraries-card {
+      flex: 2 1 0;
+      min-width: 0;
+    }
+    .about-row > .support-card {
+      flex: 1 1 0;
+      min-width: 0;
+      background: #ffffff;
+      color: #111111;
+    }
+    .about-row > .support-card h2,
+    .about-row > .support-card p {
+      color: #111111;
+    }
+    .about-row > .support-card a {
+      color: #0066cc;
+    }
     .donations-wrap {
       display: flex;
       flex-direction: column;
@@ -19,6 +42,7 @@
       margin-top: 8px;
       font-style: italic;
       text-align: center;
+      white-space: nowrap;
     }
   </style>
 </head>
@@ -98,65 +122,60 @@
       </div>
     </section>
 
-    <section class="about-section about-card">
-      <h2>Libraries and frameworks</h2>
+    <div class="about-row">
+      <section class="about-section about-card libraries-card">
+        <h2>Libraries and frameworks</h2>
 
-      <p>
-        Brewser is built using homebrew and web runtime technologies.
-        The project may use or integrate libraries and frameworks such as:
-      </p>
+        <p>
+          Brewser is built using homebrew and web runtime technologies.
+          The project may use or integrate libraries and frameworks such as:
+        </p>
 
-      <ul class="settings-list">
-        <li>
-          <strong>libnx</strong>
-          <span class="desc">
-            Nintendo Switch homebrew development library.
-          </span>
-        </li>
+        <ul class="settings-list">
+          <li>
+            <strong>libnx</strong>
+            <span class="desc">
+              Nintendo Switch homebrew development library.
+            </span>
+          </li>
 
-        <li>
-          <strong>SDL2</strong>
-          <span class="desc">
-            Cross-platform media/input layer used by many homebrew projects.
-          </span>
-        </li>
+          <li>
+            <strong>SDL2</strong>
+            <span class="desc">
+              Cross-platform media/input layer used by many homebrew projects.
+            </span>
+          </li>
 
-        <li>
-          <strong>nx.js</strong>
-          <span class="desc">
-            JavaScript/runtime integration for Switch-focused web app behavior.
-          </span>
-        </li>
+          <li>
+            <strong>nx.js</strong>
+            <span class="desc">
+              JavaScript/runtime integration for Switch-focused web app behavior.
+            </span>
+          </li>
 
-        <li>
-          <strong>HTML, CSS, JavaScript, WebGL, and WASM</strong>
-          <span class="desc">
-            Web technologies used by Brewser apps and experiments.
-          </span>
-        </li>
-      </ul>
-    </section>
+          <li>
+            <strong>HTML, CSS, JavaScript, WebGL, and WASM</strong>
+            <span class="desc">
+              Web technologies used by Brewser apps and experiments.
+            </span>
+          </li>
+        </ul>
+      </section>
 
-    <section class="about-section about-card">
-      <h2>Support Brewser</h2>
+      <section class="about-section about-card support-card">
+        <h2>Support Brewser</h2>
 
-      <p>
-        If you enjoy using Brewser or want to support future development,
-        donations are appreciated.
-      </p>
+        <p>
+          If you enjoy using Brewser or want to support future development,
+          donations are appreciated.
+        </p>
 
-      <p>
-        PayPal:
-        <a href="https://www.paypal.com/">
-          alexdaskalakis@hotmail.com
-        </a>
-      </p>
-
-      <div class="donations-wrap">
-        <donations></donations>
-        <p class="donations-caption">Buy me a coffee</p>
-      </div>
-    </section>
+        <div class="donations-wrap">
+          <donations></donations>
+          <p class="donations-caption">Buy me a coffee</p>
+        </div>
+      </section>
+    </div>
 
     <section class="about-section about-card">
       <h2>Privacy note</h2>
