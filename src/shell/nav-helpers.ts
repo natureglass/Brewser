@@ -133,25 +133,83 @@ export function extractAppDirFromUrl(url: string): string | null {
 }
 
 /**
- * Read `<appRoot><appDir>manifest.json` and return its parsed
- * `buttonMapping` object (or `null` when absent / malformed). Other
- * manifest fields are ignored here — they belong to the launcher's
- * catalog rendering, which goes through `catalogue.json` instead.
+ * Parsed shape of an app's `manifest.json`.
+ *
+ * Only the fields the runtime + shell consult today are typed; unknown
+ * keys survive on the parsed object but aren't part of the contract.
+ * Every field is optional — a missing manifest, malformed JSON, or a
+ * manifest that omits a field must not crash callers.
  */
-export function loadAppManifestButtonMapping(
+export interface AppManifest {
+	/** Reverse-DNS app id, e.g. `com.natureglass.spectraplay`. Used as
+	 * the log-context marker in permission-deny lines. */
+	id?: string;
+	name?: string;
+	version?: string;
+	description?: string;
+	logo?: string;
+	entry?: string;
+	category?: string;
+	features?: string[];
+	/** Manifest-declared permissions. Each string maps to a key in
+	 * `configs/warnings.json` (`network`, `storage`, `system`,
+	 * `filesystem_read`, `filesystem_write`, `device_info`, `account`,
+	 * `external_links`). The runtime consults this on every gated API
+	 * to decide whether to permit or deny the call. */
+	permissions?: string[];
+	compatibility?: string[];
+	allowed_origins?: string[];
+	developer?: string;
+	source?: string;
+	license?: string;
+	data?: string[];
+	/** Map from action name (e.g. `exit`, `refresh`) to button label
+	 * (`PLUS`, `B`, …). Used by the shell's button-router overlay so an
+	 * app can rebind e.g. `exit` off of the default combo onto a single
+	 * button for the lifetime of its navigation. */
+	buttonMapping?: Record<string, unknown>;
+}
+
+/**
+ * Read `<appRoot><appDir>manifest.json` and return the full parsed
+ * manifest, or `null` when the file is absent / unreadable / malformed.
+ * Callers pick out the fields they care about — button mapping goes to
+ * the button-router overlay, permissions go to the permission policy,
+ * etc. Kept as a single read so a navigation only touches the SD card
+ * once for manifest lookup.
+ */
+export function loadAppManifest(
 	appDir: string,
 	appRoot: string,
-): Record<string, unknown> | null {
+): AppManifest | null {
 	try {
 		const path = `${appRoot}${appDir}manifest.json`;
 		const raw = (globalThis as { Switch?: { readFileSync?: (p: string) => ArrayBuffer | null } })
 			.Switch?.readFileSync?.(path);
 		if (!raw) return null;
 		const parsed = JSON.parse(new TextDecoder().decode(raw));
-		const bm = parsed?.buttonMapping;
-		if (!bm || typeof bm !== 'object' || Array.isArray(bm)) return null;
-		return bm as Record<string, unknown>;
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+		return parsed as AppManifest;
 	} catch (_) {
 		return null;
 	}
+}
+
+/**
+ * Read `<appRoot><appDir>manifest.json` and return its parsed
+ * `buttonMapping` object (or `null` when absent / malformed). Other
+ * manifest fields are ignored here — they belong to the launcher's
+ * catalog rendering, which goes through `catalogue.json` instead.
+ *
+ * Thin wrapper around {@link loadAppManifest} kept for callers that
+ * only need the button mapping.
+ */
+export function loadAppManifestButtonMapping(
+	appDir: string,
+	appRoot: string,
+): Record<string, unknown> | null {
+	const manifest = loadAppManifest(appDir, appRoot);
+	const bm = manifest?.buttonMapping;
+	if (!bm || typeof bm !== 'object' || Array.isArray(bm)) return null;
+	return bm as Record<string, unknown>;
 }

@@ -119,6 +119,7 @@ import { captureScreenshot } from './shell/screenshot.js';
 import {
 	computeLivePageBase,
 	extractAppDirFromUrl,
+	loadAppManifest,
 	loadAppManifestButtonMapping,
 	resolveNavUrl,
 } from './shell/nav-helpers.js';
@@ -155,7 +156,7 @@ import { BookmarksStore } from './navigation/bookmarks-store.js';
 import { BrowserNavigation } from './navigation/browser-navigation.js';
 import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
-import { BrowserPermissionPolicy } from '@switch-web/runtime';
+import { BrowserPermissionPolicy, setLiveInputPermissionPolicy } from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
 import { type BrowserConfig, DEFAULT_CONFIG, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
@@ -284,6 +285,11 @@ export class BrowserShell {
 	 * `StorageProfileLike` (storageRoot + pickStorageNamespace), so the
 	 * runtime stays agnostic to the brewser:// dev URL convention. */
 	getProfile(): BrowserProfile { return this.profile; }
+	/** Expose the permission policy so main.ts can thread it into the
+	 * runtime's `installPolyfills` — storage drivers consult
+	 * `allowStorage()` on every read/write, so a manifest that omits
+	 * `storage` gets denied at the storage API boundary. */
+	getPermissionPolicy(): BrowserPermissionPolicy { return this.policy; }
 	private mode: BrowserMode = 'normal';
 	/** Active chrome strip height (px). Cached from `config.json
 	 * toolbarHeight` at boot and refreshed on settings save. Read by
@@ -429,6 +435,10 @@ export class BrowserShell {
 		globalThis.requestAnimationFrame as unknown as (cb: () => void) => number;
 	constructor() {
 		this.policy = new BrowserPermissionPolicy();
+		// Feed the anchor-tap navigate-intent gate. Any `<a href="http…">`
+		// click on an app page whose manifest omits `external_links` will
+		// be dropped + logged instead of dispatched to the shell.
+		setLiveInputPermissionPolicy(this.policy);
 		this.profile = new BrowserProfile();
 		this.profile.ensure();
 		// One WebPageSession per shell — owns the per-navigation page
@@ -629,7 +639,10 @@ export class BrowserShell {
 					// via `fetchFile`, which is what the policy is sitting
 					// on top of anyway. Local reads don't touch the network
 					// gate.
-					new LocalSchemeFetchLoader(captureNativeFetch()),
+					new LocalSchemeFetchLoader({
+						nativeFetch: captureNativeFetch(),
+						permissionPolicy: this.policy,
+					}),
 				],
 			},
 			delegate,
@@ -1763,10 +1776,34 @@ export class BrowserShell {
 		const appDir = this.extractAppDirFromUrl(url);
 		this.currentAppDir = appDir;
 		if (appDir) {
-			const appButtonMapping = this.loadAppManifestButtonMapping(appDir);
-			setAppButtonOverlay(appButtonMapping);
+			// Read the full manifest once per navigation and feed both the
+			// button-router overlay AND the permission policy from the same
+			// parsed object — one SD read, two consumers.
+			const manifest = loadAppManifest(appDir, this.profile.appRoot);
+			const bm = manifest?.buttonMapping;
+			const buttonMapping = (bm && typeof bm === 'object' && !Array.isArray(bm))
+				? (bm as Record<string, unknown>) : null;
+			setAppButtonOverlay(buttonMapping);
+			// Update the runtime's permission policy for the app that's
+			// about to run. Sandbox root = the app's own on-disk dir; any
+			// filesystem read/write inside it is always allowed. Reads/
+			// writes outside require `filesystem_read` / `filesystem_write`
+			// / `system` in the manifest. Storage APIs require `storage`,
+			// network fetches require `network`, external anchor navs
+			// require `external_links`.
+			const appId = typeof manifest?.id === 'string' ? manifest.id : null;
+			const perms = Array.isArray(manifest?.permissions)
+				? manifest.permissions.filter((p): p is string => typeof p === 'string')
+				: [];
+			const sandboxRoot = `${this.profile.appRoot}${appDir}`;
+			this.policy.setManifestPermissions(appId, perms, sandboxRoot);
 		} else {
 			clearAppButtonOverlay();
+			// Shell page (brewser://home/, brewser://settings/, ...): grant
+			// all manifest-scoped gates. The global `network` toggle in
+			// Settings still applies via `policy.networkEnabled`, but
+			// no manifest declaration is required for shell code paths.
+			this.policy.setManifestPermissions(null, null, null);
 		}
 		// A queued fullscreen request from any prior page should never
 		// leak across navigations — the new page's scripts will queue

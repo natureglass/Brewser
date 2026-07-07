@@ -50,6 +50,7 @@ async function main() {
 	installPolyfills({
 		profile: shell.getProfile(),
 		getCurrentUrl: () => shell.getCurrentPageUrl(),
+		permissionPolicy: shell.getPermissionPolicy(),
 	});
 
 	await shell.run();
