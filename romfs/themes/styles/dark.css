@@ -1333,9 +1333,15 @@ fieldset.settings-group {
      so each `.settings-row` underreports by ~2-4px and the cumulative
      deficit pushes the last number input through the fieldset's
      bottom border. */
-  padding: 14px 18px;
+  padding: 14px 18px 28px;
   margin: 0;
 }
+/* Strip the leading row margin so the fieldset's 14px padding-top
+   is the only gap between the `<legend>` and the first control —
+   otherwise `.settings-row` / `.settings-radio` / `.settings-toggle`
+   stack their own `margin-top` on top of the padding and open a
+   double gap under the legend. */
+fieldset.settings-group > *:first-child { margin-top: 0; }
 
 fieldset.settings-group legend {
   color: #ffd35e;
@@ -1520,7 +1526,7 @@ fieldset.settings-group legend {
 .settings-save[disabled] {
   background: #2a3a66;
   color: #6a7c95;
-  cursor: default;
+  cursor: not-allowed;
 }
 
 /* ===================================================================

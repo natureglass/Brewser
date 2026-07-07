@@ -716,6 +716,38 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</div>'
 		);
 
+		// Component versions from `<appRoot>configs/current.json`, read
+		// fresh on every settings render so the row reflects the
+		// installed build without a runtime restart. Missing / malformed
+		// file → the row is omitted silently (fail-open, same as
+		// loadConfig's on-parse fallback). Rendered as a single text
+		// flow (`<strong>key</strong>: value | ...`) so all entries
+		// share one line rather than stacking as list items.
+		let versionsRow = '';
+		try {
+			const raw = Switch.readFileSync(`${this.appRoot}configs/current.json`);
+			if (raw) {
+				const parsed = JSON.parse(decoder.decode(raw));
+				if (parsed && typeof parsed === 'object') {
+					const items: string[] = [];
+					for (const key of Object.keys(parsed)) {
+						const value = (parsed as Record<string, unknown>)[key];
+						if (typeof value !== 'string') continue;
+						items.push(
+							`<strong>${htmlEscape(key)}</strong>: ${htmlEscape(value)}`
+						);
+					}
+					if (items.length > 0) {
+						versionsRow = (
+							'<div class="settings-row">'
+							+ `<p>${items.join(' | ')}</p>`
+							+ '</div>'
+						);
+					}
+				}
+			}
+		} catch (_) { /* current.json unreadable — skip row */ }
+
 		// Home page section picker — drives the `<browser-home-apps>` +
 		// `<browser-home-title>` expansions on home.html via the
 		// `homeSection` config field. The home page has no in-page tab
@@ -813,6 +845,8 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '<fieldset class="settings-group">'
 			+ '<legend>System</legend>'
 			+ warningsRow
+			+ toggleRow('showToolbar', 'Show Toolbar', config.showToolbar, 'hide or show the toolbar strip')
+			+ versionsRow
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'
@@ -831,11 +865,6 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ toggleRow('momentumScrolling', 'Momentum scrolling', config.momentumScrolling, 'scroll content coasts to a stop with friction after right-stick release / finger lift')
 			+ '</fieldset>'
 			+ '</div>'
-			+ '<fieldset class="settings-group">'
-			+ '<legend>Diagnostics</legend>'
-			+ toggleRow('navDebug', 'Navigation debug log', config.navDebug, 'writes shell-nav-diag.log on every navigation / shell input / touch')
-			+ toggleRow('swbImgDebug', 'Image-load debug log', config.swbImgDebug, 'writes swb_img_diag.log per image load (capped at 500 entries)')
-			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-savebar">'
 			+ '<span class="settings-status" data-settings-status>No unsaved changes.</span>'

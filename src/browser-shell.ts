@@ -914,11 +914,22 @@ export class BrowserShell {
 		// Chrome strip metrics: cache the height + position the engine
 		// uses for the chrome rect, then build the HTML-driven toolbar
 		// root so the first chrome paint already has something to blit.
-		this.chromeHeight = shellConfig.toolbarHeight;
+		// `showToolbar: false` in `config.json` disables the chrome strip
+		// entirely — chromeHeight forced to 0 collapses every paint
+		// inset + CSS viewport reduction (`layoutTopInset`,
+		// `publishChromeRegion`, the paint sites at lines 1979/2567/3645,
+		// the `syncCanvasSize` viewport calc), and skipping the overlay
+		// load + leaving it invisible means no fullscreen-exit path can
+		// re-introduce the strip.
+		this.chromeHeight = shellConfig.showToolbar ? shellConfig.toolbarHeight : 0;
 		this.pageBackground = shellConfig.pageBackground;
 		this.toolbarPosition = shellConfig.toolbarPosition;
-		await this.loadHtmlToolbar();
-		setToolbarOverlayVisible(true);
+		if (shellConfig.showToolbar) {
+			await this.loadHtmlToolbar();
+			setToolbarOverlayVisible(true);
+		} else {
+			setToolbarOverlayVisible(false);
+		}
 		this.publishChromeRegion();
 		// Per-style wallpaper. Cached value in `config.styleBackground`
 		// is authoritative when non-empty; an empty cache backfills from
@@ -3004,7 +3015,21 @@ export class BrowserShell {
 		// + paint-inset math read `this.chromeHeight` so the page area
 		// resizes on the next paint without a full reload.
 		if ('toolbarHeight' in staged && staged.toolbarHeight !== prior.toolbarHeight) {
-			this.chromeHeight = fresh.toolbarHeight;
+			// `showToolbar: false` keeps chromeHeight pinned at 0 — a
+			// height slider tweak while the strip is disabled must not
+			// zombie-revive it.
+			this.chromeHeight = fresh.showToolbar ? fresh.toolbarHeight : 0;
+			resetToolbarOverlayCache();
+			this.publishChromeRegion();
+		}
+		// Show/hide the toolbar strip when the checkbox is toggled. Same
+		// chromeHeight + cache + region-publish sequence the toolbarHeight
+		// block above runs — recomputing off the fresh flag flips
+		// chromeHeight between 0 and the configured strip height so the
+		// post-save reload lays the page area out with (or without) the
+		// chrome inset.
+		if ('showToolbar' in staged && staged.showToolbar !== prior.showToolbar) {
+			this.chromeHeight = fresh.showToolbar ? fresh.toolbarHeight : 0;
 			resetToolbarOverlayCache();
 			this.publishChromeRegion();
 		}

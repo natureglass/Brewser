@@ -193,6 +193,16 @@ export interface BrowserConfig {
 	 * or rename that file in romfs to suppress the C-side splash too.
 	 * Default `true`. */
 	showSplash: boolean;
+	/** Whether the chrome-strip toolbar is present at all. When `false`,
+	 * the shell boots with `chromeHeight` forced to 0 and the toolbar
+	 * overlay marked invisible, so page content paints edge-to-edge and
+	 * no fullscreen exit path can re-introduce the strip (every paint
+	 * inset + CSS viewport reduction keys off `chromeHeight`, and every
+	 * toolbar paint site is gated on the overlay-visible flag). The
+	 * configured toolbar HTML is not even loaded from disk in this
+	 * mode. Read once at boot — a runtime flip requires restart.
+	 * Default `true`. */
+	showToolbar: boolean;
 	/** Minimum visible duration (ms) of the JS-side boot splash before the
 	 * fade-out starts. The shell allocates the canvas, blits the stashed
 	 * C-side splash bytes in via `nx_framebuffer_init`, then repaints the
@@ -419,6 +429,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	navDebug: false,
 	swbImgDebug: false,
 	showSplash: true,
+	showToolbar: true,
 	splashMinMs: 1500,
 	splashFadeMs: 500,
 	buttonMapping: {},
@@ -528,6 +539,9 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			showSplash: typeof parsed?.showSplash === 'boolean'
 				? parsed.showSplash
 				: DEFAULT_CONFIG.showSplash,
+			showToolbar: typeof parsed?.showToolbar === 'boolean'
+				? parsed.showToolbar
+				: DEFAULT_CONFIG.showToolbar,
 			splashMinMs: typeof parsed?.splashMinMs === 'number' && Number.isFinite(parsed.splashMinMs)
 				? Math.max(0, Math.min(10000, Math.trunc(parsed.splashMinMs)))
 				: DEFAULT_CONFIG.splashMinMs,
