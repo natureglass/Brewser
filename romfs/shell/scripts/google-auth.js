@@ -1,27 +1,34 @@
 // Google OAuth 2.0 Limited Input Device flow for Brewser. Page-flow
 // variant: drives shell/googleLogin.html.
 //
-// Limited Input Device flow is Google's RFC 8628 variant — same shape
-// as GitHub's, except the grant_type identifier is the legacy
-// `http://oauth.net/grant_type/device/1.0` (not the standard
-// `urn:ietf:params:oauth:grant-type:device_code`). Endpoints:
-//   * https://oauth2.googleapis.com/device/code
-//   * https://oauth2.googleapis.com/token
-//   * https://openidconnect.googleapis.com/v1/userinfo
+// Limited Input Device flow is Google's RFC 8628 variant. Endpoints:
+//   * https://oauth2.googleapis.com/device/code       (device auth)
+//   * https://oauth2.googleapis.com/token             (token exchange)
+//   * https://brewser.tech/wp-json/brewser/v1/auth/device-mint
+//                                                     (Brewser mint route)
 //
 // The OAuth client registered in Google Cloud Console MUST be of type
 // "TVs and Limited Input devices" — desktop / web / mobile client
-// types do NOT issue device codes. Scopes are restricted to a small
-// allowlist; `openid email profile` is supported and that's all we
-// need for the identity story (sub / email / name / picture).
+// types do NOT issue device codes. Scopes: `openid email profile`.
+// `openid` is required so Google emits an `id_token` in the /token
+// response; the identity/mint tail depends on that.
 //
 // Identity model:
-//   * Stable unique ID is `sub` from /userinfo (an opaque Google
-//     account id).
-//   * `email` — the user's primary verified email.
-//   * `name` — display name.
-//   * `picture` — public CDN URL for the avatar; downloaded next to
-//     google-auth.json as google-avatar.<ext> + google-avatar_64x64.<ext>.
+//   * On successful poll, Google returns an `id_token` alongside the
+//     `access_token`. We POST that `id_token` to Brewser's device-mint
+//     route, which verifies the signature against Google's JWKS +
+//     `aud` against the Switch client id, and returns an HS256
+//     envelope `{ token, user: { sub, name, email, picture, exp } }`
+//     — the same shape the web popup flow's postMessage receiver
+//     saves to `localStorage['brewser_auth']` on the game origin.
+//   * Stable unique ID is `sub` from the envelope's user object.
+//   * `email`, `name`, `picture` also come from the envelope. This
+//     tail does NOT hit Google's /userinfo — the id_token's verified
+//     claims are the sole identity source.
+//   * The persisted SDMC record ({provider,id,email,name,avatar_url,
+//     token,user,saved_at}) matches the shape
+//     CONTRACT_switch_auth_record.md's runtime bridge reads to
+//     surface the session at `localStorage['brewser_auth']` on Switch.
 //
 // Persistence: `sdmc:/switch/brewser/shell/auth/google-auth.json`.
 // Diagnostic log: `sdmc:/switch/brewser/logs/google-auth.log`.
@@ -31,16 +38,23 @@
 
   var DEVICE_CODE_URL = 'https://oauth2.googleapis.com/device/code';
   var TOKEN_URL       = 'https://oauth2.googleapis.com/token';
-  var USERINFO_URL    = 'https://openidconnect.googleapis.com/v1/userinfo';
+  // Brewser-owned mint route. Trades a Google id_token for the HS256
+  // envelope the app-side read seam expects. Contracts:
+  //   brewser-runtime-v8/docs/CONTRACT_switch_auth_record.md
+  //   brewser-WP-Plugins/.../brewser-auth/CONTRACT_device_mint_route.md
+  var MINT_URL        = 'https://brewser.tech/wp-json/brewser/v1/auth/device-mint';
 
   // openid → emits sub. email → email field on /userinfo. profile →
   // name + picture. All three are on Google's Limited Input Device
   // allowlist.
   var SCOPES = 'openid email profile';
-  // Google's device-flow docs explicitly call out this legacy
-  // grant_type identifier; the RFC 8628 standard string isn't
-  // accepted by the limited-input token endpoint.
-  var DEVICE_GRANT_TYPE = 'http://oauth.net/grant_type/device/1.0';
+  // RFC 8628 standard grant_type identifier for Device Authorization
+  // Grant. Google accepted the legacy `http://oauth.net/grant_type/device/1.0`
+  // for older TV clients, but newly-created clients (2024+) dispatch to
+  // authorization_code grant validation on the legacy value, producing
+  // a "Missing required parameter: code" error. The standard urn form
+  // is what current Google servers route to the device-code handler.
+  var DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
 
   var AUTH_DIR  = 'sdmc:/switch/brewser/shell/auth/';
   var AUTH_PATH = AUTH_DIR + 'google-auth.json';
@@ -128,11 +142,28 @@
     return (body.getAttribute('data-google-client-id') || '').trim();
   }
 
+  // Google's TV/Limited-Input Device flow requires `client_secret` on
+  // the /token poll body, unlike RFC 8628 which permits public clients.
+  // The value comes through the same template-substitution pipeline as
+  // the client id — see browser-resource-loader.ts's
+  // `<browser-config-google-client-secret/>` handler.
+  function getClientSecret() {
+    if (!body) return '';
+    return (body.getAttribute('data-google-client-secret') || '').trim();
+  }
+
   function isClientIdConfigured(cid) {
     if (!cid) return false;
     if (cid.indexOf('REPLACE_ME') === 0) return false;
     // Google client ids are typically "<num>-<hash>.apps.googleusercontent.com"
     return cid.length >= 10;
+  }
+
+  function isClientSecretConfigured(cs) {
+    if (!cs) return false;
+    if (cs.indexOf('REPLACE_ME') === 0) return false;
+    // Google client secrets are ~28 chars starting with `GOCSPX-`.
+    return cs.length >= 10;
   }
 
   function setStage(stage) {
@@ -178,7 +209,7 @@
     try { text = await resp.text(); } catch (e) { log(label + ' .text() threw: ' + (e && e.message ? e.message : String(e))); return null; }
     log(label + ' status=' + resp.status
       + ' ct=' + (resp.headers && resp.headers.get ? resp.headers.get('content-type') : '?')
-      + ' body=' + trimForLog(text));
+      + ' body=' + trimForLog(text, 8192));
     if (!text) return null;
     try { return JSON.parse(text); } catch (e) { log(label + ' JSON.parse threw: ' + (e && e.message ? e.message : String(e))); return null; }
   }
@@ -351,7 +382,7 @@
     return data;
   }
 
-  async function pollForToken(clientId, deviceCode, intervalSec, expiresInSec, cancelToken) {
+  async function pollForToken(clientId, clientSecret, deviceCode, intervalSec, expiresInSec, cancelToken) {
     var interval = Math.max(1, intervalSec || 5);
     var deadline = Date.now() + Math.min(expiresInSec || 900, MAX_POLL_SECONDS) * 1000;
     log('poll loop start interval=' + interval + 's expires_in=' + expiresInSec + 's');
@@ -371,8 +402,13 @@
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
           },
+          // client_secret is required by Google's TV/Limited-Input Device
+          // flow at /token — the standard RFC 8628 public-client shape
+          // (client_id + device_code + grant_type) triggers "Missing
+          // required parameter: client_secret" from Google's server.
           body: formBody({
             client_id: clientId,
+            client_secret: clientSecret,
             device_code: deviceCode,
             grant_type: DEVICE_GRANT_TYPE,
           }),
@@ -408,30 +444,45 @@
   }
 
   // ============================================================
-  // Identity fetch
+  // Envelope mint (Brewser-owned) — replaces the identity fetch
   // ============================================================
-  async function fetchUserIdentity(accessToken) {
-    log('GET ' + USERINFO_URL);
-    var resp;
-    try {
-      resp = await globalThis.fetch(USERINFO_URL, {
-        headers: { 'Authorization': 'Bearer ' + accessToken, 'Accept': 'application/json' },
-      });
-    } catch (e) {
-      log('/userinfo fetch threw: ' + (e && e.message ? e.message : String(e)));
-      throw new Error('Google /userinfo network error: ' + (e && e.message ? e.message : String(e)));
+  //
+  // POST the id_token from the poll response to /auth/device-mint.
+  // On 200 with a well-formed envelope, resolve with
+  // `{ ok: true, token, user }`. On any HTTP/protocol failure,
+  // resolve with `{ ok: false, error: <message> }` so the caller can
+  // report to the panel without an exception boundary. A network
+  // throw is left to bubble — the caller distinguishes it from
+  // server-side rejects.
+  //
+  // Never logs the raw id_token (only its length) — the token is a
+  // JWT and would leak sub/email if written to the diagnostic log.
+  async function mintEnvelope(idToken) {
+    log('POST ' + MINT_URL + ' id_token_len=' + idToken.length);
+    var resp = await globalThis.fetch(MINT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ id_token: idToken }),
+    });
+    var data = await readJsonWithLog(resp, 'device-mint');
+    if (!resp.ok) {
+      var msg = data && data.error ? String(data.error) : ('HTTP ' + resp.status);
+      log('device-mint terminal error: ' + msg);
+      return { ok: false, error: 'Sign-in server rejected the request: ' + msg };
     }
-    var user = await readJsonWithLog(resp, '/userinfo');
-    if (!resp.ok) throw new Error('Google /userinfo failed: HTTP ' + resp.status);
-    if (!user || typeof user.sub !== 'string') throw new Error('Google /userinfo response missing sub');
-
-    return {
-      id:         user.sub,
-      login:      '',
-      name:       typeof user.name  === 'string' ? user.name  : '',
-      email:      typeof user.email === 'string' ? user.email : '',
-      avatar_url: typeof user.picture === 'string' ? user.picture : '',
-    };
+    if (!data || typeof data.token !== 'string' || data.token.length === 0) {
+      log('device-mint response missing token');
+      return { ok: false, error: 'Sign-in server returned a malformed response (no token).' };
+    }
+    if (!data.user || typeof data.user !== 'object'
+        || typeof data.user.sub !== 'string' || data.user.sub.length === 0) {
+      log('device-mint response missing user.sub');
+      return { ok: false, error: 'Sign-in server returned a malformed response (no user.sub).' };
+    }
+    return { ok: true, token: data.token, user: data.user };
   }
 
   // ============================================================
@@ -459,6 +510,11 @@
     var clientId = getClientId();
     if (!isClientIdConfigured(clientId)) {
       showErrorStage('Google OAuth client_id is not configured. Set "googleOAuthClientId" in config.json (current: ' + (clientId || '(empty)') + ').');
+      return;
+    }
+    var clientSecret = getClientSecret();
+    if (!isClientSecretConfigured(clientSecret)) {
+      showErrorStage('Google OAuth client_secret is not configured. Set "googleOAuthClientSecret" in config.json (current: ' + (clientSecret ? '(present but too short)' : '(empty)') + ').');
       return;
     }
     log('startDeviceFlow hint="' + (loginHint || '') + '"');
@@ -490,33 +546,66 @@
 
     var myToken = {};
     pollCancelToken = myToken;
-    var result = await pollForToken(clientId, device.device_code, device.interval, device.expires_in, myToken);
+    var result = await pollForToken(clientId, clientSecret, device.device_code, device.interval, device.expires_in, myToken);
 
     if (result.cancelled) return;
     if (result.error)    { setPollStatus(result.error, 'error'); return; }
     if (!result.tokens)  { setPollStatus('Unexpected end of polling.', 'error'); return; }
 
-    setPollStatus('Fetching Google user info…');
-    var user;
-    try { user = await fetchUserIdentity(result.tokens.access_token); }
-    catch (e) {
-      log('fetchUserIdentity caught: ' + (e && e.message ? e.message : String(e)));
-      setPollStatus(e && e.message ? e.message : String(e), 'error');
+    // Capture the id_token from the poll response. `openid` in SCOPES
+    // guarantees Google issues one (confirmed on hardware 2026-07-08:
+    // Google's TV client returns id_token alongside access_token). If
+    // the response is somehow missing it, the mint route can't verify
+    // identity — bail with an explicit error, per the contract's
+    // "persist-only-on-success" invariant.
+    var idToken = result.tokens && typeof result.tokens.id_token === 'string'
+      ? result.tokens.id_token
+      : '';
+    if (!idToken) {
+      log('mint precondition failed: no id_token in poll response');
+      setPollStatus('Sign-in incomplete: identity token missing.', 'error');
       return;
     }
 
+    // Trade id_token for a Brewser envelope. Contract HARD INVARIANT
+    // (persist-only-on-success): on ANY failure — network unreachable,
+    // non-200, malformed JSON, missing token/user.sub — show an error
+    // and persist NOTHING. No google-auth.json write, no active.json
+    // touch, no avatar fetch, prior-session record left in place. The
+    // sequence below is the only path to persistRecord() and each
+    // early-return exits before touching any storage.
+    setPollStatus('Verifying identity with Brewser…');
+    var mint;
+    try {
+      mint = await mintEnvelope(idToken);
+    } catch (e) {
+      log('mintEnvelope threw (network): ' + (e && e.message ? e.message : String(e)));
+      setPollStatus('Could not reach brewser.tech to complete sign-in.', 'error');
+      return;
+    }
+    if (!mint.ok) {
+      setPollStatus(mint.error, 'error');
+      return;
+    }
+
+    // Build the contract-shape SDMC record.
+    //   Top-level id/email/name/avatar_url mirror `user` for the
+    //     shell login picker (which does not decode envelopes).
+    //   token + user are the envelope the runtime bridge (#102)
+    //     surfaces to localStorage['brewser_auth'].
+    //   No access_token / refresh_token / token_type / scope / login —
+    //     see the contract's removed-fields list. A stored Google
+    //     access_token would be a needless secret at rest and nothing
+    //     reads it now that /userinfo is out of the identity path.
     var record = {
-      provider: 'google',
-      id: user.id,
-      login: '',
-      email: user.email || loginHint || '',
-      name: user.name,
-      avatar_url: user.avatar_url,
-      access_token:  result.tokens.access_token,
-      refresh_token: result.tokens.refresh_token || '',
-      token_type:    result.tokens.token_type || 'Bearer',
-      scope:         result.tokens.scope || SCOPES,
-      saved_at:      Date.now(),
+      provider:   'google',
+      id:         mint.user.sub,
+      email:      (typeof mint.user.email === 'string' && mint.user.email) || loginHint || '',
+      name:       typeof mint.user.name    === 'string' ? mint.user.name    : '',
+      avatar_url: typeof mint.user.picture === 'string' ? mint.user.picture : '',
+      token:      mint.token,
+      user:       mint.user,
+      saved_at:   Date.now(),
     };
     if (!persistRecord(record)) return;
     await ensureAvatarFresh(record);
@@ -534,34 +623,35 @@
     var clientId = getClientId();
     if (!isClientIdConfigured(clientId)) return null;
     var stored = loadStoredRecord();
-    if (!stored || !stored.access_token) return null;
+    if (!stored) return null;
 
-    log('trySilentVerify — re-hitting /userinfo with stored token');
-    try {
-      var user = await fetchUserIdentity(stored.access_token);
-      var refreshed = Object.assign({}, stored, {
-        id:         user.id,
-        email:      user.email || stored.email,
-        name:       user.name  || stored.name,
-        avatar_url: user.avatar_url || stored.avatar_url,
-        verified_at: Date.now(),
-      });
-      persistRecord(refreshed);
-      await ensureAvatarFresh(refreshed);
-      // Silent re-verification also re-asserts the active-session
-      // pointer so a user who launches googleLogin.html directly
-      // (without going through the central dashboard) still ends up
-      // with `active.json` naming google.
-      if (globalThis.__swbAuth) {
-        globalThis.__swbAuth.wipeOthers('google');
-        globalThis.__swbAuth.setActiveProvider('google');
-      }
-      return refreshed;
-    } catch (e) {
-      log('silent verify failed (' + (e && e.message ? e.message : String(e)) + ') — dropping stored record');
+    // Contract §"Silent-verify decision": local expiry check against
+    // the envelope's `user.exp`, no network. The envelope was minted
+    // by /auth/device-mint and is trusted as the sole source of
+    // validity — `exp` is HMAC-signed inside the `token`.
+    //
+    // Pre-envelope records (from before the tail rewrite) lack the
+    // `user.exp` field and are correctly treated as expired here —
+    // clearStoredRecord drops them so the next boot forces a fresh
+    // sign-in in the new shape. This is the intended migration path.
+    var expUnix = stored.user && Number(stored.user.exp);
+    var expOk = Number.isFinite(expUnix) && expUnix * 1000 > Date.now();
+    if (!expOk) {
+      log('trySilentVerify — envelope missing or expired (exp='
+        + (stored.user && stored.user.exp) + '); clearing record');
       clearStoredRecord();
       return null;
     }
+
+    log('trySilentVerify — envelope still valid (exp=' + expUnix + ')');
+    // Re-assert the active-session pointer for the case a user opens
+    // googleLogin.html directly (bypassing the central dashboard) —
+    // same rationale as the fresh-mint path.
+    if (globalThis.__swbAuth) {
+      globalThis.__swbAuth.wipeOthers('google');
+      globalThis.__swbAuth.setActiveProvider('google');
+    }
+    return stored;
   }
 
   function wireEvents() {

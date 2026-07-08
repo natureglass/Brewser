@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-07T09:43:20Z",
+  "generated": "2026-07-07T21:11:02Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -329,6 +329,29 @@
         "exit": "PLUS"
       },
       "sizeBytes": 47827
+    },
+    {
+      "id": "com.natureglass.savedemo",
+      "name": "Save Demo",
+      "version": "1.0.0",
+      "description": "Test your internet speed directly on your console.",
+      "logo": "assets/savedemo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "buttonMapping": {
+        "exit": "PLUS"
+      },
+      "sizeBytes": 30945
     },
     {
       "id": "com.natureglass.speedtest",

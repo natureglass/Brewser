@@ -400,6 +400,15 @@ export interface BrowserConfig {
 	 * **Override-allowed runtime fallback** — see
 	 * {@link githubOAuthClientId}. */
 	googleOAuthClientId: string;
+	/** Google OAuth client secret for the Limited Input Device flow.
+	 * Required alongside `googleOAuthClientId` at the /token exchange
+	 * step — Google's TV/Limited-Input Device flow requires
+	 * `client_secret` on the poll body. Surfaced to googleLogin.html
+	 * via the `<browser-config-google-client-secret/>` custom tag.
+	 *
+	 * **Override-allowed runtime fallback** — see
+	 * {@link githubOAuthClientId}. */
+	googleOAuthClientSecret: string;
 	/** Twitch OAuth application client ID. Register at
 	 * https://dev.twitch.tv/console with the Device Code Flow enabled.
 	 * (Twitch requires an OAuth Redirect URL to be set — `https://localhost`
@@ -455,6 +464,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	githubOAuthClientId: RUNTIME_CONFIG_DEFAULTS.githubOAuthClientId,
 	microsoftOAuthClientId: RUNTIME_CONFIG_DEFAULTS.microsoftOAuthClientId,
 	googleOAuthClientId: RUNTIME_CONFIG_DEFAULTS.googleOAuthClientId,
+	googleOAuthClientSecret: RUNTIME_CONFIG_DEFAULTS.googleOAuthClientSecret,
 	twitchOAuthClientId: RUNTIME_CONFIG_DEFAULTS.twitchOAuthClientId,
 };
 
@@ -639,6 +649,10 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				&& parsed.googleOAuthClientId.length > 0
 				? parsed.googleOAuthClientId
 				: DEFAULT_CONFIG.googleOAuthClientId,
+			googleOAuthClientSecret: typeof parsed?.googleOAuthClientSecret === 'string'
+				&& parsed.googleOAuthClientSecret.length > 0
+				? parsed.googleOAuthClientSecret
+				: DEFAULT_CONFIG.googleOAuthClientSecret,
 			twitchOAuthClientId: typeof parsed?.twitchOAuthClientId === 'string'
 				&& parsed.twitchOAuthClientId.length > 0
 				? parsed.twitchOAuthClientId

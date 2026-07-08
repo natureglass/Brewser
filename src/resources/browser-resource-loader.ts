@@ -444,6 +444,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			() => htmlEscape(loadConfig(this.appRoot).googleOAuthClientId),
 		);
 		out = out.replace(
+			/<browser-config-google-client-secret(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-google-client-secret\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).googleOAuthClientSecret),
+		);
+		out = out.replace(
 			/<browser-config-twitch-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-twitch-client-id\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).twitchOAuthClientId),
 		);
