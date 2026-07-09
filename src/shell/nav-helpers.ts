@@ -168,6 +168,12 @@ export interface AppManifest {
 	 * app can rebind e.g. `exit` off of the default combo onto a single
 	 * button for the lifetime of its navigation. */
 	buttonMapping?: Record<string, unknown>;
+	/** Switch button label (`PLUS`, `B`, …) that quits the app. Merged
+	 * into `buttonMapping` as the `exit` action by the shell — kept as a
+	 * top-level field so the exit binding is discoverable at a glance
+	 * without scanning the (usually keyboard-focused) `buttonMapping`
+	 * block. Wins over any `exit` entry declared inside `buttonMapping`. */
+	exitGame?: string;
 }
 
 /**

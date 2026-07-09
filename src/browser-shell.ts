@@ -59,7 +59,7 @@ import {
 } from '@switch-web/runtime';
 import {
 	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
-	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
+	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveAboveCanvasOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
 	patchLiveDirtyRegions, resetLiveOverlayCache, resetToolbarOverlayCache,
@@ -368,6 +368,22 @@ export class BrowserShell {
 	 * inside libnx itself), so polling every tick adds no measurable
 	 * cost vs an event subscription. */
 	private lastChromeOperationMode: number | undefined = undefined;
+	/** Cached toolbar-avatar `src` snapshot. Populated once at shell boot
+	 * (unproxied `Switch`, no policy) and refreshed at each navigation
+	 * from `handleHtmlResponseLive` AFTER `setManifestPermissions` has
+	 * installed the incoming page's policy AND ONLY when that policy is
+	 * shell / grant-all (`currentAppId() === null`). The read-only auth
+	 * paths live outside every app sandbox and would deny under any
+	 * restrictive app policy — the shell-context guard is what keeps
+	 * an app-scoped policy from clobbering a valid cached value with
+	 * the placeholder. `pushToolbarState` reads this field instead of
+	 * calling `resolveActiveSessionAvatarPath` per-frame — the resolver's
+	 * two `Switch.readFileSync` calls (`active.json` + `<provider>-auth.json`)
+	 * are on-navigation only, keeping the per-rAF-tick renderChrome path
+	 * off SDMC. Defaults to the placeholder bitmap so the toolbar has
+	 * something to paint from the first frame even before the boot init
+	 * call runs at end-of-constructor. */
+	private cachedToolbarAvatarSrc: string = DEFAULT_TOOLBAR_AVATAR_SRC;
 	/** Effective scrollY at the end of the last slow-path repaintContent.
 	 * The video-only fast path uses this to confirm scrollY hasn't
 	 * shifted since the cache was last blitted into screen pixels — if
@@ -508,6 +524,29 @@ export class BrowserShell {
 		this.bookmarksStore = new BookmarksStore({ path: this.profile.bookmarksPath() });
 		const delegate: WebViewDelegate = {
 			onPageStarted: (url: string) => {
+				// Reset the permission policy to shell mode (grant-all)
+				// BEFORE the fetch runs. `onPageStarted` fires from
+				// `WebView.runSession` right after `beginSession` and
+				// BEFORE `fetchAndExecute` — so this is the last hook where
+				// we can influence the policy that gates the incoming URL's
+				// Switch.readFileSync path. If we skip this, the prior
+				// page's `setManifestPermissions` call (installed by
+				// `handleHtmlResponseLive` on the previous nav) is still
+				// active during the new page's HTML read — an
+				// app -> shell navigation (e.g. tapping the toolbar's Back
+				// button while inside a game) then denies the read of
+				// `sdmc:/switch/brewser/shell/settings.html` (path outside
+				// the last app's sandbox, and the last app's manifest
+				// didn't grant `filesystem_read`), the load fails, the
+				// error-page fallback fails for the same reason, and the
+				// user sees the previous page frozen while the URL bar
+				// updates. Grant-all here is safe: the shell code doing
+				// the fetch is trusted, and `handleHtmlResponseLive` will
+				// re-install the app-specific restrictive policy AFTER
+				// reading the new app's manifest but BEFORE running any
+				// of its scripts. Shell URLs stay in grant-all through the
+				// whole page lifetime (same as any first-nav shell page).
+				this.policy.setManifestPermissions(null, null, null);
 				// Per-page render budget: internal `brewser://` pages always
 				// render in one shot (their size is bounded — apps grid,
 				// settings list, dev probes etc. — and the visible "line-by-
@@ -803,6 +842,16 @@ export class BrowserShell {
 			resetLiveOverlayCache();
 			requestFullRepaint();
 		};
+		// Boot-time snapshot of the toolbar avatar `src`. Runs BEFORE
+		// `installPolyfills` (main.ts:50) and therefore BEFORE the runtime's
+		// `installSwitchPathResolver` proxy exists, so the two auth reads go
+		// through the raw nx.js `Switch.readFileSync` under no policy — safe
+		// even if a stray manifestPerms had been pre-seeded. Subsequent
+		// refreshes happen in `handleHtmlResponseLive` AFTER each
+		// per-navigation `setManifestPermissions` swap, gated to shell
+		// context only so the refresh never runs under a restrictive app
+		// policy.
+		this.refreshCachedToolbarAvatarSrc();
 	}
 
 	async run(): Promise<void> {
@@ -1398,6 +1447,27 @@ export class BrowserShell {
 		}
 	}
 
+	/** Re-resolve the toolbar avatar `src` from the SDMC auth records and
+	 * stash it in `cachedToolbarAvatarSrc` so subsequent `renderChrome`
+	 * calls can paint it without touching the disk. Called exactly at
+	 * (1) end-of-constructor (boot, unproxied `Switch`, no policy) and
+	 * (2) `handleHtmlResponseLive` AFTER `setManifestPermissions` swaps
+	 * the runtime policy AND ONLY when that policy is shell / grant-all
+	 * — the resolver reads shell-owned paths that only resolve under
+	 * grant-all, so calling this while a restrictive app policy is
+	 * installed would deny both reads and clobber the cached value with
+	 * the placeholder. See the field's own comment for the rationale.
+	 *
+	 * MUST NOT be called from any per-frame code path. `pushToolbarState`
+	 * — the only user of `cachedToolbarAvatarSrc` — reads the field
+	 * directly. Adding this call to any tick-driven surface would
+	 * reintroduce the pre-2026-07-09 60 Hz `sdmc:/switch/brewser/shell/auth/`
+	 * read flood on animated app pages (see `handleHtmlResponseLive`'s
+	 * refresh site for the full history). */
+	private refreshCachedToolbarAvatarSrc(): void {
+		this.cachedToolbarAvatarSrc = resolveActiveSessionAvatarPath() ?? DEFAULT_TOOLBAR_AVATAR_SRC;
+	}
+
 	private renderChrome(fallbackURL = ''): void {
 		const url = this.navigation.currentURL ?? fallbackURL;
 		const reachable = readInternetReachable();
@@ -1782,8 +1852,22 @@ export class BrowserShell {
 			const manifest = loadAppManifest(appDir, this.profile.appRoot);
 			const bm = manifest?.buttonMapping;
 			const buttonMapping = (bm && typeof bm === 'object' && !Array.isArray(bm))
-				? (bm as Record<string, unknown>) : null;
-			setAppButtonOverlay(buttonMapping);
+				? { ...(bm as Record<string, unknown>) } : null;
+			// Root-level `exitGame` is the new home for "which Switch button
+			// quits this app" — declaring it at the top of the manifest keeps
+			// the `buttonMapping` block focused on keyboard-key mappings.
+			// Merged into the buttonMapping overlay as an `exit` action so the
+			// existing action-router path (emitAction('exit') + ControllerInput
+			// {kind:'exit'} → shell $.exit()) fires unchanged. Wins over any
+			// legacy `exit` entry inside `buttonMapping` for apps mid-migration.
+			const exitGame = manifest?.exitGame;
+			if (typeof exitGame === 'string' && exitGame !== '') {
+				const overlay = buttonMapping ?? {};
+				overlay.exit = exitGame;
+				setAppButtonOverlay(overlay);
+			} else {
+				setAppButtonOverlay(buttonMapping);
+			}
 			// Update the runtime's permission policy for the app that's
 			// about to run. Sandbox root = the app's own on-disk dir; any
 			// filesystem read/write inside it is always allowed. Reads/
@@ -1804,6 +1888,23 @@ export class BrowserShell {
 			// Settings still applies via `policy.networkEnabled`, but
 			// no manifest declaration is required for shell code paths.
 			this.policy.setManifestPermissions(null, null, null);
+		}
+		// Snapshot the toolbar avatar `src` for this navigation. MUST run
+		// AFTER the `setManifestPermissions` swap above AND gated to shell
+		// context (`currentAppId() === null` — grant-all). The two auth
+		// reads (`active.json` + `<provider>-auth.json`) target shell-
+		// owned paths outside every app sandbox, so they only resolve
+		// under grant-all; running them under a restrictive app policy
+		// would deny and cache the placeholder. Placement + guard together
+		// guarantee the refresh executes only when the freshly-installed
+		// policy is shell context: covers every shell→shell / app→shell
+		// / boot→shell transition (login/logout is picked up here) and
+		// correctly skips every shell→app / app→app transition (the
+		// cached value from the last shell landing carries through the
+		// app run so the toolbar keeps painting the real avatar under
+		// the restrictive app policy).
+		if (this.policy.currentAppId() === null) {
+			this.refreshCachedToolbarAvatarSrc();
 		}
 		// A queued fullscreen request from any prior page should never
 		// leak across navigations — the new page's scripts will queue
@@ -2068,6 +2169,15 @@ export class BrowserShell {
 				ctx, getLiveRoot(), viewport, effectiveScrollY,
 				copyBridgeToScreen,
 			);
+			// Post-canvas overlay pass — see the canvas-only fast path
+			// and slow path below for the full rationale. Any DOM
+			// element after a canvas in DOM order (game overlay etc.)
+			// gets repainted here so it stays visible over the
+			// canvas-composite stomp. Cheap on pages with no such
+			// sibling pattern.
+			paintLiveAboveCanvasOverlay(
+				ctx, getLiveRoot(), viewport, effectiveScrollY,
+			);
 			this.lastCpuPresentMs = performance.now() - t0;
 			this.cpuPresentCallCount++;
 			return;
@@ -2176,6 +2286,19 @@ export class BrowserShell {
 				copyBridgeToScreen,
 				{ blitCacheUnder: true },
 			);
+			// Post-canvas overlay pass — same rationale as the slow-path
+			// call below. The canvas fast path stomps the canvas region
+			// with fresh bridge pixels every frame, so any DOM overlay
+			// that came AFTER the canvas in DOM order (e.g. Three.js
+			// Serpent's `#overlay` for start / dead / finished screens)
+			// would flash for one frame (the slow-path repaint after a
+			// tree version bump) and then vanish on subsequent fast-path
+			// frames. Running the post-canvas pass here keeps the overlay
+			// painted on top for every frame. Cheap on canvas-less pages
+			// or canvases with no post-canvas siblings.
+			paintLiveAboveCanvasOverlay(
+				ctx, getLiveRoot(), viewport, effectiveScrollY,
+			);
 			this.lastCpuPresentMs = performance.now() - t0;
 			this.cpuPresentCallCount++;
 			return;
@@ -2231,6 +2354,17 @@ export class BrowserShell {
 			overlayLiveAnimatedCanvases(
 				ctx, getLiveRoot(), viewport, effectiveScrollY,
 				copyBridgeToScreen,
+			);
+			// Post-canvas overlay pass. Repaints DOM elements that in
+			// DOM order come after a canvas at the same parent, so
+			// HUD/start-screen overlays inside a canvas container (e.g.
+			// `<main id="main"><canvas id="gl"><div id="overlay">…`)
+			// render ABOVE the just-composited canvas — matching the
+			// standard CSS "later sibling paints on top" stacking rule.
+			// Cheap on canvas-less pages: the walker just recurses to
+			// hit no-canvas leaves and returns.
+			paintLiveAboveCanvasOverlay(
+				ctx, getLiveRoot(), viewport, effectiveScrollY,
 			);
 		}
 		// External stylesheets fetched mid-flight: cover the broken pre-CSS
@@ -3647,19 +3781,25 @@ export class BrowserShell {
 					dot.setAttribute('data-status', status);
 				}
 			}
-			// Avatar slot — show the active session's cached avatar if
-			// one exists, else the default placeholder. Resolved fresh
-			// each renderChrome so a login / logout reflects in the
-			// chrome strip without a separate notification path. The
-			// disk reads (active.json + the active provider's
-			// auth.json) are tiny and renderChrome only fires on
-			// explicit events (nav, settings save, bookmark toggle),
-			// not per-frame.
+			// Avatar slot — paint from the shell's `cachedToolbarAvatarSrc`
+			// snapshot. The snapshot is refreshed once at boot and once
+			// per navigation (in `handleHtmlResponseLive` AFTER the
+			// permission-policy swap, gated to shell context only); this
+			// code path MUST NOT call `resolveActiveSessionAvatarPath` or
+			// otherwise hit `Switch.readFileSync` for the auth records.
+			// `renderChrome` — which drives `pushToolbarState` — fires
+			// PER rAF TICK on animated app pages via the `onTick →
+			// animFired` gate at browser-shell.ts:1074-1128, so any disk
+			// read here becomes a ~60 Hz flood; under a restrictive app
+			// manifest that flood also emits a `perm denied:
+			// filesystem_read` deny log line every frame (see
+			// switch-path-resolver.ts:136-139). Snapshot-at-navigation
+			// keeps the resolver's two reads off the paint path entirely.
 			const avatarBtn = findToolbarById(root, 'avatarButton');
 			if (avatarBtn) {
 				const img = findToolbarImg(avatarBtn);
 				if (img) {
-					const nextSrc = resolveActiveSessionAvatarPath() ?? DEFAULT_TOOLBAR_AVATAR_SRC;
+					const nextSrc = this.cachedToolbarAvatarSrc;
 					if (img.getAttribute('src') !== nextSrc) {
 						img.setAttribute('src', nextSrc);
 					}
@@ -4182,13 +4322,35 @@ function toggleDisabledAttr(el: LiveElement, on: boolean): void {
 // --- Toolbar avatar slot ----------------------------------------------------
 //
 // Reads the active-session pointer (`auth/active.json`) and the named
-// provider's auth record on each renderChrome to figure out which
-// avatar bitmap the toolbar should display. Same disk shape the
-// page-side `auth-shared.js` writes — kept in sync there. No caching:
-// renderChrome only fires on explicit events (nav, bookmark toggle,
-// settings save), so the disk reads happen at most a few times per
-// minute and the always-fresh lookup means a login from a Login page
-// reflects in the toolbar the moment the user navigates away from it.
+// provider's auth record to figure out which avatar bitmap the toolbar
+// should display. Same disk shape the page-side `auth-shared.js` writes
+// — kept in sync there.
+//
+// Snapshot lifetime, NOT per-frame. `renderChrome` (and its
+// `pushToolbarState` tail that repaints the avatar `<img>` src) fires
+// per rAF tick on animated app pages via the `onTick → animFired`
+// gate at browser-shell.ts:1074-1128 — up to ~60 Hz. Running the two
+// `Switch.readFileSync` calls in this resolver on that cadence
+// produced a per-frame perm-denied deny log under any restrictive
+// app manifest (the shell-owned `sdmc:/switch/brewser/shell/auth/`
+// paths are outside every app's sandbox and no app declares
+// `filesystem_read`).
+//
+// The shell now caches the resolved path in
+// `BrowserShell.cachedToolbarAvatarSrc` and refreshes it at exactly
+// two seams: end-of-constructor (boot; unproxied `Switch`, no policy)
+// and `handleHtmlResponseLive` AFTER `setManifestPermissions` installs
+// the incoming page's policy AND ONLY when that policy is shell /
+// grant-all (`this.policy.currentAppId() === null`). The post-swap +
+// shell-context guard is load-bearing: the resolver reads shell-owned
+// paths that only succeed under grant-all, so calling it while a
+// restrictive app policy is installed would deny both reads and cache
+// the placeholder. `pushToolbarState` reads the cached field and never
+// calls into this resolver. Do NOT re-introduce a direct call to
+// `resolveActiveSessionAvatarPath` from any tick-driven surface AND
+// do NOT relocate the `handleHtmlResponseLive` refresh call to before
+// the `setManifestPermissions` swap or remove its `currentAppId() ===
+// null` guard — verify-patches.sh has #105 checks for both.
 
 const AUTH_DIR_ABS = 'sdmc:/switch/brewser/shell/auth/';
 const ACTIVE_PATH_ABS = `${AUTH_DIR_ABS}active.json`;

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-07T21:11:02Z",
+  "generated": "2026-07-09T13:17:02Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -25,10 +25,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 50510
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 50513
     },
     {
       "id": "com.natureglass.playdock",
@@ -54,10 +53,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 8236
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 8239
     },
     {
       "id": "com.natureglass.pvzge",
@@ -84,10 +82,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "GPL-3.0",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 1180370491
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 1180370494
     },
     {
       "id": "com.natureglass.sensors",
@@ -116,10 +113,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 71617
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 71620
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -148,10 +144,9 @@
       "data": [
         "assets"
       ],
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 121250
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 121253
     },
     {
       "id": "com.natureglass.streamcast",
@@ -178,10 +173,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 46039
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 46042
     },
     {
       "id": "com.natureglass.webgl1threejsdemos",
@@ -208,10 +202,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 17361177
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 17361180
     },
     {
       "id": "com.natureglass.webgl2threejsdemos",
@@ -238,10 +231,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 24301040
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 25066452
     }
   ],
   "experimental": [
@@ -270,10 +262,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 22021143
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 22021146
     },
     {
       "id": "com.natureglass.gl-probes",
@@ -296,10 +287,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "Apache-2.0",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 118123
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 118126
     },
     {
       "id": "com.natureglass.itchio",
@@ -325,10 +315,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 47827
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 47830
     },
     {
       "id": "com.natureglass.savedemo",
@@ -348,10 +337,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 30945
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 42514
     },
     {
       "id": "com.natureglass.speedtest",
@@ -378,10 +366,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 37418
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 37421
     },
     {
       "id": "com.natureglass.unity-demos",
@@ -409,10 +396,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 195169772
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 195169775
     },
     {
       "id": "com.natureglass.wasmprobe",
@@ -434,10 +420,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 21968
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 21971
     },
     {
       "id": "com.natureglass.webglconformtest",
@@ -463,10 +448,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 9668015
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 9668018
     },
     {
       "id": "com.natureglass.webglreport",
@@ -489,13 +473,54 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "Apache-2.0",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 61069
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 61072
     }
   ],
   "community": [
+    {
+      "id": "com.natureglass.threejsserpent",
+      "name": "Three.js Serpent",
+      "version": "1.0.0",
+      "description": "The same Serpent arcade game rebuilt with Three.js (r184) — sprite-based, no custom shaders.",
+      "logo": "assets/snakelogo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage",
+        "network"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 2089705
+    },
     {
       "id": "com.natureglass.webgl1demo",
       "name": "Moonlight - Procedural WebGL Demo",
@@ -517,10 +542,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 70669
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 70672
     },
     {
       "id": "com.natureglass.webgl2demo",
@@ -543,10 +567,9 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "buttonMapping": {
-        "exit": "PLUS"
-      },
-      "sizeBytes": 62062
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 62065
     }
   ]
 }
