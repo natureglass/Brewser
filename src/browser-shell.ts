@@ -1117,11 +1117,26 @@ export class BrowserShell {
 						// chrome strip via bridge clearColor and so demand a
 						// chrome redraw; video-only ticks don't touch chrome
 						// at all (it sits above the painter's viewport).
-						// Preserve the prior short-circuit (only run
-						// tickVideo when nothing rAF-shaped fired) for
-						// back-compat.
+						// 2026-07-10 — run BOTH ticks each iteration. The
+						// prior short-circuit (`animFired ? false : tickVideo()`)
+						// starved the video decoder whenever a page had ANY
+						// rAF-shaped animation running, because
+						// tickAnimationFrames() returns true first and skipped
+						// tickVideo entirely. Three.js's `webgl_materials_video`
+						// (and any demo that drives `VideoTexture` under a
+						// `setAnimationLoop` render loop) hit this: the
+						// decoder opened, got metadata, but never advanced —
+						// `hasFirstFrame` stayed false, `video.readyState`
+						// stayed 0, and Three.js's VideoTexture.update()
+						// (which needs `readyState >= HAVE_CURRENT_DATA`)
+						// never fired, so `texture.needsUpdate` never became
+						// true and the material rendered black. The two ticks
+						// touch disjoint state (rAF callbacks vs. per-video
+						// decoder ring buffers) and both are cheap enough to
+						// run together every iteration — the OR-composed
+						// `fired` flag drives the chrome-redraw decision.
 						const animFired = tickAnimationFrames();
-						const videoFired = animFired ? false : tickVideo();
+						const videoFired = tickVideo();
 						const fired = animFired || videoFired;
 						// Phase 1.5+1.6 follow-up: live-form's handleFormTap
 						// flags `requestFullRepaint()` after a tap mutates
