@@ -174,6 +174,15 @@ export interface AppManifest {
 	 * without scanning the (usually keyboard-focused) `buttonMapping`
 	 * block. Wins over any `exit` entry declared inside `buttonMapping`. */
 	exitGame?: string;
+	/** When `true`, the shell launches this app with chrome hidden and
+	 * the CSS viewport widened to the full screen height — every page
+	 * navigation inside the app enters `BrowserMode = 'fullscreen-app'`
+	 * before the first paint (mode reasserted per-nav on the manifest
+	 * re-read). Distinct from the L+R-toggleable `fullscreen-page` mode
+	 * and from page-script `canvas.requestFullscreen()` (`fullscreen-
+	 * canvas`) — the manifest owns the mode for the app's lifetime; L+R
+	 * / `__swbExitFullscreen` are no-ops while it's in effect. */
+	fullscreen?: boolean;
 }
 
 /**

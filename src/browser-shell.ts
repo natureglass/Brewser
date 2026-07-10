@@ -777,6 +777,9 @@ export class BrowserShell {
 		(globalThis as { __swbExitFullscreen?: () => Promise<void> })
 			.__swbExitFullscreen = async () => {
 			if (this.mode === 'normal') return;
+			// `fullscreen-app` is owned by the manifest for the app's
+			// lifetime — page scripts can't opt out of it.
+			if (this.mode === 'fullscreen-app') return;
 			await this.exitFullscreen();
 		};
 		// Page-script-callable "go back to the page that launched this
@@ -787,7 +790,11 @@ export class BrowserShell {
 		// gets a one-press exit from fullscreen-canvas to the launcher.
 		(globalThis as { __swbNavigateBack?: () => Promise<void> })
 			.__swbNavigateBack = async () => {
-			if (this.mode !== 'normal') await this.exitFullscreen();
+			// `fullscreen-app`: skip exitFullscreen — the onNavigate
+			// delegate at the start of the goBack will do a hard
+			// `setMode('normal')` and the destination page's manifest
+			// re-read will decide the next mode fresh.
+			if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
 			await this.runNavigation(() => this.navigation.goBack());
 		};
 		// Silent variant used by the quit-prompt page (romfs/shell/quit-
@@ -808,6 +815,10 @@ export class BrowserShell {
 				this.clampScroll();
 				// intentional: NO repaintAll here — the goBack below
 				// triggers a fresh repaint at the previous page.
+			} else if (this.mode === 'fullscreen-app') {
+				// Same short-circuit path as fullscreen-page: skip the
+				// exitFullscreen intermediate paint (it would flash the
+				// toolbar over the still-visible previous page).
 			} else if (this.mode !== 'normal') {
 				await this.exitFullscreen();
 			}
@@ -1308,7 +1319,13 @@ export class BrowserShell {
 						// any non-app page, the historical shell-quit
 						// semantic holds and we return from the input loop.
 						if (this.currentAppDir) {
-							if (this.mode !== 'normal') await this.exitFullscreen();
+							// Skip exitFullscreen for the manifest-owned
+							// `fullscreen-app` mode — the onNavigate delegate
+							// at goBack() will reset the mode cleanly, and
+							// the previous page's manifest re-read decides
+							// the next mode fresh (returning to launcher =
+							// normal; nested fullscreen app page = re-enter).
+							if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
 							await this.runNavigation(() => this.navigation.goBack());
 							break;
 						}
@@ -1420,8 +1437,10 @@ export class BrowserShell {
 					case 'lr-combo':
 						// L+R exits whichever fullscreen mode is active.
 						// Ignored in normal mode (so user can still hold
-						// L+R+Minus for the shell-exit combo).
-						if (this.mode !== 'normal') await this.exitFullscreen();
+						// L+R+Minus for the shell-exit combo). Also ignored
+						// in `fullscreen-app` — the manifest owns that
+						// mode for the app's lifetime; L+R is a no-op.
+						if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
 						break;
 				}
 			}
@@ -1860,6 +1879,13 @@ export class BrowserShell {
 		// mapping.
 		const appDir = this.extractAppDirFromUrl(url);
 		this.currentAppDir = appDir;
+		// Manifest-declared launch-fullscreen intent. Captured here so it
+		// can override the CSS-viewport height passed to the session
+		// BEFORE `populateAndRunScripts` (first-paint fullscreen, no re-
+		// layout jank) AND drive the `setMode('fullscreen-app')` call
+		// after populate. Reset on every navigation — non-app pages
+		// (launcher / settings) always get `false`.
+		let appLaunchFullscreen = false;
 		if (appDir) {
 			// Read the full manifest once per navigation and feed both the
 			// button-router overlay AND the permission policy from the same
@@ -1896,6 +1922,12 @@ export class BrowserShell {
 				: [];
 			const sandboxRoot = `${this.profile.appRoot}${appDir}`;
 			this.policy.setManifestPermissions(appId, perms, sandboxRoot);
+			// Capture the manifest's launch-fullscreen intent. Only takes
+			// effect when the toolbar is enabled globally — with
+			// `showToolbar: false` in `config.json` there's no chrome to
+			// hide, so the mode flip is a no-op (paint gates + CSS
+			// viewport already match).
+			appLaunchFullscreen = manifest?.fullscreen === true && this.chromeHeight > 0;
 		} else {
 			clearAppButtonOverlay();
 			// Shell page (brewser://home/, brewser://settings/, ...): grant
@@ -1930,8 +1962,12 @@ export class BrowserShell {
 		this.pendingFullscreenCanvasRequest = null;
 		// Keep the session in sync with the shell's chrome height so its
 		// internal `setCssViewport` resolves `vh`/`vw` against the visible
-		// content rect, not the full screen.
-		this.session.setChromeHeight(this.chromeHeight);
+		// content rect, not the full screen. Fullscreen-manifest apps
+		// override this to 0 so `100vh` resolves to the full screen
+		// height on first paint — otherwise the initial layout would use
+		// the chrome-trimmed height (720−56) and the mode flip below
+		// would trigger a full re-layout to widen it.
+		this.session.setChromeHeight(appLaunchFullscreen ? 0 : this.chromeHeight);
 		// Hand off the page-lifecycle core: setLivePageBase, install fetch
 		// + Worker wrappers, setCssViewport, populateLiveRoot,
 		// scanForAutoplayVideos, external stylesheet fetches, runPageScripts,
@@ -1951,6 +1987,22 @@ export class BrowserShell {
 		this.fullscreenCanvasLive = false;
 		this.currentScrollY = 0;
 		this.momentumVelocityPxPerTick = 0;
+
+		// Manifest-declared launch fullscreen: enter `fullscreen-app`
+		// mode BEFORE the pending-fullscreen drain below so a page that
+		// also calls `canvas.requestFullscreen()` synchronously at load
+		// upgrades cleanly from fullscreen-app → fullscreen-canvas. The
+		// CSS viewport was already set to the full screen height inside
+		// `populateAndRunScripts` (we passed `chromeHeight = 0` above),
+		// so no viewport update is needed here — the mode flip only
+		// suppresses chrome paint + adjusts the paint-inset gates. Held
+		// to `mode === 'normal'` so we don't clobber `fullscreen-canvas`
+		// left over from a stale in-flight page-scripted transition
+		// (defensive — the `onNavigate` delegate resets to `'normal'`
+		// at nav start).
+		if (appLaunchFullscreen && this.mode === 'normal') {
+			this.setMode('fullscreen-app');
+		}
 
 		// Drain a fullscreen request queued by a top-level script body
 		// (e.g. apps/com.natureglass.webgl1demo/index.html that calls
@@ -2216,10 +2268,10 @@ export class BrowserShell {
 		// and the fast path bypasses without a special case.
 		// `fullscreen-canvas` and `video-fullscreen` early-return at the
 		// top of repaintContentInner, so by the time we reach this gate
-		// mode is always `normal` or `fullscreen-page`. Both share the
-		// same paintLiveOverlay + cache-blit path — the fast path is
-		// equally safe for either.
-		const canCanvasFastPath = (this.mode === 'normal' || this.mode === 'fullscreen-page')
+		// mode is always `normal`, `fullscreen-page`, or `fullscreen-
+		// app`. All three share the same paintLiveOverlay + cache-blit
+		// path — the fast path is equally safe for any of them.
+		const canCanvasFastPath = (this.mode === 'normal' || this.mode === 'fullscreen-page' || this.mode === 'fullscreen-app')
 			&& !opts.videoOnlyFast
 			&& (pageHasAnimationActivity() || hasPageCanvas2dActivity())
 			&& effectiveScrollY === this.lastRepaintedScrollY
