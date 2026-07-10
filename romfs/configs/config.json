@@ -20,7 +20,6 @@
   "swbImgDebug": false,
   "showSplash": true,
   "showToolbar": true,
-  "splashMinMs": 500,
   "splashFadeMs": 250,
   "local": "dd/mm/yyyy",
   "homeSection": "featured",

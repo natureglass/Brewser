@@ -203,20 +203,11 @@ export interface BrowserConfig {
 	 * mode. Read once at boot — a runtime flip requires restart.
 	 * Default `true`. */
 	showToolbar: boolean;
-	/** Minimum visible duration (ms) of the JS-side boot splash before the
-	 * fade-out starts. The shell allocates the canvas, blits the stashed
-	 * C-side splash bytes in via `nx_framebuffer_init`, then repaints the
-	 * splash (`romfs:/shell/assets/loading.jpg`) continuously for this
-	 * many ms — independent of how long boot prelude work (seedRomfs,
-	 * config parse, HTML parse) took. Larger = more time to read the
-	 * splash but slower app launch. Clamped to [0, 10000]; default 1500. */
-	splashMinMs: number;
-	/** Fade-out duration (ms) from splash → black between the dwell above
-	 * and the home page paint. After the dwell, the shell allocates the
-	 * canvas, blits the stashed splash into it, then animates a black
-	 * overlay from alpha 0→1 over this many ms. Set to 0 to skip the
-	 * fade (instant cut from splash to home). Clamped to [0, 5000];
-	 * default 500. */
+	/** Fade-out duration (ms) from splash → black between the boot navigate
+	 * completing and the home page paint. Once the navigate lands, the shell
+	 * animates a black overlay from alpha 0→1 over this many ms on top of
+	 * the already-blitted splash. Set to 0 to skip the fade (instant cut
+	 * from splash to home). Clamped to [0, 5000]; default 500. */
 	splashFadeMs: number;
 	/** Joycon button → engine action override map. Keys are Switch
 	 * face / shoulder labels (A, B, X, Y, L, R, ZL, ZR, MINUS, PLUS,
@@ -439,7 +430,6 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	swbImgDebug: false,
 	showSplash: true,
 	showToolbar: true,
-	splashMinMs: 1500,
 	splashFadeMs: 500,
 	buttonMapping: {},
 	keyboardHeight: 400,
@@ -552,9 +542,6 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			showToolbar: typeof parsed?.showToolbar === 'boolean'
 				? parsed.showToolbar
 				: DEFAULT_CONFIG.showToolbar,
-			splashMinMs: typeof parsed?.splashMinMs === 'number' && Number.isFinite(parsed.splashMinMs)
-				? Math.max(0, Math.min(10000, Math.trunc(parsed.splashMinMs)))
-				: DEFAULT_CONFIG.splashMinMs,
 			splashFadeMs: typeof parsed?.splashFadeMs === 'number' && Number.isFinite(parsed.splashFadeMs)
 				? Math.max(0, Math.min(5000, Math.trunc(parsed.splashFadeMs)))
 				: DEFAULT_CONFIG.splashFadeMs,

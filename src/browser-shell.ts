@@ -470,9 +470,9 @@ export class BrowserShell {
 		//
 		// Also stashed on `this` so `run()` can hoist `startBootSplash`
 		// to its first statement (the splash needs `showSplash` /
-		// `splashMinMs` / `splashFadeMs` BEFORE any awaiting step;
-		// re-doing `loadConfig` from `run()` would be sync too but
-		// stashing avoids the double read and makes the splash's "no
+		// `splashFadeMs` BEFORE any awaiting step; re-doing
+		// `loadConfig` from `run()` would be sync too but stashing
+		// avoids the double read and makes the splash's "no
 		// pre-paint await" contract explicit at the class boundary).
 		const startupConfig = this.startupConfig = loadConfig(this.profile.appRoot);
 		// Wire the user-editable joycon button mapping. Empty values in
@@ -875,10 +875,7 @@ export class BrowserShell {
 		// `startBootSplash`'s first `rafCallback()` runs synchronously
 		// inside its own body — see its contract comment.
 		const splashHandle: SplashHandle | null = this.startupConfig.showSplash
-			? this.startBootSplash(
-					this.startupConfig.splashMinMs,
-					this.startupConfig.splashFadeMs,
-				)
+			? this.startBootSplash(this.startupConfig.splashFadeMs)
 			: null;
 		this.webView.initialize();
 		// Touch listener must be installed after the WebView has touched up
@@ -1054,19 +1051,14 @@ export class BrowserShell {
 		// and has been painting its frame every rAF tick from the
 		// instant Skia was initialized — covering the entire span
 		// above (seedRomfs, 8× loadHtml*, modal/toolbar parses, applet
-		// warning, etc.). Now we just need to start the home navigate,
-		// hold the splash through the dwell minimum AND the navigate's
-		// terminal repaintAll cache build, then fade and hand off.
-		//
-		// Fade gating: `await Promise.all([navPromise, dwellMin])`
-		// guarantees BOTH (a) the home live-DOM cache is built (so
-		// `repaintAll()` after the fade is a fast cache-blit, not a
-		// rebuild) AND (b) the user has seen the splash for at least
-		// `splashMinMs`. The fade's final frame paints alpha=1 black,
-		// then `repaintAll` blits home on top — no flash of black
-		// between fade-end and home-paint (the splash rAF self-
-		// terminates on `phase === 'done'`, so it won't repaint the
-		// black layer after `repaintAll` lands).
+		// warning, etc.). Now we just need to await the home navigate
+		// (which guarantees the live-DOM cache is built so the
+		// post-fade `repaintAll()` is a fast cache-blit, not a
+		// rebuild), then fade and hand off. The fade's final frame
+		// paints alpha=1 black, then `repaintAll` blits home on top —
+		// no flash of black between fade-end and home-paint (the
+		// splash rAF self-terminates on `phase === 'done'`, so it
+		// won't repaint the black layer after `repaintAll` lands).
 		//
 		// `showSplash: false` bypasses all of the above for fastest
 		// boot (no rAF cost, no fade). C-side
@@ -1081,11 +1073,7 @@ export class BrowserShell {
 		// trap the user in the app.
 		const bootUrl = resolveAutorunUrl(shellConfig.autorunApp) ?? DEFAULT_HOME_URL;
 		if (splashHandle) {
-			const navPromise = this.navigateTo(bootUrl);
-			const dwellMin = new Promise<void>((resolve) =>
-				setTimeout(resolve, this.startupConfig.splashMinMs),
-			);
-			await Promise.all([navPromise, dwellMin]);
+			await this.navigateTo(bootUrl);
 			splashHandle.beginFade();
 			await splashHandle.finishedFading;
 			// Warm-cache repaint. Should be ~10 ms (cache blit only).
@@ -4182,12 +4170,11 @@ export class BrowserShell {
 	 * Returns a `SplashHandle`: `beginFade()` flips into the fade
 	 * phase; `finishedFading` resolves once the fade overlay reaches
 	 * alpha 1 (or immediately if `splashFadeMs <= 0`). Caller gates
-	 * the fade on BOTH `navigateTo` completing AND `splashMinMs`
-	 * dwell — see `run()` for the wiring.
+	 * the fade on `navigateTo` completing — see `run()` for the
+	 * wiring.
 	 *
 	 * `splashFadeMs <= 0` skips the fade entirely (instant cut). */
-	private startBootSplash(splashMinMs: number, splashFadeMs: number): SplashHandle {
-		void splashMinMs; // Caller enforces dwell via Promise.all; documented in signature.
+	private startBootSplash(splashFadeMs: number): SplashHandle {
 		// Allocate canvas → `nx_framebuffer_init` fires → Skia screen
 		// surface initialized. This is the trigger for the engine-side
 		// `[skia] GPU screen surface ... ready` log; nothing earlier in

@@ -92,6 +92,16 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	bin: { mime: 'application/octet-stream', binary: true },
 	gltf: { mime: 'model/gltf+json; charset=utf-8', binary: false },
 	glb: { mime: 'model/gltf-binary', binary: true },
+	// Stanford PLY (`Lucy100k.ply` etc.) — Three's PLYLoader fetches via
+	// FileLoader with `arraybuffer` response type; both ASCII and binary
+	// variants land here (loader sniffs the header). No registered MIME
+	// for PLY; `application/octet-stream` matches the binary=true path.
+	ply: { mime: 'application/octet-stream', binary: true },
+	// Collada (`elf.dae` etc.) — Three's ColladaLoader fetches via
+	// FileLoader as text, then parses the XML with DOMParser. Registered
+	// MIME per Khronos is `model/vnd.collada+xml`, but `application/xml`
+	// is universally accepted and matches the text-parsing path.
+	dae: { mime: 'application/xml; charset=utf-8', binary: false },
 	hdr: { mime: 'image/vnd.radiance', binary: true },
 	nrrd: { mime: 'application/octet-stream', binary: true },
 	// WebAssembly binary. Content-type MUST be `application/wasm`
@@ -123,6 +133,16 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	astc: { mime: 'image/x-astc', binary: true },
 	pkm: { mime: 'image/x-pkm', binary: true },
 	pvr: { mime: 'application/octet-stream', binary: true },
+	// Zip archives — Three.js's webgl_texture2darray demo streams a
+	// zipped volumetric-data payload via FileLoader + fflate.unzipSync;
+	// same code path applies to any demo that packs multi-slice / multi-
+	// asset data into a single .zip. Binary + application/zip MIME.
+	zip: { mime: 'application/zip', binary: true },
+	// OpenEXR HDR (`piz_compressed.exr` etc.) — Three's EXRLoader fetches
+	// this via FileLoader; add here so the loader doesn't reject it as
+	// an "unknown brewser:// page". Binary application/octet-stream MIME
+	// (no standardised registered MIME for EXR).
+	exr: { mime: 'application/octet-stream', binary: true },
 };
 
 /** Inline right-pointing arrow painted between the installed + catalog

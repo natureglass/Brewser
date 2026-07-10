@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-07-09T13:17:02Z",
+  "generated": "2026-07-10T21:43:13Z",
   "featured": [
     {
       "id": "com.natureglass.lumaclips",
@@ -26,8 +26,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 50513
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 50676
     },
     {
       "id": "com.natureglass.playdock",
@@ -54,37 +64,9 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
+      "fullscreen": true,
       "buttonMapping": {},
-      "sizeBytes": 8239
-    },
-    {
-      "id": "com.natureglass.pvzge",
-      "name": "PvZ GE",
-      "version": "1.0.0",
-      "description": "Plants vs. Zombies — Garden Edition (browser game).",
-      "logo": "assets/pvzge_logo.png",
-      "entry": "index.html",
-      "category": "game",
-      "features": [
-        "canvas",
-        "webgl",
-        "audio",
-        "controller"
-      ],
-      "permissions": [
-        "network",
-        "storage"
-      ],
-      "compatibility": [
-        "switch"
-      ],
-      "allowed_origins": [],
-      "developer": "Alex Daskalakis",
-      "source": "https://github.com/natureglass/Brewser-apps",
-      "license": "GPL-3.0",
-      "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 1180370494
+      "sizeBytes": 8261
     },
     {
       "id": "com.natureglass.sensors",
@@ -114,8 +96,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 71620
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 71045
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -131,8 +123,7 @@
         "controller"
       ],
       "permissions": [
-        "network",
-        "storage"
+        "filesystem_read"
       ],
       "compatibility": [
         "switch"
@@ -141,12 +132,58 @@
       "developer": "Alex Daskalakis",
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
-      "data": [
-        "assets"
-      ],
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 121253
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 119606
+    },
+    {
+      "id": "com.natureglass.speedtest",
+      "name": "Speed Test",
+      "version": "1.0.0",
+      "description": "Test your internet speed directly on your console.",
+      "logo": "assets/speedtest_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "network"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://itch.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "fullscreen": true,
+      "exitGame": "PLUS",
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 36967
     },
     {
       "id": "com.natureglass.streamcast",
@@ -174,8 +211,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 46042
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 46205
     },
     {
       "id": "com.natureglass.webgl1threejsdemos",
@@ -203,8 +250,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 17361180
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 17361343
     },
     {
       "id": "com.natureglass.webgl2threejsdemos",
@@ -232,8 +289,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 25066452
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 40887569
     }
   ],
   "experimental": [
@@ -320,6 +387,45 @@
       "sizeBytes": 47830
     },
     {
+      "id": "com.natureglass.pvzge",
+      "name": "PvZ GE",
+      "version": "1.0.0",
+      "description": "Plants vs. Zombies — Garden Edition (browser game).",
+      "logo": "assets/pvzge_logo.png",
+      "entry": "index.html",
+      "category": "game",
+      "features": [
+        "canvas",
+        "webgl",
+        "audio",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "GPL-3.0",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 1180369988
+    },
+    {
       "id": "com.natureglass.savedemo",
       "name": "Save Demo",
       "version": "1.0.0",
@@ -340,35 +446,6 @@
       "exitGame": "PLUS",
       "buttonMapping": {},
       "sizeBytes": 42514
-    },
-    {
-      "id": "com.natureglass.speedtest",
-      "name": "Speed Test",
-      "version": "1.0.0",
-      "description": "Test your internet speed directly on your console.",
-      "logo": "assets/speedtest_logo.png",
-      "entry": "index.html",
-      "category": "app",
-      "features": [
-        "canvas",
-        "controller"
-      ],
-      "permissions": [
-        "network"
-      ],
-      "compatibility": [
-        "switch",
-        "web"
-      ],
-      "allowed_origins": [
-        "https://itch.io"
-      ],
-      "developer": "Alex Daskalakis",
-      "source": "https://github.com/natureglass/Brewser-apps",
-      "license": "MIT",
-      "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 37421
     },
     {
       "id": "com.natureglass.unity-demos",
@@ -519,7 +596,7 @@
         "z": "A",
         "x": "B"
       },
-      "sizeBytes": 2089705
+      "sizeBytes": 2112594
     },
     {
       "id": "com.natureglass.webgl1demo",
@@ -543,8 +620,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 70672
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 68470
     },
     {
       "id": "com.natureglass.webgl2demo",
@@ -568,8 +655,18 @@
       "source": "https://github.com/natureglass/Brewser-apps",
       "license": "MIT",
       "exitGame": "PLUS",
-      "buttonMapping": {},
-      "sizeBytes": 62065
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 61711
     }
   ]
 }
