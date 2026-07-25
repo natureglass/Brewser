@@ -1,0 +1,34 @@
+{
+  "apps": [
+    {
+      "categories": [
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "WebGL 1",
+        "WebGL 2"
+      ],
+      "id": "com.natureglass.unitydemoprobe",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "maxFileBytes": 58312736,
+      "name": "Unity Demo Probe",
+      "permissions": [],
+      "publishedAt": "2026-07-23T13:37:49Z",
+      "sizeBytes": 195195997,
+      "summary": "Unity Demos is a measurement tool for Brewser, not a game. It loads a curated matrix of real Unity WebGL debug builds (spanning Unity 2021 LTS through Unity 6) one at a time and records exactly how far each one gets before it stalls, crashes, or completes. Pick a build from the table and press A to launch it. The harness watches the whole load and writes a per-run NDJSON log to…",
+      "tags": [
+        "Unity"
+      ],
+      "version": "1.0.1"
+    }
+  ],
+  "generated": "2026-07-25T14:16:47Z",
+  "source": "ext1"
+}

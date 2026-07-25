@@ -1,24 +1,18 @@
 // Download / Update progress modal — opened from the missing-app
 // modal's Download (missing app) or Update (installed-but-stale app)
-// button. Fetches the per-app artifact manifest from the catalog repo,
-// walks its file list, and writes each file under
-// `sdmc:/switch/brewser/apps/<group>/<id>/<rel>`. The entry file
-// (catalogue.json's `entry`, typically `index.html`) is saved LAST so an
-// interrupted download leaves the card flagged as missing — the
-// engine's missing-detection check (loadCatalogGroup in
-// browser-toolbar.ts) and missing-app-modal.js diff both key on the
-// entry file's presence, so re-tapping Download retries cleanly.
+// button. Looks the app up in the CACHED NORMALIZED catalogue via the
+// platform bridge (`globalThis.__brewserPlatformClient`), fetches its
+// artifact manifest from `app.artifactsUrl`, parses it with
+// `client.parseArtifacts`, and writes each file under the flat
+// `sdmc:/switch/brewser/apps/<id>/<rel>` — every remote URL comes from
+// the platform client (`app.fileUrl(rel)`), never assembled here. The
+// entry file is saved LAST so an interrupted download leaves the card
+// flagged as missing and re-tapping Download retries cleanly.
 //
 // API: exposes `globalThis.__brewserOpenDownloadModal(detail, opts)`.
 //   `detail`  — the same JSON shape stamped on cards by
-//               renderAppCards (id, group, name, version, entry,
-//               installedVersion, logo, ...). At minimum needs
-//               `id`, `group`, `entry`.
-//   `opts.catalogueUrl` — current catalogue URL (we strip the trailing
-//               filename to get the base directory for both the
-//               artifact manifest fetch and the per-file fetches).
-//   `opts.artifactsUrl` — optional GitHub Contents API listing for
-//               sanity-checking; ignored when empty.
+//               renderAppCards (id, name, version, entry,
+//               installedVersion, logo, ...). At minimum needs `id`.
 //   `opts.mode` — 'download' or 'update'; drives the title copy only.
 //
 // Visibility uses classList on the overlay + card (NEVER inline
@@ -91,16 +85,6 @@
     var i = 0;
     while (i < p.length && p[i] === '/') i++;
     return p.slice(i);
-  }
-
-  // Strip the final URL path segment to get a base directory URL with
-  // a trailing slash. Same helper updates-modal.js uses — the catalog
-  // URL points at `catalogue.json`, the per-app asset URLs live alongside
-  // it under `apps/<group>/<id>/`.
-  function catalogueBaseUrl(url) {
-    var idx = url.lastIndexOf('/');
-    if (idx < 0) return url;
-    return url.slice(0, idx + 1);
   }
 
   function parentDir(path) {
@@ -187,11 +171,10 @@
   }
 
   // Walk the grid cards on the page and find the one whose
-  // data-app-detail matches `(group, id)`. Returns null when no card on
-  // the current page matches (e.g. home.html only shows the featured
-  // group; a download from apps.html for a community card won't have a
-  // matching home-page card).
-  function findCardEl(group, id) {
+  // data-app-detail matches the app id. Returns null when no card on
+  // the current page matches (e.g. the visible tab doesn't include
+  // this app).
+  function findCardEl(id) {
     var cards = document.querySelectorAll('[data-app-detail]');
     for (var i = 0; i < cards.length; i++) {
       var cardEl = cards[i];
@@ -199,7 +182,7 @@
       if (!raw) continue;
       var parsed;
       try { parsed = JSON.parse(raw); } catch (_) { continue; }
-      if (!parsed || parsed.id !== id || parsed.group !== group) continue;
+      if (!parsed || parsed.id !== id) continue;
       return cardEl;
     }
     return null;
@@ -211,7 +194,7 @@
   // refreshCardUpgrade in updates-modal.js — same data-app-detail
   // round-trip + meta-strip patch.
   function refreshCardOnSuccess(detail) {
-    var cardEl = findCardEl(detail.group, detail.id);
+    var cardEl = findCardEl(detail.id);
     if (!cardEl) return;
     cardEl.classList.remove('app-card--missing');
     cardEl.classList.remove('app-card--upgrade');
@@ -235,7 +218,7 @@
         // detail) OR a catalog-relative path (from the artifact
         // manifest). Only rewrite when it isn't already brewser://.
         if (detail.logo.indexOf('brewser://') !== 0 && logoRel) {
-          parsed.logo = 'brewser://apps/' + detail.group + '/' + detail.id + '/' + logoRel;
+          parsed.logo = 'brewser://apps/' + detail.id + '/' + logoRel;
         }
       }
       cardEl.setAttribute('data-app-detail', JSON.stringify(parsed));
@@ -259,7 +242,7 @@
       if (rel) {
         var brewserLogoUrl = detail.logo.indexOf('brewser://') === 0
           ? detail.logo
-          : 'brewser://apps/' + detail.group + '/' + detail.id + '/' + rel;
+          : 'brewser://apps/' + detail.id + '/' + rel;
         for (var c = 0; c < cardEl.children.length; c++) {
           var child = cardEl.children[c];
           if (child.tagName === 'IMG') {
@@ -271,106 +254,42 @@
     }
   }
 
-  // Parse a fetched artifact manifest into a flat list of relative file
-  // paths. Accepts a few shapes so the upstream catalog repo can pick
-  // whichever fits its tooling:
-  //   - flat array of strings: `["index.html", "assets/x.png", ...]`
-  //   - `{ files: [...] }`
-  //   - `{ paths: [...] }`
-  //   - array of objects with `path` / `name` field
-  //     (also accepts `download_url` for direct-URL artifacts; ignored
-  //     here, see resolveFileUrl).
-  // Strips a leading slash off each entry so paths join cleanly.
-  function extractFileList(parsed) {
-    if (Array.isArray(parsed)) {
-      return parsed.map(extractPath).filter(function (p) { return !!p; });
-    }
-    if (parsed && typeof parsed === 'object') {
-      if (Array.isArray(parsed.files)) {
-        return parsed.files.map(extractPath).filter(function (p) { return !!p; });
-      }
-      if (Array.isArray(parsed.paths)) {
-        return parsed.paths.map(extractPath).filter(function (p) { return !!p; });
-      }
-    }
-    return [];
-  }
-
-  function extractPath(entry) {
-    if (typeof entry === 'string') return stripLeadingSlashes(entry);
-    if (entry && typeof entry === 'object') {
-      if (typeof entry.path === 'string') return stripLeadingSlashes(entry.path);
-      if (typeof entry.name === 'string') return stripLeadingSlashes(entry.name);
-    }
-    return '';
-  }
-
-  // Resolve the remote URL for a single per-app file. Default layout:
-  // `<catalogueBase>apps/<group>/<id>/<rel>`. Catalog authors who keep
-  // the artifact tree under a different prefix can override per-file
-  // by emitting `{ path, url }` entries in the artifact JSON — we honor
-  // an absolute `url` on the entry when present.
-  function resolveFileUrl(baseUrl, group, id, rel, entry) {
-    if (entry && typeof entry === 'object'
-      && typeof entry.url === 'string' && /^https?:\/\//i.test(entry.url)) {
-      return entry.url;
-    }
-    if (entry && typeof entry === 'object'
-      && typeof entry.download_url === 'string' && /^https?:\/\//i.test(entry.download_url)) {
-      return entry.download_url;
-    }
-    return baseUrl + 'apps/' + group + '/' + id + '/' + rel;
-  }
-
   // Reorder the path list so the entry file lands LAST. The engine's
-  // missing-detection check probes for `apps/<group>/<id>/<entry>`
-  // (loadCatalogGroup) — leaving the entry until after every other
-  // file is on disk means an interrupted download keeps the card
-  // flagged as missing, and the user can re-tap Download to retry
-  // without orphan state.
+  // missing-detection check probes for `apps/<id>/<entry>` — leaving
+  // the entry until after every other file is on disk means an
+  // interrupted download keeps the card flagged as missing, and the
+  // user can re-tap Download to retry without orphan state.
+  // (Artifact parsing lives in the platform client now —
+  // `client.parseArtifacts` yields a plain string[] of relative paths.)
   function reorderEntryLast(paths, entryRel) {
     if (!entryRel) return paths.slice();
     var entry = stripLeadingSlashes(entryRel);
     var others = [];
     var foundEntry = false;
     for (var i = 0; i < paths.length; i++) {
-      var p = paths[i];
-      var pRel = typeof p === 'string' ? p : extractPath(p);
-      if (pRel === entry) {
+      if (paths[i] === entry) {
         foundEntry = true;
         continue;
       }
-      others.push(p);
+      others.push(paths[i]);
     }
-    if (foundEntry) {
-      // Preserve the original entry shape (string or object) so
-      // resolveFileUrl can still honor a per-entry `url` override.
-      var entryEntry = entry;
-      for (var j = 0; j < paths.length; j++) {
-        var pj = paths[j];
-        var pjRel = typeof pj === 'string' ? pj : extractPath(pj);
-        if (pjRel === entry) { entryEntry = pj; break; }
-      }
-      others.push(entryEntry);
-    } else {
-      // Entry file isn't named in the manifest — append it as a raw
-      // string so resolveFileUrl uses the default base URL layout. The
-      // fetch will 404 if the catalog repo doesn't ship the file, and
-      // the modal flips to error.
-      others.push(entry);
-    }
+    // Append the entry last whether or not the manifest named it — if
+    // the repo doesn't actually ship the file, the fetch 404s and the
+    // modal flips to error, which is the honest outcome.
+    void foundEntry;
+    others.push(entry);
     return others;
   }
 
-  // Core install loop — given a parsed artifact manifest, walk each
-  // file, mkdir its parent, fetch its bytes, write them. Updates the
-  // progress UI as each file lands. Returns true on success, false on
-  // any failure (caller surfaces the error to the modal).
-  async function downloadFiles(parsed, detail, baseUrl) {
-    var rawList = Array.isArray(parsed)
-      ? parsed
-      : (parsed && (parsed.files || parsed.paths)) || [];
-    if (!Array.isArray(rawList) || rawList.length === 0) {
+  // Core install loop — given the artifact file list (string[] from the
+  // platform client) and the normalized catalogue app (whose
+  // `fileUrl(rel)` builds every remote URL), walk each file, mkdir its
+  // parent, fetch its bytes, write them. Updates the progress UI as
+  // each file lands. Returns true on success, false on any failure
+  // (caller surfaces the error to the modal).
+  async function downloadFiles(files, detail, app) {
+    var rawList = Array.isArray(files) ? files : [];
+    if (rawList.length === 0) {
       setError('Artifact manifest has no files.');
       return false;
     }
@@ -396,8 +315,7 @@
       // Cancel checkpoint at the top of every iteration — covers the
       // common case where the user taps Cancel between files.
       if (cancelled) return false;
-      var entry = ordered[i];
-      var rel = typeof entry === 'string' ? entry : extractPath(entry);
+      var rel = stripLeadingSlashes(ordered[i] || '');
       if (!rel) {
         // Malformed entry — skip silently rather than failing the
         // whole install. Counter still ticks so the bar advances.
@@ -405,8 +323,8 @@
         setProgress(done, total, downloadedBytes, totalBytes);
         continue;
       }
-      var localPath = APP_ROOT + 'apps/' + detail.group + '/' + detail.id + '/' + rel;
-      var remoteUrl = resolveFileUrl(baseUrl, detail.group, detail.id, rel, entry);
+      var localPath = APP_ROOT + 'apps/' + detail.id + '/' + rel;
+      var remoteUrl = app.fileUrl(rel);
       try {
         var dir = parentDir(localPath);
         if (dir) Switch.mkdirSync(dir);
@@ -484,21 +402,36 @@
     // install.
     cancelled = false;
     try {
-      var catalogueUrl = (opts && opts.catalogueUrl) || '';
-      if (!catalogueUrl) {
-        setError('No catalog URL configured. Set "catalogue" in config.json.');
+      if (!detail || !detail.id) {
+        setError('Missing app id.');
         return;
       }
-      if (!detail || !detail.id || !detail.group) {
-        setError('Missing app id/group.');
+      // Look the app up in the CACHED normalized catalogue — the only
+      // place remote URLs come from. An app absent from the cache
+      // cannot be downloaded (nothing trustworthy to fetch from), so
+      // say so instead of guessing a URL.
+      var client = globalThis.__brewserPlatformClient;
+      if (!client) {
+        setError('Platform client unavailable (shell bridge missing).');
         return;
       }
-      var baseUrl = catalogueBaseUrl(catalogueUrl);
-      var artifactUrl = baseUrl + 'artifacts/' + detail.id + '.json';
+      var cached = client.readCachedCatalogue();
+      if (!cached || cached.kind !== 'Ok') {
+        setError('No usable catalogue on disk — run Check for Updates first.');
+        return;
+      }
+      var app = null;
+      for (var ai = 0; ai < cached.catalogue.apps.length; ai++) {
+        if (cached.catalogue.apps[ai].id === detail.id) { app = cached.catalogue.apps[ai]; break; }
+      }
+      if (!app) {
+        setError('App is not in the current catalogue — sync and try again.');
+        return;
+      }
       statusEl.innerHTML = 'Fetching artifact manifest…';
       var resp;
       try {
-        resp = await globalThis.fetch(artifactUrl);
+        resp = await globalThis.fetch(app.artifactsUrl);
       } catch (e) {
         if (cancelled) return;
         setError('Network error fetching manifest: ' + (e && e.message ? e.message : String(e)));
@@ -518,11 +451,10 @@
         return;
       }
       if (cancelled) return;
-      var parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch (e) {
-        setError('Manifest is not valid JSON: ' + (e && e.message ? e.message : String(e)));
+      var artifacts = client.parseArtifacts(text);
+      if (artifacts.kind !== 'Ok') {
+        setError('Artifact manifest rejected (' + artifacts.kind + '): '
+          + (artifacts.message || 'unknown reason'));
         return;
       }
       // Make sure the per-app directory exists upfront — mkdirSync
@@ -530,12 +462,12 @@
       // but doing it once at the top is cheap and gives a friendlier
       // error message if the path is somehow invalid.
       try {
-        Switch.mkdirSync(APP_ROOT + 'apps/' + detail.group + '/' + detail.id);
+        Switch.mkdirSync(APP_ROOT + 'apps/' + detail.id);
       } catch (err) {
         setError('mkdir failed for app dir: ' + (err && err.message ? err.message : String(err)));
         return;
       }
-      var ok = await downloadFiles(parsed, detail, baseUrl);
+      var ok = await downloadFiles(artifacts.artifacts.files, detail, app);
       // Cancel during the loop → downloadFiles returns false WITHOUT
       // calling setError. Skip both the failure surfacing AND the
       // success path so the modal just stays closed with no message.

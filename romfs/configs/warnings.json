@@ -47,6 +47,12 @@
             "risk": "low",
             "description": "Opens external links and apps.",
             "warning": "Allows this app to open external URLs or launch other apps, which could redirect you to untrusted content."
+        },
+        "usb": {
+            "show": true,
+            "risk": "medium",
+            "description": "Talks to connected USB devices.",
+            "warning": "Allows this app to communicate with USB devices plugged into the console (controllers, MIDI gear, adapters). A malicious app could read from or send commands to connected hardware."
         }
     }
 }

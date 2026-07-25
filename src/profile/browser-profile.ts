@@ -18,10 +18,19 @@ import {
 /** Filenames at the romfs root that the seeder must NEVER mirror to
  * the SD card. `main.js` + `main.js.map` are the runtime bundle — they
  * live INSIDE the NRO and are read by nxjs at boot, not by the resource
- * loader, so copying them to sdmc would just produce a stale duplicate. */
+ * loader, so copying them to sdmc would just produce a stale duplicate.
+ * `GeistMono.ttf` + `runtime.js.map` are fat-base artifacts merged into
+ * `romfs:/` by @nx.js/nro (see nxjs-source-v8/packages/nro/src/main.ts).
+ * They're read at runtime from the separate `nxjs:` mount
+ * (`romfsMountSelf("nxjs")` in main.cc) — the terminal font from
+ * `nxjs:/GeistMono.ttf`, the source map from `nxjs:/runtime.js.map`. The
+ * `romfs:/`-rooted copies are never referenced, so mirroring them to
+ * sdmc is dead weight. */
 const SEED_SKIP_ROOT_FILES: ReadonlySet<string> = new Set([
 	'main.js',
 	'main.js.map',
+	'GeistMono.ttf',
+	'runtime.js.map',
 ]);
 
 /** Romfs subtrees the seeder must NOT recurse into. Each entry is a
@@ -47,7 +56,6 @@ export class BrowserProfile implements StorageProfileLike {
 	 *   - `themes/` → `toolbars/`, `keyboards/`, `styles/` plus their
 	 *     three registry JSONs.
 	 *   - `logs/` → runtime log files.
-	 *   - `screenshots/` → user screenshots.
 	 *   - `apps/` → installed apps under `<group>/<id>/...`. */
 	readonly appRoot: string;
 
@@ -109,7 +117,6 @@ export class BrowserProfile implements StorageProfileLike {
 		try { Switch.mkdirSync(`${this.appRoot}themes/toolbars/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}themes/keyboards/`); } catch (_) { /* exists */ }
 		try { Switch.mkdirSync(`${this.appRoot}themes/styles/`); } catch (_) { /* exists */ }
-		try { Switch.mkdirSync(`${this.appRoot}screenshots/`); } catch (_) { /* exists */ }
 		// `apps/` itself is intentionally NOT pre-created here. Apps live
 		// in arbitrary subtrees (e.g. `apps/<channel>/<reverse-dns>/...`)
 		// that are deployed via robocopy; the structure changes over time

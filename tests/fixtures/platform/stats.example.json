@@ -1,0 +1,70 @@
+{
+  "generated": "2026-07-25T14:16:47Z",
+  "stats": {
+    "com.natureglass.fluiddynamics": {
+      "downloads": 87,
+      "ratingAvg": 4.2,
+      "ratingCount": 9,
+      "ratingScore": 4.2071
+    },
+    "com.natureglass.ghostapp": {
+      "downloads": 999,
+      "ratingAvg": 4.9,
+      "ratingCount": 40,
+      "ratingScore": 4.8244
+    },
+    "com.natureglass.gravityballs": {
+      "downloads": 54,
+      "ratingAvg": 3.8,
+      "ratingCount": 4,
+      "ratingScore": 4.0333
+    },
+    "com.natureglass.midilab": {
+      "downloads": 412,
+      "ratingAvg": 4.6,
+      "ratingCount": 23,
+      "ratingScore": 4.5321
+    },
+    "com.natureglass.neuralnetworks": {
+      "downloads": 61,
+      "ratingAvg": 5.0,
+      "ratingCount": 1,
+      "ratingScore": 4.35
+    },
+    "com.natureglass.savedemo": {
+      "downloads": 12,
+      "ratingAvg": 0,
+      "ratingCount": 0
+    },
+    "com.natureglass.sensorsplayground": {
+      "downloads": 133,
+      "ratingAvg": 4.1,
+      "ratingCount": 11,
+      "ratingScore": 4.1375
+    },
+    "com.natureglass.spectraplay": {
+      "downloads": 96,
+      "ratingAvg": 4.8,
+      "ratingCount": 50,
+      "ratingScore": 4.7473
+    },
+    "com.natureglass.streamcast": {
+      "downloads": 71,
+      "ratingAvg": 2.9,
+      "ratingCount": 7,
+      "ratingScore": 3.45
+    },
+    "com.natureglass.unitydemoprobe": {
+      "downloads": 210,
+      "ratingAvg": 3.5,
+      "ratingCount": 6,
+      "ratingScore": 3.8273
+    },
+    "com.natureglass.webgl2threejsdemos": {
+      "downloads": 158,
+      "ratingAvg": 4.4,
+      "ratingCount": 17,
+      "ratingScore": 4.3591
+    }
+  }
+}

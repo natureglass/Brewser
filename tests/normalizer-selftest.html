@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<!--
+  Phase 2 normalizer selftest — headless-Chrome harness (no console needed:
+  results land in #RESULT / #REPORTS and document.title, scraped from
+  ⁠-​-dump-dom).
+
+  Serve from the WORKSPACE ROOT (D:\Workspace), not this directory:
+      cd D:\Workspace && python -m http.server 8734
+      chrome --headless=new --dump-dom --virtual-time-budget=8000 \
+        http://localhost:8734/brewser-v8/tests/normalizer-selftest.html
+
+  Imports the COMPILED engine module (dist), so it tests what ships.
+-->
+<html>
+<head><meta charset="utf-8"><title>RUNNING</title></head>
+<body>
+<div id="RESULT">RUNNING</div>
+<pre id="REPORTS"></pre>
+<script type="module">
+const out = [];
+let failures = 0;
+function ok(cond, label, detail) {
+  if (cond) { out.push(`ok - ${label}`); }
+  else { failures++; out.push(`FAIL - ${label}${detail ? ` :: ${detail}` : ''}`); }
+}
+
+async function main() {
+  const mod = await import('/brewser-runtime-v8/dist/platform/catalogue-normalizer.js');
+  const { parseCatalogue, summarize, permissionSlug } = mod;
+  const FIX = '/brewser-v8/tests/fixtures/platform/';
+  const load = async (name) => (await fetch(FIX + name)).text();
+
+  const v2Text = await load('catalogue.v2.example.json');
+  // Two v1 fixtures with distinct roles: `dateless` is the frozen
+  // PRE-backfill snapshot (exercises publishedAt-absent tolerance);
+  // `live` is a genuine CI-produced capture (dated — what production
+  // actually serves until the v2 generator ships).
+  const v1Text = await load('catalogue.v1.dateless.json');
+  const v1LiveText = await load('catalogue.v1.live.json');
+
+  // ---- v2 fixture ---------------------------------------------------------
+  const v2 = parseCatalogue(v2Text);
+  ok(v2.kind === 'Ok', 'v2 parses Ok', v2.kind);
+  const cat2 = v2.catalogue;
+  const byId = Object.fromEntries(cat2.apps.map((a) => [a.id.split('.').pop(), a]));
+  ok(cat2.apps.length === 12, 'v2: 12 apps', String(cat2.apps.length));
+  ok(cat2.report.appCount === 12 && cat2.report.dropped.length === 0,
+     'v2: nothing dropped', JSON.stringify(cat2.report.dropped));
+
+  for (const a of cat2.apps) {
+    const expectHost = a.id === 'com.natureglass.unitydemoprobe'
+      ? 'https://play1.brewser.tech' : 'https://play.brewser.tech';
+    ok(a.entryUrl === `${expectHost}/apps/${a.id}/index.html`,
+       `v2 entryUrl ${a.id}`, a.entryUrl);
+    const urls = [a.entryUrl, a.logoUrl, a.artifactsUrl, a.fileUrl('x/y.png')];
+    ok(urls.every((u) => !/\/(featured|community|experimental)\//.test(u)),
+       `v2 no <group> segment ${a.id}`, urls.join(' '));
+    ok(a.artifactsUrl === `${expectHost}/artifacts/${a.id}.json`,
+       `v2 artifactsUrl ${a.id}`, a.artifactsUrl);
+  }
+  ok(byId.unitydemoprobe.source === 'ext1', 'unitydemoprobe source=ext1', byId.unitydemoprobe.source);
+  ok(cat2.apps.filter((a) => a.source === 'base').length === 11, 'all others source=base');
+  ok(byId.midilab.permissionSlugs.includes('usb'), 'midilab -> usb',
+     JSON.stringify(byId.midilab.permissionSlugs));
+  ok(byId.midilab.permissionNamesRaw.includes('Usb'), 'midilab raw name preserved');
+  ok(byId.sensorsplayground.permissionSlugs.includes('device_info'), 'sensorsplayground -> device_info',
+     JSON.stringify(byId.sensorsplayground.permissionSlugs));
+  const feat = cat2.apps.filter((a) => a.featured).map((a) => a.id).sort();
+  ok(JSON.stringify(feat) === JSON.stringify(
+      ['com.natureglass.fluiddynamics', 'com.natureglass.midilab']),
+     'featured = fluiddynamics+midilab only', JSON.stringify(feat));
+  ok(cat2.apps.every((a) => !a.revoked), 'v2: nothing revoked');
+  ok(cat2.report.unknownPermissions.length === 0,
+     'v2 report: clean parse reports CLEAN (usb registered)', JSON.stringify(cat2.report.unknownPermissions));
+  ok(cat2.report.unknownEntryFields.length === 0, 'v2 report: no unknown entry fields',
+     JSON.stringify(cat2.report.unknownEntryFields));
+  ok(cat2.apps.every((a) => a.publishedAt !== '' && !Number.isNaN(Date.parse(a.publishedAt))),
+     'v2: every app carries a parseable publishedAt');
+  ok(byId.midilab.publishedAt === '2026-07-16T12:00:00Z', 'v2 publishedAt round-trips (real backfill date)',
+     byId.midilab.publishedAt);
+  ok(byId.midilab.fileUrl('./assets/x.bin') === 'https://play.brewser.tech/apps/com.natureglass.midilab/assets/x.bin',
+     'fileUrl strips leading ./', byId.midilab.fileUrl('./assets/x.bin'));
+
+  // ---- v1 live fixture ----------------------------------------------------
+  const v1 = parseCatalogue(v1Text);
+  ok(v1.kind === 'Ok', 'v1 parses Ok (no crash on absent sources)', v1.kind);
+  const cat1 = v1.catalogue;
+  ok(cat1.apps.length === 12, 'v1: 12 apps', String(cat1.apps.length));
+  ok(JSON.stringify(cat1.apps.map((a) => a.id).sort()) ===
+     JSON.stringify(cat2.apps.map((a) => a.id).sort()), 'v1: same id set as v2');
+  ok(cat1.apps.every((a) => a.source === 'base'), 'v1: implicit base source');
+  ok(cat1.apps.every((a) => a.entryUrl === `https://play.brewser.tech/apps/${a.id}/index.html`),
+     'v1: entry URLs on the pin, no <group>');
+  ok(cat1.apps.every((a) => a.summary.length > 0 && [...a.summary].length <= 400 && !a.summary.includes('<')),
+     'v1: summaries derived, <=400 chars, no markup');
+  // Cross-implementation parity: the v2 fixture summaries came from the
+  // Python reference over the SAME descriptions — the TS derivation must
+  // agree on all 12 real apps (tags, entities, truncation-at-space).
+  for (const a of cat1.apps) {
+    const twin = cat2.apps.find((b) => b.id === a.id);
+    ok(a.summary === twin.summary, `v1/v2 summary parity ${a.id}`,
+       JSON.stringify({ ts: a.summary.slice(-25), py: twin.summary.slice(-25) }));
+  }
+  ok(cat1.report.unknownEntryFields.length === 0, 'v1 report: manifest fields are known, not drift',
+     JSON.stringify(cat1.report.unknownEntryFields));
+  ok(cat1.report.unknownPermissions.length === 0, 'v1 report: clean (usb registered)',
+     JSON.stringify(cat1.report.unknownPermissions));
+  ok(cat1.apps.every((a) => a.publishedAt === ''),
+     'v1 dateless: absent publishedAt maps to empty string, never an epoch');
+  ok(cat1.report.unknownEntities.length === 0, 'v1 report: live descriptions decode fully',
+     JSON.stringify(cat1.report.unknownEntities));
+
+  // The DATED live capture (CI output post-backfill) — the shape
+  // production actually serves until the v2 generator ships.
+  const v1live = parseCatalogue(v1LiveText);
+  ok(v1live.kind === 'Ok' && v1live.catalogue.apps.length === 12, 'v1 live (dated): 12 apps parse');
+  ok(v1live.kind === 'Ok' && v1live.catalogue.apps.every(
+       (a) => a.publishedAt !== '' && !Number.isNaN(Date.parse(a.publishedAt))),
+     'v1 live: every app carries the backfilled publishedAt');
+  ok(v1live.kind === 'Ok'
+     && v1live.catalogue.apps.find((a) => a.id === 'com.natureglass.midilab').publishedAt === '2026-07-16T12:00:00Z',
+     'v1 live: backfill date round-trips through the v1 path');
+  ok(v1live.kind === 'Ok' && v1live.catalogue.report.unknownEntryFields.length === 0,
+     'v1 live: publishedAt is a KNOWN v1 field, not drift',
+     JSON.stringify(v1live.kind === 'Ok' ? v1live.catalogue.report.unknownEntryFields : v1live));
+
+  // Unknown entity in a v1 description → recorded, not silent.
+  const entDoc = JSON.parse(v1Text);
+  entDoc.apps[0].description = '<p>&oelig;uvre &amp; more &unknownent; text</p>';
+  const ent = parseCatalogue(JSON.stringify(entDoc));
+  ok(ent.kind === 'Ok'
+     && ent.catalogue.report.unknownEntities.includes('&oelig;')
+     && ent.catalogue.report.unknownEntities.includes('&unknownent;'),
+     'undecodable entities land in report.unknownEntities',
+     JSON.stringify(ent.kind === 'Ok' ? ent.catalogue.report.unknownEntities : ent));
+  ok(ent.kind === 'Ok' && ent.catalogue.apps[0].summary.includes('&oelig;uvre & more'),
+     'unknown entity left literal, known ones decoded',
+     ent.kind === 'Ok' ? ent.catalogue.apps[0].summary : '');
+
+  // publishedAt is REQUIRED on v2 entries — a missing one drops, itemized.
+  const noDate = JSON.parse(v2Text);
+  delete noDate.apps[0].publishedAt;
+  const nd = parseCatalogue(JSON.stringify(noDate));
+  ok(nd.kind === 'Ok' && nd.catalogue.apps.length === 11
+     && nd.catalogue.report.dropped.length === 1
+     && /publishedAt/.test(nd.catalogue.report.dropped[0].reason),
+     'v2 entry without publishedAt dropped + itemized',
+     JSON.stringify(nd.kind === 'Ok' ? nd.catalogue.report.dropped : nd));
+
+  // ---- version guard / adversarial ---------------------------------------
+  // The v3 stub is HOSTILE below the version field ("apps": "not-an-array"),
+  // so TooNew here proves the standalone version read happens before any
+  // shape validation — not a pass-by-coincidence.
+  const v3 = parseCatalogue(await load('catalogue.v3-stub.json'));
+  ok(v3.kind === 'TooNewCatalogue', 'HOSTILE v3 stub -> TooNewCatalogue (parse ordering proven)', v3.kind);
+  ok(v3.kind === 'TooNewCatalogue' && v3.version === 3, 'v3 stub carries version 3');
+
+  const corrupt = parseCatalogue(await load('catalogue.corrupt.json'));
+  ok(corrupt.kind === 'CorruptCatalogue', 'corrupt -> CorruptCatalogue', corrupt.kind);
+  ok(v3.kind !== corrupt.kind, 'TooNew distinct from Corrupt');
+
+  const tiered = parseCatalogue(await load('catalogue.pre-v1-tiered.json'));
+  ok(tiered.kind === 'InvalidCatalogue', 'pre-v1 tiered -> InvalidCatalogue', tiered.kind);
+  ok(tiered.kind === 'InvalidCatalogue' && /tiered/.test(tiered.message),
+     'tiered reason names the shape', tiered.message);
+
+  // ---- unknown source -> dropped, reported --------------------------------
+  const mutant = JSON.parse(v2Text);
+  mutant.apps[1].source = 'ext9';
+  const m = parseCatalogue(JSON.stringify(mutant));
+  ok(m.kind === 'Ok', 'unknown-source catalogue still parses', m.kind);
+  ok(m.catalogue.apps.length === 11, 'unknown-source entry dropped', String(m.catalogue.apps.length));
+  const dropped = m.catalogue.report.dropped;
+  ok(dropped.length === 1 && dropped[0].id === mutant.apps[1].id && /ext9/.test(dropped[0].reason),
+     'drop is itemized with id + reason', JSON.stringify(dropped));
+  ok(JSON.stringify(m.catalogue.report.unknownSources) === JSON.stringify(['ext9']),
+     'unknownSources records ext9', JSON.stringify(m.catalogue.report.unknownSources));
+
+  // ---- revoked ------------------------------------------------------------
+  const rev = JSON.parse(v2Text);
+  rev.revoked = ['com.natureglass.midilab', 'com.natureglass.ghostapp'];
+  const r = parseCatalogue(JSON.stringify(rev));
+  ok(r.kind === 'Ok' && r.catalogue.apps.find((a) => a.id === 'com.natureglass.midilab').revoked === true,
+     'revoked id -> revoked:true on the app');
+  ok(r.catalogue.apps.filter((a) => a.revoked).length === 1, 'only the revoked id is marked');
+  ok(r.catalogue.revoked.includes('com.natureglass.ghostapp'),
+     'revoked id with no entry survives on the envelope (Phase 3 needs it)');
+
+  // ---- summarize(): boundaries + character counting -----------------------
+  const s400 = 'a'.repeat(400);
+  ok(summarize(s400) === s400, 'exactly 400 chars: unchanged');
+  const s401 = 'a'.repeat(401);
+  const h = summarize(s401);
+  ok(h === 'a'.repeat(399) + '…' && [...h].length === 400,
+     'no-space 401 chars: hard cut to 399+ellipsis', `${[...h].length}`);
+  const sb = 'a'.repeat(399) + ' ' + 'b'.repeat(50);
+  ok(summarize(sb) === 'a'.repeat(399) + '…', 'space at char 400: cut at the space');
+  const acc = 'é'.repeat(400); // 800 UTF-8 bytes — must NOT truncate
+  ok(summarize(acc) === acc, 'multi-byte: 400 two-byte chars unchanged (chars, not bytes)');
+  const emoji = '🎮'.repeat(400); // 800 UTF-16 units — must NOT truncate
+  ok(summarize(emoji) === emoji, 'astral: 400 emoji unchanged (code points, not UTF-16 units)');
+  const emojiCut = summarize('🎮'.repeat(401));
+  ok([...emojiCut].length === 400 && emojiCut.endsWith('…') && !emojiCut.includes('�'),
+     'astral truncation: no surrogate split', `${[...emojiCut].length}`);
+  ok(summarize('<p>Fish &amp; Chips &#8212; <b>tasty</b></p>\r\n twice') === 'Fish & Chips — tasty twice',
+     'tags stripped, entities decoded, whitespace collapsed',
+     summarize('<p>Fish &amp; Chips &#8212; <b>tasty</b></p>\r\n twice'));
+  ok(permissionSlug('Device Info') === 'device_info' && permissionSlug('Usb') === 'usb',
+     'permissionSlug mapping');
+
+  // ---- stats.json (C2) ----------------------------------------------------
+  const { parseStats, joinStats } =
+    await import('/brewser-runtime-v8/dist/platform/stats.js');
+  const statsText = await load('stats.example.json');
+  const so = parseStats(statsText);
+  ok(so.kind === 'Ok', 'stats.example parses Ok', so.kind);
+  ok(so.kind === 'Ok' && Object.keys(so.parsed.stats).length === 11
+     && so.parsed.report.invalid.length === 0,
+     'stats: 11 entries, none invalid');
+  const join = joinStats(so.parsed, cat2.apps.map((a) => a.id));
+  ok(Object.keys(join.byId).length === 10,
+     'stats join: 10 of 12 catalogue apps have stats', String(Object.keys(join.byId).length));
+  ok(!('com.natureglass.speedtest' in join.byId) && !('com.natureglass.fractalzoom' in join.byId),
+     'gap: catalogue apps absent from stats simply have none (no error)');
+  ok(JSON.stringify(join.orphanIds) === JSON.stringify(['com.natureglass.ghostapp']),
+     'gap: stats id with no catalogue entry -> orphan, recorded not fatal',
+     JSON.stringify(join.orphanIds));
+  ok(join.byId['com.natureglass.midilab'].downloads === 412
+     && join.byId['com.natureglass.midilab'].ratingCount === 23,
+     'stats values round-trip');
+  const sc = parseStats('{ nope');
+  ok(sc.kind === 'CorruptStats', 'corrupt stats -> CorruptStats (degrade, not sync failure)', sc.kind);
+  const sbad = parseStats(JSON.stringify({ generated: 'x', stats: {
+    'com.natureglass.a': { downloads: -1, ratingAvg: 2, ratingCount: 1 },
+    'com.natureglass.b': { downloads: 3, ratingAvg: 9.9, ratingCount: 1 },
+    'com.natureglass.c': { downloads: 3, ratingAvg: 4.0, ratingCount: 2 },
+    'com.natureglass.d': { downloads: 3, ratingAvg: 4.0, ratingCount: 2, ratingScore: 9 },
+  } }));
+  ok(sbad.kind === 'Ok' && Object.keys(sbad.parsed.stats).length === 1
+     && sbad.parsed.report.invalid.length === 3,
+     'malformed stats entries (incl. out-of-range ratingScore) skipped + itemized, valid ones kept',
+     JSON.stringify(sbad.kind === 'Ok' ? sbad.parsed.report : sbad));
+  ok(sbad.kind === 'Ok' && sbad.parsed.stats['com.natureglass.c'].ratingScore === undefined,
+     'absent ratingScore stays absent (no data, not zero)');
+
+  // ---- emit ---------------------------------------------------------------
+  document.getElementById('REPORTS').textContent = JSON.stringify({
+    v1: cat1.report, v2: cat2.report,
+    statsJoin: { joined: Object.keys(join.byId).length, orphanIds: join.orphanIds },
+  }, null, 1);
+  const summary = failures === 0
+    ? `PASS ${out.length}/${out.length}`
+    : `FAIL ${failures}/${out.length}`;
+  document.title = summary;
+  document.getElementById('RESULT').textContent =
+    `${summary}\n` + out.join('\n');
+}
+
+main().catch((e) => {
+  document.title = 'FAIL exception';
+  document.getElementById('RESULT').textContent = 'FAIL exception :: ' + (e && e.stack || e);
+});
+</script>
+</body>
+</html>

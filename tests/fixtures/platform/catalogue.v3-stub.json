@@ -1,0 +1,15 @@
+{
+  "apps": "not-an-array",
+  "defaultSource": "base",
+  "generated": "2027-01-01T00:00:00Z",
+  "revoked": [],
+  "signature": {
+    "alg": "ed25519",
+    "keyId": "brewser-catalogue-2027",
+    "value": "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  "sources": {
+    "base": "https://play.brewser.tech"
+  },
+  "version": 3
+}

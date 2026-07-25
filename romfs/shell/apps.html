@@ -5,13 +5,27 @@
 <link rel="stylesheet" href="brewser://assets/main.css">
 <style>
   body { padding: 32px 28px 28px; }
+  /* Parse-report line in the Check-for-Updates modal. Quiet single
+     line on a clean sync; the --drift modifier (any dropped entry or
+     unknown field reported by the platform client) switches to the
+     warning palette so drift is impossible to miss. */
+  .updates-modal-report { margin-top: 10px; font-size: 13px; color: #8fa1bd; }
+  .updates-modal-report--drift { color: #e8b34b; }
 </style>
 </head>
 <body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>">
 
-<input type="radio" id="apps-tab-community" name="apps-tab" checked>
-<input type="radio" id="apps-tab-experimental" name="apps-tab">
-<input type="radio" id="apps-tab-featured" name="apps-tab">
+<!-- The four browse tabs mirror the WordPress plugin: Featured is a
+     curation FILTER; Most Recent / Popular / Top Rated are sorts fed by
+     the library tabs the shell computes (publishedAt + stats.json). A
+     tab whose driving data is absent renders unavailable with a reason
+     instead of a fake ordering. Featured is the checked default until
+     publishedAt flows from the platform (then `recent` takes over,
+     matching the web's default sort). -->
+<input type="radio" id="apps-tab-featured" name="apps-tab" checked>
+<input type="radio" id="apps-tab-recent" name="apps-tab">
+<input type="radio" id="apps-tab-popular" name="apps-tab">
+<input type="radio" id="apps-tab-toprated" name="apps-tab">
 
 <div class="page-shell">
   <!-- Top toolbar: tab strip flush left, action buttons flush right.
@@ -19,27 +33,33 @@
        `:checked ~ .page-shell .tab-label[for=…]` cascade still
        resolves the active tab without any selector change. -->
   <div class="apps-toolbar clickable">
-    <nav class="tab-bar" aria-label="App catalog groups">
-      <label for="apps-tab-community" class="tab-label">Community</label>
-      <label for="apps-tab-experimental" class="tab-label">Experimental</label>
+    <nav class="tab-bar" aria-label="App library tabs">
       <label for="apps-tab-featured" class="tab-label">Featured</label>
+      <label for="apps-tab-recent" class="tab-label">Most Recent</label>
+      <label for="apps-tab-popular" class="tab-label">Popular</label>
+      <label for="apps-tab-toprated" class="tab-label">Top Rated</label>
     </nav>
-    <button type="button" class="munch-link apps-check-updates" data-catalogue-url="<browser-config-catalogue/>" data-downloads-url="<browser-config-downloads/>" data-ratings-url="<browser-config-ratings/>" data-versions-url="<browser-config-versions/>">Check for Updates</button>
+    <button type="button" class="munch-link apps-check-updates" data-catalogue-url="<browser-config-catalogue/>" data-stats-url="<browser-config-stats/>" data-downloads-url="<browser-config-downloads/>" data-ratings-url="<browser-config-ratings/>" data-versions-url="<browser-config-versions/>">Check for Updates</button>
   </div>
   <div class="tab-panels clickable">
-    <section class="tab-panel" data-tab="community" aria-label="Community apps">
-      <div class="app-grid">
-        <browser-community></browser-community>
-      </div>
-    </section>
-    <section class="tab-panel" data-tab="experimental" aria-label="Experimental apps">
-      <div class="app-grid">
-        <browser-experimental></browser-experimental>
-      </div>
-    </section>
     <section class="tab-panel" data-tab="featured" aria-label="Featured apps">
       <div class="app-grid">
-        <browser-featured></browser-featured>
+        <browser-tab-featured></browser-tab-featured>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="recent" aria-label="Most recent apps">
+      <div class="app-grid">
+        <browser-tab-recent></browser-tab-recent>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="popular" aria-label="Popular apps">
+      <div class="app-grid">
+        <browser-tab-popular></browser-tab-popular>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="toprated" aria-label="Top rated apps">
+      <div class="app-grid">
+        <browser-tab-toprated></browser-tab-toprated>
       </div>
     </section>
   </div>
@@ -105,7 +125,7 @@
          combination. -->
     <div class="app-modal-actions">
       <div class="app-modal-actions-side">
-        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Update</button>
+        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Update</button>
         <!-- Install-size chip. Populated by missing-app-modal.js from
              `detail.sizeBytes` (catalogue.json) as a megabyte figure.
              Lives in the LEFT action slot so it sits flush-left below
@@ -124,7 +144,7 @@
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
         <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Launch</a>
-        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Download</button>
+        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
       </div>
     </div>
   </div>
@@ -167,6 +187,13 @@
         <h3 class="updates-modal-section-title">Updates</h3>
         <div id="updates-modal-update" class="updates-modal-list"></div>
       </div>
+      <!-- Parse-report line — the drift-visibility payload: catalogue
+           version + app count on every successful sync, plus itemized
+           dropped entries / unknown fields / unknown permissions /
+           unknown sources / undecoded entities whenever the platform
+           client reported any. Populated by renderParseReport() in
+           updates-modal.js. -->
+      <div id="updates-modal-report" class="updates-modal-report"></div>
     </div>
     <div class="app-modal-actions updates-modal-actions">
       <div class="app-modal-actions-side">

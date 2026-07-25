@@ -879,10 +879,9 @@
   // Hand off to download-modal.js — it owns the artifact-manifest
   // fetch + per-file download loop and surfaces progress / errors in
   // its own overlay. We close this modal first so the two cards
-  // don't stack visually. `data-catalogue-url` + `data-artifacts-url`
-  // are stamped on the buttons server-side from `config.json` via
-  // the `<browser-config-catalogue/>` + `<browser-config-artifacts/>`
-  // tags.
+  // don't stack visually. No URLs cross this boundary: the download
+  // modal resolves everything from the cached normalized catalogue via
+  // the platform bridge.
   function openDownload(mode) {
     var detail = currentDetail;
     var opener = globalThis.__brewserOpenDownloadModal;
@@ -899,14 +898,8 @@
       console.debug('[apps] ' + mode + ' tap ignored — insufficient SD free space');
       return;
     }
-    var catalogueUrl = (btn && btn.getAttribute && btn.getAttribute('data-catalogue-url')) || '';
-    var artifactsUrl = (btn && btn.getAttribute && btn.getAttribute('data-artifacts-url')) || '';
     close();
-    opener(detail || {}, {
-      mode: mode,
-      catalogueUrl: catalogueUrl,
-      artifactsUrl: artifactsUrl,
-    });
+    opener(detail || {}, { mode: mode });
   }
 
   downloadBtn.addEventListener('click', function (e) {

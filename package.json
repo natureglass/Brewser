@@ -25,7 +25,8 @@
     "@nx.js/nsp": "link:../nxjs-source-v8/packages/nsp",
     "@nx.js/runtime": "link:../nxjs-source-v8/packages/runtime",
     "@types/css-tree": "^2.3.11",
-    "esbuild": "^0.27.3"
+    "esbuild": "^0.27.3",
+    "typescript": "5.2.2"
   },
   "nacp": {
     "id": "01f5905036d20000"

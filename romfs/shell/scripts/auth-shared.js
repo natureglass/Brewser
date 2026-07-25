@@ -17,11 +17,6 @@
 //     therefore counts as "login-flow data" that has to be wiped on
 //     full logout.
 //
-// The legacy github bare `avatar.<ext>` / `avatar_64x64.<ext>` files
-// (pre-2026-06-15 when each provider's avatar was uniquely prefixed)
-// are listed alongside the prefixed names so a profile carried over
-// from before the rename still gets cleaned.
-//
 // Switch.writeFileSync(path, empty Uint8Array) is the "delete" the
 // runtime exposes — there's no unlinkSync. An empty file is
 // indistinguishable from "missing" to every reader in the auth flow:
@@ -35,7 +30,7 @@
   var ACTIVE_PATH = AUTH_DIR + 'active.json';
   var LOG_DIR     = 'sdmc:/switch/brewser/logs/';
 
-  var PROVIDERS = ['github', 'google', 'microsoft', 'twitch'];
+  var PROVIDERS = ['google', 'microsoft'];
 
   // Every avatar extension that may have ever been written by any
   // provider. The actual on-disk extension is whatever
@@ -53,14 +48,6 @@
       var e = AVATAR_EXTS[i];
       out.push(AUTH_DIR + provider + '-avatar.'        + e);
       out.push(AUTH_DIR + provider + '-avatar_64x64.'  + e);
-    }
-    // Legacy bare names github-auth.js wrote before the per-provider
-    // prefix was introduced. Listed under the github provider only.
-    if (provider === 'github') {
-      for (var j = 0; j < AVATAR_EXTS.length; j++) {
-        out.push(AUTH_DIR + 'avatar.'        + AVATAR_EXTS[j]);
-        out.push(AUTH_DIR + 'avatar_64x64.'  + AVATAR_EXTS[j]);
-      }
     }
     return out;
   }
@@ -144,9 +131,8 @@
   }
 
   /** Wipe every artifact the login flow may have ever written for a
-   * single provider: its auth.json, every avatar variant we might have
-   * cached (under both the current `<provider>-avatar` prefix and the
-   * pre-2026-06-15 bare `avatar` names for github), and its log file. */
+   * single provider: its auth.json, every cached avatar variant, and
+   * its log file. */
   function wipeProvider(provider) {
     if (PROVIDERS.indexOf(provider) < 0) return;
     safeWriteEmpty(authJsonPath(provider));
@@ -173,9 +159,9 @@
   }
 
   /** Best display string for a record: `name` first, then `login`
-   * (GitHub / Microsoft userPrincipalName), then `email`. Returns ''
-   * when none of those fields carry a non-empty string — callers
-   * usually substitute a "(no display name)" placeholder. */
+   * (Microsoft userPrincipalName), then `email`. Returns '' when none
+   * of those fields carry a non-empty string — callers usually
+   * substitute a "(no display name)" placeholder. */
   function displayNameFromRecord(rec) {
     if (!rec) return '';
     if (typeof rec.name  === 'string' && rec.name.length  > 0) return rec.name;
@@ -184,14 +170,12 @@
     return '';
   }
 
-  /** Human-readable provider name for UI labels ("GitHub", "Google",
-   * "Microsoft", "Twitch"). Defensive fallback returns the raw string. */
+  /** Human-readable provider name for UI labels ("Google", "Microsoft").
+   * Defensive fallback returns the raw string. */
   function providerLabel(provider) {
     switch (provider) {
-      case 'github':    return 'GitHub';
       case 'google':    return 'Google';
       case 'microsoft': return 'Microsoft';
-      case 'twitch':    return 'Twitch';
       default:          return provider || '';
     }
   }

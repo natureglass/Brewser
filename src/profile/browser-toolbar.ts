@@ -24,7 +24,18 @@
  * silently.
  */
 
-import { RUNTIME_CONFIG_DEFAULTS } from '@switch-web/runtime';
+import {
+	buildLibraryTabs,
+	enumerateInstalledApps,
+	joinLibrary,
+	parseCatalogue,
+	parseStats,
+	RUNTIME_CONFIG_DEFAULTS,
+	type LibraryApp,
+	type LibraryTabId,
+	type NormalizedCatalogue,
+	type ParsedStats,
+} from '@switch-web/runtime';
 
 export type ToolbarPosition = 'top' | 'bottom';
 
@@ -215,11 +226,11 @@ export interface BrowserConfig {
 	 * LEFT_SL, LEFT_SR, RIGHT_SL, RIGHT_SR). Values are action strings
 	 * recognised by `src/input/button-router.ts ButtonAction` (e.g.
 	 * `"leftClick"`, `"back"`, `"forward"`, `"reload"`,
-	 * `"addressBar"`, `"screenshot"`, …). Empty strings (or missing
+	 * `"addressBar"`, …). Empty strings (or missing
 	 * keys) fall through to the engine defaults in `DEFAULT_ACTIONS`,
 	 * which preserve the previously-hardcoded behaviour (A=leftClick,
 	 * B=rightClick, X=forward, Y=reload, ZR=middleClick,
-	 * MINUS=screenshot, UP/DOWN=scroll). */
+	 * UP/DOWN=scroll). */
 	buttonMapping: Record<string, string>;
 	/** Height in CSS pixels of the on-screen virtual keyboard panel.
 	 * The keyboard root renders into this slice anchored at the BOTTOM
@@ -274,15 +285,16 @@ export interface BrowserConfig {
 	 * the toolbar live root so per-theme CSS can switch layout (border
 	 * placement, focus ring direction, etc.) accordingly. */
 	toolbarPosition: ToolbarPosition;
-	/** Which catalog group the home page renders cards for — one of
-	 * `'featured'`, `'community'`, `'experimental'`. The home page has
-	 * no tab strip (apps.html does), so the user picks the visible
-	 * section from the Settings page's "Home Page" radio. Default
-	 * `'featured'` preserves the pre-2026-06-12 behaviour where home
-	 * always painted Featured Apps. Read by the
-	 * `<browser-home-apps>` / `<browser-home-title>` custom tag
-	 * expansions at home.html render time. */
-	homeSection: CatalogGroup;
+	/** Which library tab the home page renders cards for — one of
+	 * `'featured'`, `'recent'`, `'popular'`, `'toprated'` (the four
+	 * browse tabs). The home page has no tab strip (apps.html does), so
+	 * the user picks the visible section from the Settings page's
+	 * "Home Page" radio. Default `'featured'` — the eventual default is
+	 * `'recent'`, but that flips only once `publishedAt` is flowing
+	 * from the platform (the WP backfill); until then Recent renders
+	 * unavailable and would make an empty home page. Old tier values
+	 * (`community` / `experimental`) are not migrated (D1). */
+	homeSection: LibraryTabId;
 	/** Optional autorun target. When non-empty, the shell navigates to
 	 * this URL at boot instead of {@link DEFAULT_HOME_URL}. Root-relative
 	 * paths (`/apps/experimental/foo/index.html`) resolve against the
@@ -321,14 +333,14 @@ export interface BrowserConfig {
 	 * ignored — a tampered `config.json` cannot redirect the catalog
 	 * refresh to an attacker. */
 	catalogue: string;
-	/** GitHub Contents API endpoint listing every per-app artifact
-	 * manifest (`<id>.json`) the catalog ships. The Download / Update
-	 * flow fetches this once and verifies the tapped app has a matching
-	 * entry before kicking off the per-file download. Surfaced to the
-	 * page via the `<browser-config-artifacts>` custom tag.
+	/** Remote URL of `stats.json` (C2 operational counters). Fetched by
+	 * the Check-for-Updates flow alongside the catalogue and written to
+	 * `<appRoot>configs/stats.json` only when it parses. Missing or
+	 * unparseable is NOT a sync failure — the stats-driven tabs degrade
+	 * visibly. Surfaced to the page via `<browser-config-stats>`.
 	 *
 	 * **Strict-pinned** at the runtime layer. */
-	artifacts: string;
+	stats: string;
 	/** Remote URL of the per-app download-count telemetry file. The
 	 * apps.html "Check for Updates" button fetches the bytes alongside
 	 * the catalog and writes them verbatim to
@@ -356,20 +368,6 @@ export interface BrowserConfig {
 	 * preventing a tampered `config.json` from redirecting telemetry
 	 * POSTs to an attacker-controlled endpoint. */
 	telemetry: string;
-	/** GitHub OAuth App client ID for the Device Authorization Grant
-	 * (Settings → Login). Public client — GitHub's device flow honors
-	 * RFC 8628's public-client model, so no client_secret is needed.
-	 * Register at https://github.com/settings/developers as an OAuth App
-	 * with "Enable Device Flow" ticked. Surfaced to githubLogin.html via
-	 * the `<browser-config-github-client-id/>` custom tag.
-	 *
-	 * **Override-allowed runtime fallback**: the bundled default in
-	 * `@switch-web/runtime`'s `RUNTIME_CONFIG_DEFAULTS` is used when
-	 * user config is empty / missing. A non-empty value in user config
-	 * wins, so developers can BYO OAuth app without rebuilding the NRO.
-	 * Empty in BOTH user config and the runtime default → the auth
-	 * page's misconfiguration stage. */
-	githubOAuthClientId: string;
 	/** Microsoft Entra application (client) ID for the Device
 	 * Authorization Grant. Register a single-tenant or multi-tenant
 	 * (recommended: multi-tenant `common`) app at Microsoft Entra >
@@ -378,8 +376,12 @@ export interface BrowserConfig {
 	 * Surfaced to microsoftLogin.html via the
 	 * `<browser-config-microsoft-client-id/>` custom tag.
 	 *
-	 * **Override-allowed runtime fallback** — see
-	 * {@link githubOAuthClientId}. */
+	 * **Override-allowed runtime fallback**: the bundled default in
+	 * `@switch-web/runtime`'s `RUNTIME_CONFIG_DEFAULTS` is used when
+	 * user config is empty / missing. A non-empty value in user config
+	 * wins, so developers can BYO OAuth app without rebuilding the NRO.
+	 * Empty in BOTH user config and the runtime default → the auth
+	 * page's misconfiguration stage. */
 	microsoftOAuthClientId: string;
 	/** Google OAuth client ID for the Limited Input Device flow.
 	 * Register in Google Cloud Console > APIs & Services > Credentials
@@ -389,7 +391,7 @@ export interface BrowserConfig {
 	 * `<browser-config-google-client-id/>` custom tag.
 	 *
 	 * **Override-allowed runtime fallback** — see
-	 * {@link githubOAuthClientId}. */
+	 * {@link microsoftOAuthClientId}. */
 	googleOAuthClientId: string;
 	/** Google OAuth client secret for the Limited Input Device flow.
 	 * Required alongside `googleOAuthClientId` at the /token exchange
@@ -398,18 +400,8 @@ export interface BrowserConfig {
 	 * via the `<browser-config-google-client-secret/>` custom tag.
 	 *
 	 * **Override-allowed runtime fallback** — see
-	 * {@link githubOAuthClientId}. */
+	 * {@link microsoftOAuthClientId}. */
 	googleOAuthClientSecret: string;
-	/** Twitch OAuth application client ID. Register at
-	 * https://dev.twitch.tv/console with the Device Code Flow enabled.
-	 * (Twitch requires an OAuth Redirect URL to be set — `https://localhost`
-	 * is fine since device flow never redirects.) Surfaced to
-	 * twitchLogin.html via the `<browser-config-twitch-client-id/>` custom
-	 * tag.
-	 *
-	 * **Override-allowed runtime fallback** — see
-	 * {@link githubOAuthClientId}. */
-	twitchOAuthClientId: string;
 }
 
 export const DEFAULT_CONFIG: BrowserConfig = {
@@ -447,15 +439,13 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	// config value, if any, is ignored); the OAuth IDs are the runtime
 	// fallback consulted when user config is empty / missing.
 	catalogue: RUNTIME_CONFIG_DEFAULTS.catalogue,
-	artifacts: RUNTIME_CONFIG_DEFAULTS.artifacts,
+	stats: RUNTIME_CONFIG_DEFAULTS.stats,
 	downloads: RUNTIME_CONFIG_DEFAULTS.downloads,
 	ratings: RUNTIME_CONFIG_DEFAULTS.ratings,
 	telemetry: RUNTIME_CONFIG_DEFAULTS.telemetry,
-	githubOAuthClientId: RUNTIME_CONFIG_DEFAULTS.githubOAuthClientId,
 	microsoftOAuthClientId: RUNTIME_CONFIG_DEFAULTS.microsoftOAuthClientId,
 	googleOAuthClientId: RUNTIME_CONFIG_DEFAULTS.googleOAuthClientId,
 	googleOAuthClientSecret: RUNTIME_CONFIG_DEFAULTS.googleOAuthClientSecret,
-	twitchOAuthClientId: RUNTIME_CONFIG_DEFAULTS.twitchOAuthClientId,
 };
 
 
@@ -576,9 +566,12 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			toolbarPosition: parsed?.toolbarPosition === 'top' || parsed?.toolbarPosition === 'bottom'
 				? parsed.toolbarPosition
 				: DEFAULT_CONFIG.toolbarPosition,
+			// Old tier values (community/experimental) are NOT migrated
+			// (D1) — they fall through to the default like any unknown.
 			homeSection: parsed?.homeSection === 'featured'
-				|| parsed?.homeSection === 'community'
-				|| parsed?.homeSection === 'experimental'
+				|| parsed?.homeSection === 'recent'
+				|| parsed?.homeSection === 'popular'
+				|| parsed?.homeSection === 'toprated'
 				? parsed.homeSection
 				: DEFAULT_CONFIG.homeSection,
 			// Free-form path/URL. Empty string means "no autorun" (boot
@@ -613,7 +606,7 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			// source. See `[[runtime-defaults]]` in
 			// `@switch-web/runtime` for the rationale.
 			catalogue: RUNTIME_CONFIG_DEFAULTS.catalogue,
-			artifacts: RUNTIME_CONFIG_DEFAULTS.artifacts,
+			stats: RUNTIME_CONFIG_DEFAULTS.stats,
 			downloads: RUNTIME_CONFIG_DEFAULTS.downloads,
 			ratings: RUNTIME_CONFIG_DEFAULTS.ratings,
 			telemetry: RUNTIME_CONFIG_DEFAULTS.telemetry,
@@ -624,10 +617,6 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			// string fields — it lets a fresh install ship working
 			// sign-in via the bundled runtime ID without forcing every
 			// installer to provision their own OAuth app.
-			githubOAuthClientId: typeof parsed?.githubOAuthClientId === 'string'
-				&& parsed.githubOAuthClientId.length > 0
-				? parsed.githubOAuthClientId
-				: DEFAULT_CONFIG.githubOAuthClientId,
 			microsoftOAuthClientId: typeof parsed?.microsoftOAuthClientId === 'string'
 				&& parsed.microsoftOAuthClientId.length > 0
 				? parsed.microsoftOAuthClientId
@@ -640,10 +629,6 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				&& parsed.googleOAuthClientSecret.length > 0
 				? parsed.googleOAuthClientSecret
 				: DEFAULT_CONFIG.googleOAuthClientSecret,
-			twitchOAuthClientId: typeof parsed?.twitchOAuthClientId === 'string'
-				&& parsed.twitchOAuthClientId.length > 0
-				? parsed.twitchOAuthClientId
-				: DEFAULT_CONFIG.twitchOAuthClientId,
 		};
 	} catch (error) {
 		console.debug(`[brewser] config.json parse failed: ${error}`);
@@ -663,10 +648,6 @@ export interface AppEntry {
 	 * renderer can stamp it onto the card markup — the missing-app modal
 	 * keys its `data-app-detail` payload on this. */
 	id: string;
-	/** Catalog group this entry came from (`featured` / `community` /
-	 * `experimental`). Surfaced for the same modal-payload reason as
-	 * `id`. */
-	group: CatalogGroup;
 	title: string;
 	description: string;
 	logo: string;
@@ -730,60 +711,10 @@ export interface AppEntry {
 	sizeBytes: number;
 }
 
-/** Catalog group name — every entry in `catalogue.json` lives under one
- * of these three top-level arrays. The Apps page renders each group
- * in its own tab; the welcome page renders only `featured`. */
-export type CatalogGroup = 'featured' | 'community' | 'experimental';
-
-export const CATALOG_GROUPS: readonly CatalogGroup[] = ['featured', 'community', 'experimental'];
-
-/** One entry as authored in `catalogue.json`. The catalog is the single
- * source of truth — apps are grouped under three top-level arrays
- * (`featured`, `community`, `experimental`), and each entry carries
- * everything needed to render a card AND to find the app on disk:
- *
- *   - `id` — reverse-DNS folder name under
- *     `sdmc:/switch/brewser/apps/<group>/<id>/` (and the brewser://
- *     equivalent).
- *   - `name` — display title on the card.
- *   - `description` — short blurb under the title.
- *   - `logo` — relative path to the card's image, resolved against
- *     the app's own dir (e.g. `assets/tiktok_logo.png` →
- *     `brewser://apps/<group>/<id>/assets/tiktok_logo.png`).
- *   - `entry` — relative path to the launcher HTML
- *     (e.g. `index.html`).
- *
- * Other catalog fields (version, permissions, features, files…) are
- * ignored by the shell today; future code can read them from the
- * raw catalog without changing this interface. */
-interface RawCatalogEntry {
-	id: string;
-	name: string;
-	description?: string;
-	logo?: string;
-	entry: string;
-	version?: string;
-	license?: string;
-	category?: string;
-	developer?: string;
-	source?: string;
-	/** Capability flags from the manifest (`["video", "controller", …]`).
-	 * Free-form strings — the missing-app modal renders them comma-
-	 * separated; no validation against an enum. */
-	features?: string[];
-	/** Permissions the app declares it needs (`["network", "storage", …]`).
-	 * Same shape + rendering as `features`. */
-	permissions?: string[];
-	/** Allowed third-party origins the app may fetch from
-	 * (`["https://api.example.com", …]`). Empty array displays as `—`
-	 * in the modal. */
-	allowed_origins?: string[];
-	/** Total download size in bytes (sum of every file in the app's
-	 * artifact manifest). Surfaced in the missing-app modal as a
-	 * megabyte figure so the user sees the install footprint before
-	 * tapping Download/Update. Omitted entries display no size chip. */
-	sizeBytes?: number;
-}
+/** Home-section choices = the four library tabs. Labels for the
+ * Settings radios + home-page title live in
+ * `browser-resource-loader.ts homeSectionTitle`. */
+export const HOME_SECTIONS: readonly LibraryTabId[] = ['featured', 'recent', 'popular', 'toprated'];
 
 /** URL of the generic "download" logo painted on cards whose backing
  * app folder isn't on disk. Lives in `<storageRoot>assets/` so it's
@@ -792,143 +723,159 @@ interface RawCatalogEntry {
  * normal `brewser://assets/...` route. */
 const MISSING_APP_LOGO_URL = 'brewser://assets/download.png';
 
-/** Read + validate `<profile>/catalogue.json` and return the entries for
- * the requested group, mapped to `AppEntry` cards. Missing / malformed
- * file → empty list; entries missing any required field are dropped.
+/** One rendered library tab: availability + reason + card entries. */
+export interface LibraryTabRender {
+	available: boolean;
+	reason: string;
+	entries: AppEntry[];
+}
+
+/**
+ * Build the four library tab views (D2a + Phase 4 tab semantics):
+ * DISK IS AUTHORITATIVE for what is installed — `apps/<id>/
+ * manifest.json` dirs are enumerated once and rendered from their
+ * local manifests; the cached catalogue (`configs/catalogue.json`,
+ * parsed by the platform client, never here) joins BY ID to annotate
+ * availability, updates, curation, and revocation; the cached
+ * `configs/stats.json` drives the Popular / Top Rated ordering. A
+ * missing / stale / unparseable catalogue still yields the complete
+ * installed library; missing stats degrade only the stats-driven tabs.
  *
- * `logo` and `url` are emitted as `brewser://apps/<group>/<id>/...`
- * paths so they flow through the resource loader (same path as the
- * launched app). The brewser:// scheme keeps the on-device file layout
- * (sdmc vs. romfs) hidden from the page. */
-export function loadCatalogGroup(appRoot: string, group: CatalogGroup): AppEntry[] {
-	const raw = readCatalogGroup(appRoot, group);
-	return raw.map((e) => {
-		const entryRel = stripLeadingSlashes(e.entry);
-		// "Missing" = the launcher file the card would navigate to isn't
-		// present on disk. We probe via `Switch.readFileSync` (the same
-		// call the resource loader uses) so the check matches what the
-		// real navigation would see — sdmc override files, robocopy'd
-		// app folders, etc. Any thrown error counts as missing too: it's
-		// the same outcome the user would see (a 404 / blank page).
-		let missing = false;
-		try {
-			const data = Switch.readFileSync(`${appRoot}apps/${group}/${e.id}/${entryRel}`);
-			if (!data) missing = true;
-		} catch (_) {
-			missing = true;
+ * This replaced the old per-catalogue-entry disk probes: installedness
+ * comes from one enumeration, not N manifest reads driven by the
+ * catalogue (which silently hid anything the catalogue forgot).
+ *
+ * One call = one disk pass — the resource loader calls this once per
+ * page render and feeds every tab tag from the same result.
+ */
+export function loadLibraryTabs(appRoot: string): Record<LibraryTabId, LibraryTabRender> {
+	// Cached catalogue → normalized model. Anything but Ok → render
+	// from disk alone; the outcome is logged here and surfaced in the
+	// updates modal's report UI at sync time.
+	const text = readTextFile(`${appRoot}configs/catalogue.json`);
+	let catalogue: NormalizedCatalogue | null = null;
+	if (text !== null) {
+		const outcome = parseCatalogue(text);
+		if (outcome.kind === 'Ok') {
+			catalogue = outcome.catalogue;
+			const r = catalogue.report;
+			if (r.dropped.length || r.unknownPermissions.length || r.unknownSources.length) {
+				console.debug(`[brewser] catalogue report: dropped=${r.dropped.length} unknownPerms=${r.unknownPermissions.join(',')} unknownSources=${r.unknownSources.join(',')}`);
+			}
+		} else {
+			console.debug(`[brewser] cached catalogue rejected (${outcome.kind}) — rendering library from disk only`);
 		}
-		// Logo URL is independent from `missing`: after a Check-for-
-		// Updates refresh, updates-modal.js seeds the missing app's
-		// logo into `apps/<group>/<id>/<logo>` so the card paints the
-		// real glyph instead of the generic `download.png` while the
-		// entry file is still absent. If the logo file isn't on disk
-		// (older sync, fetch failed, no logo specified) we fall back
-		// to the generic placeholder — same as before this change.
-		const logoRel = typeof e.logo === 'string' ? stripLeadingSlashes(e.logo) : '';
-		const hasLogo = logoRel !== ''
-			&& appFileExists(`${appRoot}apps/${group}/${e.id}/${logoRel}`);
-		const logo = hasLogo
-			? `brewser://apps/${group}/${e.id}/${logoRel}`
-			: MISSING_APP_LOGO_URL;
-		const catalogVersion = typeof e.version === 'string' ? e.version : '';
-		// Cross-reference the on-disk manifest's version with the
-		// catalog. Only meaningful when the app is installed (missing
-		// = no manifest to read), and only worth surfacing when both
-		// sides have a version AND they differ — otherwise we leave
-		// the field empty so the renderer paints the normal chip.
-		const installedVersion = missing
-			? ''
-			: readInstalledVersionIfChanged(appRoot, group, e.id, catalogVersion);
-		return {
-			id: e.id,
-			group,
-			title: e.name,
-			description: e.description ?? '',
-			logo,
-			url: `brewser://apps/${group}/${e.id}/${entryRel}`,
-			version: catalogVersion,
-			license: typeof e.license === 'string' ? e.license : '',
-			category: typeof e.category === 'string' ? e.category : '',
-			developer: typeof e.developer === 'string' ? e.developer : '',
-			source: typeof e.source === 'string' ? e.source : '',
-			features: joinStringArray(e.features),
-			permissions: joinStringArray(e.permissions),
-			allowedOrigins: joinStringArray(e.allowed_origins),
-			installedVersion,
-			missing,
-			entry: entryRel,
-			sizeBytes: typeof e.sizeBytes === 'number' && Number.isFinite(e.sizeBytes) && e.sizeBytes > 0
-				? e.sizeBytes
-				: 0,
-		};
+	}
+
+	// Cached stats → parsed or null (null degrades Popular/Top Rated
+	// only — deliberately NOT a failure).
+	const statsText = readTextFile(`${appRoot}configs/stats.json`);
+	let stats: ParsedStats | null = null;
+	if (statsText !== null) {
+		const so = parseStats(statsText);
+		if (so.kind === 'Ok') {
+			stats = so.parsed;
+		} else {
+			console.debug(`[brewser] cached stats rejected (${so.kind}) — stats-driven tabs unavailable`);
+		}
+	}
+
+	const enumeration = enumerateInstalledApps({
+		listAppDirs: () => {
+			try {
+				return Switch.readDirSync(`${appRoot}apps`) ?? [];
+			} catch (_) {
+				return [];
+			}
+		},
+		readAppText: (dir: string, rel: string) => readTextFile(`${appRoot}apps/${dir}/${rel}`),
+		appFileExists: (dir: string, rel: string) => appFileExists(`${appRoot}apps/${dir}/${rel}`),
 	});
+	const er = enumeration.report;
+	if (er.unreadable.length || er.idMismatches.length || er.brokenEntries.length) {
+		console.debug(`[brewser] installed-apps report: unreadable=${JSON.stringify(er.unreadable)} idMismatches=${JSON.stringify(er.idMismatches)} brokenEntries=${JSON.stringify(er.brokenEntries)}`);
+	}
+
+	const library = joinLibrary(enumeration.apps, catalogue);
+	const tabs = buildLibraryTabs(library, stats);
+	const out = {} as Record<LibraryTabId, LibraryTabRender>;
+	for (const id of ['featured', 'recent', 'popular', 'toprated'] as const) {
+		const view = tabs[id];
+		out[id] = {
+			available: view.available,
+			reason: view.reason,
+			entries: view.apps.map((a: LibraryApp) => libraryAppToCard(a, appRoot)),
+		};
+	}
+	return out;
 }
 
-/** Read `apps/<group>/<id>/manifest.json` and return its `version`
- * field iff that field differs from `catalogVersion`. Empty string in
- * every other case — manifest absent, malformed, missing version, or
- * matching version. This is the "an upgrade is available" signal the
- * grid renderer keys the yellow chip on; the comparison is a strict
- * string match (no semver parsing — catalog authors decide what
- * counts as a change). */
-function readInstalledVersionIfChanged(
-	appRoot: string,
-	group: CatalogGroup,
-	id: string,
-	catalogVersion: string,
-): string {
-	if (!catalogVersion) return '';
+/**
+ * Nav-level revoked check (D3): ids in the cached catalogue's
+ * `revoked` list are blocked from launch even by direct URL. Reads the
+ * cache fresh per call — callers invoke once per app navigation, and
+ * the read shares the manifest lookup's per-nav SD budget.
+ */
+export function isRevokedInCachedCatalogue(appRoot: string, appId: string): boolean {
+	const text = readTextFile(`${appRoot}configs/catalogue.json`);
+	if (text === null) return false;
+	const outcome = parseCatalogue(text);
+	return outcome.kind === 'Ok' && outcome.catalogue.revoked.includes(appId);
+}
+
+/** Map one joined library row onto the card shape the renderer +
+ * modal payloads consume. Field authority follows the contract: the
+ * catalogue owns availability/version/curation, the local manifest
+ * owns behaviour; display fields prefer whichever side is present. */
+function libraryAppToCard(app: LibraryApp, appRoot: string): AppEntry {
+	const inst = app.installed;
+	const listing = app.listing;
+	// Directory name is authoritative for paths (flat layout,
+	// folder == id; on manifest/folder mismatch the folder wins).
+	const dirName = inst ? inst.dirName : app.id;
+	const entryRel = stripLeadingSlashes(inst ? inst.entry : listing?.entryRel ?? 'index.html');
+	const logoRel = stripLeadingSlashes(inst ? inst.logo : listing?.logoRel ?? '');
+	const hasLogo = logoRel !== '' && appFileExists(`${appRoot}apps/${dirName}/${logoRel}`);
+	// Marked-and-blocked: a revoked app renders with the missing-card
+	// treatment so the launcher intercepts the tap (no navigation).
+	// The navigation-level guard for direct URLs lands with Phase 4's
+	// consumer rewrite.
+	const missing = app.state === 'available' || (inst !== null && !inst.entryExists) || app.revoked;
+	return {
+		id: app.id,
+		title: inst?.name ?? listing?.name ?? app.id,
+		description: listing?.summary ?? inst?.summary ?? '',
+		logo: hasLogo ? `brewser://apps/${dirName}/${logoRel}` : MISSING_APP_LOGO_URL,
+		url: `brewser://apps/${dirName}/${entryRel}`,
+		version: listing?.version ?? inst?.version ?? '',
+		license: listing?.license ?? inst?.license ?? '',
+		category: (inst?.categories.length ? inst.categories : listing?.categories ?? []).join(', '),
+		developer: listing?.developer ?? inst?.developer ?? '',
+		source: '',
+		features: (inst?.features.length ? inst.features : listing?.features ?? []).join(', '),
+		permissions: (inst?.permissionNamesRaw.length
+			? inst.permissionNamesRaw
+			: listing?.permissionNamesRaw ?? []).join(', '),
+		allowedOrigins: (inst?.allowedOrigins ?? []).join(', '),
+		installedVersion: app.state === 'installed-update' ? inst?.version ?? '' : '',
+		missing,
+		entry: entryRel,
+		sizeBytes: listing?.sizeBytes ?? 0,
+	};
+}
+
+function readTextFile(path: string): string | null {
 	let raw: ArrayBuffer | null;
 	try {
-		raw = Switch.readFileSync(`${appRoot}apps/${group}/${id}/manifest.json`);
+		raw = Switch.readFileSync(path);
 	} catch (_) {
-		return '';
+		return null;
 	}
-	if (!raw) return '';
+	if (!raw) return null;
 	try {
-		const parsed = JSON.parse(decoder.decode(raw));
-		const installed = typeof parsed?.version === 'string' ? parsed.version : '';
-		if (!installed || installed === catalogVersion) return '';
-		return installed;
+		return decoder.decode(raw);
 	} catch (_) {
-		return '';
-	}
-}
-
-/** Coerce a catalog `features` / `permissions` / `allowed_origins`
- * field to a flat display string. Non-arrays + non-string entries are
- * dropped silently so a malformed manifest produces an empty cell
- * instead of `[object Object]`. */
-function joinStringArray(arr: unknown): string {
-	if (!Array.isArray(arr)) return '';
-	return arr.filter((s): s is string => typeof s === 'string' && s.length > 0).join(', ');
-}
-
-function readCatalogGroup(appRoot: string, group: CatalogGroup): RawCatalogEntry[] {
-	let raw: ArrayBuffer | null;
-	try {
-		raw = Switch.readFileSync(`${appRoot}configs/catalogue.json`);
-	} catch (_) {
-		return [];
-	}
-	if (!raw) return [];
-	try {
-		const parsed = JSON.parse(decoder.decode(raw));
-		const arr = parsed && Array.isArray(parsed[group]) ? parsed[group] : null;
-		if (!arr) return [];
-		return arr.filter((e: unknown): e is RawCatalogEntry =>
-			!!e && typeof e === 'object'
-			&& typeof (e as RawCatalogEntry).id === 'string'
-			&& typeof (e as RawCatalogEntry).name === 'string'
-			&& typeof (e as RawCatalogEntry).entry === 'string'
-			&& (typeof (e as RawCatalogEntry).logo === 'string'
-				|| typeof (e as RawCatalogEntry).logo === 'undefined')
-			&& (typeof (e as RawCatalogEntry).description === 'string'
-				|| typeof (e as RawCatalogEntry).description === 'undefined'),
-		);
-	} catch (error) {
-		console.debug(`[brewser] catalogue.json parse failed: ${error}`);
-		return [];
+		return null;
 	}
 }
 

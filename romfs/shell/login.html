@@ -5,7 +5,7 @@
     <link rel="stylesheet" href="brewser://assets/main.css">
     <style>
       .signin-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
       }
 
       .signin-tile {
@@ -182,16 +182,6 @@
         <p class="lead" id="signin-lead">Choose a service to sign in with.</p>
 
         <div class="app-grid signin-grid">
-          <a class="app-card signin-tile" id="signin-tile-github" href="brewser://githubLogin/">
-            <div class="signin-provider">
-              <strong class="signin-name">GitHub</strong>
-              <span class="signin-status" id="signin-status-github">Not signed in</span>
-            </div>
-            <div class="signin-avatar-wrap">
-              <img id="signin-avatar-github" src="brewser://assets/github_logo.png" alt="">
-            </div>
-          </a>
-
           <a class="app-card signin-tile" id="signin-tile-google" href="brewser://googleLogin/">
             <div class="signin-provider">
               <strong class="signin-name">Google</strong>
@@ -199,16 +189,6 @@
             </div>
             <div class="signin-avatar-wrap">
               <img id="signin-avatar-google" src="brewser://assets/google_logo.png" alt="">
-            </div>
-          </a>
-
-          <a class="app-card signin-tile" id="signin-tile-twitch" href="brewser://twitchLogin/">
-            <div class="signin-provider">
-              <strong class="signin-name">Twitch</strong>
-              <span class="signin-status" id="signin-status-twitch">Not signed in</span>
-            </div>
-            <div class="signin-avatar-wrap">
-              <img id="signin-avatar-twitch" src="brewser://assets/twitch_logo.png" alt="">
             </div>
           </a>
 

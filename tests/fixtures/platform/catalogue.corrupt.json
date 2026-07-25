@@ -1,0 +1,21 @@
+{
+  "apps": [
+    {
+      "categories": [
+        "Apps",
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "featured": true,
+      "id": "com.natureglass.fluiddynamics",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Fluid dynamics",
+      "permissions": [],
+      "sizeBytes": 85838,
+      "summary": "Fluid dynamics is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the N

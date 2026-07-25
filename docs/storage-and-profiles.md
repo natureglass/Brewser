@@ -44,8 +44,6 @@ sdmc:/switch/brewser/                        ← appRoot
     nxjs-debug.log
     shell-nav-diag.log
     ...
-  screenshots/
-    screenshot_<timestamp>.png
   apps/                                      ← app catalog (shared)
     mediaplayer/
     ThreeJSDemos/                            ← hoisted from per-profile 2026-06-02

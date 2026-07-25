@@ -6,7 +6,8 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, CATALOG_GROUPS, type CatalogGroup, loadCatalogGroup, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine } from '../profile/browser-toolbar.js';
+import { type AppEntry, HOME_SECTIONS, type LibraryTabRender, loadConfig, loadKeyboardRegistry, loadLibraryTabs, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine } from '../profile/browser-toolbar.js';
+import type { LibraryTabId } from '@switch-web/runtime';
 
 /**
  * Serves the browser's built-in pages.
@@ -354,17 +355,32 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-search(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-search\s*>)?/gi,
 			() => this.renderSearch(),
 		);
+		// The four browse tabs (Phase 4, mirroring the WP plugin):
+		// Featured is a curation FILTER; Most Recent / Popular / Top
+		// Rated are sorts. One `loadLibraryTabs` call feeds every tag on
+		// the page (single disk pass per render); a tab whose driving
+		// data is absent renders unavailable with its reason — sparse
+		// data hides a sort, it never fakes one.
+		let libraryTabsMemo: Record<LibraryTabId, LibraryTabRender> | null = null;
+		const libraryTab = (id: LibraryTabId): string => {
+			libraryTabsMemo ??= loadLibraryTabs(this.appRoot);
+			return this.renderLibraryTab(libraryTabsMemo[id]);
+		};
 		out = out.replace(
-			/<browser-featured(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-featured\s*>)?/gi,
-			() => this.renderGroup('featured'),
+			/<browser-tab-featured(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-featured\s*>)?/gi,
+			() => libraryTab('featured'),
 		);
 		out = out.replace(
-			/<browser-community(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-community\s*>)?/gi,
-			() => this.renderGroup('community'),
+			/<browser-tab-recent(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-recent\s*>)?/gi,
+			() => libraryTab('recent'),
 		);
 		out = out.replace(
-			/<browser-experimental(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-experimental\s*>)?/gi,
-			() => this.renderGroup('experimental'),
+			/<browser-tab-popular(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-popular\s*>)?/gi,
+			() => libraryTab('popular'),
+		);
+		out = out.replace(
+			/<browser-tab-toprated(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-toprated\s*>)?/gi,
+			() => libraryTab('toprated'),
 		);
 		// `<browser-config-catalogue>` — expands to the active
 		// `config.json` `catalogue` URL, HTML-escaped so it's safe inside
@@ -375,16 +391,14 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-catalogue(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-catalogue\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).catalogue),
 		);
-		// `<browser-config-artifacts>` — expands to the active
-		// `config.json` `artifacts` URL (GitHub Contents API listing of
-		// per-app artifact manifests). HTML-escaped, same shape as
-		// `<browser-config-catalogue>`. Empty when no URL is configured;
-		// the download-modal then skips the optional sanity check and
-		// goes straight to the artifact-URL fetch (the artifact 404 is
-		// the canonical "unknown app" signal anyway).
+		// `<browser-config-stats>` — expands to the strict-pinned
+		// `stats.json` URL (C2 operational counters). Fetched by the
+		// Check-for-Updates flow alongside the catalogue; per-app
+		// artifact URLs are NOT config anymore — they come from the
+		// normalized catalogue via the platform bridge.
 		out = out.replace(
-			/<browser-config-artifacts(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-artifacts\s*>)?/gi,
-			() => htmlEscape(loadConfig(this.appRoot).artifacts),
+			/<browser-config-stats(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-stats\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).stats),
 		);
 		// `<browser-config-downloads>` / `<browser-config-ratings>` —
 		// expand to the active `config.json` `downloads` / `ratings`
@@ -452,10 +466,6 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// the provider; each auth script branches on those and shows
 		// the misconfiguration stage instead of starting the flow.
 		out = out.replace(
-			/<browser-config-github-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-github-client-id\s*>)?/gi,
-			() => htmlEscape(loadConfig(this.appRoot).githubOAuthClientId),
-		);
-		out = out.replace(
 			/<browser-config-microsoft-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-microsoft-client-id\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).microsoftOAuthClientId),
 		);
@@ -467,19 +477,12 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-google-client-secret(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-google-client-secret\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).googleOAuthClientSecret),
 		);
-		out = out.replace(
-			/<browser-config-twitch-client-id(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-twitch-client-id\s*>)?/gi,
-			() => htmlEscape(loadConfig(this.appRoot).twitchOAuthClientId),
-		);
-		// `<browser-home-apps>` — renders the catalog group named by
-		// `config.json` `homeSection` (featured / community /
-		// experimental). The home page has no tab strip, so this is
-		// how the user picks which catalog section the home grid
-		// surfaces. Falls through to `renderGroup`, which already
-		// handles the empty-list case.
+		// `<browser-home-apps>` — the home grid renders the library tab
+		// named by `config.json homeSection` (featured / recent /
+		// popular / toprated). Shares the page-render memo above.
 		out = out.replace(
 			/<browser-home-apps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-apps\s*>)?/gi,
-			() => this.renderGroup(loadConfig(this.appRoot).homeSection),
+			() => libraryTab(loadConfig(this.appRoot).homeSection),
 		);
 		// `<browser-home-title>` — display name of the currently-
 		// selected home section ("Featured Apps", "Community Apps",
@@ -518,19 +521,20 @@ export class BrowserResourceLoader implements ResourceLoader {
 		return out;
 	}
 
-	/** Render one catalog group's cards (`.app-card` links — logo on
-	 * top, then title + description) styled by main.css's `.app-grid`
-	 * + `.app-card` rules. Each entry comes from `catalogue.json`'s
-	 * `featured` / `community` / `experimental` array; `loadCatalogGroup`
-	 * builds the `brewser://apps/<group>/<id>/...` paths used for both
-	 * the logo `<img src>` and the card's `href`. Empty / missing group
-	 * → an empty-state `<p>`. */
-	private renderGroup(group: CatalogGroup): string {
-		const entries = loadCatalogGroup(this.appRoot, group);
-		if (entries.length === 0) {
-			return `<p class="empty">No ${group} apps yet. Add entries to <code>catalogue.json</code>'s <code>${group}</code> array.</p>`;
+	/** Render one library tab's cards (`.app-card` links — logo on top,
+	 * then title + description) styled by main.css's `.app-grid` +
+	 * `.app-card` rules. Unavailable tabs render their reason in the
+	 * existing empty-state style — visible degradation, never a fake
+	 * ordering. An *available but empty* tab (Featured with nothing
+	 * curated) gets the plain empty state. */
+	private renderLibraryTab(tab: LibraryTabRender): string {
+		if (!tab.available) {
+			return `<p class="empty">${htmlEscape(tab.reason)}</p>`;
 		}
-		return renderAppCards(entries);
+		if (tab.entries.length === 0) {
+			return '<p class="empty">Nothing here yet — run Check for Updates to fetch the catalogue, or install apps under <code>apps/</code>.</p>';
+		}
+		return renderAppCards(tab.entries);
 	}
 
 	/** Render the welcome-page search bar for the active engine (per
@@ -778,11 +782,11 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// strip (apps.html does), so this radio is the only way to
 		// flip the visible section. Labels mirror `homeSectionTitle`
 		// so the Settings copy reads the same as the rendered h2.
-		const homeSectionRows = CATALOG_GROUPS.map((group) => {
-			const label = homeSectionTitle(group);
+		const homeSectionRows = HOME_SECTIONS.map((section) => {
+			const label = homeSectionTitle(section);
 			return (
 				'<label class="settings-radio">'
-				+ `<input type="radio" name="setting-homeSection" value="${group}" data-setting="homeSection"${checked(config.homeSection === group)}>`
+				+ `<input type="radio" name="setting-homeSection" value="${section}" data-setting="homeSection"${checked(config.homeSection === section)}>`
 				+ htmlEscape(label)
 				+ '</label>'
 			);
@@ -1027,7 +1031,6 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// recover the structure.
 		const detailAttrs = ` data-app-detail="${htmlEscape(JSON.stringify({
 			id: e.id,
-			group: e.group,
 			name: e.title,
 			description: e.description,
 			// `logo` carries the brewser:// URL the script stamps
@@ -1235,10 +1238,11 @@ function htmlEscape(s: string): string {
  * (`<browser-home-title>`) and the Settings page's "Home Page" radio
  * labels. Kept as a single source of truth so the two locations stay
  * in sync if the wording ever changes. */
-function homeSectionTitle(group: CatalogGroup): string {
-	switch (group) {
-		case 'featured': return 'Featured Apps';
-		case 'community': return 'Community Apps';
-		case 'experimental': return 'Experimental Apps';
+function homeSectionTitle(section: LibraryTabId): string {
+	switch (section) {
+		case 'featured': return 'Featured';
+		case 'recent': return 'Most Recent';
+		case 'popular': return 'Popular';
+		case 'toprated': return 'Top Rated';
 	}
 }

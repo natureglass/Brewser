@@ -19,13 +19,14 @@
 // custom tag from `config.json` -> `catalogue`. Empty / missing
 // URL = treated as a failure (the fetch isn't attempted).
 //
-// Diff source of truth: AFTER the write, the script parses the just-
-// fetched catalog JSON and walks each entry, reading
-// `sdmc:/switch/brewser/apps/<group>/<id>/manifest.json` for the
-// installed version + checking the launcher's entry file for
-// presence. This mirrors `loadCatalogGroup` + `readInstalledVersion
-// IfChanged` in src/profile/browser-toolbar.ts — they're the engine-
-// side equivalents that drive the grid-card upgrade chips.
+// Diff source of truth: the fetched text is handed to the PLATFORM
+// CLIENT (`globalThis.__brewserPlatformClient.parseCatalogue`) — this
+// script never parses raw catalogue fields or builds a platform URL.
+// Only an Ok outcome is persisted (D2b: a catalogue that fails to
+// parse/validate, or is newer than this runtime understands, never
+// replaces the cached copy). The diff then walks the NORMALIZED apps
+// against the flat on-disk layout (`apps/<id>/…`), mirroring the
+// engine-side library join that drives the grid-card upgrade chips.
 //
 // Visibility flips via classList — `.app-modal-overlay--open` on the
 // overlay (reused from the missing-app modal's stylesheet) and
@@ -101,10 +102,11 @@
   // Check-for-Updates press, so a stale copy can't hide a new release.
   var VERSIONS_PATH = APP_ROOT + 'configs/versions.json';
   var CURRENT_PATH = APP_ROOT + 'configs/current.json';
-  // The three catalog groups walked when computing the diff. Mirror
-  // `CATALOG_GROUPS` in src/profile/browser-toolbar.ts — keep in sync
-  // if a new group is ever added on the engine side.
-  var GROUPS = ['featured', 'community', 'experimental'];
+  // C2 operational counters (downloads/ratingAvg/ratingCount), fetched
+  // alongside the catalogue from `data-stats-url`. Persisted only when
+  // the platform client parses it; a bad/missing stats.json is NOT a
+  // sync failure (Popular / Top Rated degrade visibly instead).
+  var STATS_PATH = APP_ROOT + 'configs/stats.json';
 
   var modalOpen = false;
   var fetchInFlight = false;
@@ -153,18 +155,6 @@
     return p.slice(i);
   }
 
-  // Strip the final URL path segment to get a base directory URL with
-  // a trailing slash. The catalogue URL points at `catalogue.json` (or
-  // whatever the user named it); the per-app asset URLs live alongside
-  // it, so the base is "catalog URL minus the filename". Falls back to
-  // the input unchanged when there's no `/` to strip (defensive — a
-  // malformed URL still produces some output rather than throwing).
-  function catalogueBaseUrl(url) {
-    var idx = url.lastIndexOf('/');
-    if (idx < 0) return url;
-    return url.slice(0, idx + 1);
-  }
-
   // Parent directory of a `/`-joined path, without the trailing slash.
   // Used as the `Switch.mkdirSync` argument when seeding a new app
   // folder — mkdirSync creates the full chain including intermediates.
@@ -203,7 +193,7 @@
   function refreshCardLogo(detail) {
     var logoRel = detail.logo ? stripLeadingSlashes(detail.logo) : '';
     if (!logoRel) return;
-    var brewserUrl = 'brewser://apps/' + detail.group + '/' + detail.id + '/' + logoRel;
+    var brewserUrl = 'brewser://apps/' + detail.id + '/' + logoRel;
     var cards = document.querySelectorAll('[data-app-detail]');
     for (var i = 0; i < cards.length; i++) {
       var cardEl = cards[i];
@@ -211,7 +201,7 @@
       if (!raw) continue;
       var parsed;
       try { parsed = JSON.parse(raw); } catch (_) { continue; }
-      if (!parsed || parsed.id !== detail.id || parsed.group !== detail.group) continue;
+      if (!parsed || parsed.id !== detail.id) continue;
       // First IMG child = the `.app-logo` element (only `<img>` in
       // the card markup; no need to filter by class). setAttribute
       // routes through LiveElement.setAttr which kicks off
@@ -258,7 +248,7 @@
       if (!raw) continue;
       var parsed;
       try { parsed = JSON.parse(raw); } catch (_) { continue; }
-      if (!parsed || parsed.id !== detail.id || parsed.group !== detail.group) continue;
+      if (!parsed || parsed.id !== detail.id) continue;
       cardEl.classList.add('app-card--upgrade');
       var versionEl = findDescendantByClass(cardEl, 'app-meta__version');
       var chipHtml = '<span>v' + escapeHtml(detail.installedVersion) + '</span>'
@@ -285,28 +275,27 @@
     }
   }
 
-  // Best-effort download of every missing app's catalog logo so the
+  // Best-effort download of every missing app's catalogue logo so the
   // grid card paints the real glyph on next render instead of the
   // generic `download.png`. Each failure is logged + swallowed —
-  // failing a single logo doesn't fail the catalog refresh.
+  // failing a single logo doesn't fail the catalogue refresh.
   //
-  // The remote URL is constructed from the catalogue URL's base dir
-  // (`https://.../main/`) + `apps/<group>/<id>/<logo>`, matching the
-  // on-disk layout the engine expects under `<appRoot>apps/<group>/
-  // <id>/<logo>`. mkdirSync handles intermediate folders, so the app
-  // dir + any logo subfolder (`assets/` etc.) are created in one call.
-  // After a successful write the card on the visible Apps page gets
-  // its `<img src>` rewritten in-place so the user sees the real
-  // glyph without a reload.
-  async function seedMissingLogos(missing, catalogueUrl) {
+  // The remote URL is the platform client's `logoUrl` (built from the
+  // catalogue's `sources` table — never assembled here); the local
+  // path matches the flat on-disk layout `<appRoot>apps/<id>/<logo>`.
+  // mkdirSync handles intermediate folders, so the app dir + any logo
+  // subfolder (`assets/` etc.) are created in one call. After a
+  // successful write the card on the visible Apps page gets its
+  // `<img src>` rewritten in-place so the user sees the real glyph
+  // without a reload.
+  async function seedMissingLogos(missing) {
     if (!missing || missing.length === 0) return;
-    var baseUrl = catalogueBaseUrl(catalogueUrl);
     for (var i = 0; i < missing.length; i++) {
       var detail = missing[i];
       var logoRel = detail.logo ? stripLeadingSlashes(detail.logo) : '';
-      if (!logoRel) continue;
-      var remoteUrl = baseUrl + 'apps/' + detail.group + '/' + detail.id + '/' + logoRel;
-      var localPath = APP_ROOT + 'apps/' + detail.group + '/' + detail.id + '/' + logoRel;
+      if (!logoRel || !detail.logoUrl) continue;
+      var remoteUrl = detail.logoUrl;
+      var localPath = APP_ROOT + 'apps/' + detail.id + '/' + logoRel;
       try {
         var dir = parentDir(localPath);
         if (dir) Switch.mkdirSync(dir);
@@ -360,6 +349,76 @@
     } catch (err) {
       console.debug('[updates-modal] ' + label + ' refresh failed: ' + (err && err.message ? err.message : String(err)));
     }
+  }
+
+  // Fetch stats.json (C2 counters) and persist it ONLY when the
+  // platform client parses it. Missing/corrupt/HTTP-error stats are
+  // logged and skipped — deliberately NOT a sync failure: Featured and
+  // Most Recent keep working, and the Popular / Top Rated tabs render
+  // themselves unavailable with a reason instead.
+  async function refreshStatsFile(client, remoteUrl) {
+    if (!remoteUrl) {
+      console.debug('[updates-modal] stats URL not configured; skipping refresh');
+      return;
+    }
+    try {
+      var resp = await globalThis.fetch(remoteUrl);
+      if (!resp.ok) {
+        console.debug('[updates-modal] stats.json HTTP ' + resp.status + ' — keeping cached stats');
+        return;
+      }
+      var text = await resp.text();
+      var outcome = client.parseStats(text);
+      if (outcome.kind !== 'Ok') {
+        console.debug('[updates-modal] stats.json rejected (' + outcome.kind + '); keeping cached stats');
+        return;
+      }
+      Switch.writeFileSync(STATS_PATH, text);
+      console.debug('[updates-modal] stats.json refreshed (' + Object.keys(outcome.parsed.stats).length + ' apps)');
+    } catch (err) {
+      console.debug('[updates-modal] stats refresh failed: ' + (err && err.message ? err.message : String(err)));
+    }
+  }
+
+  // Render the platform client's parse report into the modal — the
+  // drift-visibility payload of the whole architecture. Always shows
+  // version + app count; itemizes dropped entries and unknown
+  // fields/permissions/sources/entities only when present, so a clean
+  // sync reads as one quiet line.
+  function renderParseReport(catalogue) {
+    var el = document.getElementById('updates-modal-report');
+    if (!el || !catalogue || !catalogue.report) return;
+    var r = catalogue.report;
+    var html = 'Catalogue v' + escapeHtml(String(r.version))
+      + ' — ' + escapeHtml(String(r.appCount)) + ' apps';
+    var details = [];
+    if (r.dropped && r.dropped.length) {
+      var droppedBits = [];
+      for (var i = 0; i < r.dropped.length; i++) {
+        var d = r.dropped[i];
+        droppedBits.push(escapeHtml((d.id || ('#' + d.index)) + ': ' + d.reason));
+      }
+      details.push('dropped ' + r.dropped.length + ' (' + droppedBits.join('; ') + ')');
+    }
+    if (r.unknownEntryFields && r.unknownEntryFields.length) {
+      details.push('unknown fields: ' + escapeHtml(r.unknownEntryFields.join(', ')));
+    }
+    if (r.unknownPermissions && r.unknownPermissions.length) {
+      details.push('unknown permissions: ' + escapeHtml(r.unknownPermissions.join(', ')));
+    }
+    if (r.unknownSources && r.unknownSources.length) {
+      details.push('unknown sources: ' + escapeHtml(r.unknownSources.join(', ')));
+    }
+    if (r.unknownEntities && r.unknownEntities.length) {
+      details.push('undecoded entities: ' + escapeHtml(r.unknownEntities.join(', ')));
+    }
+    if (details.length) {
+      html += '<br>' + details.join('<br>');
+      el.classList.add('updates-modal-report--drift');
+    } else {
+      el.classList.remove('updates-modal-report--drift');
+    }
+    el.innerHTML = html;
   }
 
   // Download `versions.json` from the configured URL, persist it under
@@ -454,67 +513,58 @@
     return false;
   }
 
-  // Walk the fetched catalog and bucket each entry as missing (the
-  // launcher file isn't on disk under `apps/<group>/<id>/<entry>`) or
-  // updated (manifest.json's `version` differs from the catalog's
-  // `version`). Mirrors the engine-side checks in
-  // src/profile/browser-toolbar.ts so the modal's diff matches what
-  // the grid will show after the next reload.
-  function diffCatalog(catalog) {
+  // Walk the NORMALIZED catalogue (platform-client output — this
+  // script never reads raw catalogue fields) and bucket each app as
+  // missing (launcher not on disk under the flat `apps/<id>/<entry>`)
+  // or updated (installed manifest `version` differs from the
+  // catalogue's). Mirrors the engine-side library join so the modal's
+  // diff matches what the grid shows after the next reload.
+  function diffCatalog(normalized) {
     var decoder = new TextDecoder();
     var missing = [];
     var updates = [];
-    for (var gi = 0; gi < GROUPS.length; gi++) {
-      var group = GROUPS[gi];
-      var entries = catalog && Array.isArray(catalog[group]) ? catalog[group] : [];
-      for (var ei = 0; ei < entries.length; ei++) {
-        var e = entries[ei];
-        if (!e || typeof e !== 'object') continue;
-        if (typeof e.id !== 'string' || typeof e.entry !== 'string') continue;
-        var name = typeof e.name === 'string' ? e.name : e.id;
-        var version = typeof e.version === 'string' ? e.version : '';
-        var entryRel = stripLeadingSlashes(e.entry);
-        var entryPath = APP_ROOT + 'apps/' + group + '/' + e.id + '/' + entryRel;
-        var entryData = null;
-        try { entryData = Switch.readFileSync(entryPath); } catch (_) { entryData = null; }
-        if (!entryData) {
-          missing.push({
-            id: e.id,
-            group: group,
-            name: name,
-            version: version,
-            // Catalog-relative logo path (e.g. `assets/pvzge_logo.png`).
-            // Forwarded to the post-diff logo-download pass so it can
-            // pull the bytes from the remote catalog and stash them
-            // under `apps/<group>/<id>/<logo>` on disk — the engine's
-            // next render then paints the real logo on the missing
-            // card instead of the generic download glyph.
-            logo: typeof e.logo === 'string' ? e.logo : '',
-          });
-          continue;
-        }
-        // Installed — compare manifest.json's version against the
-        // catalog's. Skip when either side is empty (no signal to
-        // surface) or the strings match (no upgrade available).
-        if (!version) continue;
-        var manifestPath = APP_ROOT + 'apps/' + group + '/' + e.id + '/manifest.json';
-        var manifestData = null;
-        try { manifestData = Switch.readFileSync(manifestPath); } catch (_) { manifestData = null; }
-        if (!manifestData) continue;
-        var installedVersion = '';
-        try {
-          var manifest = JSON.parse(decoder.decode(manifestData));
-          installedVersion = typeof manifest.version === 'string' ? manifest.version : '';
-        } catch (_) { continue; }
-        if (!installedVersion || installedVersion === version) continue;
-        updates.push({
+    var apps = normalized && Array.isArray(normalized.apps) ? normalized.apps : [];
+    for (var ei = 0; ei < apps.length; ei++) {
+      var e = apps[ei];
+      var entryRel = stripLeadingSlashes(e.entryRel || 'index.html');
+      var entryPath = APP_ROOT + 'apps/' + e.id + '/' + entryRel;
+      var entryData = null;
+      try { entryData = Switch.readFileSync(entryPath); } catch (_) { entryData = null; }
+      if (!entryData) {
+        missing.push({
           id: e.id,
-          group: group,
-          name: name,
-          version: version,
-          installedVersion: installedVersion,
+          name: e.name || e.id,
+          version: e.version || '',
+          // Relative logo path + the platform-client-built remote URL
+          // (`logoUrl` — source-aware, so ext-repo apps fetch from
+          // their own root). The post-diff logo pass stashes the bytes
+          // under the flat `apps/<id>/<logoRel>` so the engine's next
+          // render paints the real glyph on the missing card.
+          logo: e.logoRel || '',
+          logoUrl: e.logoUrl || '',
         });
+        continue;
       }
+      // Installed — compare manifest.json's version against the
+      // catalogue's. Skip when either side is empty (no signal to
+      // surface) or the strings match (no upgrade available).
+      if (!e.version) continue;
+      var manifestPath = APP_ROOT + 'apps/' + e.id + '/manifest.json';
+      var manifestData = null;
+      try { manifestData = Switch.readFileSync(manifestPath); } catch (_) { manifestData = null; }
+      if (!manifestData) continue;
+      var installedVersion = '';
+      try {
+        var manifest = JSON.parse(decoder.decode(manifestData));
+        installedVersion = typeof manifest.version === 'string' ? manifest.version : '';
+      } catch (_) { continue; }
+      if (!installedVersion || installedVersion === e.version) continue;
+      updates.push({
+        id: e.id,
+        name: e.name || e.id,
+        version: e.version,
+        installedVersion: installedVersion,
+      });
     }
     return { missing: missing, updates: updates };
   }
@@ -603,18 +653,32 @@
         setError('Failed reading response body: ' + (e && e.message ? e.message : String(e)));
         return;
       }
-      // JSON-validate before writing — bad JSON on disk would silently
-      // empty the apps grid (loadCatalogGroup returns []). Better to
-      // refuse the write and keep the old catalog in place.
-      var parsed;
+      // Hand the raw text to the platform client. ONLY an Ok outcome
+      // is persisted — a corrupt/invalid document, or one newer than
+      // this runtime understands, keeps the cached catalogue in place
+      // (D2b) and surfaces a distinct message. The version guard runs
+      // before shape validation client-side, so a future catalogue is
+      // reported as "runtime needs updating", not as corrupt.
+      var client = globalThis.__brewserPlatformClient;
+      if (!client) {
+        setError('Platform client unavailable (shell bridge missing).');
+        return;
+      }
+      var outcome;
       try {
-        parsed = JSON.parse(text);
-        if (!parsed || typeof parsed !== 'object') {
-          setError('Catalog JSON is not an object.');
-          return;
-        }
+        outcome = client.parseCatalogue(text);
       } catch (e) {
-        setError('Catalog is not valid JSON: ' + (e && e.message ? e.message : String(e)));
+        setError('Catalogue parse threw: ' + (e && e.message ? e.message : String(e)));
+        return;
+      }
+      if (outcome.kind === 'TooNewCatalogue') {
+        setError('This catalogue is version ' + outcome.version
+          + ' — your Brewser runtime needs updating to read it. Keeping the current catalogue.');
+        return;
+      }
+      if (outcome.kind !== 'Ok') {
+        setError('Catalogue rejected (' + outcome.kind + '): '
+          + (outcome.message || 'unknown reason') + '. Keeping the current catalogue.');
         return;
       }
       try {
@@ -623,12 +687,12 @@
         setError('Write failed: ' + (e && e.message ? e.message : String(e)));
         return;
       }
-      // Success — compute the diff against the freshly-written
-      // catalog and the on-disk manifests, then populate the modal
+      // Success — compute the diff against the freshly-normalized
+      // catalogue and the on-disk manifests, then populate the modal
       // and remove the loading state so the lists become visible.
       var buckets;
       try {
-        buckets = diffCatalog(parsed);
+        buckets = diffCatalog(outcome.catalogue);
       } catch (e) {
         setError('Diff failed: ' + (e && e.message ? e.message : String(e)));
         return;
@@ -642,16 +706,18 @@
       var downloadsUrl = triggerBtn.getAttribute('data-downloads-url') || '';
       var ratingsUrl = triggerBtn.getAttribute('data-ratings-url') || '';
       var versionsUrl = triggerBtn.getAttribute('data-versions-url') || '';
+      var statsUrl = triggerBtn.getAttribute('data-stats-url') || '';
       // Versions check runs alongside the other refreshes — independent
       // remote (versions.json lives in the apps repo, not telemetry),
       // independent failure mode. `Promise.all` is safe here only
       // because every task swallows its own errors; if any of these
       // ever start rejecting, switch to `Promise.allSettled`.
       var results = await Promise.all([
-        seedMissingLogos(buckets.missing, url),
+        seedMissingLogos(buckets.missing),
         refreshConfigFile(downloadsUrl, DOWNLOADS_PATH, 'downloads.json'),
         refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json'),
         checkVersionsForUpdate(versionsUrl),
+        refreshStatsFile(client, statsUrl),
       ]);
       var newBrewserVersionAvailable = !!results[3];
       // Repaint upgrade chips on already-installed cards whose
@@ -674,6 +740,7 @@
         catch (err) { console.debug('[updates-modal] __swbRepaint failed: ' + (err && err.message ? err.message : String(err))); }
       }
       populate(buckets);
+      renderParseReport(outcome.catalogue);
       card.classList.remove('updates-modal-card--loading');
       // Append a second line to the modal summary when the
       // freshly-downloaded versions.json differs from the seeded

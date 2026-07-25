@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+  Phase 3 installed-state selftest — headless-Chrome harness.
+  Serve from the WORKSPACE ROOT (D:\Workspace):
+      cd D:\Workspace && python -m http.server 8734
+      chrome --headless=new --dump-dom --virtual-time-budget=8000 \
+        http://localhost:8734/brewser-v8/tests/library-selftest.html
+  Imports the COMPILED engine modules (dist), so it tests what ships.
+-->
+<html>
+<head><meta charset="utf-8"><title>RUNNING</title></head>
+<body>
+<div id="RESULT">RUNNING</div>
+<pre id="REPORTS"></pre>
+<script type="module">
+const out = [];
+let failures = 0;
+function ok(cond, label, detail) {
+  if (cond) { out.push(`ok - ${label}`); }
+  else { failures++; out.push(`FAIL - ${label}${detail ? ` :: ${detail}` : ''}`); }
+}
+
+async function main() {
+  const { enumerateInstalledApps, joinLibrary } =
+    await import('/brewser-runtime-v8/dist/platform/installed-apps.js');
+  const { parseCatalogue } =
+    await import('/brewser-runtime-v8/dist/platform/catalogue-normalizer.js');
+  const v2Text = await (await fetch('/brewser-v8/tests/fixtures/platform/catalogue.v2.example.json')).text();
+
+  // ---- mock disk -----------------------------------------------------------
+  const goodManifest = {
+    id: 'com.natureglass.midilab', name: 'MIDI Lab', version: 'LOCAL',
+    description: '<p>MIDI &amp; synth <b>lab</b></p>', logo: 'assets/appbanner.jpg',
+    entry: 'index.html', categories: ['Apps'], permissions: ['Usb', 'Device Info'],
+    compatibility: ['switch', 'web'], allowed_origins: [], developer: 'NatureGlass',
+    license: 'MIT', exitGame: 'PLUS', fullscreen: true,
+    publishedAt: '2026-07-20T10:00:00Z',
+  };
+  const disk = {
+    'featured': {},                          // legacy tier dir — no manifest, skipped silently
+    '.trash': { 'manifest.json': '{}' },     // dot-dir skipped
+    'com.natureglass.midilab': {
+      'manifest.json': JSON.stringify(goodManifest),
+      'index.html': '<html></html>', 'assets/appbanner.jpg': 'x',
+    },
+    'com.natureglass.speedtest': {
+      'manifest.json': JSON.stringify({ ...goodManifest, id: 'com.natureglass.speedtest', name: 'Speedtest', version: '0.0.1', permissions: [] }),
+      'index.html': '<html></html>',
+    },
+    'com.natureglass.phase3probe': {         // STATE 3: on disk, absent from catalogue
+      'manifest.json': JSON.stringify({ ...goodManifest, id: 'com.natureglass.phase3probe', name: 'Phase 3 Probe', version: '9.9.9', permissions: ['Storage'] }),
+      'index.html': '<html></html>',
+    },
+    'com.natureglass.badjson': { 'manifest.json': '{ not json' },
+    'mismatch-dir': {
+      'manifest.json': JSON.stringify({ ...goodManifest, id: 'com.other.thing', name: 'Mismatch' }),
+      'index.html': '<html></html>',
+    },
+    'com.natureglass.noentry': {
+      'manifest.json': JSON.stringify({ ...goodManifest, id: 'com.natureglass.noentry', name: 'Broken' }),
+      // launcher file missing
+    },
+    'com.natureglass.nodate': {  // installed, unlisted, NO publishedAt — sorts last, never hidden
+      'manifest.json': JSON.stringify((() => {
+        const m = { ...goodManifest, id: 'com.natureglass.nodate', name: 'No Date', permissions: [] };
+        delete m.publishedAt;
+        return m;
+      })()),
+      'index.html': '<html></html>',
+    },
+  };
+  const fs = {
+    listAppDirs: () => Object.keys(disk),
+    readAppText: (dir, rel) => (disk[dir] && typeof disk[dir][rel] === 'string' ? disk[dir][rel] : null),
+    appFileExists: (dir, rel) => !!(disk[dir] && typeof disk[dir][rel] === 'string'),
+  };
+
+  // ---- enumeration ---------------------------------------------------------
+  const en = enumerateInstalledApps(fs);
+  ok(en.apps.length === 6, 'enumerate: 6 installed apps', JSON.stringify(en.apps.map((a) => a.id)));
+  ok(!en.apps.some((a) => a.dirName === 'featured' || a.dirName === '.trash'),
+     'legacy tier dir + dot-dir skipped');
+  ok(en.report.unreadable.length === 1 && en.report.unreadable[0].dirName === 'com.natureglass.badjson',
+     'unparseable manifest itemized, not silent', JSON.stringify(en.report.unreadable));
+  ok(en.report.idMismatches.length === 1 && en.report.idMismatches[0].manifestId === 'com.other.thing',
+     'id/folder mismatch itemized', JSON.stringify(en.report.idMismatches));
+  ok(JSON.stringify(en.report.brokenEntries) === JSON.stringify(['com.natureglass.noentry']),
+     'missing launcher itemized', JSON.stringify(en.report.brokenEntries));
+  const ids = en.apps.map((a) => a.id);
+  ok(JSON.stringify(ids) === JSON.stringify([...ids].sort()), 'enumeration sorted by id');
+  const midi = en.apps.find((a) => a.id === 'com.natureglass.midilab');
+  ok(JSON.stringify(midi.permissionSlugs) === JSON.stringify(['usb', 'device_info']),
+     'installed permissions slug-normalized', JSON.stringify(midi.permissionSlugs));
+  ok(midi.summary === 'MIDI & synth lab', 'installed summary derived from HTML description', midi.summary);
+  const mm = en.apps.find((a) => a.dirName === 'mismatch-dir');
+  ok(mm.id === 'com.other.thing' && mm.dirName === 'mismatch-dir',
+     'mismatch: manifest id for identity, dirName for paths');
+
+  // ---- join: the four states ----------------------------------------------
+  const cat = parseCatalogue(v2Text);
+  ok(cat.kind === 'Ok', 'v2 fixture parses', cat.kind);
+  const installed = en.apps.filter((a) => a.id.startsWith('com.natureglass.')
+    && ['midilab', 'speedtest', 'phase3probe', 'nodate'].includes(a.id.split('.').pop()));
+  // Make midilab current: version must equal the listing's.
+  const midiListing = cat.catalogue.apps.find((a) => a.id === 'com.natureglass.midilab');
+  installed.find((a) => a.id === 'com.natureglass.midilab').version = midiListing.version;
+
+  const lib = joinLibrary(installed, cat.catalogue);
+  const st = Object.fromEntries(lib.apps.map((a) => [a.id.split('.').pop(), a.state]));
+  ok(st.midilab === 'installed-current', 'state 1: installed, current', st.midilab);
+  ok(st.speedtest === 'installed-update', 'state 2: installed, update available', st.speedtest);
+  ok(st.phase3probe === 'installed-unlisted', 'STATE 3: installed, absent from catalogue', st.phase3probe);
+  ok(lib.apps.filter((a) => a.state === 'available').length === 10,
+     'state 4: 10 listed-not-installed', String(lib.apps.filter((a) => a.state === 'available').length));
+  ok(lib.apps.length === 14, 'library = 4 installed + 10 available', String(lib.apps.length));
+  ok(st.nodate === 'installed-unlisted', 'nodate app joins as installed-unlisted', st.nodate);
+
+  const probe = lib.apps.find((a) => a.id === 'com.natureglass.phase3probe');
+  ok(probe.installed !== null && probe.installed.entryExists && probe.installed.entry === 'index.html',
+     'STATE 3: fully runnable — launcher present, launch path intact');
+  ok(probe.installed.publishedAt === '2026-07-20T10:00:00Z',
+     'STATE 3: on-disk publishedAt available for Most Recent sorting',
+     probe.installed.publishedAt);
+  ok(lib.apps.indexOf(probe) < lib.apps.findIndex((a) => a.state === 'available'),
+     'STATE 3: listed with the library, not hidden or demoted');
+  ok(probe.revoked === false, 'STATE 3: absence from catalogue is NOT revocation');
+
+  // ---- revoked -------------------------------------------------------------
+  const revDoc = JSON.parse(v2Text);
+  revDoc.revoked = ['com.natureglass.midilab', 'com.natureglass.ghostapp'];
+  const revCat = parseCatalogue(JSON.stringify(revDoc));
+  const revLib = joinLibrary(installed, revCat.catalogue);
+  ok(revLib.apps.find((a) => a.id === 'com.natureglass.midilab').revoked === true,
+     'revoked id marked on installed app');
+  ok(revLib.apps.filter((a) => a.revoked).length === 1, 'only the revoked id marked');
+  ok(revLib.revoked.includes('com.natureglass.ghostapp'),
+     'revoked id with no entry+no install kept on the library');
+
+  // ---- D2a resilience: no catalogue ---------------------------------------
+  const bare = joinLibrary(installed, null);
+  ok(bare.apps.length === 4 && bare.apps.every((a) => a.state === 'installed-current'),
+     'no catalogue: full library, no false "unlisted" marking',
+     JSON.stringify(bare.apps.map((a) => a.state)));
+  ok(bare.catalogueAvailable === false && bare.revoked.length === 0,
+     'no catalogue: flagged unavailable, nothing revoked');
+
+  // ---- library tabs (Phase 4): Featured / Recent / Popular / Top Rated ----
+  const { buildLibraryTabs } =
+    await import('/brewser-runtime-v8/dist/platform/library-view.js');
+  const { parseStats } = await import('/brewser-runtime-v8/dist/platform/stats.js');
+  const statsText = await (await fetch('/brewser-v8/tests/fixtures/platform/stats.example.json')).text();
+  const so = parseStats(statsText);
+  ok(so.kind === 'Ok', 'stats fixture parses for tabs', so.kind);
+  const tabs = buildLibraryTabs(lib, so.parsed);
+  const short = (a) => a.id.split('.').pop();
+
+  // Featured — a FILTER: exactly the curated two, newest first.
+  ok(tabs.featured.available && tabs.featured.apps.map(short).join(',') === 'midilab,fluiddynamics',
+     'featured: filter only, curated two, newest first', tabs.featured.apps.map(short).join(','));
+
+  // Most Recent — publishedAt desc; dateless installed app LAST but present.
+  ok(tabs.recent.available, 'recent: available (dates exist)');
+  ok(short(tabs.recent.apps[0]) === 'unitydemoprobe', 'recent: newest (07-23) first', short(tabs.recent.apps[0]));
+  ok(short(tabs.recent.apps[tabs.recent.apps.length - 1]) === 'nodate',
+     'recent: dateless app sorts LAST, never hidden', tabs.recent.apps.map(short).join(','));
+  ok(tabs.recent.apps.length === 14, 'recent: every app present');
+
+  // Popular — downloads desc; apps without stats last (visible).
+  ok(tabs.popular.available && short(tabs.popular.apps[0]) === 'midilab',
+     'popular: most-downloaded first', short(tabs.popular.apps[0]));
+  ok(tabs.popular.apps.length === 14, 'popular: no sort hides an app');
+
+  // Top Rated — sorts on the SERVER-SUPPLIED ratingScore; the decision
+  // case (4.8x50 outranks 5.0x1) now holds because the platform
+  // published those scores, not because the runtime knows a formula.
+  ok(tabs.toprated.available, 'toprated: available (scores supplied)');
+  const tr = tabs.toprated.apps.map(short);
+  ok(tr[0] === 'spectraplay' && tr[1] === 'midilab',
+     'toprated: supplied scores rank 4.8x50 first, 4.6x23 second', tr.join(','));
+  ok(tr.indexOf('spectraplay') < tr.indexOf('neuralnetworks'),
+     'toprated: one 5-star rating no longer outranks a real track record (supplied data)');
+  ok(tr.indexOf('savedemo') > tr.indexOf('streamcast'),
+     'toprated: apps without ratingScore sort after every scored app');
+  ok(tabs.toprated.apps.length === 14, 'toprated: no sort hides an app');
+
+  // The runtime has NO formula: hand it scores that CONTRADICT the raw
+  // averages and it must follow the scores verbatim. (Three scored apps —
+  // the availability floor — so the contradiction is actually ranked.)
+  const contrarian = {
+    generated: 'x',
+    stats: {
+      'com.natureglass.midilab':    { downloads: 1, ratingAvg: 5.0, ratingCount: 99, ratingScore: 1.0 },
+      'com.natureglass.speedtest':  { downloads: 1, ratingAvg: 1.0, ratingCount: 1,  ratingScore: 4.9 },
+      'com.natureglass.streamcast': { downloads: 1, ratingAvg: 3.0, ratingCount: 4,  ratingScore: 3.0 },
+    },
+  };
+  const contraTabs = buildLibraryTabs(lib, parseStats(JSON.stringify(contrarian)).parsed);
+  const ct = contraTabs.toprated.apps.map(short);
+  ok(ct.indexOf('speedtest') < ct.indexOf('midilab'),
+     'toprated: runtime follows ratingScore even against ratingAvg — no local formula',
+     ct.slice(0, 3).join(','));
+
+  // Availability floor (TOP_RATED_MIN_RATED = 3): below it a "ranking"
+  // is a spotlight or a two-way comparison — the tab hides itself with
+  // the count instead. Scores on ids OUTSIDE the library (orphans) never
+  // count toward the floor.
+  const { TOP_RATED_MIN_RATED } = await import('/brewser-runtime-v8/dist/platform/library-view.js');
+  ok(TOP_RATED_MIN_RATED === 3, 'toprated floor: constant is 3 (normative in catalogue-v2.md)');
+  const oneScored = {
+    generated: 'x',
+    stats: {
+      'com.natureglass.gravityballs': { downloads: 0, ratingAvg: 4.0, ratingCount: 1, ratingScore: 4.0 },
+      'com.natureglass.ghostapp':     { downloads: 0, ratingAvg: 5.0, ratingCount: 9, ratingScore: 4.9 },
+    },
+  };
+  const oneTabs = buildLibraryTabs(lib, parseStats(JSON.stringify(oneScored)).parsed);
+  ok(!oneTabs.toprated.available && oneTabs.toprated.reason.indexOf('Only 1 app rated') === 0,
+     'toprated floor: 1 in-library scored app (orphan ignored) -> unavailable with count',
+     oneTabs.toprated.reason);
+  const twoScored = JSON.parse(JSON.stringify(oneScored));
+  twoScored.stats['com.natureglass.speedtest'] = { downloads: 0, ratingAvg: 3.0, ratingCount: 1, ratingScore: 3.4 };
+  const twoTabs = buildLibraryTabs(lib, parseStats(JSON.stringify(twoScored)).parsed);
+  ok(!twoTabs.toprated.available && twoTabs.toprated.reason.indexOf('Only 2 apps rated') === 0,
+     'toprated floor: 2 scored apps -> still unavailable (plural reason)', twoTabs.toprated.reason);
+  const threeScored = JSON.parse(JSON.stringify(twoScored));
+  threeScored.stats['com.natureglass.streamcast'] = { downloads: 0, ratingAvg: 5.0, ratingCount: 1, ratingScore: 4.2 };
+  const threeTabs = buildLibraryTabs(lib, parseStats(JSON.stringify(threeScored)).parsed);
+  ok(threeTabs.toprated.available && threeTabs.toprated.apps.length === 14,
+     'toprated floor: 3 scored apps -> available, no sort hides an app');
+
+  // Stats present but NO scores anywhere (older stats.json) → the tab
+  // hides itself instead of inventing an order from display fields.
+  const scoreless = {
+    generated: 'x',
+    stats: { 'com.natureglass.midilab': { downloads: 3, ratingAvg: 4.6, ratingCount: 23 } },
+  };
+  const scorelessTabs = buildLibraryTabs(lib, parseStats(JSON.stringify(scoreless)).parsed);
+  ok(!scorelessTabs.toprated.available && scorelessTabs.toprated.reason.length > 0,
+     'toprated: stats without ratingScore -> unavailable with reason (no fallback formula)',
+     scorelessTabs.toprated.reason);
+  ok(scorelessTabs.popular.available, 'popular: unaffected by missing scores');
+
+  // Degradation — stats missing: the two stats tabs report themselves
+  // unavailable WITH a reason; Featured + Recent unaffected.
+  const noStats = buildLibraryTabs(lib, null);
+  ok(!noStats.popular.available && noStats.popular.reason.length > 0,
+     'no stats: popular unavailable with reason', noStats.popular.reason);
+  ok(!noStats.toprated.available && noStats.toprated.reason.length > 0,
+     'no stats: toprated unavailable with reason');
+  ok(noStats.featured.available && noStats.recent.available,
+     'no stats: featured + recent unaffected');
+
+  // No dates at all -> recent hides itself rather than faking recency.
+  const bareTabs = buildLibraryTabs(joinLibrary(
+    installed.filter((a) => a.id === 'com.natureglass.nodate'), null), null);
+  ok(!bareTabs.recent.available && bareTabs.recent.reason.length > 0,
+     'no dates anywhere: recent unavailable with reason', bareTabs.recent.reason);
+
+  // ---- parseArtifacts ------------------------------------------------------
+  const { parseArtifacts } = await import('/brewser-runtime-v8/dist/platform/artifacts.js');
+  const pa = parseArtifacts(JSON.stringify({ id: 'com.x.y', sizeBytes: 9, files: ['index.html', 'assets/a.png'] }));
+  ok(pa.kind === 'Ok' && pa.artifacts.files.length === 2, 'artifacts: valid doc parses');
+  ok(parseArtifacts('{ nope').kind === 'CorruptArtifacts', 'artifacts: corrupt rejected');
+  ok(parseArtifacts('{"id":"x"}').kind === 'InvalidArtifacts', 'artifacts: missing files rejected');
+  ok(parseArtifacts('{"files":[]}').kind === 'InvalidArtifacts', 'artifacts: empty files rejected');
+  ok(parseArtifacts('{"files":["a",5]}').kind === 'InvalidArtifacts',
+     'artifacts: non-string entry rejects whole doc (no partial installs)');
+
+  // ---- emit ---------------------------------------------------------------
+  document.getElementById('REPORTS').textContent =
+    JSON.stringify({ enumeration: en.report, states: st }, null, 1);
+  const summary = failures === 0 ? `PASS ${out.length}/${out.length}` : `FAIL ${failures}/${out.length}`;
+  document.title = summary;
+  document.getElementById('RESULT').textContent = `${summary}\n` + out.join('\n');
+}
+
+main().catch((e) => {
+  document.title = 'FAIL exception';
+  document.getElementById('RESULT').textContent = 'FAIL exception :: ' + (e && e.stack || e);
+});
+</script>
+</body>
+</html>

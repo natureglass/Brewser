@@ -24,7 +24,6 @@ export type ShellButtonAction =
 	| 'addressBar'
 	| 'settings'
 	| 'bookmark'
-	| 'screenshot'
 	| 'exit'
 	| 'search';
 

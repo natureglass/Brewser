@@ -37,9 +37,10 @@ import {
 	requestPaintTick,
 	tickAnimationFrames,
 } from '@switch-web/runtime';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setCssViewport, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
+import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, dispatchPageResizeEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setCssViewport, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
 import { setMediaColorScheme } from '@switch-web/runtime';
 import { isWebGLBackedCanvas } from '@switch-web/runtime';
+import { permissionSlug } from '@switch-web/runtime';
 import { getInputChecked, getInputValue, openKeyboardAndApply, setColorPickerOpener, setDateInputDefaultPlaceholder, setDatePickerOpener, setFilePickerOpener, setFilePickerStartDirResolver, setInputValue, setKeyboardOpener, setLiveFormColorScheme, setNumberPickerOpener, setSelectModalOpener, setTimePickerOpener } from '@switch-web/runtime';
 import { ColorPickerOverlay, DatePickerOverlay, FilePickerOverlay, NumberPickerOverlay, setColorPickerRepaintDriver, setDatePickerRepaintDriver, setFilePickerRepaintDriver, setNumberPickerRepaintDriver, SelectModalOverlay, setSelectModalRepaintDriver, setTimePickerRepaintDriver, TimePickerOverlay } from '@switch-web/runtime';
 import {
@@ -115,7 +116,6 @@ import { getLayoutBox } from '@switch-web/runtime';
 import { isExternalCssLoading, populateRootFromTree } from '@switch-web/runtime';
 import { extractTitle, parseHtml, type HtmlElement } from '@switch-web/runtime';
 import { AddressBarInput } from './input/address-bar-input.js';
-import { captureScreenshot } from './shell/screenshot.js';
 import {
 	computeLivePageBase,
 	extractAppDirFromUrl,
@@ -158,7 +158,8 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
 import { BrowserPermissionPolicy, setLiveInputPermissionPolicy } from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { type BrowserConfig, DEFAULT_CONFIG, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { type BrowserConfig, DEFAULT_CONFIG, isRevokedInCachedCatalogue, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { parseArtifacts, parseCatalogue, parseStats } from '@switch-web/runtime';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
 import { BrowserResourceLoader } from './resources/browser-resource-loader.js';
@@ -478,7 +479,7 @@ export class BrowserShell {
 		// Wire the user-editable joycon button mapping. Empty values in
 		// `config.json buttonMapping` fall through to engine defaults
 		// (A=leftClick, B=rightClick, X=forward, Y=reload,
-		// ZR=middleClick, MINUS=screenshot, UP/DOWN=scroll). Used by
+		// ZR=middleClick, UP/DOWN=scroll). Used by
 		// both `page-mouse-forwarder.ts` (which polls the indices the
 		// router assigns to leftClick/rightClick/middleClick) and
 		// `controller-shortcuts.ts` (which fires shell actions for
@@ -777,9 +778,14 @@ export class BrowserShell {
 		(globalThis as { __swbExitFullscreen?: () => Promise<void> })
 			.__swbExitFullscreen = async () => {
 			if (this.mode === 'normal') return;
-			// `fullscreen-app` is owned by the manifest for the app's
-			// lifetime — page scripts can't opt out of it.
-			if (this.mode === 'fullscreen-app') return;
+			// `manifest.fullscreen: true` used to be a hard lock; as of
+			// 2026-07-12 it's an INITIAL-state hint only — the app can
+			// call `document.exitFullscreen()` (routes here via the
+			// canvas-runner polyfill) or `__swbExitFullscreen()` directly
+			// to drop out of `fullscreen-app` back to `normal`. L+R still
+			// stays locked for `fullscreen-app` so a user can't
+			// accidentally exit an app that designed itself to own the
+			// display; only the app itself decides via a deliberate call.
 			await this.exitFullscreen();
 		};
 		// Page-script-callable "go back to the page that launched this
@@ -863,6 +869,44 @@ export class BrowserShell {
 		// context only so the refresh never runs under a restrictive app
 		// policy.
 		this.refreshCachedToolbarAvatarSrc();
+		this.installPlatformBridge();
+	}
+
+	/**
+	 * Expose the platform client to shell page scripts (updates /
+	 * download / missing-app modals) as `globalThis.__brewserPlatformClient`.
+	 * The one-door rule: page scripts never parse platform JSON or build
+	 * a platform URL themselves — they hand raw text to these functions
+	 * and consume the normalized result (whose `fileUrl`/`entryUrl`/
+	 * `artifactsUrl` members are the only URL builders). Pure parsing
+	 * functions plus two cache readers; nothing here writes.
+	 */
+	private installPlatformBridge(): void {
+		const appRoot = this.profile.appRoot;
+		const readText = (path: string): string | null => {
+			try {
+				const raw = Switch.readFileSync(path);
+				return raw && raw.byteLength > 0 ? new TextDecoder().decode(raw) : null;
+			} catch (_) {
+				return null;
+			}
+		};
+		(globalThis as Record<string, unknown>).__brewserPlatformClient = {
+			parseCatalogue,
+			parseStats,
+			parseArtifacts,
+			/** Parse the cached `configs/catalogue.json`; same outcome
+			 * union as `parseCatalogue`, or null when no cache exists. */
+			readCachedCatalogue: () => {
+				const text = readText(`${appRoot}configs/catalogue.json`);
+				return text === null ? null : parseCatalogue(text);
+			},
+			/** Parse the cached `configs/stats.json`, or null. */
+			readCachedStats: () => {
+				const text = readText(`${appRoot}configs/stats.json`);
+				return text === null ? null : parseStats(text);
+			},
+		};
 	}
 
 	async run(): Promise<void> {
@@ -906,8 +950,6 @@ export class BrowserShell {
 		// Action-bus subscribers for chrome actions whose handlers are
 		// safe to fire from the bus's synchronous dispatch:
 		//  - `bookmark` is a sync toggle, no I/O.
-		//  - `screenshot` is sync (`toBlob` already runs on its own
-		//     worker; the disk write is fire-and-forget).
 		// Navigation-class actions (back / forward / reload / home /
 		// settings / exit) still flow through the ControllerInput
 		// switch below because they need the main loop's `await` to
@@ -918,7 +960,6 @@ export class BrowserShell {
 		// the bus subscription via `hasActionHandler` and skips queuing
 		// a ControllerInput for the migrated action — no double-dispatch.
 		subscribeShellAction('bookmark', () => this.toggleBookmark());
-		subscribeShellAction('screenshot', () => this.captureScreenshot());
 
 		// Splash is rendered C-side by `nx_render_loading_image` (nxjs-source
 		// main.c) from `romfs:/loading.jpg` BEFORE JS init begins — fires
@@ -1367,22 +1408,21 @@ export class BrowserShell {
 						await this.navigateTo('brewser://settings/');
 						break;
 					case 'avatar':
-						// Toolbar avatar slot taps go to the central login
-						// dashboard. The dashboard either shows the active
-						// session card (with a Log out button) or the picker
-						// grid; either way it's the right landing place
-						// regardless of whether anyone is currently signed in.
-						await this.navigateTo('brewser://login/');
+						// Google is the sole sign-in provider — send the tap
+						// straight to the Google device-flow page. That page
+						// owns both the sign-in stages and the logged-in /
+						// Log out state, so no separate picker landing is
+						// needed.
+						await this.navigateTo('brewser://googleLogin/');
 						break;
 					case 'reload':
 						await this.runNavigation(() => this.navigation.reload());
 						break;
-					// `case 'star':` (bookmark) + `case 'screenshot':` removed
-					// 2026-06-16 in the chrome-handler → action-bus migration.
+					// `case 'star':` (bookmark) removed 2026-06-16 in the
+					// chrome-handler → action-bus migration.
 					// `controller-shortcuts.checkShellRisingEdge` no longer
-					// queues a ControllerInput for either; the bus
-					// subscribers wired in `run()` handle the rising edge
-					// directly.
+					// queues a ControllerInput for it; the bus subscriber
+					// wired in `run()` handles the rising edge directly.
 					case 'navigate': {
 						// Link (`<a href>`) taps: resolve a relative href against
 						// the current page's URL, same page-relative architecture
@@ -1875,6 +1915,21 @@ export class BrowserShell {
 		// (launcher / settings) always get `false`.
 		let appLaunchFullscreen = false;
 		if (appDir) {
+			// D3 revoked guard — the one catalogue signal allowed to remove
+			// local capability. Sits at THIS choke point (the html-response
+			// handler) so every route into an app — card tap, direct URL,
+			// history back/forward — hits it. The dir segment is the id
+			// (flat layout, folder == id). On a hit: no overlay, deny-all
+			// sandbox, and replace the page with the revoked notice.
+			const dirAppId = appDir.split('/')[1] ?? '';
+			if (dirAppId && isRevokedInCachedCatalogue(this.profile.appRoot, dirAppId)) {
+				console.debug(`[brewser] blocked launch of revoked app ${dirAppId}`);
+				clearAppButtonOverlay();
+				this.policy.setManifestPermissions(null, [], `${this.profile.appRoot}${appDir}`);
+				(globalThis as { __brewserRevokedAppId?: string }).__brewserRevokedAppId = dirAppId;
+				void this.navigateTo('brewser://revoked/');
+				return;
+			}
 			// Read the full manifest once per navigation and feed both the
 			// button-router overlay AND the permission policy from the same
 			// parsed object — one SD read, two consumers.
@@ -1905,8 +1960,17 @@ export class BrowserShell {
 			// network fetches require `network`, external anchor navs
 			// require `external_links`.
 			const appId = typeof manifest?.id === 'string' ? manifest.id : null;
-			const perms = Array.isArray(manifest?.permissions)
-				? manifest.permissions.filter((p): p is string => typeof p === 'string')
+			// D5 transition shim: platform manifests carry Title-Case
+			// taxonomy term NAMES (`"Usb"`, `"Device Info"`); the policy
+			// keys on slugs. Normalize through the platform client so
+			// `Device Info` gates `device_info` instead of silently
+			// matching nothing. Becomes a no-op (and is deleted) once
+			// WordPress emits slugs.
+			const manifestPerms = manifest?.permissions;
+			const perms = Array.isArray(manifestPerms)
+				? manifestPerms
+					.filter((p): p is string => typeof p === 'string')
+					.map(permissionSlug)
 				: [];
 			const sandboxRoot = `${this.profile.appRoot}${appDir}`;
 			this.policy.setManifestPermissions(appId, perms, sandboxRoot);
@@ -1999,7 +2063,10 @@ export class BrowserShell {
 		// fields above are reset to their defaults — otherwise those
 		// resets would clobber the mode/state that toggleFullscreenCanvas
 		// just established.
-		const pendingFullscreen = this.pendingFullscreenCanvasRequest;
+		// Cast: TS narrows the field to `null` from the per-nav reset
+		// earlier in this method and cannot see that populateAndRunScripts
+		// (between the reset and here) may have queued a request.
+		const pendingFullscreen = this.pendingFullscreenCanvasRequest as (() => void) | null;
 		this.pendingFullscreenCanvasRequest = null;
 		if (pendingFullscreen) pendingFullscreen();
 
@@ -2063,31 +2130,6 @@ export class BrowserShell {
 	private effectivePageBackground(): string {
 		if (this.colorScheme === 'light') return '#ffffff';
 		return this.pageBackground;
-	}
-
-	/**
-	 * Capture whatever is currently on the screen canvas and write it
-	 * to `<profile>/screenshots/screenshot_<timestamp>.png`. Triggered
-	 * by the Minus button rising-edge on the active joy-con (handled
-	 * via the `screenshot` shell-input kind from controller-shortcuts).
-	 *
-	 * Implementation notes:
-	 *   - `screen.toBlob` is async (the encode runs on a worker), so
-	 *     this method returns immediately and the file write happens
-	 *     once the PNG blob is ready. No UI feedback for now — the file
-	 *     either lands on disk or doesn't.
-	 *   - The screenshots dir is created lazily; subsequent shots reuse
-	 *     it without re-touching the filesystem for the mkdir.
-	 *   - The timestamp uses `YYYY-MM-DDThh-mm-ss-mmmZ` (dots + colons
-	 *     replaced with dashes) so the filename is FAT32-safe and
-	 *     sortable lexicographically.
-	 */
-	private captureScreenshot(): void {
-		captureScreenshot(`${this.profile.appRoot}screenshots/`, {
-			chromeHeight: this.chromeHeight,
-			mode: this.mode,
-			toolbarPosition: this.toolbarPosition,
-		});
 	}
 
 	/**
@@ -3958,14 +4000,28 @@ export class BrowserShell {
 		// rewrite, fullscreen-page mode paints content from 0..664 and
 		// leaves the bottom 56 px empty, while paintScrollAdjust shifts
 		// everything up by chromeHeight so the top of the page clips off.
-		// The paint viewport's height change (664→720) is what triggers
-		// `paintLiveOverlay`'s viewportChanged → full rebuild, so the
-		// new vh value gets picked up immediately on the next frame —
-		// no explicit tree-version bump needed.
 		const screen = nxScreen();
 		setCssViewport(screen.width, screen.height);
+		// Notify the page that `innerWidth`/`innerHeight` (and `vh`/`vw`)
+		// have shifted so its `resize` listeners can reflow — WebGL apps
+		// like gravityballs recompute canvas backing buffer size from
+		// `innerHeight * DPR` in a `resize` handler, and without this
+		// dispatch the buffer stays at the old chrome-trimmed dims and
+		// content ends up clipped to a 664-tall strip inside the widened
+		// viewport (the reciprocal of the "ghost toolbar" symptom on exit).
+		dispatchPageResizeEvent();
 		this.setMode('fullscreen-page');
 		this.clampScroll();
+		// Same cache-flush rationale as exitFullscreen: the live-overlay
+		// and toolbar-overlay caches were built at the chrome-trimmed
+		// viewport; a straight repaintAll would blit stale pixels sized
+		// for the old viewport into the new fullscreen area, leaving a
+		// slice at the bottom (or top) unpainted. Flush + full-repaint
+		// so the next paint rebuilds at the current dims.
+		resetLiveOverlayCache();
+		resetToolbarOverlayCache();
+		this.renderChrome();
+		requestFullRepaint();
 		this.repaintAll();
 	}
 
@@ -4023,15 +4079,33 @@ export class BrowserShell {
 	private async exitFullscreen(): Promise<void> {
 		const wasFullscreenCanvas = this.mode === 'fullscreen-canvas';
 		const wasFullscreenPage = this.mode === 'fullscreen-page';
+		const wasFullscreenApp = this.mode === 'fullscreen-app';
 		const wasLive = this.fullscreenCanvasLive;
 		this.fullscreenCanvasLive = false;
 		(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
 			.__swbFullscreenCanvasSize = null;
-		// Undo the fullscreen-page CSS viewport widen so vh resolves back
-		// to the chrome-trimmed area for normal-mode layout.
-		if (wasFullscreenPage) {
+		// Undo the fullscreen-page / fullscreen-app CSS viewport widen so
+		// vh resolves back to the chrome-trimmed area for normal-mode
+		// layout. `fullscreen-app` additionally had its session
+		// `chromeHeight` overridden to 0 at launch (browser-shell.ts:1953)
+		// so `100vh` would fill the screen on first paint — restore that
+		// too so the session's next `setCssViewport` calls resolve
+		// against the chrome-trimmed rect again.
+		if (wasFullscreenPage || wasFullscreenApp) {
 			const screen = nxScreen();
 			setCssViewport(screen.width, Math.max(1, screen.height - this.chromeHeight));
+		}
+		if (wasFullscreenApp) {
+			this.session.setChromeHeight(this.chromeHeight);
+		}
+		// Notify the page that `innerWidth`/`innerHeight` (and `vh`/`vw`)
+		// have shifted so its `resize` listeners get a chance to reflow.
+		// setCssViewport is a bare setter — without this, apps like
+		// gravityballs keep their WebGL backing buffer + physics
+		// coordinates at the fullscreen dimensions and content ends up
+		// clipped under the returned toolbar strip.
+		if (wasFullscreenPage || wasFullscreenApp) {
+			dispatchPageResizeEvent();
 		}
 		// Flip mode (and the global) BEFORE restoreCanvasSize's rerun so
 		// the re-executed page scripts see 'normal' and revert to their
@@ -4071,6 +4145,21 @@ export class BrowserShell {
 			this.renderChrome();
 			requestFullRepaint();
 			return;
+		}
+		// Fullscreen-page / fullscreen-app: the live-overlay cache and
+		// toolbar-overlay cache were built at the fullscreen viewport
+		// (`viewport.height = screen.height`, no chrome inset), so a
+		// straight `repaintAll` blits stale cache pixels sized for the
+		// old viewport into the new chrome-trimmed area. The toolbar
+		// strip ends up as an unpainted / stale slice ("ghost toolbar").
+		// Flush both caches so the next paint rebuilds them at the
+		// current viewport, and force a full repaint so the rebuild
+		// isn't skipped by the per-tick idle-fast-path.
+		if (wasFullscreenPage || wasFullscreenApp) {
+			resetLiveOverlayCache();
+			resetToolbarOverlayCache();
+			this.renderChrome();
+			requestFullRepaint();
 		}
 		this.repaintAll();
 	}
@@ -4409,7 +4498,7 @@ function toggleDisabledAttr(el: LiveElement, on: boolean): void {
 const AUTH_DIR_ABS = 'sdmc:/switch/brewser/shell/auth/';
 const ACTIVE_PATH_ABS = `${AUTH_DIR_ABS}active.json`;
 const DEFAULT_TOOLBAR_AVATAR_SRC = 'sdmc:/switch/brewser/shell/assets/avatar_default.png';
-const KNOWN_PROVIDERS = ['github', 'google', 'microsoft', 'twitch'] as const;
+const KNOWN_PROVIDERS = ['google', 'microsoft'] as const;
 type KnownProvider = typeof KNOWN_PROVIDERS[number];
 
 function readJsonFile(path: string): unknown {

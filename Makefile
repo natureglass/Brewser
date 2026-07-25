@@ -76,7 +76,7 @@ NXJS_SOURCE_DIR   ?= ../nxjs-source-v8
 NXJS_SOURCE_NRO   := $(NXJS_SOURCE_DIR)/nxjs.nro
 NXJS_OVERLAY      := node_modules/@nx.js/nro/dist/nxjs.nro
 
-.PHONY: all runtime-build sync-runtime current-json build nro sdmc mirror-only clean help nxjs-runtime
+.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json build nro sdmc mirror-only clean help nxjs-runtime
 
 all: sdmc
 
@@ -110,6 +110,20 @@ runtime-build:
 sync-runtime: runtime-build
 	@BREWSER_RUNTIME_DIR="$(BREWSER_RUNTIME_DIR)" node scripts/sync-runtime.mjs
 
+# Endpoint-parity guard: the endpoint constants exist in three copies
+# (engine src, engine dist, shell vendored dist) and Phase 0 of the
+# platform adaptation caught the dist pair shipping stale URLs while the
+# source was already fixed. Fails the build on any disagreement.
+check-endpoints: sync-runtime
+	@BREWSER_RUNTIME_DIR="$(BREWSER_RUNTIME_DIR)" node scripts/check-endpoint-parity.mjs
+
+# Shell typecheck (tsc 5.2.2, local devDependency since Phase 1c).
+# Needs the vendored runtime types, hence the sync-runtime dep. esbuild
+# does NOT typecheck, so without this gate type rot ships silently —
+# same defect class as the vendored-dist drift.
+typecheck: sync-runtime
+	@npm run typecheck
+
 # File target: re-runs only when an upstream package.json (or the
 # collector script itself) changes. The phony `current-json` alias lets
 # callers spell the intent without remembering the output path.
@@ -118,7 +132,7 @@ $(CURRENT_JSON): $(BREWSER_PKG) $(BREWSER_RUNTIME_PKG) $(NXJS_PKG) $(COLLECT_CUR
 
 current-json: $(CURRENT_JSON)
 
-build: sync-runtime
+build: sync-runtime check-endpoints typecheck
 	@npm run build
 
 # Build nxjs.nro from ../nxjs-source and overlay it into brewser's

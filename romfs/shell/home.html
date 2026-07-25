@@ -26,8 +26,8 @@
     <div class="app-grid">
       <!-- Cards for the catalog group named by `config.homeSection`.
            Resource loader resolves the tag to renderGroup(<group>),
-           same path the `<browser-featured>` / `<browser-community>`
-           / `<browser-experimental>` tags on apps.html take. -->
+           same path the `<browser-tab-*>` library-tab tags
+           on apps.html take. -->
       <browser-home-apps></browser-home-apps>
     </div>
   </section>
@@ -81,7 +81,7 @@
     <!-- Two-slot action row (see apps.html for the rationale). -->
     <div class="app-modal-actions">
       <div class="app-modal-actions-side">
-        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Update</button>
+        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Update</button>
         <!-- Install-size chip. See apps.html for the full rationale. -->
         <span id="app-modal-size" class="app-modal-size"></span>
         <!-- SD free-space chip. See apps.html for the full rationale. -->
@@ -90,7 +90,7 @@
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
         <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Launch</a>
-        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button" data-catalogue-url="<browser-config-catalogue/>" data-artifacts-url="<browser-config-artifacts/>">Download</button>
+        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
       </div>
     </div>
   </div>

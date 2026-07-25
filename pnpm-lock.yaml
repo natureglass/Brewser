@@ -30,6 +30,9 @@ importers:
       esbuild:
         specifier: ^0.27.3
         version: 0.27.7
+      typescript:
+        specifier: 5.2.2
+        version: 5.2.2
 
 packages:
 
@@ -208,6 +211,11 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
+  typescript@5.2.2:
+    resolution: {integrity: sha512-mI4WrpHsbCIcwT9cF4FZvr80QUeKvsUsUvKDoR+X/7XHQH98xYD8YHZg7ANtz2GtZt/CBq2QJ0thkGJMHfqc1w==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
 snapshots:
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -327,3 +335,5 @@ snapshots:
   mdn-data@2.27.1: {}
 
   source-map-js@1.2.1: {}
+
+  typescript@5.2.2: {}

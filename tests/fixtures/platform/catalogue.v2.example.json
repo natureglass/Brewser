@@ -1,0 +1,321 @@
+{
+  "apps": [
+    {
+      "categories": [
+        "Apps",
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "featured": true,
+      "id": "com.natureglass.fluiddynamics",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Fluid dynamics",
+      "permissions": [],
+      "publishedAt": "2026-07-09T12:00:00Z",
+      "sizeBytes": 85881,
+      "summary": "Fluid dynamics is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate. How it works. Every frame the app runs a chain of GPU shader passes over floating-point textures. It first…",
+      "tags": [
+        "Fluids"
+      ],
+      "version": "1.0.3"
+    },
+    {
+      "categories": [
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "WebGL 2"
+      ],
+      "id": "com.natureglass.fractalzoom",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Fractal Zoom",
+      "permissions": [],
+      "publishedAt": "2026-06-18T12:00:00Z",
+      "sizeBytes": 66462,
+      "summary": "Fractal Zoom is a GPU-powered explorer for six infinitely detailed fractals. Dive endlessly into these mathematical worlds, panning and zooming smoothly to reveal intricate structure at every scale, all rendered in real time with WebGL2. How it works. Most of the fractals — the Mandelbrot, Julia, Burning Ship, Phoenix and Koch sets — are drawn by a fragment shader covering the whole screen: for…",
+      "tags": [
+        "Fractals"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Apps",
+        "Demos",
+        "Games"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "Motion Sensors"
+      ],
+      "genre": [
+        "Simulation"
+      ],
+      "id": "com.natureglass.gravityballs",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Gravity Balls",
+      "permissions": [],
+      "publishedAt": "2026-06-25T12:00:00Z",
+      "sizeBytes": 35800,
+      "summary": "Gravity Balls is a relaxing physics sandbox where a set of colourful balls fall, bounce and jostle against each other and the walls — and gravity points wherever you tilt. How it works. A proper physics engine runs behind the scenes. Each frame is broken into several small sub-steps, and within each step the app nudges every ball's velocity by gravity, then repeatedly resolves collisions —…",
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "featured": true,
+      "features": [
+        "WebUSB"
+      ],
+      "genre": [
+        "Experience"
+      ],
+      "id": "com.natureglass.midilab",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "MIDI Lab",
+      "permissions": [
+        "Usb"
+      ],
+      "publishedAt": "2026-07-16T12:00:00Z",
+      "sizeBytes": 118987,
+      "summary": "MIDI Lab is a universal MIDI-controller tester, synthesizer and visual playground. Plug in a keyboard, pad grid or knob controller and the app builds an on-screen mirror of your exact device, then lights up every note, pad and dial as you play it — while turning your performance into sound and reactive graphics. How it works. The app connects to your hardware two ways, with an automatic fallback.…",
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Apps",
+        "Demos",
+        "Robotics"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "WebNN"
+      ],
+      "id": "com.natureglass.neuralnetworks",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Neural Networks",
+      "permissions": [],
+      "publishedAt": "2026-07-22T12:57:20Z",
+      "sizeBytes": 88451,
+      "summary": "Neural Networks is a live handwriting classifier that runs a real convolutional neural network right in the browser. Draw a digit from 0 to 9 and the model instantly guesses what it is, showing its confidence and a probability bar for every possible digit — and no data ever leaves your device. How it works. The app is a working demonstration of WebNN, a browser standard for running…",
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "id": "com.natureglass.savedemo",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Save Demo",
+      "permissions": [
+        "Storage"
+      ],
+      "publishedAt": "2026-07-22T11:29:42Z",
+      "sizeBytes": 63735,
+      "summary": "Save Demo is a hands-on test harness for the Brewser save system — the same building blocks any app can use to remember data across sessions and devices. Sign in with your Google/Brewser account and exercise every part of the API from one screen. How it works. The app uses a two-tier persistence model. When you save, your data is written instantly to this browser's local storage, then a…",
+      "tags": [
+        "Save"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Apps",
+        "Measurement",
+        "Sensors"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "Motion Sensors"
+      ],
+      "id": "com.natureglass.sensorsplayground",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Sensors Playground",
+      "permissions": [
+        "Device Info"
+      ],
+      "publishedAt": "2026-07-02T12:00:00Z",
+      "sizeBytes": 99762,
+      "summary": "Sensors Playground is a hardware diagnostics dashboard that surfaces the sensors and capabilities of your device. Each panel probes a real piece of hardware through a standard web API and shows a live readout, so you can see — and feel — exactly what your device exposes. How it works. The dashboard is a grid of independent \"diagnostic cards\", each wired to a browser API and updating live from…",
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "WebAudio"
+      ],
+      "id": "com.natureglass.spectraplay",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Spectra Play",
+      "permissions": [
+        "Storage"
+      ],
+      "publishedAt": "2026-06-04T12:00:00Z",
+      "sizeBytes": 156064,
+      "summary": "Spectra Play is a modern music player with GPU-accelerated visuals. Point it at your own audio and watch it come alive with a choice of nine real-time visualizers rendered in WebGL2. How it works. You pick a folder of music and the app lists everything inside it — loading a whole directory at once and remembering it for next time. As a track plays through the audio engine, the app continuously…",
+      "tags": [
+        "Audio Player"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "id": "com.natureglass.speedtest",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Speed Test",
+      "permissions": [],
+      "publishedAt": "2026-05-21T12:00:00Z",
+      "sizeBytes": 59772,
+      "summary": "Speed Test checks how fast your internet connection really is, measuring against Cloudflare's global network and showing the results on an animated needle gauge with live metric tiles and a diagnostics log. How it works. Tapping start runs three phases in turn. First it measures latency by timing several tiny round-trips to the server and averaging them. Then it measures download speed by…",
+      "version": "1.0.1"
+    },
+    {
+      "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "id": "com.natureglass.streamcast",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Stream Cast",
+      "permissions": [
+        "Network"
+      ],
+      "publishedAt": "2026-05-28T12:00:00Z",
+      "sizeBytes": 72375,
+      "summary": "Stream Cast brings live Twitch streaming to the Switch browser. A \"Live now\" sidebar lists popular channels while the main stage swaps between a search screen and full-screen video. How it works. The app talks to Twitch's own web service to do everything the site does: it fetches the directory of top live channels, looks up a stream's title, viewer count and uptime, and requests a signed playback…",
+      "tags": [
+        "Streaming"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "categories": [
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "WebGL 1",
+        "WebGL 2"
+      ],
+      "id": "com.natureglass.unitydemoprobe",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "Unity Demo Probe",
+      "permissions": [],
+      "publishedAt": "2026-07-23T13:37:49Z",
+      "sizeBytes": 195195997,
+      "source": "ext1",
+      "summary": "Unity Demos is a measurement tool for Brewser, not a game. It loads a curated matrix of real Unity WebGL debug builds (spanning Unity 2021 LTS through Unity 6) one at a time and records exactly how far each one gets before it stalls, crashes, or completes. Pick a build from the table and press A to launch it. The harness watches the whole load and writes a per-run NDJSON log to…",
+      "tags": [
+        "Unity"
+      ],
+      "version": "1.0.1"
+    },
+    {
+      "categories": [
+        "Demos"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "WebGL 2"
+      ],
+      "id": "com.natureglass.webgl2threejsdemos",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "name": "WebGL2 - ThreeJS Demos",
+      "permissions": [],
+      "publishedAt": "2026-06-11T12:00:00Z",
+      "sizeBytes": 40915159,
+      "summary": "WebGL2 - ThreeJS Demos is a showcase of real-time 3D graphics powered by Three.js and WebGL2, running natively on the Switch browser. It's a curated gallery of sixteen self-contained examples, each built to stress a different advanced rendering technique. How it works. The home page is a simple gallery of cards — a thumbnail and a short description for each demo. Clicking one opens that example…",
+      "version": "1.0.0"
+    }
+  ],
+  "defaultSource": "base",
+  "generated": "2026-07-25T14:16:47Z",
+  "revoked": [],
+  "sources": {
+    "base": "https://play.brewser.tech",
+    "ext1": "https://play1.brewser.tech"
+  },
+  "version": 2
+}

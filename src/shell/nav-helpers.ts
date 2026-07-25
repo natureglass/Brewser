@@ -116,10 +116,20 @@ export function computeLivePageBase(url: string, roots: ProfileRoots): string {
 }
 
 /**
- * If `url` points inside an installed app — i.e. matches
- * `brewser://apps/<group>/<id>/...` — return the `apps/<group>/<id>/`
- * dir prefix. Otherwise `null`. Used to gate the per-app button-router
- * overlay + the context-aware `exit` action.
+ * If `url` points inside an installed app — i.e. matches the flat
+ * layout `brewser://apps/<id>/...` — return the `apps/<id>/` dir
+ * prefix. Otherwise `null`. Used to gate the per-app button-router
+ * overlay, the manifest permission sandbox, and the context-aware
+ * `exit` action.
+ *
+ * ANY first segment under `apps/` counts as an app dir, deliberately:
+ * a `null` here means the navigation runs under the shell's grant-all
+ * policy, so failing "toward null" for odd dir names would hand a
+ * sideloaded app full permissions. Matching broadly fails toward the
+ * sandboxed deny-by-default path instead (no manifest → no declared
+ * permissions). Old tiered paths (`apps/<tier>/<id>/…`) resolve to the
+ * tier dir, which has no manifest — same safe deny-by-default; tiered
+ * installs are not-installed by decision (D1, no migration).
  */
 export function extractAppDirFromUrl(url: string): string | null {
 	if (!/^brewser:\/\//i.test(url)) return null;
@@ -127,9 +137,9 @@ export function extractAppDirFromUrl(url: string): string | null {
 		.split('?')[0].split('#')[0].replace(/^\/+/, '');
 	if (!stripped.startsWith('apps/')) return null;
 	const parts = stripped.split('/');
-	// Need at least `apps/<group>/<id>/...` — three segments + a tail.
-	if (parts.length < 4 || !parts[1] || !parts[2]) return null;
-	return `apps/${parts[1]}/${parts[2]}/`;
+	// Need at least `apps/<id>/<file-or-dir…>` — two segments + a tail.
+	if (parts.length < 3 || !parts[1]) return null;
+	return `apps/${parts[1]}/`;
 }
 
 /**

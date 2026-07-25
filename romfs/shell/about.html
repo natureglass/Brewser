@@ -31,12 +31,13 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      margin-top: 16px;
+      margin-top: 8px;
+      margin-bottom: 14px;
     }
     donations {
       display: block;
-      width: 200px;
-      height: 200px;
+      width: 250px;
+      height: 250px;
     }
     .donations-caption {
       margin-top: 8px;
@@ -164,16 +165,13 @@
 
       <section class="about-section about-card support-card">
         <h2>Support Brewser</h2>
-
+        <div class="donations-wrap">
+          <donations></donations>
+        </div>
         <p>
           If you enjoy using Brewser or want to support future development,
           donations are appreciated.
         </p>
-
-        <div class="donations-wrap">
-          <donations></donations>
-          <p class="donations-caption">Buy me a coffee</p>
-        </div>
       </section>
     </div>
 

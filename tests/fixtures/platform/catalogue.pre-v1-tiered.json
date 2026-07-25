@@ -1,0 +1,782 @@
+{
+  "version": 1,
+  "generated": "2026-07-12T20:21:25Z",
+  "featured": [
+    {
+      "id": "com.natureglass.lumaclips",
+      "name": "Lumaclips - TikTok Videos",
+      "version": "1.0.0",
+      "description": "Scroll through TikTok videos directly on your console.",
+      "logo": "assets/tiktok_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "video",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 50676
+    },
+    {
+      "id": "com.natureglass.mobsensors",
+      "name": "Mobile Sensors",
+      "version": "1.0.0",
+      "description": "An application to test the various sensors on your device.",
+      "logo": "assets/sensors_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "sensors",
+        "vibration",
+        "battery",
+        "canvas",
+        "webgl",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "device_info"
+      ],
+      "compatibility": [
+        "web",
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 74041
+    },
+    {
+      "id": "com.natureglass.sensors",
+      "name": "Sensors",
+      "version": "1.0.0",
+      "description": "An application to test the various sensors on your device.",
+      "logo": "assets/sensors_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "sensors",
+        "vibration",
+        "battery",
+        "canvas",
+        "webgl",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "device_info"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 71045
+    },
+    {
+      "id": "com.natureglass.spectraplay",
+      "name": "SpectraPlay",
+      "version": "1.0.0",
+      "description": "Enjoy music directly on your console with this media player.",
+      "logo": "assets/audioplayer_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "audio",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "filesystem_read"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 119606
+    },
+    {
+      "id": "com.natureglass.speedtest",
+      "name": "Speed Test",
+      "version": "1.0.0",
+      "description": "Test your internet speed directly on your console.",
+      "logo": "assets/speedtest_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "network"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://itch.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "fullscreen": true,
+      "exitGame": "PLUS",
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 36967
+    },
+    {
+      "id": "com.natureglass.streamcast",
+      "name": "Streamcast - Twitch Steams",
+      "version": "1.0.0",
+      "description": "Scroll through Twitch videos directly on your console.",
+      "logo": "assets/twitch_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "video",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [
+        "https://itch.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 46205
+    },
+    {
+      "id": "com.natureglass.webgl1threejsdemos",
+      "name": "WebGL1 ThreeJS Demos",
+      "version": "1.0.0",
+      "description": "A collection of demos showcasing the capabilities of WebGL1 ThreeJS on the Nintendo Switch.",
+      "logo": "assets/threejsdemos_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 17361343
+    },
+    {
+      "id": "com.natureglass.webgl2threejsdemos",
+      "name": "WebGL2 ThreeJS Demos",
+      "version": "1.0.0",
+      "description": "A collection of demos showcasing the capabilities of WebGL2 ThreeJS on the Nintendo Switch.",
+      "logo": "assets/threejsdemos_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 40887569
+    }
+  ],
+  "experimental": [
+    {
+      "id": "com.natureglass.domhtmlcss",
+      "name": "DOM HTML CSS",
+      "version": "1.0.0",
+      "description": "An experimental app that demonstrates the use of DOM, HTML, and CSS in a Nintendo Switch homebrew web app.",
+      "logo": "assets/domhtmlcss_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 22021146
+    },
+    {
+      "id": "com.natureglass.gl-probes",
+      "name": "GL Probes",
+      "version": "0.15.0",
+      "description": "Functional round-trip probes for the WebGL bridge. v0.9.0: strict-mode gate (URL ?strict=1) + PASS-QUIRK-RELAXED summary tally + three phase-1.5-MED-HIGH TF probes (TF_CAPTURE 3-vertex SEPARATE_ATTRIBS + memcmp readback; TF_PAUSE_RESUME pause skips id=200; TF_ERR nested beginTransformFeedback → INVALID_OPERATION). Extends v0.8.0's QUERY driver-quirk relaxation with #54 reclassified as Citron-observed / hardware-pending — same status now applied to any relaxed pass. Total 21 probes across LOW/LOW-MED/MED/MED-HIGH families + batch-1 EXT paths.",
+      "logo": "assets/gl_probes_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "Apache-2.0",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 118126
+    },
+    {
+      "id": "com.natureglass.pvzge",
+      "name": "PvZ GE",
+      "version": "1.0.0",
+      "description": "Plants vs. Zombies — Garden Edition (browser game).",
+      "logo": "assets/pvzge_logo.png",
+      "entry": "index.html",
+      "category": "game",
+      "features": [
+        "canvas",
+        "webgl",
+        "audio",
+        "controller"
+      ],
+      "permissions": [
+        "network",
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "GPL-3.0",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 1180369988
+    },
+    {
+      "id": "com.natureglass.savedemo",
+      "name": "Save Demo",
+      "version": "1.0.0",
+      "description": "Test your internet speed directly on your console.",
+      "logo": "assets/savedemo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 42514
+    },
+    {
+      "id": "com.natureglass.unity-demos",
+      "name": "Unity Demos",
+      "version": "1.0.0",
+      "description": "Diagnostic harness that loads a curated set of real Unity WebGL debug builds (JohannesDeml/UnityWebGL-LoadingTest) one at a time and writes a per-run NDJSON log to sdmc:/switch/brewser/logs/unity-demos/ capturing loader/framework console output, uncaught errors, missing-API interceptor hits (KNOWN-GAP vs NEW-GAP), load milestones, capacity failures, heartbeats, and a preliminary/final verdict. Measurement tool only — no engine changes. Under Citron's jitless wasm mode every demo terminates at WASM-UNAVAILABLE after the loader-stage shim gaps are harvested; on hardware JIT the full path runs and gives real first-frame timings. Godot leg deferred (see README §Godot).",
+      "logo": "assets/unity-demos_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "wasm",
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 195169775
+    },
+    {
+      "id": "com.natureglass.wasmprobe",
+      "name": "WASM Probe",
+      "version": "1.0.0",
+      "description": "Track-A DrumBrake smoke test (NXJS_PATCHES_NEEDED.md #74). Compiles + instantiates + executes minimal WebAssembly modules covering exports, imports, Memory grow/detach re-view, Table + funcref indirect calls, catchable traps (unreachable + OOB), and instantiateStreaming. Reports PASS/FAIL per case + engine-tier summary. Runs unchanged on JIT (Liftoff) and jitless-DrumBrake paths; on the current pre-Track-B monolith reports engine tier as unavailable and all execution tests as FAIL cleanly (fail-soft — no crash).",
+      "logo": "assets/wasmprobe_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "wasm"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 21971
+    },
+    {
+      "id": "com.natureglass.webglconformtest",
+      "name": "WebGL Conformance Tests",
+      "version": "1.0.0",
+      "description": "Runs the full Khronos WebGL 1 and WebGL 2 conformance test suites in-app against the bridge's GL implementation.",
+      "logo": "assets/webglconformtest_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 9668018
+    },
+    {
+      "id": "com.natureglass.webglreport",
+      "name": "WebGL Report",
+      "version": "1.1.0",
+      "description": "Surface WebGL 1 and WebGL 2 capabilities, extensions, and limits exposed by the bridge. Port of CesiumGS/webglreport with brewser-specific audit + UNSUPPORTED_BY_DRIVER classification + per-name WebGL2 spec-fn coverage.",
+      "logo": "assets/webglreport_logo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "Apache-2.0",
+      "exitGame": "PLUS",
+      "buttonMapping": {},
+      "sizeBytes": 61072
+    }
+  ],
+  "community": [
+    {
+      "id": "com.natureglass.fluidsdraw",
+      "name": "Fluids Draw",
+      "version": "1.0.0",
+      "description": "Fluids Draw is a fluid simulation drawing app that allows you to create mesmerizing fluid art using your mouse or touch input. Experiment with different colors and brush sizes to create stunning visual effects.",
+      "logo": "assets/fluidslogo.png",
+      "entry": "index.html",
+      "category": "physics",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {},
+      "sizeBytes": 27468
+    },
+    {
+      "id": "com.natureglass.fractalszoom",
+      "name": "Fractals Zoom",
+      "version": "1.0.0",
+      "description": "Zoom into fractals with a simple click-and-drag interface. Explore the Mandelbrot and Julia sets, and discover the beauty of complex mathematics.",
+      "logo": "assets/fractalszoomlogo.png",
+      "entry": "index.html",
+      "category": "demos",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {},
+      "sizeBytes": 21908
+    },
+    {
+      "id": "com.natureglass.gravityballs",
+      "name": "Gravity balls",
+      "version": "1.0.0",
+      "description": "Gravity balls is a physics simulation app that allows you to create and manipulate a collection of balls that interact with each other and the environment. You can adjust gravity, collision properties, and other parameters to create interesting behaviors.",
+      "logo": "assets/gravityballslogo.png",
+      "entry": "index.html",
+      "category": "physics",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {},
+      "sizeBytes": 16748
+    },
+    {
+      "id": "com.natureglass.sensorstest",
+      "name": "Sensors test",
+      "version": "1.0.0",
+      "description": "Test app for device sensors",
+      "logo": "assets/sensorstest.png",
+      "entry": "index.html",
+      "category": "demos",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {},
+      "sizeBytes": 7596
+    },
+    {
+      "id": "com.natureglass.threejsserpent",
+      "name": "Three.js Serpent",
+      "version": "1.0.0",
+      "description": "The same Serpent arcade game rebuilt with Three.js (r184) — sprite-based, no custom shaders.",
+      "logo": "assets/snakelogo.png",
+      "entry": "index.html",
+      "category": "app",
+      "features": [
+        "webgl",
+        "webgl2",
+        "canvas",
+        "controller"
+      ],
+      "permissions": [
+        "storage",
+        "network"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 2112594
+    },
+    {
+      "id": "com.natureglass.watermetaballs",
+      "name": "Water metaballs",
+      "version": "1.0.0",
+      "description": "Water metaballs is a fluid simulation app that allows you to create mesmerizing fluid art using your mouse or touch input. Experiment with different colors and brush sizes to create stunning visual effects.",
+      "logo": "assets/metaballslogo.png",
+      "entry": "index.html",
+      "category": "physics",
+      "features": [],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [
+        "https://natureglass.github.io"
+      ],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {},
+      "sizeBytes": 23580
+    },
+    {
+      "id": "com.natureglass.webgl1demo",
+      "name": "Moonlight - Procedural WebGL Demo",
+      "version": "1.0.0",
+      "description": "Experimenting with WebGL on the Nintendo Switch.",
+      "logo": "assets/logo.png",
+      "entry": "index.html",
+      "category": "other",
+      "features": [
+        "webgl",
+        "controller"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 68470
+    },
+    {
+      "id": "com.natureglass.webgl2demo",
+      "name": "Sunset - Procedural WebGL2 Demo",
+      "version": "1.0.0",
+      "description": "Experimenting with WebGL2 on the Nintendo Switch.",
+      "logo": "assets/logo.png",
+      "entry": "index.html",
+      "category": "other",
+      "features": [
+        "webgl",
+        "controller"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "source": "https://github.com/natureglass/Brewser-apps",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "buttonMapping": {
+        "up": "UP",
+        "down": "DOWN",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "enter": "A",
+        "space": "B",
+        "z": "A",
+        "x": "B"
+      },
+      "sizeBytes": 61711
+    }
+  ]
+}

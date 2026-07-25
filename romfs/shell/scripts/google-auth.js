@@ -76,8 +76,27 @@
   // Diagnostic log
   // ============================================================
   var _logBuffer = [];
+  // The log file lands on SDMC and gets pasted verbatim into support
+  // threads, so token material must never reach the buffer. Response
+  // bodies logged via readJsonWithLog carry access_token/refresh_token/
+  // id_token (Google) and the minted Brewser token ("token", two
+  // base64url segments — also matched by the eyJ pattern since its
+  // payload is base64url JSON). Lengths are kept for debuggability.
+  var REDACT_FIELD_RE = /("(?:access_token|refresh_token|id_token|token)"\s*:\s*")([^"]*)(")/g;
+  var REDACT_JWT_RE   = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]+)?/g;
+  var REDACT_YA29_RE  = /\bya29\.[A-Za-z0-9._-]{8,}/g;
+  function redactTokens(line) {
+    if (typeof line !== 'string' || !line) return line;
+    return line
+      .replace(REDACT_FIELD_RE, function (_m, pre, val, post) {
+        return pre + '<redacted:' + val.length + 'ch>' + post;
+      })
+      .replace(REDACT_JWT_RE, function (m) { return '<redacted:jwt:' + m.length + 'ch>'; })
+      .replace(REDACT_YA29_RE, function (m) { return '<redacted:oauth:' + m.length + 'ch>'; });
+  }
   function log(line) {
     var ts = new Date().toISOString();
+    line = redactTokens(line);
     _logBuffer.push('[' + ts + '] ' + line);
     try { console.debug('[google-auth] ' + line); } catch (_) {}
     flushLog();
@@ -244,9 +263,8 @@
       try { Switch.writeFileSync(avatarMainPath(ext),  new Uint8Array(0)); } catch (_) {}
       try { Switch.writeFileSync(avatarThumbPath(ext), new Uint8Array(0)); } catch (_) {}
     }
-    // Drop the "one active session" pointer too. See github-auth.js's
-    // clearStoredRecord for the rationale (login.html keys its
-    // logged-in card on `active.json` AND a populated provider record).
+    // Drop the "one active session" pointer too — login.html keys its
+    // logged-in card on `active.json` AND a populated provider record.
     if (globalThis.__swbAuth && typeof globalThis.__swbAuth.clearActiveProvider === 'function') {
       globalThis.__swbAuth.clearActiveProvider();
     }

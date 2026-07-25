@@ -26,10 +26,8 @@
   // The active-session card uses `__swbAuth.readActiveSession` directly
   // and doesn't need this table.
   var PROVIDERS = [
-    { key: 'github',    file: 'github-auth.json'    },
     { key: 'microsoft', file: 'microsoft-auth.json' },
     { key: 'google',    file: 'google-auth.json'    },
-    { key: 'twitch',    file: 'twitch-auth.json'    },
   ];
 
   function readJson(path) {

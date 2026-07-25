@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "generated": "2026-07-25T14:16:47Z",
+  "generated": "2026-07-24T19:36:52Z",
   "apps": [
     {
       "id": "com.natureglass.fluiddynamics",
       "name": "Fluid dynamics",
-      "version": "1.0.3",
+      "version": "1.0.0",
       "description": "<p><strong>Fluid dynamics</strong> is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate.</p>\r\n<p><strong>How it works.</strong> Every frame the app runs a chain of GPU shader passes over floating-point textures. It first computes the fluid's <em>curl</em> and adds a vorticity force to keep the motion lively and turbulent, then makes the flow <em>incompressible</em> by solving for pressure over roughly twenty iterations and subtracting its gradient from the velocity field. The velocity and the coloured dye are then <em>advected</em> — carried along the flow — and both fade slightly each step so trails dissipate naturally. The simulation runs on a compact velocity grid while the dye is rendered at much higher resolution for crisp detail, with a lighting pass that shades the fluid from its own density gradients to give it depth.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — drag anywhere to inject dye and push the fluid; the <em>direction and speed</em> of your stroke become the force applied, and the colour drifts through the rainbow as you move. <em>Multi-touch is supported</em>, so several fingers stir at once.</li>\r\n<li><strong>Burst</strong> — fires several randomly aimed splats of colour and force into the field for an instant explosion of motion.</li>\r\n<li><strong>Particles</strong> — toggles a layer of ~16,000 GPU particles that ride the velocity field, brightening where the flow moves fastest, then wrap and respawn to keep coverage even.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Everything runs locally with no network access, and the app automatically probes the device for the best supported float texture formats so it degrades gracefully across GPUs.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -23,11 +23,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-09T12:00:00Z",
       "tags": [
         "Fluids"
       ],
-      "sizeBytes": 85881
+      "sizeBytes": 85838
     },
     {
       "id": "com.natureglass.fractalzoom",
@@ -49,14 +48,13 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-18T12:00:00Z",
       "features": [
         "WebGL 2"
       ],
       "tags": [
         "Fractals"
       ],
-      "sizeBytes": 66462
+      "sizeBytes": 66419
     },
     {
       "id": "com.natureglass.gravityballs",
@@ -80,14 +78,13 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-25T12:00:00Z",
       "genre": [
         "Simulation"
       ],
       "features": [
         "Motion Sensors"
       ],
-      "sizeBytes": 35800
+      "sizeBytes": 35757
     },
     {
       "id": "com.natureglass.midilab",
@@ -111,14 +108,13 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-16T12:00:00Z",
       "genre": [
         "Experience"
       ],
       "features": [
         "WebUSB"
       ],
-      "sizeBytes": 118987
+      "sizeBytes": 118944
     },
     {
       "id": "com.natureglass.neuralnetworks",
@@ -142,11 +138,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-22T12:57:20Z",
       "features": [
         "WebNN"
       ],
-      "sizeBytes": 88451
+      "sizeBytes": 88408
     },
     {
       "id": "com.natureglass.savedemo",
@@ -170,11 +165,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-22T11:29:42Z",
       "tags": [
         "Save"
       ],
-      "sizeBytes": 63735
+      "sizeBytes": 63692
     },
     {
       "id": "com.natureglass.sensorsplayground",
@@ -200,11 +194,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-02T12:00:00Z",
       "features": [
         "Motion Sensors"
       ],
-      "sizeBytes": 99762
+      "sizeBytes": 99719
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -228,14 +221,13 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-04T12:00:00Z",
       "features": [
         "WebAudio"
       ],
       "tags": [
         "Audio Player"
       ],
-      "sizeBytes": 156064
+      "sizeBytes": 156021
     },
     {
       "id": "com.natureglass.speedtest",
@@ -257,8 +249,7 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-05-21T12:00:00Z",
-      "sizeBytes": 59772
+      "sizeBytes": 59729
     },
     {
       "id": "com.natureglass.streamcast",
@@ -285,11 +276,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-05-28T12:00:00Z",
       "tags": [
         "Streaming"
       ],
-      "sizeBytes": 72375
+      "sizeBytes": 72332
     },
     {
       "allowed_origins": [],
@@ -314,12 +304,11 @@
       "logo": "assets/appbanner.jpg",
       "name": "Unity Demo Probe",
       "permissions": [],
-      "publishedAt": "2026-07-23T13:37:49Z",
       "tags": [
         "Unity"
       ],
-      "version": "1.0.1",
-      "sizeBytes": 195195997
+      "version": "1.0.0",
+      "sizeBytes": 195195960
     },
     {
       "id": "com.natureglass.webgl2threejsdemos",
@@ -341,11 +330,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-11T12:00:00Z",
       "features": [
         "WebGL 2"
       ],
-      "sizeBytes": 40915159
+      "sizeBytes": 40915116
     }
   ]
 }

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>App revoked — brewser</title>
+<style>
+  body { background-color: #1a1410; color: #f2e2cf; font-size: 18px;
+         padding: 48px; display: flex; flex-direction: column;
+         align-items: center; text-align: center; }
+  h1 { color: #ffb056; }
+  .id { font-family: monospace; color: #ffd39b; }
+  .hint { color: #bda388; font-size: 14px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>This app has been revoked</h1>
+<p>The catalogue lists <span class="id" id="revoked-id">this app</span> as revoked,
+so Brewser will not launch it. The files remain on your SD card.</p>
+<p class="hint">Revocation is the only catalogue signal that blocks an installed
+app — if you believe this is a mistake, sync again via Check for Updates, or ask
+on the Brewser board. <kbd>B</kbd> goes back.</p>
+<script>
+  // Stamped by the shell's revoked guard just before navigating here.
+  var id = globalThis.__brewserRevokedAppId;
+  if (typeof id === 'string' && id) {
+    var el = document.getElementById('revoked-id');
+    if (el) el.textContent = id;
+  }
+</script>
+</body>
+</html>

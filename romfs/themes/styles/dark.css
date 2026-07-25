@@ -239,16 +239,18 @@ input[name="apps-tab"] { display: none; }
    and `.tab-label[for=...]` / `.tab-panel[data-tab=...]` pick out the
    matching label + panel inside it. */
 #apps-tab-featured:checked ~ .page-shell .tab-label[for="apps-tab-featured"],
-#apps-tab-community:checked ~ .page-shell .tab-label[for="apps-tab-community"],
-#apps-tab-experimental:checked ~ .page-shell .tab-label[for="apps-tab-experimental"] {
+#apps-tab-recent:checked ~ .page-shell .tab-label[for="apps-tab-recent"],
+#apps-tab-popular:checked ~ .page-shell .tab-label[for="apps-tab-popular"],
+#apps-tab-toprated:checked ~ .page-shell .tab-label[for="apps-tab-toprated"] {
   color: #0b1220;
   background: #ffd35e;
   border-color: #ffd35e;
 }
 
 #apps-tab-featured:checked ~ .page-shell .tab-panel[data-tab="featured"],
-#apps-tab-community:checked ~ .page-shell .tab-panel[data-tab="community"],
-#apps-tab-experimental:checked ~ .page-shell .tab-panel[data-tab="experimental"] {
+#apps-tab-recent:checked ~ .page-shell .tab-panel[data-tab="recent"],
+#apps-tab-popular:checked ~ .page-shell .tab-panel[data-tab="popular"],
+#apps-tab-toprated:checked ~ .page-shell .tab-panel[data-tab="toprated"] {
   display: block;
 }
 

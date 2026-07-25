@@ -10,10 +10,29 @@
         body[data-auth-stage="success"] .auth-stage-success { display: block; }
         body[data-auth-stage="error"]   .auth-stage-error   { display: block; }
 
-        #auth-verification-url { font-size: 48px; padding: 8px 0px; text-align: center; }
-        #auth-user-code        { font-size: 64px; padding: 8px 0px; text-align: center; }
-        #auth-poll-status      { font-size: 20px; padding: 12px 16px; text-align: center; }
+        #auth-verification-url { font-size: 28px; min-height: 48px; padding: 8px 0px; text-align: center; }
+        #auth-user-code        { font-size: 64px; min-height: 88px; padding: 8px 0px; text-align: center; }
+        #auth-poll-status      { font-size: 20px; min-height: 48px; padding: 12px 16px; text-align: center; }
         #auth-hint             { width: 300px; }
+        .auth-device-grid {
+            display: grid;
+            grid-template-columns: 4fr 2fr;
+            gap: 24px;
+        }
+        .settings-group.auth-verification-qr {
+            background: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-verification-qr qrcode {
+            display: block;
+            padding-top: 25px;
+            width: 290px;
+            height: 290px;
+            flex: 0 0 250px;
+        }
     </style>
   </head>
 
@@ -25,7 +44,6 @@
             <header class="top-header">
                 <h2>Google Account</h2>
                 <nav class="top-links" aria-label="Browser navigation">
-                <a class="munch-link" href="brewser://login/">Back</a>
                 <a class="munch-link" href="brewser://home/">Home</a>
                 </nav>
             </header>
@@ -52,20 +70,29 @@
         <div class="auth-stage auth-stage-device">
             <div class="settings-form">
 
-                <fieldset class="settings-group">
-                    <legend>Step 1 — Open this URL in any browser</legend>
-                    <div id="auth-verification-url"></div>
-                </fieldset>
+                <div class="auth-device-grid">
+                    <div class="auth-device-steps">
+                        <fieldset class="settings-group">
+                            <legend>Step 1 — Open this URL or Scan the QR Code</legend>
+                            <div id="auth-verification-url"></div>
+                        </fieldset>
 
-                <fieldset class="settings-group">
-                    <legend>Step 2 — Enter this one-time code</legend>
-                    <div id="auth-user-code">…</div>
-                </fieldset>
+                        <fieldset class="settings-group">
+                            <legend>Step 2 — Enter this one-time code</legend>
+                            <div id="auth-user-code">…</div>
+                        </fieldset>
 
-                <fieldset class="settings-group">
-                    <legend>Status</legend>
-                    <div id="auth-poll-status" class="auth-poll-status">Waiting for confirmation…</div>
-                </fieldset>
+                        <fieldset class="settings-group">
+                            <legend>Status</legend>
+                            <div id="auth-poll-status" class="auth-poll-status">Waiting for confirmation…</div>
+                        </fieldset>
+                    </div>
+
+                    <fieldset class="settings-group auth-verification-qr">
+                        <qrcode data="https://www.google.com/device"></qrcode>
+                    </fieldset>
+                </div>
+
                 <div class="settings-savebar">
                     <a class="settings-save" href="brewser://login/">Cancel</a>
                 </div>

@@ -1,6 +1,6 @@
 // Microsoft Identity Platform (Entra ID) OAuth 2.0 Device Authorization
 // Grant for Brewser. Page-flow variant: drives shell/microsoftLogin.html.
-// Same stage-attribute model as github-auth.js.
+// Same stage-attribute model as google-auth.js.
 //
 // Identity model:
 //   * Stable unique ID is Microsoft Graph's `id` field (GUID) from
@@ -51,9 +51,8 @@
   var AUTH_DIR  = 'sdmc:/switch/brewser/shell/auth/';
   var AUTH_PATH = AUTH_DIR + 'microsoft-auth.json';
 
-  // Avatar bitmap cache (see microsoft download flow below). Prefix
-  // every filename with `microsoft-` so this provider doesn't collide
-  // with the legacy `avatar.<ext>` files github-auth.js writes.
+  // Avatar bitmap cache (see microsoft download flow below). Every
+  // filename is prefixed with `microsoft-` for per-provider isolation.
   var AVATAR_STEM       = 'microsoft-avatar';
   var AVATAR_THUMB_STEM = 'microsoft-avatar_64x64';
   // Microsoft's PHOTO endpoint returns whatever pre-cached size lives
@@ -72,8 +71,24 @@
   // Diagnostic log
   // ============================================================
   var _logBuffer = [];
+  // The log file lands on SDMC and gets pasted verbatim into support
+  // threads, so token material must never reach the buffer. Response
+  // bodies logged via readJsonWithLog carry access_token/refresh_token/
+  // id_token; the eyJ pattern also catches bare JWTs (and MSA tokens
+  // ride inside the JSON fields). Lengths are kept for debuggability.
+  var REDACT_FIELD_RE = /("(?:access_token|refresh_token|id_token|token)"\s*:\s*")([^"]*)(")/g;
+  var REDACT_JWT_RE   = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]+)?/g;
+  function redactTokens(line) {
+    if (typeof line !== 'string' || !line) return line;
+    return line
+      .replace(REDACT_FIELD_RE, function (_m, pre, val, post) {
+        return pre + '<redacted:' + val.length + 'ch>' + post;
+      })
+      .replace(REDACT_JWT_RE, function (m) { return '<redacted:jwt:' + m.length + 'ch>'; });
+  }
   function log(line) {
     var ts = new Date().toISOString();
+    line = redactTokens(line);
     var entry = '[' + ts + '] ' + line;
     _logBuffer.push(entry);
     try { console.debug('[microsoft-auth] ' + line); } catch (_) {}
@@ -260,8 +275,8 @@
       try { Switch.writeFileSync(avatarMainPath(ext),  new Uint8Array(0)); } catch (_) {}
       try { Switch.writeFileSync(avatarThumbPath(ext), new Uint8Array(0)); } catch (_) {}
     }
-    // Drop the "one active session" pointer too. See github-auth.js's
-    // clearStoredRecord for the rationale.
+    // Drop the "one active session" pointer too — login.html keys its
+    // logged-in card on `active.json` AND a populated provider record.
     if (globalThis.__swbAuth && typeof globalThis.__swbAuth.clearActiveProvider === 'function') {
       globalThis.__swbAuth.clearActiveProvider();
     }
