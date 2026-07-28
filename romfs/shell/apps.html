@@ -82,7 +82,7 @@
      modal HTML is shared verbatim with home.html — keep the two in
      sync if either side changes. -->
 <browser-modal id="app-modal-overlay" class="app-modal-overlay">
-  <div class="app-modal-card">
+  <div id="app-modal-card" class="app-modal-card">
     <!-- Meta strip mirrors the `.app-card__meta` strip on grid cards:
          version chip flush left, license chip flush right, both in a
          row above the logo. The strip is rendered conditionally by
@@ -100,12 +100,33 @@
          (Category / Features / Permissions / Allowed origins /
          Developer / Source). -->
     <div class="app-modal-header">
-      <img id="app-modal-logo" class="app-modal-logo" src="brewser://assets/download.png" alt="App logo">
       <div class="app-modal-header-text">
         <h2 id="app-modal-title" class="app-modal-title">App</h2>
         <p id="app-modal-identifier" class="app-modal-identifier"></p>
-        <p id="app-modal-description" class="app-modal-description"></p>
+        <!-- "Rating | Downloads" stats line (filled by missing-app-modal.js
+             headStatsHtml() each open) + a host for the inline rating
+             message ("Sign in to rate" / "Rating failed"). -->
+        <div id="app-modal-headstats" class="app-modal-headstats" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:8px;"></div>
+        <div id="app-modal-rating-msg-host"></div>
       </div>
+    </div>
+    <!-- Full-width scrollable description block. Deliberately a SIBLING of
+         the flex header (not a child of `.app-modal-header-text`): inside
+         the flex the header's cross-size was measured from the description's
+         natural (unclamped) height, so a clamped max-height left a gap below
+         it. As a plain block child of the card it clamps cleanly and spans
+         the full card width. The `.app-modal-description` CSS gives it its
+         border + max-height + scroll. -->
+    <div id="app-modal-description" class="app-modal-description"></div>
+    <!-- Expand toggle. Sits under the description, flush right. Tapping it
+         adds `app-modal-card--expanded` to the card (see missing-app-modal.js):
+         the meta strip, header and body rows hide and the description grows
+         to fill the card (min-height 600px) so a long write-up reads nearly
+         full-screen; only the bottom action row stays visible. The state is
+         reset to collapsed on every open, and the script hides this whole row
+         for apps that carry no description. -->
+    <div id="app-modal-expand-row" class="app-modal-expand-row">
+      <button id="app-modal-expand" class="app-modal-btn app-modal-expand-btn" type="button">Expand</button>
     </div>
     <!-- Body rows: missing-app-modal.js prepends Downloads + Rating
          rows here (so they share the body's text-align: left + the

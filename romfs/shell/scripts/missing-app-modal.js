@@ -23,6 +23,9 @@
   var licenseEl = document.getElementById('app-modal-license');
   var titleEl = document.getElementById('app-modal-title');
   var identifierEl = document.getElementById('app-modal-identifier');
+  // Header "Rating | Downloads" line (under the packageId). Populated each
+  // show() from headStatsHtml(); null if the page markup predates it.
+  var headStatsEl = document.getElementById('app-modal-headstats');
   var descEl = document.getElementById('app-modal-description');
   var bodyEl = document.getElementById('app-modal-body');
   var cancelBtn = document.getElementById('app-modal-cancel');
@@ -46,6 +49,17 @@
   // catalog's `sizeBytes`, the chip flips into a red warning palette
   // AND we disable the Download / Update buttons.
   var sdFreeEl = document.getElementById('app-modal-sd-free');
+  // Expand/collapse the description into a near-full-modal reading view.
+  // `cardEl` is the app-detail modal card (`.app-modal-card`; an id was
+  // added to the markup for this feature). Toggling `app-modal-card--expanded`
+  // on it hides the meta strip / header / body rows and lets the description
+  // grow to fill the card — CSS lives in the four theme stylesheets.
+  // `expandRow` wraps the button so we can hide the whole row (button and
+  // all) for apps with no description. All three are optional — markup that
+  // predates this feature simply won't wire the toggle.
+  var cardEl = document.getElementById('app-modal-card');
+  var expandBtn = document.getElementById('app-modal-expand');
+  var expandRow = document.getElementById('app-modal-expand-row');
   if (!overlay || !titleEl || !bodyEl || !cancelBtn || !downloadBtn || !playBtn || !updateBtn) return;
 
   var modalOpen = false;
@@ -60,6 +74,23 @@
   // standard path: href is set on the play button and the engine
   // navigates directly without any JS in the middle).
   var pendingLaunchUrl = '';
+
+  // Whether the description is currently in the expanded reading view.
+  var descExpanded = false;
+  // Toggle the near-full-modal description view. Adds/removes the
+  // `app-modal-card--expanded` class (the theme CSS hides the meta / header
+  // / body and grows the description to fill the card) and swaps the button
+  // label between "Expand" and "Collapse". Uses classList — NOT
+  // `style.display` — so the modal-layer paint cache invalidates, the same
+  // reason the overlay open/close does (see the top-of-file note).
+  function setExpanded(on) {
+    descExpanded = !!on;
+    if (cardEl) {
+      if (descExpanded) cardEl.classList.add('app-modal-card--expanded');
+      else cardEl.classList.remove('app-modal-card--expanded');
+    }
+    if (expandBtn) expandBtn.textContent = descExpanded ? 'Collapse' : 'Expand';
+  }
 
   // Default download glyph — used when the catalog entry doesn't carry
   // a logo URL we can resolve (or carries the placeholder we already
@@ -89,16 +120,6 @@
       + '<span class="app-modal-row-label">' + esc(label) + '</span>'
       + '<span class="app-modal-row-value">' + esc(String(value)) + '</span>'
       + '</div>';
-  }
-
-  // Render a row with an em-dash when value is empty so the row is
-  // still legible (matches the "intentionally unset" cue we want for
-  // `allowed_origins: []`). Returns empty string for null/undefined so
-  // a totally-absent field in the catalog suppresses its row instead.
-  function rowOrDash(label, value) {
-    if (value == null) return '';
-    var s = String(value).trim();
-    return row(label, s.length > 0 ? s : '—');
   }
 
   // Format a byte count as a megabyte string. Two decimal places —
@@ -226,31 +247,25 @@
     return html;
   }
 
-  // The Downloads + Rating rows that get prepended to the body row
-  // stack on every show(). Stamped with IDs so the async fetch can
-  // re-query and update them after the JSONs land. Uses the same
-  // `.app-modal-row` / `.app-modal-row-label` / `.app-modal-row-value`
-  // markup as the metadata rows below so labels line up across the
-  // whole list. `.app-modal-rating-value` adds flex alignment for the
-  // star <img>s + trailing count span.
-  function statsRowsHtml() {
-    return '<div class="app-modal-row">'
-      + '<span class="app-modal-row-label">Downloads</span>'
-      + '<span id="app-modal-downloads" class="app-modal-row-value">' + formatCount(0) + '</span>'
-      + '</div>'
-      + '<div class="app-modal-row">'
-      + '<span class="app-modal-row-label">Rating</span>'
-      + '<span id="app-modal-rating" class="app-modal-row-value app-modal-rating-value">'
+  // The "Rating | Downloads" line shown in the HEADER, under the packageId
+  // (moved out of the body row stack). Rating on the left — the interactive
+  // star row + average + count — a thin divider, then the download count.
+  // Stamped with the same #app-modal-rating / #app-modal-downloads IDs the
+  // async loadStats() + submitRating() re-query, so relocating the stats
+  // from the body to the header changed only where this markup lands.
+  // `.app-modal-rating-value` keeps the star-row flex alignment; the extra
+  // inline flex styles let the two stats sit on one line. The rating-message
+  // host is now a static element in the header markup (see apps.html), so
+  // this no longer emits it.
+  function headStatsHtml() {
+    return '<span id="app-modal-rating" class="app-modal-rating-value" style="display:inline-flex;align-items:center;">'
       + renderStarsHtml(0, 0)
       + '</span>'
-      + '</div>'
-      // Host slot for the inline rating-submission message ("Sign in
-      // to rate" / "Rating failed. Try again."). Empty by default —
-      // collapses to a zero-height div so the layout is unchanged
-      // when no message is showing. Populated by setRatingMessage()
-      // with a full `.app-modal-row` so the message inherits the same
-      // border/padding cadence as the surrounding metadata rows.
-      + '<div id="app-modal-rating-msg-host"></div>';
+      + '<span class="app-modal-headstats-sep" style="opacity:0.4;padding:0 2px;">|</span>'
+      + '<span class="app-modal-headstats-dl" style="display:inline-flex;align-items:center;gap:6px;">'
+      + '<img src="brewser://assets/download.png" alt="Downloads" style="width:15px;height:15px;">'
+      + '<span id="app-modal-downloads">' + formatCount(0) + '</span>'
+      + '</span>';
   }
 
   // Bind per-star click listeners. Required because the engine's
@@ -301,10 +316,11 @@
     var host = document.getElementById('app-modal-rating-msg-host');
     if (!host) return;
     if (!html) { host.innerHTML = ''; return; }
-    host.innerHTML = '<div class="app-modal-row app-modal-rating-msg-row">'
-      + '<span class="app-modal-row-label"></span>'
-      + '<span class="app-modal-row-value">' + html + '</span>'
-      + '</div>';
+    // Simple inline message under the header stats line. The rating now
+    // lives in the header (not the body row list), so it no longer borrows
+    // the `.app-modal-row` border/padding cadence — a plain left-aligned
+    // note sits directly beneath "Rating | Downloads".
+    host.innerHTML = '<div style="margin-top:4px;font-size:13px;text-align:left;">' + html + '</div>';
   }
 
   // Rating-submission state. `currentRatingAvg/Count` are the values
@@ -647,7 +663,42 @@
     // CSS rule hides the slot when the catalog entry has no `id`.
     if (identifierEl) identifierEl.textContent = currentDetail.id || '';
 
-    if (descEl) descEl.textContent = currentDetail.description || '';
+    // Description block. Prefer the full HTML `description` (carried in the
+    // catalogue entry / local manifest) rendered as HTML so paragraphs,
+    // bold and bullet lists show — the developer-authored body is
+    // wp_kses-sanitized on the WP side, and the `.app-modal-description`
+    // CSS bounds it with a max-height + scrollbar. Fall back to the short
+    // blurb (`description`) as plain text when there's no full description.
+    // innerHTML/textContent both replace the children, so swapping apps is
+    // cache-safe (fresh nodes each open, per the toast-host note above).
+    var hasDescription = false;
+    if (descEl) {
+      var fullDesc = (typeof currentDetail.fullDescription === 'string')
+        ? currentDetail.fullDescription : '';
+      if (fullDesc.replace(/^\s+|\s+$/g, '') !== '') {
+        descEl.innerHTML = fullDesc;
+        hasDescription = true;
+      } else {
+        var shortDesc = currentDetail.description || '';
+        descEl.textContent = shortDesc;
+        hasDescription = shortDesc.replace(/^\s+|\s+$/g, '') !== '';
+      }
+      // Reset the scroll position so a freshly-opened app always starts
+      // reading from the top. The description element persists across
+      // opens (only its children are swapped by innerHTML/textContent),
+      // so without this it inherits the previous app's scrollTop. The
+      // scrollTop setter bumps the modal tree version when the element is
+      // in the modal layer, so the modal cache repaints at offset 0 (see
+      // the modal inner-scroll note at the top of this file).
+      descEl.scrollTop = 0;
+    }
+    // Only surface the Expand toggle when there's a description to expand —
+    // mirrors the description block's own `:empty { display:none }` rule so
+    // we never leave an orphaned button under a hidden block.
+    if (expandRow) {
+      if (hasDescription) expandRow.classList.remove('app-modal-expand-row--hidden');
+      else expandRow.classList.add('app-modal-expand-row--hidden');
+    }
 
     // Detail rows in the order requested: category → features →
     // permissions → allowed_origins → developer → source. Identifier
@@ -655,23 +706,21 @@
     // identifierEl above) so the modal surfaces it next to the logo.
     // Version + license are shown as chips in the meta strip, so we
     // don't repeat them here either.
+    // Rating | Downloads go in the HEADER (under the packageId), not the
+    // body row stack. Rendered as the 0 / 5-empty-stars placeholder;
+    // loadStats() rewrites the value spans once the configs land. Also
+    // clear any stale rating message from a previous open (the message
+    // host is a static header element now, not re-stamped each show()).
+    if (headStatsEl) headStatsEl.innerHTML = headStatsHtml();
+    setRatingMessage('');
+
     var rows = [];
-    // Downloads + Rating sit at the top of the row stack so the user
-    // sees popularity + score before the metadata fields. Initial render
-    // is the 0 / 5-empty-stars placeholder; loadStats() rewrites the
-    // value spans once the configs land.
-    rows.push(statsRowsHtml());
     if (currentDetail.category) rows.push(row('Category', currentDetail.category));
     if (currentDetail.features) rows.push(row('Features', currentDetail.features));
     if (currentDetail.permissions) rows.push(row('Permissions', currentDetail.permissions));
-    // `allowed_origins: []` (deliberate "no external fetches") and an
-    // absent field both round-trip through the renderer as the same
-    // empty string — show the row with an em-dash in that case so
-    // the modal still surfaces the field instead of silently dropping
-    // it. Callers that genuinely want the row hidden can omit the
-    // field from catalogue.json entirely (renderer drops null/undefined
-    // before stringifying).
-    rows.push(rowOrDash('Allowed origins', currentDetail.allowedOrigins));
+    // Drop the row entirely when there are no allowed origins — matches
+    // the Features row above rather than surfacing an empty em-dash cell.
+    if (currentDetail.allowedOrigins) rows.push(row('Allowed origins', currentDetail.allowedOrigins));
     if (currentDetail.developer) rows.push(row('Developer', currentDetail.developer));
     if (currentDetail.source) rows.push(row('Source', currentDetail.source));
     bodyEl.innerHTML = rows.join('');
@@ -690,8 +739,8 @@
     ratingInFlight = false;
     clearOfflineToast();
 
-    // Bind the per-star listeners on the placeholder 0/0 row that
-    // statsRowsHtml just stamped into bodyEl. Without this the user
+    // Bind the per-star listeners on the placeholder 0/0 stars that
+    // headStatsHtml just stamped into the header. Without this the user
     // could tap a star before loadStats() resolves and the tap would
     // silently no-op (no listeners attached yet). loadStats's
     // re-render path re-binds against the post-fetch stars too.
@@ -817,6 +866,10 @@
       }
     }
 
+    // Always open in the collapsed view — the expanded reading state is a
+    // transient per-read toggle, not a sticky preference across opens.
+    setExpanded(false);
+
     overlay.classList.add('app-modal-overlay--open');
     modalOpen = true;
   }
@@ -825,6 +878,9 @@
     overlay.classList.remove('app-modal-overlay--open');
     modalOpen = false;
     currentDetail = null;
+    // Drop the expanded class so a lingering `--expanded` state can't ride
+    // into the next open (show() also resets, but keep close() self-clean).
+    setExpanded(false);
     // Drop any pending offline toast so it doesn't ride the next
     // open. The timer is also cancelled so it can't fire into a
     // closed modal.
@@ -855,6 +911,15 @@
     close();
     if (e && e.stopPropagation) e.stopPropagation();
   });
+
+  // Expand / Collapse the description. stopPropagation keeps the tap from
+  // bubbling to the overlay backdrop close handler.
+  if (expandBtn) {
+    expandBtn.addEventListener('click', function (e) {
+      setExpanded(!descExpanded);
+      if (e && e.stopPropagation) e.stopPropagation();
+    });
+  }
 
   // Play (Launch) click → warnings-modal handoff when applicable.
   // pendingLaunchUrl is set in show() ONLY when this detail's

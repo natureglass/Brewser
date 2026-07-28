@@ -6,7 +6,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, HOME_SECTIONS, type LibraryTabRender, loadConfig, loadKeyboardRegistry, loadLibraryTabs, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine } from '../profile/browser-toolbar.js';
+import { type AppEntry, HOME_SECTIONS, type LibraryTabRender, loadConfig, loadKeyboardRegistry, loadLibraryTabs, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, MISSING_APP_LOGO_URL, resolveSearchEngine } from '../profile/browser-toolbar.js';
 import type { LibraryTabId } from '@switch-web/runtime';
 
 /**
@@ -1013,13 +1013,26 @@ function renderBookmarkCards(
  * missing entries show Download (stub for now). Missing entries also
  * carry `data-missing="true"` and the `app-card--missing` class so
  * the card visuals still distinguish at a glance. */
+/** Rating average → short display string ("5", "4.5"); "0" when unrated. */
+function formatRatingAvg(avg: number): string {
+	if (!Number.isFinite(avg) || avg <= 0) return '0';
+	const s = avg.toFixed(1);
+	return s.endsWith('.0') ? s.slice(0, -2) : s;
+}
+
+/** Non-negative integer count with thousands separators ("1,234"). */
+function formatCardCount(n: number): string {
+	const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+	return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 	return entries.map((e) => {
 		const isMissing = e.missing === true;
-		const logo = htmlEscape(e.logo);
-		const alt = htmlEscape(`${e.title} logo`);
+		const banner = htmlEscape(e.banner);
+		const alt = htmlEscape(`${e.title} banner`);
 		const title = htmlEscape(e.title);
-		const desc = e.description ? `<span>${htmlEscape(e.description)}</span>` : '';
+		const blurb = e.description ? `<div class="app-card__blurb">${htmlEscape(e.description)}</div>` : '';
 		// `data-app-detail` is read by the launcher's modal script.
 		// Emitted on EVERY card now (installed + missing) so taps on
 		// any card route through the modal instead of navigating
@@ -1032,7 +1045,14 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		const detailAttrs = ` data-app-detail="${htmlEscape(JSON.stringify({
 			id: e.id,
 			name: e.title,
+			// `description` is the short card blurb (the summary). The modal
+			// shows the full HTML in `fullDescription` and falls back to this
+			// blurb when there is no full description.
 			description: e.description,
+			// Full HTML description — the modal renders it as HTML in a
+			// scrollable block. Kept in the catalogue entry (v1), so no
+			// remote manifest fetch is needed to show it.
+			fullDescription: e.fullDescription,
 			// `logo` carries the brewser:// URL the script stamps
 			// into the modal header. Installed entries get the
 			// real `brewser://apps/.../<logo>` path; missing
@@ -1121,24 +1141,44 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		//     catalog's `version`) → yellow `vOld → vNew` upgrade chip.
 		//   - Installed-and-current OR catalog-only-version → ordinary
 		//     blue version pill.
-		const versionChip = isMissing
-			? `<div class="app-meta__version app-meta__version--new">NEW</div>`
-			: e.installedVersion && e.version
-				? `<div class="app-meta__version app-meta__version--upgrade"><span>v${htmlEscape(e.installedVersion)}</span>${UPGRADE_ARROW_SVG}<span>v${htmlEscape(e.version)}</span></div>`
-				: e.version
-					? `<div class="app-meta__version">v${htmlEscape(e.version)}</div>`
-					: '';
-		const licenseChip = e.license
-			? `<div class="app-meta__license">${htmlEscape(e.license)}</div>`
+		// Footer: rating on the left (a star icon + average, or "Not rated
+		// yet"), download count on the right. Both come from the cached
+		// stats.json via the card model; absent stats read as 0 / unrated,
+		// which is the honest offline state (and matches the mockup).
+		const rating = e.ratingCount > 0
+			? `${formatRatingAvg(e.ratingAvg)}<span class="app-card__rcount"> (${formatCardCount(e.ratingCount)})</span>`
+			: 'Not rated yet';
+		const ratingHtml = `<span class="app-card__rating"><img class="app-card__ricon" src="brewser://assets/star_full.png" alt="">${rating}</span>`;
+		const dlWord = e.downloads === 1 ? 'download' : 'downloads';
+		const downloadsHtml = `<span class="app-card__downloads"><img class="app-card__dicon" src="brewser://assets/download.png" alt="">${formatCardCount(e.downloads)} ${dlWord}</span>`;
+		const footer = `<div class="app-card__footer">${ratingHtml}${downloadsHtml}</div>`;
+		// Banner fallback: not-installed apps point `banner` at the remote
+		// catalogue URL, which loads the real image on hardware but fails
+		// offline (e.g. Citron); a broken load would otherwise paint the
+		// `alt`-text placeholder. `data-fallback-src` tells the engine's
+		// `<img>` loader to retry once with the bundled download.png (a
+		// 480×380 banner-shaped placeholder) instead. Skipped when the
+		// banner already IS download.png so we don't declare a no-op retry.
+		const bannerFallback = e.banner !== MISSING_APP_LOGO_URL
+			? ` data-fallback-src="${htmlEscape(MISSING_APP_LOGO_URL)}"`
 			: '';
-		// Meta strip sits at the TOP of the card now: version chip flush
-		// left, license chip flush right, logo + title + description
-		// stacked below. Rendered first in document order so column-flex
-		// places it as the topmost row without needing any pinning.
-		const meta = (versionChip || licenseChip)
-			? `<div class="app-card__meta">${versionChip}${licenseChip}</div>`
-			: '';
-		return `<a class="app-card${missingClass}${upgradeClass}"${missingAttr}${detailAttrs}>${meta}<img class="app-logo" src="${logo}" alt="${alt}"><strong>${title}</strong>${desc}</a>`;
+		// Store-style card: full-width banner on top, then a body with the
+		// title, blurb, and the rating|downloads footer. Install state
+		// (NEW / upgrade / version / license) is no longer chipped on the
+		// card — it lives in the detail modal that every card tap opens.
+		//
+		// The banner shows the app image IN FULL — scaled to the card width at
+		// the image's own aspect ratio, so the height follows the width (see
+		// `.app-banner`: width:100% + height auto + object-fit:contain; the card
+		// auto-sizes to fit). `width`/`height` are the placeholder's dimensions
+		// (480×380), used only to reserve the box at the right shape BEFORE the
+		// async image load so the body doesn't jump; the loaded image's own
+		// natural aspect takes over once it arrives. The gray `.app-banner`
+		// background fills the box while loading.
+		return `<a class="app-card"${missingAttr}${detailAttrs}>`
+			+ `<img class="app-banner" width="480" height="380" src="${banner}"${bannerFallback} alt="${alt}">`
+			+ `<div class="app-card__body"><strong>${title}</strong>${blurb}${footer}</div>`
+			+ `</a>`;
 	}).join('');
 }
 

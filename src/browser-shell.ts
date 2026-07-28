@@ -59,7 +59,7 @@ import {
 	videoToggleMute,
 } from '@switch-web/runtime';
 import {
-	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
+	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, isAnyModalOpen, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
 	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveAboveCanvasOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
@@ -1731,6 +1731,13 @@ export class BrowserShell {
 		if (isColorPickerOpen()) return false;
 		// 2026-06-18 number picker — same shape.
 		if (isNumberPickerOpen()) return false;
+		// 2026-07-27 `<browser-modal>` overlays (app-detail / download /
+		// warnings) — same shape as the picker/dialog gates. While one is
+		// open the page behind is inert; scrolling it would slide content
+		// under the modal (the reported bug). The modal owns its own inner
+		// scroll — the app detail's description scrolls via `element.scrollTop`
+		// (touch-drag → `liveScrollSession`), which never routes through here.
+		if (isAnyModalOpen()) return false;
 		// 2026-06-15: while any `<dialog>.showModal()`-opened dialog is
 		// visible (still has the `open` attribute), scrolling the host
 		// page is a spec violation — the modal-blocking semantics make

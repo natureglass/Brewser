@@ -649,8 +649,24 @@ export interface AppEntry {
 	 * keys its `data-app-detail` payload on this. */
 	id: string;
 	title: string;
+	/** Short card blurb shown under the title — the normalized `summary`
+	 * (the human "Short description", or a derived fallback). */
 	description: string;
+	/** Full HTML description for the detail modal (rendered as HTML in a
+	 * scrollable block). '' when neither the catalogue entry nor the local
+	 * manifest carries one. */
+	fullDescription: string;
 	logo: string;
+	/** Card banner image URL. Installed → on-disk banner; available →
+	 * remote catalogue banner (`logoUrl`); final fallback download.png. */
+	banner: string;
+	/** Raw rating average (0–5) from cached stats.json; 0 when unrated /
+	 * no stats. `ratingCount` gates the "Not rated yet" vs numeric display. */
+	ratingAvg: number;
+	/** Number of ratings from stats.json; 0 when unrated / no stats. */
+	ratingCount: number;
+	/** Download count from stats.json; 0 when none / no stats. */
+	downloads: number;
 	url: string;
 	/** Semantic version string from `catalogue.json`'s `version` field
 	 * (e.g. `"1.0.0"`). Empty string when the entry omits it — the
@@ -721,7 +737,7 @@ export const HOME_SECTIONS: readonly LibraryTabId[] = ['featured', 'recent', 'po
  * mirrored from `romfs:/shell/assets/` into the per-profile storageRoot
  * by `seedRomfs` and served through the
  * normal `brewser://assets/...` route. */
-const MISSING_APP_LOGO_URL = 'brewser://assets/download.png';
+export const MISSING_APP_LOGO_URL = 'brewser://assets/download.png';
 
 /** One rendered library tab: availability + reason + card entries. */
 export interface LibraryTabRender {
@@ -804,7 +820,7 @@ export function loadLibraryTabs(appRoot: string): Record<LibraryTabId, LibraryTa
 		out[id] = {
 			available: view.available,
 			reason: view.reason,
-			entries: view.apps.map((a: LibraryApp) => libraryAppToCard(a, appRoot)),
+			entries: view.apps.map((a: LibraryApp) => libraryAppToCard(a, appRoot, stats)),
 		};
 	}
 	return out;
@@ -827,7 +843,7 @@ export function isRevokedInCachedCatalogue(appRoot: string, appId: string): bool
  * modal payloads consume. Field authority follows the contract: the
  * catalogue owns availability/version/curation, the local manifest
  * owns behaviour; display fields prefer whichever side is present. */
-function libraryAppToCard(app: LibraryApp, appRoot: string): AppEntry {
+function libraryAppToCard(app: LibraryApp, appRoot: string, stats: ParsedStats | null): AppEntry {
 	const inst = app.installed;
 	const listing = app.listing;
 	// Directory name is authoritative for paths (flat layout,
@@ -836,6 +852,18 @@ function libraryAppToCard(app: LibraryApp, appRoot: string): AppEntry {
 	const entryRel = stripLeadingSlashes(inst ? inst.entry : listing?.entryRel ?? 'index.html');
 	const logoRel = stripLeadingSlashes(inst ? inst.logo : listing?.logoRel ?? '');
 	const hasLogo = logoRel !== '' && appFileExists(`${appRoot}apps/${dirName}/${logoRel}`);
+	// Card banner. Installed apps show their on-disk banner; not-installed
+	// (available) apps have no local file, so we point at the catalogue's
+	// remote banner URL (`logoUrl`) — the real image loads on hardware /
+	// online. Offline (e.g. Citron) an available app's remote banner can't
+	// load; the generic download.png is the final fallback.
+	const banner = hasLogo
+		? `brewser://apps/${dirName}/${logoRel}`
+		: (listing?.logoUrl ?? MISSING_APP_LOGO_URL);
+	// Operational counters from the cached stats.json (C2). Absent when
+	// stats haven't synced (offline / pre-first-sync) → 0 / "not rated",
+	// which is the correct honest state on the card.
+	const st = stats?.stats?.[app.id];
 	// Marked-and-blocked: a revoked app renders with the missing-card
 	// treatment so the launcher intercepts the tap (no navigation).
 	// The navigation-level guard for direct URLs lands with Phase 4's
@@ -845,7 +873,12 @@ function libraryAppToCard(app: LibraryApp, appRoot: string): AppEntry {
 		id: app.id,
 		title: inst?.name ?? listing?.name ?? app.id,
 		description: listing?.summary ?? inst?.summary ?? '',
+		fullDescription: listing?.description ?? inst?.description ?? '',
 		logo: hasLogo ? `brewser://apps/${dirName}/${logoRel}` : MISSING_APP_LOGO_URL,
+		banner,
+		ratingAvg: st ? st.ratingAvg : 0,
+		ratingCount: st ? st.ratingCount : 0,
+		downloads: st ? st.downloads : 0,
 		url: `brewser://apps/${dirName}/${entryRel}`,
 		version: listing?.version ?? inst?.version ?? '',
 		license: listing?.license ?? inst?.license ?? '',

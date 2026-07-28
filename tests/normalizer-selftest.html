@@ -124,6 +124,47 @@ async function main() {
      'v1 live: publishedAt is a KNOWN v1 field, not drift',
      JSON.stringify(v1live.kind === 'Ok' ? v1live.catalogue.report.unknownEntryFields : v1live));
 
+  // ---- summary source: human "Short description" preferred over derived --
+  // The WP builder now emits the human Short description as the entry's
+  // `summary`. A v1 entry that carries one uses it VERBATIM (not the derived
+  // truncation), `summary` is a KNOWN v1 field (not drift), and the full
+  // HTML `description` is still carried through for the detail modal.
+  const sumDoc = JSON.parse(v1Text);
+  const derivedFirst = summarize(sumDoc.apps[0].description);
+  sumDoc.apps[0].summary = 'Hand-written one-line blurb.';
+  const sd = parseCatalogue(JSON.stringify(sumDoc));
+  ok(sd.kind === 'Ok', 'v1 with summary parses Ok', sd.kind);
+  ok(sd.kind === 'Ok' && sd.catalogue.apps[0].summary === 'Hand-written one-line blurb.',
+     'v1: entry summary used verbatim (human blurb), not derived',
+     sd.kind === 'Ok' ? sd.catalogue.apps[0].summary : sd.kind);
+  ok(sd.kind === 'Ok' && sd.catalogue.apps[0].summary !== derivedFirst,
+     'v1: human summary overrides the derived one');
+  ok(sd.kind === 'Ok' && sd.catalogue.report.unknownEntryFields.length === 0,
+     'v1: summary is a known field, not drift',
+     JSON.stringify(sd.kind === 'Ok' ? sd.catalogue.report.unknownEntryFields : sd));
+  ok(sd.kind === 'Ok' && sd.catalogue.apps[0].description === sumDoc.apps[0].description,
+     'v1: full HTML description carried through to NormalizedApp.description');
+
+  // Blank/whitespace summary (developer left Short description empty) falls
+  // back to the derived summary — cards never go blank.
+  const blankDoc = JSON.parse(v1Text);
+  blankDoc.apps[0].summary = '   ';
+  const bd = parseCatalogue(JSON.stringify(blankDoc));
+  ok(bd.kind === 'Ok' && bd.catalogue.apps[0].summary === derivedFirst,
+     'v1: blank summary falls back to the derived summary',
+     bd.kind === 'Ok' ? bd.catalogue.apps[0].summary.slice(0, 30) : bd.kind);
+
+  // A v2 entry may now carry `description` (kept in the catalogue) — it is a
+  // KNOWN field (not drift) and populates NormalizedApp.description.
+  const v2desc = JSON.parse(v2Text);
+  v2desc.apps[0].description = '<p>Full <strong>body</strong>.</p>';
+  const v2d = parseCatalogue(JSON.stringify(v2desc));
+  ok(v2d.kind === 'Ok'
+     && v2d.catalogue.apps[0].description === '<p>Full <strong>body</strong>.</p>'
+     && v2d.catalogue.report.unknownEntryFields.length === 0,
+     'v2: description is a known field, carried to NormalizedApp.description',
+     JSON.stringify(v2d.kind === 'Ok' ? v2d.catalogue.report.unknownEntryFields : v2d));
+
   // Unknown entity in a v1 description → recorded, not silent.
   const entDoc = JSON.parse(v1Text);
   entDoc.apps[0].description = '<p>&oelig;uvre &amp; more &unknownent; text</p>';

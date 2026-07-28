@@ -92,6 +92,19 @@ async function main() {
   ok(JSON.stringify(midi.permissionSlugs) === JSON.stringify(['usb', 'device_info']),
      'installed permissions slug-normalized', JSON.stringify(midi.permissionSlugs));
   ok(midi.summary === 'MIDI & synth lab', 'installed summary derived from HTML description', midi.summary);
+  ok(midi.description === '<p>MIDI &amp; synth <b>lab</b></p>',
+     'installed: full HTML description carried through for the modal', midi.description);
+  // A manifest carrying its own `summary` (the human Short description) uses
+  // it verbatim — the derived summary is only the fallback.
+  const withSummary = enumerateInstalledApps({
+    listAppDirs: () => ['com.natureglass.blurby'],
+    readAppText: (dir, rel) => rel === 'manifest.json'
+      ? JSON.stringify({ ...goodManifest, id: 'com.natureglass.blurby', summary: 'Hand-written blurb.' })
+      : null,
+    appFileExists: () => true,
+  });
+  ok(withSummary.apps[0].summary === 'Hand-written blurb.',
+     'installed: manifest summary used verbatim over the derived one', withSummary.apps[0].summary);
   const mm = en.apps.find((a) => a.dirName === 'mismatch-dir');
   ok(mm.id === 'com.other.thing' && mm.dirName === 'mismatch-dir',
      'mismatch: manifest id for identity, dirName for paths');

@@ -299,21 +299,16 @@ input[name="apps-tab"] { display: none; }
 
 .app-card {
   position: relative;
-  /* Block layout (not flex) so the existing painters center the logo
-     under the parent's `text-align: center`, and the `<strong>` title
-     + `<span>` description blocks stretch full-width with their own
-     `text-align: left` for readable copy. The meta strip on top
-     handles its left-right chip layout via its own internal flex. */
+  /* Store-style card: a full-width banner on top, then a body with the
+     title, blurb, and a rating|downloads footer. The card height is auto
+     (banner + body) instead of a fixed value that left dead space under the
+     footer; the grid equalises each row to its tallest card so rows stay
+     uniform. `overflow: hidden` clips the banner to the rounded corners and
+     caps a chatty blurb. */
   display: block;
   overflow: hidden;
-  padding: 14px 18px;
-  /* Fixed height across the whole grid — see the same rule in
-     `shell/assets/main.css` for the rationale (avoids the per-tap
-     localized relayout collapsing short-content cards on `:active`).
-     280 px fits the meta strip + logo + title + 3-line description
-     cap with margin to spare; `overflow: hidden` clips outliers. */
-   height: 245px;
-  text-align: center;
+  padding: 6px;
+  text-align: left;
   color: #eaf2ff;
   text-decoration: none;
   background: #14202d;
@@ -321,37 +316,83 @@ input[name="apps-tab"] { display: none; }
   border-radius: 16px;
 }
 
-.app-logo {
+/* Full-width banner filling the top of the card - the app's appbanner
+   (local file for installed apps, the catalogue's remote banner for
+   available ones). `object-fit: cover` fills the strip and crops. */
+.app-banner {
   display: block;
-  width: 88px;
-  height: 88px;
+  /* Full-width banner shown IN FULL. `height` is auto, so the box takes the
+     image's own aspect ratio (height follows width): the engine reserves it at
+     the placeholder's 480x380 shape before load (from the img width/height
+     attrs) and switches to the loaded image's natural aspect once it arrives,
+     so the body doesn't jump. `object-fit: contain` scales the image to fit the
+     box WITHOUT cropping or distortion; because the box matches the image's
+     aspect it fills edge to edge (a non-conforming banner letterboxes onto the
+     gray `background`, which also fills the box while loading). Rounded via
+     border-radius (the painter clips both the fill and the image). */
+  width: 100%;
+  margin: 0;
+  background: #8b909a;
   object-fit: contain;
-  margin-bottom: 14px;
+  border-radius: 12px;
 }
 
+.app-card__body {
+  padding: 10px 14px 12px;
+  text-align: left;
+}
+
+/* Title - up to two lines, hard-clipped (the painter has no line-clamp /
+   ellipsis, so this is a plain overflow cut). */
 .app-card strong {
   display: block;
   color: #ffd35e;
-  font-size: 1.15em;
-  margin-bottom: 8px;
-  text-align: left;
+  font-size: 1.05em;
+  line-height: 1.2;
+  margin: 0 0 5px;
+  max-height: 24px;
+  overflow: hidden;
 }
 
-/* Description text — clamped to three lines max so cards stay uniform
-   no matter how chatty the catalog blurb is. `max-height` is set just
-   above `3 × line-height` (4.5em vs the bare-min 4.05em) so descender
-   ink on the third line — gpqy etc. — paints in full instead of being
-   cut by the baseline. `overflow: hidden` still chops a fourth line.
-   (Brewser's painter doesn't honor `-webkit-line-clamp` / `text-
-   overflow: ellipsis`, so the cut is a hard clip — fine for catalog
-   copy that already favors short blurbs.) */
-.app-card span {
+/* Blurb (the catalogue summary) - two lines, hard-clipped. */
+.app-card__blurb {
   display: block;
   color: #9bb1d6;
-  line-height: 1.35;
-  max-height: 4.5em;
+  font-size: 0.9em;
+  line-height: 1.3;
+  max-height: 44px;
   overflow: hidden;
-  text-align: left;
+  margin: 0 0 9px;
+}
+
+/* Footer: rating flush left (accent), downloads flush right (muted). */
+.app-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.85em;
+}
+.app-card__rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #ffd35e;
+  white-space: nowrap;
+}
+.app-card__rcount { color: #9bb1d6; }
+.app-card__downloads {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #9bb1d6;
+  white-space: nowrap;
+}
+.app-card__ricon,
+.app-card__dicon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
 }
 
 /* Version + license footer pinned to the card's bottom edge. The
@@ -717,10 +758,25 @@ ul.settings-list li:active {
 
 .app-modal-description {
   color: #cdd9ee;
-  margin: 0;
+  margin: 0 0 16px;
   text-align: left;
+  max-height: 112px;
+  overflow-y: auto;
+  line-height: 1.45;
+  padding: 12px 14px;
+  border: 1px solid #2c3f6b;
+  border-radius: 8px;
 }
 .app-modal-description:empty { display: none; }
+/* Full-description HTML children (paragraphs, bold, bullet lists) — give
+   them readable spacing since live-DOM has no UA margin defaults. */
+.app-modal-description p { margin: 0 0 8px; }
+.app-modal-description p:last-child { margin-bottom: 0; }
+.app-modal-description ul,
+.app-modal-description ol { margin: 0 0 8px; padding-left: 18px; }
+.app-modal-description li { margin: 2px 0; }
+.app-modal-description strong { font-weight: 700; }
+.app-modal-description em { font-style: italic; }
 
 .app-modal-body { margin-bottom: 18px; text-align: left; }
 
@@ -856,6 +912,40 @@ a.app-modal-btn {
   color: #e0e8f4;
 }
 a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
+
+/* ---- Expand / collapse the description ----------------------------
+   The Expand button sits under the description block, flush right. When
+   tapped, the script adds `app-modal-card--expanded` to the card: the
+   meta strip, header and body rows hide and the description grows to
+   fill the card so a long write-up reads nearly full-screen (only the
+   bottom action row stays visible). Reset to collapsed on every open;
+   the row is hidden by the script for apps with no description. */
+.app-modal-expand-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 14px;
+}
+.app-modal-expand-row.app-modal-expand-row--hidden { display: none; }
+/* Reuses the neutral `.app-modal-btn` palette (incl. its light-mode
+   media-query override) — this only shrinks it to a secondary size.
+   Placed AFTER `.app-modal-btn` so these equal-specificity overrides win
+   on source order. */
+.app-modal-expand-btn {
+  padding: 6px 14px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+/* Expanded reading view. `min-height: 600px` gives a long description
+   room; the meta strip / header / body hide; the description's
+   max-height grows from the collapsed 112px to fill the card (the inner
+   scroll still engages past this cap — see the modal inner-scroll note).
+   The `.app-modal-actions` row is deliberately NOT hidden. */
+.app-modal-card.app-modal-card--expanded { min-height: 600px; }
+.app-modal-card--expanded .app-modal-meta,
+.app-modal-card--expanded .app-modal-header,
+.app-modal-card--expanded .app-modal-body { display: none; }
+.app-modal-card--expanded .app-modal-description { max-height: 460px; }
 
 /* Missing-card title styles muted relative to live apps so the
    catalog-vs-installed distinction is visible at a glance. */
@@ -1641,6 +1731,10 @@ fieldset.settings-group legend {
   }
   .app-card strong { color: #1d4ed8; }
   .app-card span { color: #4b5563; }
+  .app-card__blurb,
+  .app-card__downloads { color: #4b5563; }
+  .app-card__rcount { color: #4b5563; }
+  .app-card__rating { color: #1d4ed8; }
   .clickable .app-card:active {
     background: #eef2f7;
     border-color: #1d4ed8;

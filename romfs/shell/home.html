@@ -56,7 +56,7 @@
      modal HTML is shared verbatim with apps.html — keep the two in
      sync if either side changes. -->
 <browser-modal id="app-modal-overlay" class="app-modal-overlay">
-  <div class="app-modal-card">
+  <div id="app-modal-card" class="app-modal-card">
     <!-- Meta strip mirrors the `.app-card__meta` strip on grid cards:
          version chip flush left, license chip flush right, both in a
          row above the logo. The strip is rendered conditionally by
@@ -69,12 +69,23 @@
          stacked on its right. See apps.html for the full rationale —
          keep the two files in sync. -->
     <div class="app-modal-header">
-      <img id="app-modal-logo" class="app-modal-logo" src="brewser://assets/download.png" alt="App logo">
       <div class="app-modal-header-text">
         <h2 id="app-modal-title" class="app-modal-title">App</h2>
         <p id="app-modal-identifier" class="app-modal-identifier"></p>
-        <p id="app-modal-description" class="app-modal-description"></p>
+        <!-- "Rating | Downloads" stats line + inline rating-message host
+             (see apps.html for the rationale). -->
+        <div id="app-modal-headstats" class="app-modal-headstats" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:8px;"></div>
+        <div id="app-modal-rating-msg-host"></div>
       </div>
+    </div>
+    <!-- Full-width scrollable description block (sibling of the flex header
+         so its clamped max-height doesn't leave a gap) — see apps.html for
+         the full rationale. -->
+    <div id="app-modal-description" class="app-modal-description"></div>
+    <!-- Expand toggle under the description (flush right) — see apps.html for
+         the full rationale. Keep the two files in sync. -->
+    <div id="app-modal-expand-row" class="app-modal-expand-row">
+      <button id="app-modal-expand" class="app-modal-btn app-modal-expand-btn" type="button">Expand</button>
     </div>
     <!-- Body rows — see apps.html for the full rationale. -->
     <div id="app-modal-body" class="app-modal-body"></div>
