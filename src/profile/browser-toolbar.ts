@@ -26,6 +26,7 @@
 
 import {
 	buildLibraryTabs,
+	buildMyAppsTab,
 	enumerateInstalledApps,
 	joinLibrary,
 	parseCatalogue,
@@ -725,6 +726,10 @@ export interface AppEntry {
 	 * suppresses the size chip when this is zero so a catalog without
 	 * size data renders the same as the pre-`sizeBytes` layout. */
 	sizeBytes: number;
+	/** Per-user "My Apps" lifecycle badge: 'published' | 'unpublished' |
+	 * 'staged'. '' for every ordinary catalogue card (the public catalogue
+	 * carries no status) — the renderer shows a status pill only when set. */
+	status: string;
 }
 
 /** Home-section choices = the four library tabs. Labels for the
@@ -827,6 +832,67 @@ export function loadLibraryTabs(appRoot: string): Record<LibraryTabId, LibraryTa
 }
 
 /**
+ * Build the "My Apps" tab from the cached per-user `configs/my-catalogue.json`
+ * — the WordPress-generated document (a SECOND catalogue) restricted to the
+ * signed-in user's own apps. Returns null when that file is absent, empty, or
+ * rejected by the platform client, so the resource loader renders nothing and
+ * the tab (label + panel) stays hidden for signed-out users / before the first
+ * fetch.
+ *
+ * Unlike `loadLibraryTabs` (which reads the PUBLIC catalogue and shows
+ * everything on disk), this joins disk truth against the my-catalogue and
+ * keeps ONLY the apps that document lists — the developer's authored set,
+ * published / staged / unpublished — with the lifecycle carried on each card's
+ * `status`. Remote logo/launcher URLs resolve per-app via the my-catalogue's
+ * `sources` table (published → Play base, staged → the staging host), so the
+ * platform client's URL builder does the host routing.
+ */
+export function loadMyAppsTab(appRoot: string): LibraryTabRender | null {
+	const text = readTextFile(`${appRoot}configs/my-catalogue.json`);
+	if (text === null) return null;
+	const outcome = parseCatalogue(text);
+	if (outcome.kind !== 'Ok') {
+		console.debug(`[brewser] my-catalogue rejected (${outcome.kind}) — My Apps tab hidden`);
+		return null;
+	}
+	const myCatalogue = outcome.catalogue;
+
+	// Stats are shared with the main tabs so My Apps cards show the same
+	// rating / download chips. Missing or invalid stats degrade to 0 — never a
+	// failure (same rule as loadLibraryTabs).
+	const statsText = readTextFile(`${appRoot}configs/stats.json`);
+	let stats: ParsedStats | null = null;
+	if (statsText !== null) {
+		const so = parseStats(statsText);
+		if (so.kind === 'Ok') stats = so.parsed;
+	}
+
+	const enumeration = enumerateInstalledApps({
+		listAppDirs: () => {
+			try {
+				return Switch.readDirSync(`${appRoot}apps`) ?? [];
+			} catch (_) {
+				return [];
+			}
+		},
+		readAppText: (dir: string, rel: string) => readTextFile(`${appRoot}apps/${dir}/${rel}`),
+		appFileExists: (dir: string, rel: string) => appFileExists(`${appRoot}apps/${dir}/${rel}`),
+	});
+
+	// Join disk truth with the my-catalogue, then keep ONLY apps the document
+	// lists (drop installed-but-unlisted rows — My Apps is the authored set,
+	// not everything installed on this console).
+	const library = joinLibrary(enumeration.apps, myCatalogue);
+	const mine = library.apps.filter((a: LibraryApp) => a.listing !== null);
+	const view = buildMyAppsTab({ apps: mine, catalogueAvailable: true, revoked: myCatalogue.revoked });
+	return {
+		available: view.available,
+		reason: view.reason,
+		entries: view.apps.map((a: LibraryApp) => libraryAppToCard(a, appRoot, stats)),
+	};
+}
+
+/**
  * Nav-level revoked check (D3): ids in the cached catalogue's
  * `revoked` list are blocked from launch even by direct URL. Reads the
  * cache fresh per call — callers invoke once per app navigation, and
@@ -894,6 +960,9 @@ function libraryAppToCard(app: LibraryApp, appRoot: string, stats: ParsedStats |
 		missing,
 		entry: entryRel,
 		sizeBytes: listing?.sizeBytes ?? 0,
+		// Only the my-catalogue listing carries a status; the public catalogue
+		// and disk-only apps leave it ''.
+		status: listing?.status ?? '',
 	};
 }
 

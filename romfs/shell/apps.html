@@ -26,6 +26,12 @@
 <input type="radio" id="apps-tab-recent" name="apps-tab">
 <input type="radio" id="apps-tab-popular" name="apps-tab">
 <input type="radio" id="apps-tab-toprated" name="apps-tab">
+<!-- Per-user "My Apps" tab. The radio is always present, but its label
+     (`<browser-myapps-label/>`) renders only when a cached
+     configs/my-catalogue.json exists — so without one the tab is
+     unreachable (no `<label for>`), and the facet is absent until the
+     signed-in developer taps "Fetch my Apps". -->
+<input type="radio" id="apps-tab-myapps" name="apps-tab">
 
 <div class="page-shell">
   <!-- Top toolbar: tab strip flush left, action buttons flush right.
@@ -38,7 +44,15 @@
       <label for="apps-tab-recent" class="tab-label">Most Recent</label>
       <label for="apps-tab-popular" class="tab-label">Popular</label>
       <label for="apps-tab-toprated" class="tab-label">Top Rated</label>
+      <!-- Rendered only when a cached my-catalogue.json exists (see the
+           radio comment above). -->
+      <browser-myapps-label></browser-myapps-label>
     </nav>
+    <!-- "Fetch my Apps" — hidden by default; my-apps.js reveals it only when
+         a Brewser account is signed in. Tapping it fetches the signed-in
+         user's own apps from WordPress (with their Bearer token), writes
+         configs/my-catalogue.json, and reloads so the "My Apps" tab appears. -->
+    <button type="button" class="munch-link apps-fetch-mine apps-fetch-mine--hidden" data-my-catalogue-url="<browser-config-my-catalogue/>">Fetch my Apps</button>
     <button type="button" class="munch-link apps-check-updates" data-catalogue-url="<browser-config-catalogue/>" data-stats-url="<browser-config-stats/>" data-downloads-url="<browser-config-downloads/>" data-ratings-url="<browser-config-ratings/>" data-versions-url="<browser-config-versions/>">Check for Updates</button>
   </div>
   <div class="tab-panels clickable">
@@ -60,6 +74,11 @@
     <section class="tab-panel" data-tab="toprated" aria-label="Top rated apps">
       <div class="app-grid">
         <browser-tab-toprated></browser-tab-toprated>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="myapps" aria-label="My apps">
+      <div class="app-grid">
+        <browser-tab-myapps></browser-tab-myapps>
       </div>
     </section>
   </div>
@@ -337,5 +356,9 @@
 <script src="brewser://scripts/auth-shared.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>
 <script src="brewser://scripts/updates-modal.js"></script>
+<!-- my-apps.js reveals + wires the "Fetch my Apps" button. Loads after
+     auth-shared.js (above) so `globalThis.__swbAuth` is available for the
+     login check + Bearer token read. -->
+<script src="brewser://scripts/my-apps.js"></script>
 </body>
 </html>

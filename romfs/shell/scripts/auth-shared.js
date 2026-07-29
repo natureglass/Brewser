@@ -29,6 +29,10 @@
   var AUTH_DIR    = 'sdmc:/switch/brewser/shell/auth/';
   var ACTIVE_PATH = AUTH_DIR + 'active.json';
   var LOG_DIR     = 'sdmc:/switch/brewser/logs/';
+  // Per-user "My Apps" cache (written by my-apps.js). Tied to a specific
+  // signed-in user's token, so it is cleared on every login + logout below
+  // and must never survive one session into another.
+  var MY_CATALOGUE_PATH = 'sdmc:/switch/brewser/configs/my-catalogue.json';
 
   var PROVIDERS = ['google', 'microsoft'];
 
@@ -59,6 +63,14 @@
     if (!path) return;
     if (typeof Switch === 'undefined' || !Switch) return;
     try { Switch.writeFileSync(path, new Uint8Array(0)); } catch (_) {}
+  }
+
+  /** Clear the cached per-user "My Apps" document. Empty bytes read as
+   * "missing" to loadMyAppsTab, so the My Apps tab disappears. Called on
+   * login (a new user must not inherit the previous user's apps) and on
+   * every logout path. */
+  function clearMyCatalogue() {
+    safeWriteEmpty(MY_CATALOGUE_PATH);
   }
 
   function readJson(path) {
@@ -120,6 +132,8 @@
         JSON.stringify({ provider: provider, saved_at: Date.now() }, null, 2),
       );
     } catch (_) {}
+    // A fresh login must not inherit a prior user's cached My Apps.
+    clearMyCatalogue();
   }
 
   /** Overwrite `auth/active.json` with empty bytes. Per-page logout
@@ -128,6 +142,7 @@
    * central login dashboard. */
   function clearActiveProvider() {
     safeWriteEmpty(ACTIVE_PATH);
+    clearMyCatalogue();
   }
 
   /** Wipe every artifact the login flow may have ever written for a

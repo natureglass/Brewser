@@ -174,7 +174,8 @@
   // data-app-detail matches the app id. Returns null when no card on
   // the current page matches (e.g. the visible tab doesn't include
   // this app).
-  function findCardEl(id) {
+  function findCardEls(id) {
+    var out = [];
     var cards = document.querySelectorAll('[data-app-detail]');
     for (var i = 0; i < cards.length; i++) {
       var cardEl = cards[i];
@@ -183,9 +184,9 @@
       var parsed;
       try { parsed = JSON.parse(raw); } catch (_) { continue; }
       if (!parsed || parsed.id !== id) continue;
-      return cardEl;
+      out.push(cardEl);
     }
-    return null;
+    return out;
   }
 
   // After a successful install, flip the matching grid card out of
@@ -194,8 +195,19 @@
   // refreshCardUpgrade in updates-modal.js — same data-app-detail
   // round-trip + meta-strip patch.
   function refreshCardOnSuccess(detail) {
-    var cardEl = findCardEl(detail.id);
-    if (!cardEl) return;
+    // Patch EVERY card matching this id, not just the first: a published
+    // app appears in several tab panels at once (Featured / Recent /
+    // Popular / Top Rated AND My Apps), all present in the DOM. Patching
+    // only the first left the visible tab's card (often My Apps) stuck on
+    // "Download" until a reload — the app was installed but the card said
+    // otherwise.
+    var cardEls = findCardEls(detail.id);
+    for (var ci = 0; ci < cardEls.length; ci++) {
+      patchCardOnSuccess(cardEls[ci], detail);
+    }
+  }
+
+  function patchCardOnSuccess(cardEl, detail) {
     cardEl.classList.remove('app-card--missing');
     cardEl.classList.remove('app-card--upgrade');
     // Patch the embedded detail JSON so a future tap on the same card
@@ -389,6 +401,29 @@
     return true;
   }
 
+  // Look an app up in the cached per-user "My Apps" document
+  // (configs/my-catalogue.json). Apps a developer owns but that aren't in
+  // the PUBLIC catalogue (unpublished, or staged) live only here. Returns
+  // the normalized entry (with its source-resolved artifactsUrl/fileUrl)
+  // or null. Published + unpublished entries resolve to the base host and
+  // have artifact manifests; staged entries resolve to the staging host,
+  // which has none (handled by the caller).
+  function findInMyCatalogue(client, id) {
+    var text = null;
+    try {
+      var raw = Switch.readFileSync(APP_ROOT + 'configs/my-catalogue.json');
+      if (raw && raw.byteLength > 0) text = new TextDecoder().decode(raw);
+    } catch (_) { return null; }
+    if (!text) return null;
+    var outcome;
+    try { outcome = client.parseCatalogue(text); } catch (_) { return null; }
+    if (!outcome || outcome.kind !== 'Ok') return null;
+    for (var i = 0; i < outcome.catalogue.apps.length; i++) {
+      if (outcome.catalogue.apps[i].id === id) return outcome.catalogue.apps[i];
+    }
+    return null;
+  }
+
   // Fire-and-forget install for the currently-open detail. Each
   // failure flips the card into `--error`; success flips into
   // `--success` and patches the matching grid card in place.
@@ -415,17 +450,26 @@
         setError('Platform client unavailable (shell bridge missing).');
         return;
       }
-      var cached = client.readCachedCatalogue();
-      if (!cached || cached.kind !== 'Ok') {
-        setError('No usable catalogue on disk — run Check for Updates first.');
-        return;
-      }
+      // Resolve the app's remote URLs from a normalized catalogue — the only
+      // trustworthy source. Prefer the PUBLIC catalogue; fall back to the
+      // per-user "My Apps" document for apps that live only there (unpublished
+      // or staged). A missing public catalogue must NOT block a My Apps
+      // install — a user who only tapped "Fetch my Apps" has no public cache.
       var app = null;
-      for (var ai = 0; ai < cached.catalogue.apps.length; ai++) {
-        if (cached.catalogue.apps[ai].id === detail.id) { app = cached.catalogue.apps[ai]; break; }
+      var cached = client.readCachedCatalogue();
+      if (cached && cached.kind === 'Ok') {
+        for (var ai = 0; ai < cached.catalogue.apps.length; ai++) {
+          if (cached.catalogue.apps[ai].id === detail.id) { app = cached.catalogue.apps[ai]; break; }
+        }
       }
       if (!app) {
-        setError('App is not in the current catalogue — sync and try again.');
+        // my-catalogue points each entry at its real host: the base repo for
+        // published/unpublished, the my.brewser.tech staging host for staged.
+        // Both serve an artifacts/<id>.json, so the install path is identical.
+        app = findInMyCatalogue(client, detail.id);
+      }
+      if (!app) {
+        setError('App is not in the current catalogue — run Check for Updates (or Fetch my Apps) and try again.');
         return;
       }
       statusEl.innerHTML = 'Fetching artifact manifest…';
@@ -439,7 +483,14 @@
       }
       if (cancelled) return;
       if (!resp.ok) {
-        setError('HTTP ' + resp.status + ' fetching artifact manifest.');
+        // 404 usually means a just-staged app whose files are still deploying
+        // (the staging CI writes artifacts/<id>.json on deploy) — a transient,
+        // retryable state rather than a hard failure.
+        if (resp.status === 404) {
+          setError('This app’s file list isn’t available yet — if it was just staged, its files are still deploying. Try again shortly.');
+        } else {
+          setError('HTTP ' + resp.status + ' fetching artifact manifest.');
+        }
         return;
       }
       var text;

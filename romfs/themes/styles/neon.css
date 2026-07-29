@@ -241,7 +241,8 @@ input[name="apps-tab"] { display: none; }
 #apps-tab-featured:checked ~ .page-shell .tab-label[for="apps-tab-featured"],
 #apps-tab-recent:checked ~ .page-shell .tab-label[for="apps-tab-recent"],
 #apps-tab-popular:checked ~ .page-shell .tab-label[for="apps-tab-popular"],
-#apps-tab-toprated:checked ~ .page-shell .tab-label[for="apps-tab-toprated"] {
+#apps-tab-toprated:checked ~ .page-shell .tab-label[for="apps-tab-toprated"],
+#apps-tab-myapps:checked ~ .page-shell .tab-label[for="apps-tab-myapps"] {
   color: #05060a;
   background: #faff00;
   border-color: #faff00;
@@ -250,11 +251,36 @@ input[name="apps-tab"] { display: none; }
 #apps-tab-featured:checked ~ .page-shell .tab-panel[data-tab="featured"],
 #apps-tab-recent:checked ~ .page-shell .tab-panel[data-tab="recent"],
 #apps-tab-popular:checked ~ .page-shell .tab-panel[data-tab="popular"],
-#apps-tab-toprated:checked ~ .page-shell .tab-panel[data-tab="toprated"] {
+#apps-tab-toprated:checked ~ .page-shell .tab-panel[data-tab="toprated"],
+#apps-tab-myapps:checked ~ .page-shell .tab-panel[data-tab="myapps"] {
   display: block;
 }
 
+/* My Apps status pill — over the card banner's top-left (card is
+   position:relative + overflow:hidden). Only "My Apps" cards carry it. */
+.app-card__status {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0b1220;
+  background: #cfd8e3;
+}
+.app-card__status--published { background: #65bc7b; color: #08130c; }
+.app-card__status--staged { background: #ffd35e; color: #0b1220; }
+.app-card__status--unpublished { background: #b6c0cf; color: #1a2230; }
+
+/* Hidden until my-apps.js confirms a signed-in Brewser account and removes
+   the class. Two-class selector so it beats the button group's inline-flex
+   regardless of source order. */
+.apps-fetch-mine.apps-fetch-mine--hidden { display: none; }
+
 .apps-check-updates,
+.apps-fetch-mine,
 .communityApps {
   color: #05060a;
   background: #faff00;

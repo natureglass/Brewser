@@ -830,6 +830,17 @@ export class BrowserShell {
 			}
 			await this.runNavigation(() => this.navigation.goBack());
 		};
+		// Page-script-callable reload of the CURRENT page — re-runs the full
+		// load pipeline, INCLUDING the resource loader's server-tag expansion.
+		// A page script that just wrote a `configs/*.json` the loader reads
+		// (my-apps.js writing `configs/my-catalogue.json`) calls this to
+		// surface the change — e.g. reveal the freshly-fetched "My Apps" tab —
+		// without the user having to navigate away and back.
+		(globalThis as { __swbReload?: () => Promise<void> })
+			.__swbReload = async () => {
+			if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
+			await this.runNavigation(() => this.navigation.reload());
+		};
 		// Page-script-callable reload — exits any fullscreen mode then
 		// re-runs the current navigation. Used by updates-modal.js after
 		// it writes a fresh `catalogue.json` so the apps grid re-renders

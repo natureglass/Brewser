@@ -6,7 +6,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, HOME_SECTIONS, type LibraryTabRender, loadConfig, loadKeyboardRegistry, loadLibraryTabs, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, MISSING_APP_LOGO_URL, resolveSearchEngine } from '../profile/browser-toolbar.js';
+import { type AppEntry, HOME_SECTIONS, type LibraryTabRender, loadConfig, loadKeyboardRegistry, loadLibraryTabs, loadMyAppsTab, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, MISSING_APP_LOGO_URL, resolveSearchEngine } from '../profile/browser-toolbar.js';
 import type { LibraryTabId } from '@switch-web/runtime';
 
 /**
@@ -382,6 +382,32 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-tab-toprated(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-toprated\s*>)?/gi,
 			() => libraryTab('toprated'),
 		);
+		// "My Apps" (per-user "Fetch my Apps") — a SEPARATE cached document
+		// (`configs/my-catalogue.json`, the WordPress-generated set of the
+		// signed-in user's own apps), NOT part of `loadLibraryTabs`. Both the
+		// tab's label and its panel render only when that file exists and
+		// parses; otherwise both collapse to '' so the facet is absent for
+		// signed-out users and before the first fetch. One `loadMyAppsTab`
+		// call (memoized) feeds both tags in a single disk pass.
+		let myAppsMemo: LibraryTabRender | null | undefined;
+		const myAppsTab = (): LibraryTabRender | null => {
+			if (myAppsMemo === undefined) myAppsMemo = loadMyAppsTab(this.appRoot);
+			return myAppsMemo;
+		};
+		out = out.replace(
+			/<browser-tab-myapps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-myapps\s*>)?/gi,
+			() => {
+				const tab = myAppsTab();
+				return tab ? this.renderLibraryTab(tab) : '';
+			},
+		);
+		// The tab's clickable label — present only when the panel is (i.e. the
+		// user has a cached my-catalogue). Keeps the CSS-radio tab unreachable
+		// (no `<label for>`) when there is nothing to show.
+		out = out.replace(
+			/<browser-myapps-label(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-myapps-label\s*>)?/gi,
+			() => (myAppsTab() ? '<label for="apps-tab-myapps" class="tab-label">My Apps</label>' : ''),
+		);
 		// `<browser-config-catalogue>` — expands to the active
 		// `config.json` `catalogue` URL, HTML-escaped so it's safe inside
 		// either an attribute or text content. Empty string when no URL
@@ -431,6 +457,18 @@ export class BrowserResourceLoader implements ResourceLoader {
 		out = out.replace(
 			/<browser-config-versions(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-versions\s*>)?/gi,
 			() => htmlEscape(RUNTIME_CONFIG_DEFAULTS.versions),
+		);
+		// `<browser-config-my-catalogue>` — expands to the strict-pinned
+		// WordPress "My Apps" endpoint. Stamped onto the apps.html "Fetch my
+		// Apps" button as `data-my-catalogue-url` so my-apps.js can fetch the
+		// signed-in user's own apps (with their Bearer session token) and write
+		// the result to `<appRoot>configs/my-catalogue.json`. Read straight from
+		// `RUNTIME_CONFIG_DEFAULTS` — like `versions`, it's a page-script-only
+		// consumer, so threading it through `BrowserConfig` would be dead
+		// indirection.
+		out = out.replace(
+			/<browser-config-my-catalogue(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-my-catalogue\s*>)?/gi,
+			() => htmlEscape(RUNTIME_CONFIG_DEFAULTS.myCatalogue),
 		);
 		// `<browser-config-telemetry>` — expands to the strict-pinned
 		// `config.telemetry` URL (runtime-bundled per
@@ -1091,9 +1129,17 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 			// Update. Zero when the catalog entry omits the field —
 			// the modal hides the chip in that case.
 			sizeBytes: e.sizeBytes,
+			// Per-user "My Apps" lifecycle ('' for ordinary catalogue cards).
+			status: e.status,
 		}))}"`;
 		const missingAttr = isMissing ? ' data-missing="true"' : '';
 		const missingClass = isMissing ? ' app-card--missing' : '';
+		// My Apps status pill (published / staged / unpublished), painted over
+		// the banner's top-left. Empty for every ordinary catalogue card, so
+		// only the "My Apps" tab shows it.
+		const statusBadge = e.status
+			? `<span class="app-card__status app-card__status--${htmlEscape(e.status)}">${htmlEscape(myAppsStatusLabel(e.status))}</span>`
+			: '';
 		// Cards with a pending upgrade get a subtly-lighter background so
 		// the upgrade-yellow chip on top has more room to breathe and the
 		// row reads as "different from the rest" at a glance. Keyed on
@@ -1176,10 +1222,22 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// natural aspect takes over once it arrives. The gray `.app-banner`
 		// background fills the box while loading.
 		return `<a class="app-card"${missingAttr}${detailAttrs}>`
+			+ statusBadge
 			+ `<img class="app-banner" width="480" height="380" src="${banner}"${bannerFallback} alt="${alt}">`
 			+ `<div class="app-card__body"><strong>${title}</strong>${blurb}${footer}</div>`
 			+ `</a>`;
 	}).join('');
+}
+
+/** Display label for a My Apps status badge; passes an unknown value
+ * through so a future status still renders text rather than nothing. */
+function myAppsStatusLabel(status: string): string {
+	switch (status) {
+		case 'published': return 'Published';
+		case 'unpublished': return 'Unpublished';
+		case 'staged': return 'Staged';
+		default: return status;
+	}
 }
 
 /** Turn a card's `url` into a navigable href. `loadCatalogGroup`
