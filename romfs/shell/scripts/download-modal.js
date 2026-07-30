@@ -454,7 +454,7 @@
       // trustworthy source. Prefer the PUBLIC catalogue; fall back to the
       // per-user "My Apps" document for apps that live only there (unpublished
       // or staged). A missing public catalogue must NOT block a My Apps
-      // install — a user who only tapped "Fetch my Apps" has no public cache.
+      // install — a profile that only ever refreshed my-catalogue has none.
       var app = null;
       var cached = client.readCachedCatalogue();
       if (cached && cached.kind === 'Ok') {
@@ -469,7 +469,7 @@
         app = findInMyCatalogue(client, detail.id);
       }
       if (!app) {
-        setError('App is not in the current catalogue — run Check for Updates (or Fetch my Apps) and try again.');
+        setError('App is not in the current catalogue — run Check for Updates and try again.');
         return;
       }
       statusEl.innerHTML = 'Fetching artifact manifest…';

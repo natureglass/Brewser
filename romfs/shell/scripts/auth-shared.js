@@ -29,7 +29,7 @@
   var AUTH_DIR    = 'sdmc:/switch/brewser/shell/auth/';
   var ACTIVE_PATH = AUTH_DIR + 'active.json';
   var LOG_DIR     = 'sdmc:/switch/brewser/logs/';
-  // Per-user "My Apps" cache (written by my-apps.js). Tied to a specific
+  // Per-user "My Apps" cache (written by the Check-for-Updates flow). Tied to a specific
   // signed-in user's token, so it is cleared on every login + logout below
   // and must never survive one session into another.
   var MY_CATALOGUE_PATH = 'sdmc:/switch/brewser/configs/my-catalogue.json';

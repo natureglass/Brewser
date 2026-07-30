@@ -59,6 +59,19 @@ COLLECT_CURRENT   := scripts/collect_current.py
 
 NRO               := brewser.nro
 NRO_LOG           := .nro-build.log
+# Release output dir. `dist/` maps to the `dist/` folder at the root of the
+# natureglass/Brewser repo, which raw.githubusercontent.com serves for the
+# self-updater. `make release` lands brewser.nro here (see the `release` target).
+DIST_DIR          ?= dist
+# The sibling brewser-apps checkout — `make release` writes its versions.json
+# (served at play.brewser.tech/versions.json), which the runtime string-compares
+# against the installed current.json to recognize a new build. Mirrors
+# romfs/configs/current.json exactly (also fixes the stale collect_versions.py).
+BREWSER_APPS_DIR  ?= ../brewser-apps
+VERSIONS_JSON     := $(BREWSER_APPS_DIR)/versions.json
+# natureglass/Brewser branch the client downloads from. Keep == src/update/
+# config.ts RELEASE_REF. (Moving off v8-migration → main.)
+RELEASE_BRANCH    ?= main
 
 # nxjs runtime build + overlay. nxjs-source-v8 produces nxjs.nro, which
 # the `nxjs-nro` packager (invoked by `npm run nro`) pulls from
@@ -76,9 +89,13 @@ NXJS_SOURCE_DIR   ?= ../nxjs-source-v8
 NXJS_SOURCE_NRO   := $(NXJS_SOURCE_DIR)/nxjs.nro
 NXJS_OVERLAY      := node_modules/@nx.js/nro/dist/nxjs.nro
 
-.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json build nro sdmc mirror-only clean help nxjs-runtime
+.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json seed-fingerprint build nro sdmc mirror-only clean help nxjs-runtime release bump
 
-all: sdmc
+# Default target is now a full self-update RELEASE (bump + sign → dist/), since
+# the primary workflow is producing installable/updatable builds. For the
+# Citron dev loop (no version bump, mirrors romfs/ to the emulator) run
+# `make sdmc` explicitly.
+all: release
 
 # Build the sibling brewser-runtime workspace so its `dist/` is fresh
 # before `sync-runtime` copies it. Without this, `make sdmc` would happily
@@ -132,43 +149,36 @@ $(CURRENT_JSON): $(BREWSER_PKG) $(BREWSER_RUNTIME_PKG) $(NXJS_PKG) $(COLLECT_CUR
 
 current-json: $(CURRENT_JSON)
 
+# Content fingerprint of the app-owned romfs (shell/ + themes/) → romfs/seed-
+# fingerprint, embedded in the NRO. browser-profile.ts re-seeds those trees on
+# an EXISTING profile when the fingerprint changes (seedRomfs is otherwise
+# missing-only, so edited pages/scripts/styles never replaced the stale on-disk
+# copies without a manual mirror). Regenerated every package so it always
+# matches the romfs being shipped.
+seed-fingerprint:
+	@bash scripts/gen-seed-fingerprint.sh
+
 build: sync-runtime check-endpoints typecheck
 	@npm run build
 
-# Build nxjs.nro from ../nxjs-source and overlay it into brewser's
-# node_modules so the next `npm run nro` packs the freshly-built runtime
-# instead of the vendored copy. Always invokes the nxjs Makefile (it's
-# incremental — recompiles only changed translation units). `cmp -s`
-# skips the cp when bytes haven't changed (cheap stat-only check after
-# a no-op nxjs make).
+# nx.js runtime build MOVED to Makefile_nxjs — it needs the devkitPro toolchain,
+# whereas this Makefile's release build is pure Node (esbuild + the nxjs-nro
+# packager, reusing the prebuilt nxjs.nro base). The self-updater is
+# zero-engine-delta, so nx.js rarely changes. If you edited nx.js C/TS source,
+# rebuild + overlay it FIRST:  make -f Makefile_nxjs
 nxjs-runtime:
-	@if [ -d "$(NXJS_SOURCE_DIR)" ]; then \
-		echo "Building $(NXJS_SOURCE_DIR) (nxjs.nro)..."; \
-		$(MAKE) -C "$(NXJS_SOURCE_DIR)" || { \
-			echo "ERROR: nxjs-source build failed — aborting before brewser packaging picks up stale nxjs.nro"; \
-			exit 1; \
-		}; \
-		if [ -f "$(NXJS_SOURCE_NRO)" ]; then \
-			if cmp -s "$(NXJS_SOURCE_NRO)" "$(NXJS_OVERLAY)" 2>/dev/null; then \
-				echo "[nxjs-runtime] $(NXJS_OVERLAY) already up to date"; \
-			else \
-				echo "Overlaying $(NXJS_SOURCE_NRO) -> $(NXJS_OVERLAY)"; \
-				cp "$(NXJS_SOURCE_NRO)" "$(NXJS_OVERLAY)" || exit 1; \
-			fi; \
-		else \
-			echo "ERROR: $(NXJS_SOURCE_NRO) not produced by nxjs make"; \
-			exit 1; \
-		fi; \
-	else \
-		echo "[nxjs-runtime] $(NXJS_SOURCE_DIR) missing - skipping (using vendored $(NXJS_OVERLAY))"; \
-	fi
+	@echo "nx.js runtime build lives in Makefile_nxjs now (it needs devkitPro)."
+	@echo "If you changed nx.js source, run:  make -f Makefile_nxjs"
+	@echo "Then re-run your main-Makefile target. (The updater is zero-engine-delta,"
+	@echo "so for updater/shell changes you can skip this entirely.)"
+	@exit 1
 
 # `npm run nro` writes brewser.nro. Citron keeps an exclusive lock on
 # the NRO while the app is open, so the write fails with EBUSY. We
 # capture all output, replay it, and on a non-zero exit specifically
 # match EBUSY to surface a clear "close Citron" message. Non-EBUSY
 # failures fall through with the original npm output preserved.
-nro: build current-json nxjs-runtime
+nro: build current-json seed-fingerprint
 	@npm run nro > $(NRO_LOG) 2>&1; \
 	status=$$?; \
 	cat $(NRO_LOG); \
@@ -193,6 +203,47 @@ mirror-only:
 	@mkdir -p "$(SDMC_DEST)"
 	@cp -r romfs/* "$(SDMC_DEST)/"
 
+# Release build for the self-updater: full NRO packaging (with the baked
+# version/counter/keyring via the --define build), output to $(DIST_DIR)/ for
+# publishing to natureglass/Brewser. Does NOT mirror to Citron (this NRO is for
+# real hardware / the update server, not the emulator). Sign + verify after:
+#   node scripts/update/make-manifest.mjs $(DIST_DIR)/$(NRO) <ver> <counter> \
+#     https://raw.githubusercontent.com/natureglass/Brewser/main/$(DIST_DIR)/$(NRO) $(DIST_DIR)
+#   node scripts/update/verify-release.mjs
+# Bump package.json version + scripts/update/build-info.json counter (strictly
+# increasing, matching the manifest counter) before each real release.
+# Bump the release version + build counter (patch version + counter+1). Runs as
+# the first step of every `release`, so each build is a new, recognizable,
+# strictly-newer version. See scripts/bump-version.mjs.
+bump:
+	@node scripts/bump-version.mjs
+
+# Full self-update RELEASE (the default target). In one go:
+#   1. bump  package.json version + build-info counter
+#   2. nro   build the bundle (bakes the new version/counter/keyring via
+#            scripts/build-main.mjs) + regen current.json + seed-fingerprint +
+#            package the fat NRO (reusing the prebuilt nxjs.nro base — see
+#            Makefile_nxjs for the runtime build)
+#   3. mirror current.json → the served versions.json (in ../brewser-apps)
+#   4. move the NRO into dist/, sign the manifest, and verify the console would
+#      accept it.
+# Does NOT rebuild nx.js and does NOT mirror to Citron (this NRO is for real
+# hardware / the update server). `bump` is a prerequisite so it completes before
+# the recursive `nro` build picks up the new version.
+release: bump
+	@$(MAKE) nro
+	@echo "[release] mirroring current.json → $(VERSIONS_JSON)"
+	@mkdir -p "$(BREWSER_APPS_DIR)"
+	@cp romfs/configs/current.json "$(VERSIONS_JSON)"
+	@mkdir -p "$(DIST_DIR)"
+	@mv -f $(NRO) "$(DIST_DIR)/$(NRO)"
+	@node scripts/update/sign-release.mjs
+	@node scripts/update/verify-release.mjs
+	@echo ""
+	@echo "[release] DONE ($(RELEASE_BRANCH)). Publish:"
+	@echo "  • push $(DIST_DIR)/$(NRO) + $(DIST_DIR)/update.json to natureglass/Brewser"
+	@echo "  • push $(VERSIONS_JSON) to brewser-apps (served at play.brewser.tech/versions.json)"
+
 clean:
 	rm -rf build/ runtime/
 	-rm -f $(NRO)
@@ -201,20 +252,22 @@ help:
 	@echo "brewser-v8 Makefile (V8-migration fork). Defaults to ../brewser-runtime-v8 + ../nxjs-source-v8."
 	@echo ""
 	@echo "Targets:"
-	@echo "  make             Full chain (runtime-build + sync-runtime + current-json + build + nro + sdmc)"
-	@echo "  make runtime-build"
-	@echo "                   Build $(BREWSER_RUNTIME_DIR) so its dist/ is fresh"
-	@echo "  make sync-runtime"
-	@echo "                   Vendor $(BREWSER_RUNTIME_DIR)/dist into runtime/ (depends on runtime-build)"
-	@echo "  make current-json"
-	@echo "                   Refresh $(CURRENT_JSON) from upstream package.json files"
-	@echo "  make nxjs-runtime"
-	@echo "                   Build $(NXJS_SOURCE_DIR) and overlay nxjs.nro into node_modules"
-	@echo "  make build       esbuild bundle (depends on sync-runtime)"
-	@echo "  make nro         Package $(NRO) (depends on build + current-json + nxjs-runtime)"
-	@echo "  make sdmc        Build + mirror romfs/ to Citron SDMC"
+	@echo "  make / make release"
+	@echo "                   FULL SELF-UPDATE RELEASE (default): bump version+counter,"
+	@echo "                   build (bakes version/counter/keyring), package the NRO into"
+	@echo "                   $(DIST_DIR)/, update $(VERSIONS_JSON), sign + verify the manifest."
+	@echo "                   Each run is a NEW, strictly-newer version. Push dist/ to"
+	@echo "                   natureglass/Brewser and versions.json to brewser-apps."
+	@echo "  make bump        Bump version + counter only (scripts/bump-version.mjs)"
+	@echo "  make sdmc        Citron dev loop: build + mirror romfs/ to SDMC (NO bump/sign)"
 	@echo "  make mirror-only Mirror romfs/ to SDMC without rebuilding"
+	@echo "  make nro         Package $(NRO) at repo root (build + current-json + seed-fingerprint)"
+	@echo "  make build       esbuild bundle with baked defines (depends on sync-runtime)"
+	@echo "  make current-json  Refresh $(CURRENT_JSON) from upstream package.json files"
 	@echo "  make clean       Remove build/, runtime/, $(NRO)"
+	@echo ""
+	@echo "  nx.js runtime (needs devkitPro; separate — updater is zero-engine-delta):"
+	@echo "  make -f Makefile_nxjs   Rebuild nxjs.nro + overlay into node_modules"
 	@echo ""
 	@echo "Current sibling defaults:"
 	@echo "  BREWSER_RUNTIME_DIR = $(BREWSER_RUNTIME_DIR)"

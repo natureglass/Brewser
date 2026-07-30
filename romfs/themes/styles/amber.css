@@ -274,13 +274,7 @@ input[name="apps-tab"] { display: none; }
 .app-card__status--staged { background: #ffd35e; color: #0b1220; }
 .app-card__status--unpublished { background: #b6c0cf; color: #1a2230; }
 
-/* Hidden until my-apps.js confirms a signed-in Brewser account and removes
-   the class. Two-class selector so it beats the button group's inline-flex
-   regardless of source order. */
-.apps-fetch-mine.apps-fetch-mine--hidden { display: none; }
-
 .apps-check-updates,
-.apps-fetch-mine,
 .communityApps {
   color: #1a1206;
   background: #ffbf00;

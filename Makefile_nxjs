@@ -1,0 +1,43 @@
+# Makefile_nxjs — build the nx.js runtime (nxjs.nro) from ../nxjs-source-v8 and
+# overlay it into brewser-v8's node_modules so the next `make` / `make release`
+# packages the freshly-built runtime instead of the vendored copy.
+#
+# Kept SEPARATE from the main Makefile on purpose: the nx.js C build needs the
+# devkitPro (msys2) toolchain, whereas the Brewser release build is pure Node
+# (esbuild + the nxjs-nro packager, which reuses the prebuilt nxjs.nro base).
+# The self-updater is ZERO engine delta, so you only need to run this when the
+# nx.js C/TS source actually changed:
+#
+#   make -f Makefile_nxjs           # rebuild nxjs.nro + overlay into node_modules
+#
+# After that, a normal `make` / `make release` in the main Makefile picks up the
+# refreshed runtime.
+
+NXJS_SOURCE_DIR ?= ../nxjs-source-v8
+NXJS_SOURCE_NRO := $(NXJS_SOURCE_DIR)/nxjs.nro
+NXJS_OVERLAY    := node_modules/@nx.js/nro/dist/nxjs.nro
+
+.PHONY: all nxjs
+all: nxjs
+
+nxjs:
+	@if [ ! -d "$(NXJS_SOURCE_DIR)" ]; then \
+		echo "ERROR: $(NXJS_SOURCE_DIR) missing — cannot build the nx.js runtime."; \
+		exit 1; \
+	fi
+	@echo "Building $(NXJS_SOURCE_DIR) (nxjs.nro) — needs devkitPro..."
+	@$(MAKE) -C "$(NXJS_SOURCE_DIR)" || { \
+		echo "ERROR: nxjs-source build failed."; \
+		exit 1; \
+	}
+	@if [ ! -f "$(NXJS_SOURCE_NRO)" ]; then \
+		echo "ERROR: $(NXJS_SOURCE_NRO) not produced by the nxjs make."; \
+		exit 1; \
+	fi
+	@if cmp -s "$(NXJS_SOURCE_NRO)" "$(NXJS_OVERLAY)" 2>/dev/null; then \
+		echo "[nxjs] $(NXJS_OVERLAY) already up to date"; \
+	else \
+		echo "Overlaying $(NXJS_SOURCE_NRO) -> $(NXJS_OVERLAY)"; \
+		cp "$(NXJS_SOURCE_NRO)" "$(NXJS_OVERLAY)" || exit 1; \
+	fi
+	@echo "[nxjs] done. Now run 'make release' (or 'make') in the main Makefile."

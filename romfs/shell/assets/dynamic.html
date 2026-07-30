@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Water background</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#04161c}
+  body{background:radial-gradient(120% 90% at 40% 25%,#0b3a42 0%,#05202a 55%,#03121a 100%)}
+  canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<script>
+// ---- tuning knobs -------------------------------------------------
+const RES   = 0.6;   // internal render scale (0.4 = cheaper, 1.0 = crisper)
+const FPS   = 30;    // frame cap
+const SPEED = 0.30;  // wave speed
+const ZOOM  = 2.5;   // smaller = larger, calmer swells
+// -------------------------------------------------------------------
+
+const cv = document.getElementById('bg');
+const gl = cv.getContext('webgl', { antialias:false, depth:false, stencil:false, alpha:false, powerPreference:'low-power' });
+
+if (gl) {
+  const VS = `attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}`;
+
+  // Five directional sine waves. Each one costs a sin + a cos, and from that same
+  // pair we get height, slope (for the normal) and laplacian (for the caustics).
+  const FS = `
+  #ifdef GL_FRAGMENT_PRECISION_HIGH
+  precision highp float;
+  #else
+  precision mediump float;
+  #endif
+  uniform vec2 res; uniform float t; uniform float zoom;
+
+  #define W(DX,DY,F,A,S) { float ang=(p.x*(DX)+p.y*(DY))*(F)+t*(S); float sn=sin(ang), cs=cos(ang); g+=(A)*(F)*cs*vec2(DX,DY); lap-=(A)*(F)*(F)*sn; }
+
+  void main(){
+    vec2 uv = gl_FragCoord.xy / res;
+    vec2 p  = (gl_FragCoord.xy * 2.0 - res) / res.y * zoom;
+
+    vec2 g = vec2(0.0); float lap = 0.0;
+    W( 1.00, 0.00,  2.30, 0.300,  1.10)
+    W( 0.60, 0.80,  3.70, 0.200, -1.50)
+    W(-0.30, 0.95,  5.30, 0.120,  1.90)
+    W(-0.85,-0.53,  8.10, 0.055, -2.40)
+    W( 0.42,-0.91, 12.70, 0.028,  3.10)
+
+    vec3 n = normalize(vec3(-g, 1.0));
+
+    // pool floor, seen through the refracting surface
+    vec2 fl = p + n.xy * 0.7;
+    float depth = 0.5 + 0.5 * sin(fl.x * 0.33 + 0.7) * cos(fl.y * 0.29 - 0.4);
+    vec3 col = mix(vec3(0.015, 0.085, 0.125), vec3(0.045, 0.30, 0.335), depth * 0.75);
+
+    // caustics: light bunches up where the surface is convex, i.e. -laplacian
+    float ca = clamp(-lap * 0.10, 0.0, 1.0);
+    col += vec3(0.30, 0.70, 0.72) * ca * ca;
+    col += vec3(0.85, 1.00, 0.98) * pow(ca, 7.0) * 0.55;
+
+    // sun glints off the wave facets
+    float sp = pow(max(dot(n, normalize(vec3(0.55, 0.45, 0.72))), 0.0), 90.0);
+    col += vec3(1.0, 0.97, 0.90) * sp * 0.55;
+
+    // vignette + dither (kills banding on the upscale)
+    vec2 q = uv * 2.0 - 1.0;
+    col *= 1.0 - 0.30 * dot(q, q);
+    col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5) - 0.5) / 255.0;
+
+    gl_FragColor = vec4(col, 1.0);
+  }`;
+
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'a');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+  const uRes = gl.getUniformLocation(prog, 'res');
+  const uT   = gl.getUniformLocation(prog, 't');
+  gl.uniform1f(gl.getUniformLocation(prog, 'zoom'), ZOOM);
+
+  function resize(){
+    const w = Math.max(1, Math.round(innerWidth  * RES));
+    const h = Math.max(1, Math.round(innerHeight * RES));
+    if (cv.width !== w || cv.height !== h){
+      cv.width = w; cv.height = h;
+      gl.viewport(0, 0, w, h);
+      gl.uniform2f(uRes, w, h);
+    }
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  const slow = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.15 : 1;
+  const step = 1000 / FPS;
+  let last = 0, clock = 0;
+
+  function frame(now){
+    requestAnimationFrame(frame);
+    if (document.hidden) { last = now; return; }
+    const dt = now - last;
+    if (dt < step) return;
+    last = now - (dt % step);
+    clock += (dt / 1000) * SPEED * slow;
+    gl.uniform1f(uT, clock);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>

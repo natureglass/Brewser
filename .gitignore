@@ -1,10 +1,13 @@
 romfs/apps/
 node_modules/
 build/
+# Self-update signing keys: private keys + the release counter are NEVER
+# committed; the public SPKI/keyid files ARE (they're baked into the NRO
+# keyring and are public trust anchors).
+keys/*.key.pem
+keys/.release-counter
 romfs/main.js
 romfs/main.js.map
-*.nro
-*.nsp
 icon.jpg
 *.log
 .DS_Store

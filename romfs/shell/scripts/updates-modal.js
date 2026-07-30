@@ -107,9 +107,22 @@
   // the platform client parses it; a bad/missing stats.json is NOT a
   // sync failure (Popular / Top Rated degrade visibly instead).
   var STATS_PATH = APP_ROOT + 'configs/stats.json';
+  // Per-user "My Apps" document — folded in from the retired standalone
+  // "Fetch my Apps" button. Refreshed alongside the catalogue when a Brewser
+  // account is signed in (Bearer token), written verbatim after the platform
+  // client validates it. URL comes from `data-my-catalogue-url` on the trigger
+  // button (`<browser-config-my-catalogue>`).
+  var MY_CATALOGUE_PATH = APP_ROOT + 'configs/my-catalogue.json';
 
   var modalOpen = false;
   var fetchInFlight = false;
+  // Set true when the versions check found a newer Brewser than installed; gates
+  // whether tapping the status line opens the self-update modal.
+  var brewserUpdateOffered = false;
+  // Set true when a Check-for-Updates run refreshed my-catalogue.json for a
+  // signed-in user; drives a one-shot reload on close so the server-rendered
+  // "My Apps" tab appears (the same effect the old button's reload had).
+  var myCatalogueRefreshed = false;
 
   // Same inline-SVG arrow the grid cards + missing-app modal use for
   // the upgrade chip. Kept in sync verbatim so all three places paint
@@ -626,6 +639,54 @@
   // Fire-and-forget the actual update flow. Each failure path flips
   // the card into `--error` and surfaces a message; success leaves
   // the modal open with the diff lists populated. Nothing escapes.
+  // Folded-in "Fetch my Apps": when a Brewser account is signed in, refresh
+  // the per-user My Apps document alongside the catalogue. Best-effort — a
+  // signed-out user, missing URL, auth failure, bad response, or write error
+  // just leaves any existing my-catalogue.json untouched and never fails the
+  // overall sync (so it's safe inside the runCheck Promise.all). Returns true
+  // only when a fresh document was validated + written.
+  async function refreshMyCatalogue() {
+    var url = triggerBtn.getAttribute('data-my-catalogue-url') || '';
+    if (!url) return false;
+    var token = '';
+    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.readActiveSession === 'function') {
+      var session = globalThis.__swbAuth.readActiveSession();
+      if (session && session.record && typeof session.record.token === 'string') {
+        token = session.record.token;
+      }
+    }
+    if (!token) return false; // signed out — nothing to fetch
+    var response;
+    try {
+      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    } catch (e) {
+      console.debug('[updates-modal] my-catalogue fetch threw: ' + (e && e.message ? e.message : String(e)));
+      return false;
+    }
+    if (!response.ok) {
+      console.debug('[updates-modal] my-catalogue HTTP ' + response.status);
+      return false;
+    }
+    var text;
+    try { text = await response.text(); }
+    catch (e) { return false; }
+    // Validate through the platform client before persisting — never write a
+    // document the runtime can't read (same rule as the catalogue itself).
+    var client = globalThis.__brewserPlatformClient;
+    if (client && typeof client.parseCatalogue === 'function') {
+      var outcome;
+      try { outcome = client.parseCatalogue(text); }
+      catch (e) { console.debug('[updates-modal] my-catalogue parse threw'); return false; }
+      if (!outcome || outcome.kind !== 'Ok') {
+        console.debug('[updates-modal] my-catalogue rejected: ' + (outcome ? outcome.kind : 'no outcome'));
+        return false;
+      }
+    }
+    try { Switch.writeFileSync(MY_CATALOGUE_PATH, text); }
+    catch (e) { console.debug('[updates-modal] my-catalogue write failed: ' + (e && e.message ? e.message : String(e))); return false; }
+    return true;
+  }
+
   async function runCheck() {
     if (fetchInFlight) return;
     fetchInFlight = true;
@@ -718,8 +779,12 @@
         refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json'),
         checkVersionsForUpdate(versionsUrl),
         refreshStatsFile(client, statsUrl),
+        refreshMyCatalogue(),
       ]);
       var newBrewserVersionAvailable = !!results[3];
+      // Record whether the per-user My Apps document was refreshed this run —
+      // close() reloads once so its server-rendered tab surfaces.
+      myCatalogueRefreshed = !!results[5];
       // Repaint upgrade chips on already-installed cards whose
       // manifest version trails the new catalog. Synchronous DOM
       // mutation — runs after the logo downloads so all card-side
@@ -750,8 +815,12 @@
       // overlay is repainted from the cache (see
       // [[reference-brewser-fixed-overlay-paint-cost]]).
       var statusHtml = 'Local Catalog is now synced!';
+      brewserUpdateOffered = newBrewserVersionAvailable;
       if (newBrewserVersionAvailable) {
-        statusHtml += '<br>New Brewser Version available';
+        // The whole update line is the trigger: a tap on statusEl opens the
+        // self-update modal (gated by brewserUpdateOffered). Styled with the
+        // existing `munch-link` class so no new CSS is required.
+        statusHtml += '<br><span class="munch-link" role="button">New Brewser version available — Update now &rarr;</span>';
       }
       statusEl.innerHTML = statusHtml;
     } finally {
@@ -761,6 +830,11 @@
 
   function open() {
     if (modalOpen) return;
+    // Reset the per-run My Apps flag so a prior run's reload can't fire.
+    myCatalogueRefreshed = false;
+    // Reset the Brewser-update offer so a stale prior run can't leave the status
+    // line clickable before this run's versions check settles.
+    brewserUpdateOffered = false;
     // Reset to loading state every open so a second tap after closing
     // shows the loading bar again (matches the user's expectation of
     // "checking…" each press).
@@ -791,6 +865,15 @@
     card.classList.remove('updates-modal-card--loading');
     card.classList.remove('updates-modal-card--error');
     modalOpen = false;
+    // If this sync refreshed the per-user My Apps document, reload once on
+    // dismiss so the server-rendered "My Apps" tab appears and the grid
+    // reflects the fresh catalogue. Fires AFTER the modal is closed (never
+    // mid-modal, per the no-reload-mid-modal rule up top); signed-out runs
+    // leave the flag false, so their behaviour is unchanged.
+    if (myCatalogueRefreshed && typeof globalThis.__swbReload === 'function') {
+      myCatalogueRefreshed = false;
+      try { globalThis.__swbReload(); } catch (_) {}
+    }
   }
 
   triggerBtn.addEventListener('click', function (e) {
@@ -812,6 +895,18 @@
   closeBtn.addEventListener('click', function (e) {
     close();
     if (e && e.stopPropagation) e.stopPropagation();
+  });
+
+  // When the versions check offered a Brewser update, the status line becomes a
+  // trigger — tapping it opens the self-update modal (self-update-modal.js,
+  // loaded before this script). Gated by brewserUpdateOffered so a normal
+  // "synced!" status is inert.
+  statusEl.addEventListener('click', function (e) {
+    if (!brewserUpdateOffered) return;
+    if (typeof globalThis.__brewserOpenSelfUpdateModal === 'function') {
+      globalThis.__brewserOpenSelfUpdateModal();
+      if (e && e.stopPropagation) e.stopPropagation();
+    }
   });
 
   // Backdrop tap → close. Filter on `e.target === overlay` so a tap

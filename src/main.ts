@@ -1,5 +1,7 @@
 import { installPolyfills } from '@switch-web/runtime';
 import { BrowserShell } from './browser-shell.js';
+import { detectUpdaterRole } from './update/role.js';
+import { installSelfUpdateSeam } from './update/seam.js';
 
 // Boot timing anchor for the boot-splash residual diagnostic. Captured at
 // the very top of the JS entry — first line of execution after import
@@ -32,6 +34,29 @@ globalThis.addEventListener('beforeunload', (event) => {
 });
 
 async function main() {
+	// Self-update boot gate — BEFORE the browser shell. Config-free and cheap
+	// (one statSync of the usually-absent journal on a normal boot). Only a
+	// genuine update role dynamically loads the heavy applier, so a normal boot
+	// never evaluates the updater config/keyring. STAGED / RECOVERY / RESTORE
+	// never return (they chainload the installed NRO); POST-APPLY confirms the
+	// freshly-installed build, stamps current.json, then returns here so the user
+	// lands in the browser on the updated version. Any failure falls through to a
+	// normal boot — the updater must never wedge the app.
+	try {
+		const role = detectUpdaterRole();
+		if (role.kind !== 'normal') {
+			const applier = await import('./update/applier.js');
+			await applier.runRole(role);
+		}
+	} catch (error) {
+		console.debug('[brewser] self-update boot gate error, continuing to shell:', error);
+	}
+
+	// Expose the in-shell self-update API for the download modal. Cheap: the
+	// heavy flow/apply modules load lazily on first use, so this never evaluates
+	// the updater config/keyring on a normal boot.
+	installSelfUpdateSeam();
+
 	// Shell is constructed BEFORE the polyfill install block so the
 	// storage drivers receive its profile + currentPageUrl closure —
 	// that's how local-storage + indexed-db route writes to a `dev/`

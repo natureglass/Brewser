@@ -11,8 +11,12 @@ import {
  * built-in HTML pages the shell serves at `brewser://` URLs.
  *
  * `ensure()` creates the profile directory tree if missing.
- * `seedRomfs()` recursively mirrors the romfs tree into the SD-card
- * dir on first run, but never overwrites — user edits persist.
+ * `seedRomfs()` recursively mirrors the romfs tree into the SD-card dir.
+ * User data (`configs/`, `apps/`, `logs/`, `shell/auth/`) is seeded
+ * missing-only, so edits persist; the app-owned UI (`shell/` + `themes/`)
+ * is RE-SEEDED whenever the bundle changed (a build-time content
+ * fingerprint drives it), so a rebuilt shell reaches an existing profile
+ * without a manual mirror.
  */
 
 /** Filenames at the romfs root that the seeder must NEVER mirror to
@@ -31,6 +35,10 @@ const SEED_SKIP_ROOT_FILES: ReadonlySet<string> = new Set([
 	'main.js.map',
 	'GeistMono.ttf',
 	'runtime.js.map',
+	// The build's app-owned fingerprint (scripts/gen-seed-fingerprint.sh) is
+	// read from romfs:/ directly by the versioned seeder and tracked via a
+	// separately-written profile marker — never mirrored to the profile as-is.
+	'seed-fingerprint',
 ]);
 
 /** Romfs subtrees the seeder must NOT recurse into. Each entry is a
@@ -202,15 +210,67 @@ export class BrowserProfile implements StorageProfileLike {
 	 * app-level toolbars / keyboards / styles in one pass.
 	 */
 	async seedRomfs(): Promise<void> {
-		await this.seedRomfsDir('');
+		const embedded = await this.readRomfsFingerprint();
+		const stored = this.readStoredFingerprint();
+		// Re-seed app-owned files (shell/ + themes/) when the bundle's
+		// fingerprint differs from what we last wrote to this profile. On a
+		// fresh profile `stored` is '' so this is true, but there is nothing to
+		// overwrite yet — the walk is then identical to a first-run missing-only
+		// seed. When the fingerprint is unavailable (`embedded === ''`, e.g. an
+		// older bundle without the file) we keep the pure missing-only behavior,
+		// so a missing marker never wipes anything.
+		const forceApp = embedded !== '' && embedded !== stored;
+		if (forceApp) {
+			console.debug(`[brewser] seed: bundle changed (${stored || 'none'} → ${embedded}) — re-seeding shell/ + themes/`);
+		}
+		await this.seedRomfsDir('', forceApp);
+		// Record the applied fingerprint so the next boot skips the re-seed
+		// until the bundle changes again (an unchanged rebuild is then a no-op).
+		if (forceApp) {
+			this.writeStoredFingerprint(embedded);
+		}
+	}
+
+	/** Content fingerprint of the app-owned romfs (shell/ + themes/) baked
+	 * into the NRO at build time by `scripts/gen-seed-fingerprint.sh`. '' when
+	 * the file is absent (older bundle / generation skipped) — callers then
+	 * keep the missing-only behavior. */
+	private async readRomfsFingerprint(): Promise<string> {
+		try {
+			const response = await fetch('romfs:/seed-fingerprint');
+			if (!response.ok) return '';
+			return (await response.text()).trim();
+		} catch (_) {
+			return '';
+		}
+	}
+
+	/** The fingerprint last applied to THIS profile, or '' when it was never
+	 * seeded by the versioned seeder (fresh profile / pre-upgrade). */
+	private readStoredFingerprint(): string {
+		try {
+			const data = Switch.readFileSync(`${this.appRoot}seed-fingerprint`);
+			if (!data) return '';
+			return new TextDecoder().decode(data).trim();
+		} catch (_) {
+			return '';
+		}
+	}
+
+	private writeStoredFingerprint(fingerprint: string): void {
+		try {
+			Switch.writeFileSync(`${this.appRoot}seed-fingerprint`, new TextEncoder().encode(fingerprint));
+		} catch (error) {
+			console.debug(`[brewser] failed to write seed fingerprint: ${error}`);
+		}
 	}
 
 	/** Recursive worker for `seedRomfs`. `rel` is the path under `romfs:/`
 	 * (no leading slash, trailing slash for non-root directories — the empty
-	 * string is the romfs root). Each file write goes through
-	 * `<appRoot><rel><filename>`, and each child directory recurses one
-	 * level deeper. */
-	private async seedRomfsDir(rel: string): Promise<void> {
+	 * string is the romfs root). `forceApp` overwrites existing app-owned files
+	 * (shell/ + themes/, per `isAppOwnedRel`); every other file stays
+	 * missing-only. */
+	private async seedRomfsDir(rel: string, forceApp: boolean): Promise<void> {
 		const src = `romfs:/${rel}`;
 		const dst = `${this.appRoot}${rel}`;
 		try { Switch.mkdirSync(dst); } catch (_) { /* exists */ }
@@ -220,12 +280,15 @@ export class BrowserProfile implements StorageProfileLike {
 				if (entry.isDirectory) {
 					const childRel = `${rel}${entry.name}/`;
 					if (SEED_SKIP_DIRS.has(childRel)) continue;
-					await this.seedRomfsDir(childRel);
+					await this.seedRomfsDir(childRel, forceApp);
 				} else if (entry.isFile) {
 					if (rel === '' && SEED_SKIP_ROOT_FILES.has(entry.name)) continue;
 					const childRel = `${rel}${entry.name}`;
 					const target = `${this.appRoot}${childRel}`;
-					if (fileExists(target)) continue;
+					// App-owned UI is overwritten on a bundle change; user data
+					// (configs/, apps/, logs/, shell/auth/) stays missing-only.
+					const overwrite = forceApp && isAppOwnedRel(childRel);
+					if (!overwrite && fileExists(target)) continue;
 					try {
 						const response = await fetch(`romfs:/${childRel}`);
 						if (!response.ok) continue;
@@ -245,6 +308,16 @@ export class BrowserProfile implements StorageProfileLike {
 			console.debug(`[brewser] seed readDir ${src} failed: ${iteratorErr}`);
 		}
 	}
+}
+
+/** App-owned romfs paths the versioned seeder may overwrite on a bundle
+ * change: the shell UI (pages/scripts/assets) and the theme assets. The
+ * runtime-created `shell/auth/` login store is explicitly excluded (it is not
+ * shipped in romfs, but guard anyway), as are `configs/`, `apps/`, and
+ * `logs/` — user data that is only ever seeded when missing. */
+function isAppOwnedRel(rel: string): boolean {
+	if (rel.startsWith('shell/auth/')) return false;
+	return rel.startsWith('shell/') || rel.startsWith('themes/');
 }
 
 function fileExists(path: string): boolean {

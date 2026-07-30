@@ -1,0 +1,530 @@
+{
+  "$schema_version": 1,
+  "tiers": [
+    {
+      "tier": 1,
+      "name": "Capabilities",
+      "blurb": "What your app can reach."
+    },
+    {
+      "tier": 2,
+      "name": "Craft",
+      "blurb": "How well it is built."
+    },
+    {
+      "tier": 3,
+      "name": "Platform",
+      "blurb": "Where it has been proven to run."
+    },
+    {
+      "tier": 4,
+      "name": "Portfolio",
+      "blurb": "What you have shipped over time."
+    },
+    {
+      "tier": 5,
+      "name": "Community",
+      "blurb": "What you gave back."
+    },
+    {
+      "tier": 6,
+      "name": "Reach",
+      "blurb": "What people did with it."
+    }
+  ],
+  "achievements": [
+    {
+      "id": "tinker",
+      "name": "Tinker",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "You reached past the browser sandbox and touched real hardware.",
+      "criteria": "App uses WebUSB, Web Serial or Web Bluetooth.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "visualizer",
+      "name": "Visualizer",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Pixels pushed straight to the GPU.",
+      "criteria": "App acquires a WebGL or WebGL2 rendering context.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "maestro",
+      "name": "Maestro",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Note on, note off.",
+      "criteria": "App requests MIDI access via the Web MIDI API.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "sixth-sense",
+      "name": "Sixth Sense",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Your app knows which way is up.",
+      "criteria": "App reads DeviceOrientation, Accelerometer or Gyroscope data.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "rumbler",
+      "name": "Rumbler",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Controllers in, feedback out.",
+      "criteria": "App uses WebHID or the Gamepad API.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "sound-engineer",
+      "name": "Sound Engineer",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Not just playback — an actual signal chain.",
+      "criteria": "App builds a Web Audio graph (AudioContext with two or more connected nodes).",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "oracle",
+      "name": "Oracle",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Inference without a server in sight.",
+      "criteria": "App runs on-device inference via WebNN, WebGPU compute or a bundled model runtime.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "tap",
+      "name": "Tap",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Close-range and contactless.",
+      "criteria": "App uses the Web NFC API.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "operator",
+      "name": "Operator",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "You wired two machines together.",
+      "criteria": "App uses WebRTC or WebSocket peer connectivity.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "full-stack-tinkerer",
+      "name": "Full Stack Tinkerer",
+      "tier": 1,
+      "tierName": "Capabilities",
+      "description": "Every peripheral bus, one app. Show-off.",
+      "criteria": "A single app uses WebUSB, Web Serial, Web Bluetooth and WebHID.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "off-the-grid",
+      "name": "Off the Grid",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "Nothing leaves the device. Provably.",
+      "criteria": "No fetch, XHR, WebSocket, beacon or remote asset reference anywhere in the bundle.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "purist",
+      "name": "Purist",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "No framework, no bundler, no excuses.",
+      "criteria": "Bundle contains no third-party libraries or vendored dependencies.",
+      "source": "bundle",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "featherweight",
+      "name": "Featherweight",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "Loads before you finish reading the title.",
+      "criteria": "Total package size under 256 KB.",
+      "source": "bundle",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "sizecoder",
+      "name": "Sizecoder",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "Every byte earned its place.",
+      "criteria": "Total package size under 64 KB.",
+      "source": "bundle",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "4k",
+      "name": "4K",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "The old ways still work.",
+      "criteria": "Total package size under 4 KB.",
+      "source": "bundle",
+      "scope": "app",
+      "hidden": true,
+      "levels": null
+    },
+    {
+      "id": "clean-bill",
+      "name": "Clean Bill",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "Through the scanner first time, no notes.",
+      "criteria": "Verdict GOOD on the first scan, with no resubmission.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "showreel",
+      "name": "Showreel",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "You showed it running instead of describing it.",
+      "criteria": "A valid YouTube demo URL is attached to the submission.",
+      "source": "manifest",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "well-documented",
+      "name": "Well Documented",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "Someone can figure out what this does without running it.",
+      "criteria": "Icon, at least two screenshots, a description over 300 characters, tags and a licence.",
+      "source": "manifest",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "progressive",
+      "name": "Progressive",
+      "tier": 2,
+      "tierName": "Craft",
+      "description": "Denied a permission and carried on regardless.",
+      "criteria": "Every gated API call sits behind a guard or catch with a working fallback path.",
+      "source": "scanner",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "homebrewer",
+      "name": "Homebrewer",
+      "tier": 3,
+      "tierName": "Platform",
+      "description": "Verified running on real Switch hardware.",
+      "criteria": "App confirmed working under the Brewser runtime on Tegra X1.",
+      "source": "platform",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "dual-native",
+      "name": "Dual Native",
+      "tier": 3,
+      "tierName": "Platform",
+      "description": "One codebase, two very different machines.",
+      "criteria": "Identical bundle verified working in both Chrome and Brewser, no platform branches.",
+      "source": "platform",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "conformist",
+      "name": "Conformist",
+      "tier": 3,
+      "tierName": "Platform",
+      "description": "Plays strictly by the spec.",
+      "criteria": "App passes the gl-probes regression suite with no fallbacks triggered.",
+      "source": "platform",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "sixty",
+      "name": "Sixty",
+      "tier": 3,
+      "tierName": "Platform",
+      "description": "Locked frame rate on modest silicon.",
+      "criteria": "Sustains 60fps on Tegra X1 across a full telemetry session.",
+      "source": "telemetry",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "publisher",
+      "name": "Publisher",
+      "tier": 4,
+      "tierName": "Portfolio",
+      "description": "You shipped something. That is the hard part.",
+      "criteria": "Published apps that scanned GOOD and have a complete manifest.",
+      "source": "portfolio",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": [
+        {
+          "level": 1,
+          "name": "Publisher",
+          "threshold": 1
+        },
+        {
+          "level": 2,
+          "name": "Prolific",
+          "threshold": 5
+        },
+        {
+          "level": 3,
+          "name": "Studio",
+          "threshold": 15
+        },
+        {
+          "level": 4,
+          "name": "Foundry",
+          "threshold": 40
+        }
+      ]
+    },
+    {
+      "id": "polymath",
+      "name": "Polymath",
+      "tier": 4,
+      "tierName": "Portfolio",
+      "description": "You refuse to stay in one lane.",
+      "criteria": "Published apps spanning four or more distinct catalogue categories.",
+      "source": "portfolio",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "collector",
+      "name": "Collector",
+      "tier": 4,
+      "tierName": "Portfolio",
+      "description": "Working your way through the platform surface.",
+      "criteria": "Eight or more distinct Web APIs used across your published portfolio.",
+      "source": "portfolio",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "iterator",
+      "name": "Iterator",
+      "tier": 4,
+      "tierName": "Portfolio",
+      "description": "Shipping once is easy. Coming back is not.",
+      "criteria": "Ten accepted updates to a single app.",
+      "source": "portfolio",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "steady-hand",
+      "name": "Steady Hand",
+      "tier": 4,
+      "tierName": "Portfolio",
+      "description": "Consistency beats bursts.",
+      "criteria": "At least one accepted submission or update in six consecutive calendar months.",
+      "source": "portfolio",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "wish-granter",
+      "name": "Wish Granter",
+      "tier": 5,
+      "tierName": "Community",
+      "description": "Someone asked. You built it.",
+      "criteria": "Published an app linked to an Ideas Board entry authored by another publisher.",
+      "source": "community",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "muse",
+      "name": "Muse",
+      "tier": 5,
+      "tierName": "Community",
+      "description": "Your idea became someone else’s app.",
+      "criteria": "An idea you submitted is referenced by another publisher’s linked_app_ids.",
+      "source": "community",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "greetz",
+      "name": "Greetz",
+      "tier": 5,
+      "tierName": "Community",
+      "description": "Credit where it is due.",
+      "criteria": "Credited another Brewser publisher in a published app manifest.",
+      "source": "community",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "mentor",
+      "name": "Mentor",
+      "tier": 5,
+      "tierName": "Community",
+      "description": "You spend as much time helping as building.",
+      "criteria": "Twenty-five or more comments on other publishers’ apps or ideas.",
+      "source": "community",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "signal",
+      "name": "Signal",
+      "tier": 5,
+      "tierName": "Community",
+      "description": "You named something the community wanted.",
+      "criteria": "An idea you submitted passed fifty upvotes.",
+      "source": "community",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "founder",
+      "name": "Founder",
+      "tier": 5,
+      "tierName": "Community",
+      "description": "Here before the catalogue had anything in it.",
+      "criteria": "Among the first one hundred accounts to publish an app. Permanently closed once reached.",
+      "source": "community",
+      "scope": "publisher",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "played",
+      "name": "Played",
+      "tier": 6,
+      "tierName": "Reach",
+      "description": "People are actually running this.",
+      "criteria": "Distinct play sessions recorded for a single app.",
+      "source": "telemetry",
+      "scope": "app",
+      "hidden": false,
+      "levels": [
+        {
+          "level": 1,
+          "name": "Played",
+          "threshold": 100
+        },
+        {
+          "level": 2,
+          "name": "Popular",
+          "threshold": 1000
+        },
+        {
+          "level": 3,
+          "name": "Hit",
+          "threshold": 10000
+        }
+      ]
+    },
+    {
+      "id": "scorekeeper",
+      "name": "Scorekeeper",
+      "tier": 6,
+      "tierName": "Reach",
+      "description": "There is a number to beat.",
+      "criteria": "App integrates the Brewser leaderboard SDK and has recorded submissions.",
+      "source": "telemetry",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "persistent",
+      "name": "Persistent",
+      "tier": 6,
+      "tierName": "Reach",
+      "description": "Progress survives a power cycle.",
+      "criteria": "App integrates the Brewser save SDK and has recorded writes.",
+      "source": "telemetry",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    },
+    {
+      "id": "rock-solid",
+      "name": "Rock Solid",
+      "tier": 6,
+      "tierName": "Reach",
+      "description": "A thousand sessions, not one crash.",
+      "criteria": "One thousand play sessions with zero crash telemetry on the current version.",
+      "source": "telemetry",
+      "scope": "app",
+      "hidden": false,
+      "levels": null
+    }
+  ]
+}
