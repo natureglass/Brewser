@@ -1,0 +1,8 @@
+[
+  { "title": "None", "background": "" },
+  { "title": "Aurora", "background": "", "dynamic": "themes/backgrounds/aurora.frag" },
+  { "title": "Galaxy", "background": "", "dynamic": "themes/backgrounds/galaxy.frag" },
+  { "title": "XMB", "background": "", "dynamic": "themes/backgrounds/xmb-waves.frag" },
+  { "title": "WindowsXP", "background": "themes/backgrounds/WindowsXP.png" },
+  { "title": "Windows11", "background": "themes/backgrounds/Windows11.png" }
+]

@@ -4,9 +4,13 @@
   <title>Welcome to Brewser!</title>
   <link rel="stylesheet" href="brewser://assets/main.css">
 </head>
-<body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>">
+<body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>" data-max-per-page="<browser-config-maxperpage/>" data-lazy-banners="auto">
 <div class="page-shell clickable">
-  <section class="top-section">
+  <!-- `data-tab` marks this as a paginated panel for apps-pagination.js; the
+       loader stamps it with the active `homeSection` id so the pager fetches
+       that tab's pages from the __brewserAppsPager hook. Unlike apps.html's
+       `.tab-panel`s there is no radio, so the pager treats it as always-active. -->
+  <section class="top-section" data-tab="<browser-config-homesection/>">
     <header class="top-header">
       <!-- Section title tracks `config.homeSection` via the
            `<browser-home-title>` custom tag — the resource loader
@@ -29,6 +33,14 @@
            same path the `<browser-tab-*>` library-tab tags
            on apps.html take. -->
       <browser-home-apps></browser-home-apps>
+    </div>
+    <!-- Pagination controls — same markup + behaviour as apps.html's tab
+         panels. apps-pagination.js wires Prev/Next and swaps pages via the
+         __brewserAppsPager hook. Hidden until the section spans >1 page. -->
+    <div class="app-pager app-pager--hidden" data-pager>
+      <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+      <span class="app-pager__label"></span>
+      <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
     </div>
   </section>
 
@@ -163,5 +175,12 @@
 <script src="brewser://scripts/warnings-modal.js"></script>
 <script src="brewser://scripts/auth-shared.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>
+<!-- banner-loader.js in "auto" mode (<body data-lazy-banners="auto">) promotes
+     the initial page's `data-src` banners on load; apps-pagination.js then
+     drives Prev/Next for the home section (same hook + repaint path as
+     apps.html). banner-loader MUST load before apps-pagination (it installs
+     __brewserPromoteBanners). -->
+<script src="brewser://scripts/banner-loader.js"></script>
+<script src="brewser://scripts/apps-pagination.js"></script>
 </body>
 </html>

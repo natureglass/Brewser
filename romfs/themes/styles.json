@@ -1,6 +1,6 @@
 [
-  { "title": "Dark", "path": "themes/styles/dark.css", "background": "" },
-  { "title": "Amber", "path": "themes/styles/amber.css", "background": "" },
-  { "title": "Neon", "path": "themes/styles/neon.css", "background": "" },
-  { "title": "WindowsXP", "path": "themes/styles/windowsxp.css", "background": "shell/assets/WindowsXP.png" }
+  { "title": "Dark", "path": "themes/styles/dark.css" },
+  { "title": "Amber", "path": "themes/styles/amber.css" },
+  { "title": "Neon", "path": "themes/styles/neon.css" },
+  { "title": "WindowsXP", "path": "themes/styles/windowsxp.css" }
 ]

@@ -1,9 +1,11 @@
 {
-  "toolbar": "themes/toolbars/neon.html",
-  "keyboard": "themes/keyboards/neon.html",
-  "brewserStyle": "themes/styles/neon.css",
-  "styleBackground": "",
   "theme": "dark",
+  "toolbar": "themes/toolbars/light.html",
+  "keyboard": "themes/keyboards/dark.html",
+  "brewserStyle": "themes/styles/dark.css",
+  "themeBackground": "XMB",
+  "autoRotate": true,
+  "maxPerPage": 8,
   "toolbarHeight": 64,
   "momentumScrolling": true,
   "toolbarPosition": "top",
@@ -22,8 +24,11 @@
   "showToolbar": true,
   "splashFadeMs": 250,
   "local": "dd/mm/yyyy",
-  "homeSection": "featured",
-  "warnings": ["medium","high"],
+  "homeSection": "recent",
+  "warnings": [
+    "medium",
+    "high"
+  ],
   "autorunApp": "",
   "buttonMapping": {
     "leftClick": "A",

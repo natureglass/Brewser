@@ -6,7 +6,7 @@ import {
 } from '@switch-web/runtime';
 import type { BookmarksStore } from '../navigation/bookmarks-store.js';
 import type { HistoryStore } from '../navigation/history-store.js';
-import { type AppEntry, HOME_SECTIONS, type LibraryTabRender, loadConfig, loadKeyboardRegistry, loadLibraryTabs, loadMyAppsTab, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, MISSING_APP_LOGO_URL, resolveSearchEngine } from '../profile/browser-toolbar.js';
+import { type AppEntry, buildLibraryPager, HOME_SECTIONS, type LibraryPager, type LibraryTabRender, loadBackgroundRegistry, loadConfig, loadKeyboardRegistry, loadSearchEngines, loadStyleRegistry, loadToolbarRegistry, MISSING_APP_LOGO_URL, pagerPageEntries, pagerTabRender, pagerTotalPages, resolveSearchEngine } from '../profile/browser-toolbar.js';
 import type { LibraryTabId } from '@switch-web/runtime';
 
 /**
@@ -173,12 +173,46 @@ export class BrowserResourceLoader implements ResourceLoader {
 	private readonly appRoot: string;
 	private readonly bookmarksStore: BookmarksStore;
 	private readonly historyStore: HistoryStore;
+	/** Parsed + sorted library from the most recent apps.html / home render,
+	 * retained so the `__brewserAppsPager` hook can render pages 2…N on demand
+	 * without re-parsing the catalogue (see `expandCustomTags`). Refreshed on
+	 * every render that touches a library tag; null before the first one. */
+	private pagerData: LibraryPager | null = null;
+	private pagerPerPage = 12;
 
 	constructor(options: BrowserResourceLoaderOptions) {
 		this.storageRoot = options.storageRoot;
 		this.appRoot = options.appRoot;
 		this.bookmarksStore = options.bookmarksStore;
 		this.historyStore = options.historyStore;
+		this.installAppsPagerHook();
+	}
+
+	/** Install the client-side pagination bridge on `globalThis`. apps.html's
+	 * `apps-pagination.js` reads it (same shared JS context as the shell, the
+	 * way `__brewserPlatformClient` etc. are shared) to render pages 2…N of a
+	 * library tab on demand — the shell already holds the parsed, sorted
+	 * catalogue (`pagerData`), so a page render is a slice + map of just
+	 * ~maxPerPage cards, never a re-parse. Returns '' / 1 until a library page
+	 * has been served (which populates `pagerData`). */
+	private installAppsPagerHook(): void {
+		const self = this;
+		Reflect.set(globalThis, '__brewserAppsPager', {
+			perPage(): number {
+				return self.pagerPerPage;
+			},
+			totalPages(tab: string): number {
+				return self.pagerData
+					? pagerTotalPages(self.pagerData, tab as LibraryTabId | 'myapps', self.pagerPerPage)
+					: 1;
+			},
+			render(tab: string, page: number): string {
+				if (!self.pagerData) return '';
+				return renderAppCards(
+					pagerPageEntries(self.pagerData, tab as LibraryTabId | 'myapps', page, self.pagerPerPage),
+				);
+			},
+		});
 	}
 
 	canLoad(request: ResourceRequest): boolean {
@@ -357,15 +391,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 		);
 		// The four browse tabs (Phase 4, mirroring the WP plugin):
 		// Featured is a curation FILTER; Most Recent / Popular / Top
-		// Rated are sorts. One `loadLibraryTabs` call feeds every tag on
-		// the page (single disk pass per render); a tab whose driving
-		// data is absent renders unavailable with its reason — sparse
-		// data hides a sort, it never fakes one.
-		let libraryTabsMemo: Record<LibraryTabId, LibraryTabRender> | null = null;
-		const libraryTab = (id: LibraryTabId): string => {
-			libraryTabsMemo ??= loadLibraryTabs(this.appRoot);
-			return this.renderLibraryTab(libraryTabsMemo[id]);
-		};
+		// Rated are sorts. One `buildLibraryPager` call (memoized below)
+		// feeds every tag on the page (single disk pass per render); a tab
+		// whose driving data is absent renders unavailable with its reason —
+		// sparse data hides a sort, it never fakes one.
+		// Client-side pagination: parse + sort the library ONCE (held in
+		// `pagerMemo`, then stashed for the `__brewserAppsPager` hook at the end
+		// of this method) and server-render only PAGE 1 of each tab.
+		// apps-pagination.js asks the hook for pages 2…N and swaps them into the
+		// grid, so the live DOM only ever holds ~maxPerPage cards even for a
+		// 10k-app catalogue. A tab whose driving data is absent still renders
+		// unavailable with its reason — sparse data hides a sort, never fakes one.
+		const perPage = loadConfig(this.appRoot).maxPerPage;
+		let pagerMemo: LibraryPager | null = null;
+		const pager = (): LibraryPager => (pagerMemo ??= buildLibraryPager(this.appRoot));
+		const libraryTab = (id: LibraryTabId): string =>
+			this.renderLibraryTab(pagerTabRender(pager(), id, perPage));
 		out = out.replace(
 			/<browser-tab-featured(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-featured\s*>)?/gi,
 			() => libraryTab('featured'),
@@ -382,31 +423,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-tab-toprated(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-toprated\s*>)?/gi,
 			() => libraryTab('toprated'),
 		);
-		// "My Apps" (per-user "Fetch my Apps") — a SEPARATE cached document
+		// "My Apps" (per-user) — a SEPARATE cached document
 		// (`configs/my-catalogue.json`, the WordPress-generated set of the
-		// signed-in user's own apps), NOT part of `loadLibraryTabs`. Both the
-		// tab's label and its panel render only when that file exists and
-		// parses; otherwise both collapse to '' so the facet is absent for
-		// signed-out users and before the first fetch. One `loadMyAppsTab`
-		// call (memoized) feeds both tags in a single disk pass.
-		let myAppsMemo: LibraryTabRender | null | undefined;
-		const myAppsTab = (): LibraryTabRender | null => {
-			if (myAppsMemo === undefined) myAppsMemo = loadMyAppsTab(this.appRoot);
-			return myAppsMemo;
-		};
+		// signed-in user's own apps), carried on `pager().myApps`. Both the tab's
+		// label and its panel render only when that document exists and parses;
+		// otherwise both collapse to '' so the facet is absent for signed-out
+		// users and before the first fetch.
 		out = out.replace(
 			/<browser-tab-myapps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-myapps\s*>)?/gi,
-			() => {
-				const tab = myAppsTab();
-				return tab ? this.renderLibraryTab(tab) : '';
-			},
+			() => (pager().myApps ? this.renderLibraryTab(pagerTabRender(pager(), 'myapps', perPage)) : ''),
 		);
 		// The tab's clickable label — present only when the panel is (i.e. the
 		// user has a cached my-catalogue). Keeps the CSS-radio tab unreachable
 		// (no `<label for>`) when there is nothing to show.
 		out = out.replace(
 			/<browser-myapps-label(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-myapps-label\s*>)?/gi,
-			() => (myAppsTab() ? '<label for="apps-tab-myapps" class="tab-label">My Apps</label>' : ''),
+			() => (pager().myApps ? '<label for="apps-tab-myapps" class="tab-label">My Apps</label>' : ''),
 		);
 		// `<browser-config-catalogue>` — expands to the active
 		// `config.json` `catalogue` URL, HTML-escaped so it's safe inside
@@ -495,6 +527,17 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-config-warnings(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-warnings\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).warnings.join(',')),
 		);
+		// `<browser-config-maxperpage>` — expands to the active
+		// `config.maxPerPage` (already clamped by `loadConfig`). Stamped onto
+		// `<body data-max-per-page>` of apps.html / home.html so
+		// `apps-pagination.js` + `banner-loader.js` read the page size
+		// synchronously at load — same DOM-attribute pattern the telemetry URL
+		// and warnings gate use. Client-side pagination + lazy banner loading
+		// key off this value.
+		out = out.replace(
+			/<browser-config-maxperpage(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-maxperpage\s*>)?/gi,
+			() => htmlEscape(String(loadConfig(this.appRoot).maxPerPage)),
+		);
 		// `<browser-config-<provider>-client-id>` family — expands to
 		// the matching `config.json` `<provider>OAuthClientId` value,
 		// HTML-escaped. Stamped onto each provider's login page <body>
@@ -520,7 +563,11 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// popular / toprated). Shares the page-render memo above.
 		out = out.replace(
 			/<browser-home-apps(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-apps\s*>)?/gi,
-			() => libraryTab(loadConfig(this.appRoot).homeSection),
+			// Home is a single-page teaser: render only page 1 of the configured
+			// section (banners promoted by banner-loader.js in "auto" mode) — the
+			// full paginated grid lives on apps.html. Shares the same `pager()`
+			// parse as the library tags above (one disk pass per render).
+			() => this.renderLibraryTab(pagerTabRender(pager(), loadConfig(this.appRoot).homeSection, perPage)),
 		);
 		// `<browser-home-title>` — display name of the currently-
 		// selected home section ("Featured Apps", "Community Apps",
@@ -529,6 +576,17 @@ export class BrowserResourceLoader implements ResourceLoader {
 		out = out.replace(
 			/<browser-home-title(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-title\s*>)?/gi,
 			() => htmlEscape(homeSectionTitle(loadConfig(this.appRoot).homeSection)),
+		);
+		// `<browser-config-homesection>` — the RAW home section id
+		// (featured / recent / popular / toprated). Stamped onto the home
+		// page's grid panel as `data-tab` so `apps-pagination.js` treats it
+		// as a paginated panel and asks the `__brewserAppsPager` hook for the
+		// right tab's pages. (home.html has no tab radios, so the pager script
+		// falls back to "always active" for a panel whose `apps-tab-<id>`
+		// radio is absent — see its `isActive`.)
+		out = out.replace(
+			/<browser-config-homesection(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-homesection\s*>)?/gi,
+			() => htmlEscape(loadConfig(this.appRoot).homeSection),
 		);
 		// `<browser-modal id="…" class="…" ...>CONTENT</browser-modal>` —
 		// the engine-blessed modal wrapper. Expanded to a `<div>` with
@@ -556,6 +614,14 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return renderBrowserModal(attrs, inner);
 			},
 		);
+		// Retain the parsed library for the `__brewserAppsPager` hook. Only set
+		// when a library / home tag actually rendered (which called `pager()` and
+		// populated `pagerMemo`); other pages leave the prior stash untouched —
+		// harmless, since only apps.html's script calls the hook.
+		if (pagerMemo) {
+			this.pagerData = pagerMemo;
+			this.pagerPerPage = perPage;
+		}
 		return out;
 	}
 
@@ -572,6 +638,8 @@ export class BrowserResourceLoader implements ResourceLoader {
 		if (tab.entries.length === 0) {
 			return '<p class="empty">Nothing here yet — run Check for Updates to fetch the catalogue, or install apps under <code>apps/</code>.</p>';
 		}
+		// `tab.entries` is already the first page (the pager pre-slices via
+		// `pagerTabRender`); `apps-pagination.js` renders pages 2…N on demand.
 		return renderAppCards(tab.entries);
 	}
 
@@ -681,6 +749,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 		const toolbars = loadToolbarRegistry(this.appRoot);
 		const keyboards = loadKeyboardRegistry(this.appRoot);
 		const styles = loadStyleRegistry(this.appRoot);
+		const backgrounds = loadBackgroundRegistry(this.appRoot);
 
 		const checked = (b: boolean) => b ? ' checked' : '';
 
@@ -724,6 +793,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 				return (
 					'<label class="settings-radio">'
 					+ `<input type="radio" name="setting-brewserStyle" value="${path}" data-setting="brewserStyle"${checked(e.path === config.brewserStyle)}>`
+					+ title
+					+ '</label>'
+				);
+			}).join('');
+
+		// Wallpaper picker — keyed by the entry `title` (backgrounds have
+		// no CSS path), staged into `config.themeBackground`. The shell
+		// resolves the selected title back to its `backgrounds.json` entry
+		// and applies the static image / animated shader live on Save.
+		const backgroundRows = backgrounds.length === 0
+			? '<p class="empty">No backgrounds registered. Edit <code>backgrounds.json</code> to add one.</p>'
+			: backgrounds.map((e) => {
+				const title = htmlEscape(e.title);
+				return (
+					'<label class="settings-radio">'
+					+ `<input type="radio" name="setting-themeBackground" value="${title}" data-setting="themeBackground"${checked(e.title === config.themeBackground)}>`
 					+ title
 					+ '</label>'
 				);
@@ -864,7 +949,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 		const toggleRow = (key: string, label: string, value: boolean, hint: string): string => (
 			'<label class="settings-toggle">'
 			+ `<input type="checkbox" name="setting-${key}" data-setting="${key}"${checked(value)}>`
-			+ `<span class="settings-label">${htmlEscape(label)}<span class="settings-hint">${htmlEscape(hint)}</span></span>`
+			+ `<span class="settings-label">${htmlEscape(label)}${hint ? `<span class="settings-hint">${htmlEscape(hint)}</span>` : ''}</span>`
 			+ '</label>'
 		);
 
@@ -892,6 +977,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ '</fieldset>'
 			+ '</div>'
 			+ '<div class="settings-row-pair">'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Background</legend>'
+			+ backgroundRows
+			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Home Page</legend>'
 			+ homeSectionRows
@@ -921,6 +1010,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ numberRow('wwwRenderChunkMs', 'External page render budget', config.wwwRenderChunkMs, 1, 1000, 'ms per frame while building http(s) pages (1–1000)')
 			+ numberRow('scrollChunkMs', 'Scroll-time render budget', config.scrollChunkMs, 1, 1000, 'ms per frame while scrolling a still-building page (1–1000)')
 			+ numberRow('maxHistory', 'Max history entries', config.maxHistory, 1, 10000, 'oldest entries are dropped past this cap (1–10000)')
+			+ numberRow('maxPerPage', 'Apps per page', config.maxPerPage, 1, 60, 'app cards shown per page; fewer means fewer app banners fetched at once (1–60)')
 			+ numberRow('mouseIdleMs', 'Cursor idle hide', config.mouseIdleMs, 0, 3_600_000, 'ms of stick-idle before the cursor hides (0–3 600 000)')
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
@@ -1221,9 +1311,30 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// async image load so the body doesn't jump; the loaded image's own
 		// natural aspect takes over once it arrives. The gray `.app-banner`
 		// background fills the box while loading.
+		//
+		// LAZY BANNER (pagination): the banner URL is emitted as `data-src`,
+		// NOT `src`, so the engine's `<img>` loader does NOT fetch it at parse
+		// time. `banner-loader.js` promotes `data-src` → `src` only for the
+		// cards on the CURRENTLY-VISIBLE pagination page of the ACTIVE tab
+		// (see `apps-pagination.js`), so a catalogue with many apps only pulls
+		// the ~`maxPerPage` banners the user can actually see — not every
+		// remote `appbanner.jpg` up front. Off-page / off-tab cards keep their
+		// `data-src` untouched and never hit the network until shown. The gray
+		// `.app-banner` box stands in until a card's page is promoted.
+		//
+		// INLINE SIZING (critical): the width/object-fit/max-height are stamped
+		// as an INLINE style, not left to the `.app-banner` class rule alone.
+		// When a card is swapped into the grid via `innerHTML` (page change),
+		// the first card whose local banner loads before the class cascade
+		// settles could otherwise lay its `<img>` out at the image's NATURAL
+		// size — an off-spec banner then blew the page height into the millions
+		// of pixels and OOM'd the paint's OffscreenCanvas. Inline style applies
+		// at parse regardless of cascade timing, so `width:100%` +
+		// `max-height` bound the box unconditionally. `.app-banner` still
+		// supplies the gray placeholder bg + rounded corners.
 		return `<a class="app-card"${missingAttr}${detailAttrs}>`
 			+ statusBadge
-			+ `<img class="app-banner" width="480" height="380" src="${banner}"${bannerFallback} alt="${alt}">`
+			+ `<img class="app-banner" style="display:block;width:100%;height:auto;max-height:420px;object-fit:contain" width="480" height="380" data-src="${banner}"${bannerFallback} alt="${alt}">`
 			+ `<div class="app-card__body"><strong>${title}</strong>${blurb}${footer}</div>`
 			+ `</a>`;
 	}).join('');

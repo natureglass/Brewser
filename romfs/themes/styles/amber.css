@@ -24,9 +24,15 @@ body {
   margin: 0;
   min-height: 100vh;
   padding: 28px 48px;
-  background: #1a1206;
+  /* `transparent` lets the engine-painted style wallpaper (see
+     `styles.json` -> `background` and `BrowserShell.paintStyleBackground`)
+     show through where the body would otherwise wash it out with a
+     solid colour. The page-bg colour fill the engine does each frame
+     before drawing the wallpaper is the safety net for the no-image
+     case (Amber / Neon ship `background: ""` in `styles.json`). */
+  background: transparent;
   color: #f3e9d6;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Tahoma, "Segoe UI", Arial, Helvetica, sans-serif;
   font-size: 18px;
 }
 
@@ -233,6 +239,33 @@ input[name="apps-tab"] { display: none; }
 
 .tab-panel { display: none; }
 
+/* Pagination (apps-pagination.js) — client-side paging + lazy banners.
+   Only the current page's cards are ever in the grid (pages are rendered on
+   demand by the shell's __brewserAppsPager hook and swapped in), so there's
+   no hidden-card rule. The pager row sits centered under the grid; Prev/Next
+   reuse the `.munch-link` pill so every theme styles them for free.
+   `.app-pager--hidden` collapses the row when a tab fits on one page. */
+.app-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 22px;
+}
+.app-pager--hidden { display: none; }
+.app-pager__label {
+  color: inherit;
+  opacity: 0.72;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 104px;
+  text-align: center;
+}
+.app-pager__btn--disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* Active-tab visuals + active panel — the three `:checked` rules below
    are the whole tab-switching mechanism. Each radio sits before
    `.page-shell` in the DOM; `~ .page-shell` walks forward to the shell
@@ -331,7 +364,7 @@ input[name="apps-tab"] { display: none; }
   text-align: left;
   color: #fff4d6;
   text-decoration: none;
-  background: #241a0c;
+  background: rgba(36, 26, 12, 0.7);
   border: 1px solid #7a5a16;
   border-radius: 16px;
 }
@@ -1356,7 +1389,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
   min-height: 34px;
   padding: 7px 12px;
   color: #ffe2a8;
-  background-color: #241a0c;
+  background-color: rgba(36, 26, 12, 0.7);
   border: 1px solid #7a5a16;
   border-radius: 999px;
   font-size: 15px;
@@ -1368,7 +1401,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 .about-card {
-  background: #241a0c;
+  background: rgba(36, 26, 12, 0.7);
   border: 1px solid #7a5a16;
   border-radius: 16px;
   padding: 20px 18px;
@@ -1392,7 +1425,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 .about-meta article {
-  background-color: #241a0c;
+  background-color: rgba(36, 26, 12, 0.7);
   padding: 14px 16px;
   border-left: 3px solid #ffcf40;
   border-radius: 6px;
@@ -1437,7 +1470,7 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 }
 
 fieldset.settings-group {
-  background-color: #241a0c;
+  background-color: rgba(36, 26, 12, 0.7);
   border: 1px solid #7a5a16;
   border-radius: 12px;
   /* Extra bottom padding (28px vs the 14px top) absorbs the
@@ -1602,7 +1635,7 @@ fieldset.settings-group legend {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: #241a0c;
+  background: rgba(36, 26, 12, 0.7);
   border: 1px solid #7a5a16;
   border-radius: 14px;
 }
@@ -1678,7 +1711,6 @@ fieldset.settings-group legend {
 @media (prefers-color-scheme: light) {
 
   body {
-    background: #fdf6e3;
     color: #2a1d08;
   }
 
@@ -1748,7 +1780,7 @@ fieldset.settings-group legend {
   /* App / Featured grid cards */
   .app-card {
     color: #2a1d08;
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.7);
     border-color: #e3c98a;
   }
   .app-card strong { color: #b45309; }
@@ -1871,16 +1903,16 @@ fieldset.settings-group legend {
   /* about.html */
   .about-badge {
     color: #9a6a00;
-    background-color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.7);
     border-color: #e3c98a;
   }
   .about-card {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.7);
     border-color: #e3c98a;
   }
   .about-card p { color: #6b5320; }
   .about-meta article {
-    background-color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.7);
     border-left-color: #b45309;
   }
   .about-meta strong { color: #b45309; }
@@ -1892,7 +1924,7 @@ fieldset.settings-group legend {
 
   /* settings.html / <browser-settings> */
   fieldset.settings-group {
-    background-color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.7);
     border-color: #e3c98a;
   }
   fieldset.settings-group legend { color: #b45309; }
@@ -1918,7 +1950,7 @@ fieldset.settings-group legend {
      `#2c3e50` radio backdrop — invisible. Pin to white so the dot
      pops on the dark inner fill. */
   .settings-radio input[type="radio"] {
-    color: #ffffff;
+    color: #b45309;
   }
   .settings-toggle {
     background: #f7eed5;
@@ -1931,7 +1963,7 @@ fieldset.settings-group legend {
   }
 
   .settings-savebar {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.7);
     border-color: #e3c98a;
   }
   .settings-status { color: #8a7340; }

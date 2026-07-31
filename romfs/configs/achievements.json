@@ -41,9 +41,7 @@
       "description": "You reached past the browser sandbox and touched real hardware.",
       "criteria": "App uses WebUSB, Web Serial or Web Bluetooth.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "visualizer",
@@ -53,9 +51,7 @@
       "description": "Pixels pushed straight to the GPU.",
       "criteria": "App acquires a WebGL or WebGL2 rendering context.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "maestro",
@@ -65,9 +61,7 @@
       "description": "Note on, note off.",
       "criteria": "App requests MIDI access via the Web MIDI API.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "sixth-sense",
@@ -77,9 +71,7 @@
       "description": "Your app knows which way is up.",
       "criteria": "App reads DeviceOrientation, Accelerometer or Gyroscope data.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "rumbler",
@@ -89,9 +81,7 @@
       "description": "Controllers in, feedback out.",
       "criteria": "App uses WebHID or the Gamepad API.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "sound-engineer",
@@ -101,9 +91,7 @@
       "description": "Not just playback — an actual signal chain.",
       "criteria": "App builds a Web Audio graph (AudioContext with two or more connected nodes).",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "oracle",
@@ -113,9 +101,7 @@
       "description": "Inference without a server in sight.",
       "criteria": "App runs on-device inference via WebNN, WebGPU compute or a bundled model runtime.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "tap",
@@ -125,9 +111,7 @@
       "description": "Close-range and contactless.",
       "criteria": "App uses the Web NFC API.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "operator",
@@ -137,9 +121,7 @@
       "description": "You wired two machines together.",
       "criteria": "App uses WebRTC or WebSocket peer connectivity.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "full-stack-tinkerer",
@@ -149,9 +131,7 @@
       "description": "Every peripheral bus, one app. Show-off.",
       "criteria": "A single app uses WebUSB, Web Serial, Web Bluetooth and WebHID.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "off-the-grid",
@@ -161,9 +141,7 @@
       "description": "Nothing leaves the device. Provably.",
       "criteria": "No fetch, XHR, WebSocket, beacon or remote asset reference anywhere in the bundle.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "purist",
@@ -173,9 +151,7 @@
       "description": "No framework, no bundler, no excuses.",
       "criteria": "Bundle contains no third-party libraries or vendored dependencies.",
       "source": "bundle",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "featherweight",
@@ -185,9 +161,7 @@
       "description": "Loads before you finish reading the title.",
       "criteria": "Total package size under 256 KB.",
       "source": "bundle",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "sizecoder",
@@ -197,9 +171,7 @@
       "description": "Every byte earned its place.",
       "criteria": "Total package size under 64 KB.",
       "source": "bundle",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "4k",
@@ -209,9 +181,7 @@
       "description": "The old ways still work.",
       "criteria": "Total package size under 4 KB.",
       "source": "bundle",
-      "scope": "app",
-      "hidden": true,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "clean-bill",
@@ -221,9 +191,7 @@
       "description": "Through the scanner first time, no notes.",
       "criteria": "Verdict GOOD on the first scan, with no resubmission.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "showreel",
@@ -233,9 +201,7 @@
       "description": "You showed it running instead of describing it.",
       "criteria": "A valid YouTube demo URL is attached to the submission.",
       "source": "manifest",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "well-documented",
@@ -245,9 +211,7 @@
       "description": "Someone can figure out what this does without running it.",
       "criteria": "Icon, at least two screenshots, a description over 300 characters, tags and a licence.",
       "source": "manifest",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "progressive",
@@ -257,9 +221,7 @@
       "description": "Denied a permission and carried on regardless.",
       "criteria": "Every gated API call sits behind a guard or catch with a working fallback path.",
       "source": "scanner",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "homebrewer",
@@ -269,9 +231,7 @@
       "description": "Verified running on real Switch hardware.",
       "criteria": "App confirmed working under the Brewser runtime on Tegra X1.",
       "source": "platform",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "dual-native",
@@ -281,9 +241,7 @@
       "description": "One codebase, two very different machines.",
       "criteria": "Identical bundle verified working in both Chrome and Brewser, no platform branches.",
       "source": "platform",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "conformist",
@@ -293,9 +251,7 @@
       "description": "Plays strictly by the spec.",
       "criteria": "App passes the gl-probes regression suite with no fallbacks triggered.",
       "source": "platform",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "sixty",
@@ -305,9 +261,7 @@
       "description": "Locked frame rate on modest silicon.",
       "criteria": "Sustains 60fps on Tegra X1 across a full telemetry session.",
       "source": "telemetry",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "publisher",
@@ -317,30 +271,7 @@
       "description": "You shipped something. That is the hard part.",
       "criteria": "Published apps that scanned GOOD and have a complete manifest.",
       "source": "portfolio",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": [
-        {
-          "level": 1,
-          "name": "Publisher",
-          "threshold": 1
-        },
-        {
-          "level": 2,
-          "name": "Prolific",
-          "threshold": 5
-        },
-        {
-          "level": 3,
-          "name": "Studio",
-          "threshold": 15
-        },
-        {
-          "level": 4,
-          "name": "Foundry",
-          "threshold": 40
-        }
-      ]
+      "scope": "publisher"
     },
     {
       "id": "polymath",
@@ -350,9 +281,7 @@
       "description": "You refuse to stay in one lane.",
       "criteria": "Published apps spanning four or more distinct catalogue categories.",
       "source": "portfolio",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "collector",
@@ -362,9 +291,7 @@
       "description": "Working your way through the platform surface.",
       "criteria": "Eight or more distinct Web APIs used across your published portfolio.",
       "source": "portfolio",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "iterator",
@@ -374,9 +301,7 @@
       "description": "Shipping once is easy. Coming back is not.",
       "criteria": "Ten accepted updates to a single app.",
       "source": "portfolio",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "steady-hand",
@@ -386,9 +311,7 @@
       "description": "Consistency beats bursts.",
       "criteria": "At least one accepted submission or update in six consecutive calendar months.",
       "source": "portfolio",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "wish-granter",
@@ -398,21 +321,17 @@
       "description": "Someone asked. You built it.",
       "criteria": "Published an app linked to an Ideas Board entry authored by another publisher.",
       "source": "community",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "muse",
       "name": "Muse",
       "tier": 5,
       "tierName": "Community",
-      "description": "Your idea became someone else’s app.",
-      "criteria": "An idea you submitted is referenced by another publisher’s linked_app_ids.",
+      "description": "Your idea became someone elses app.",
+      "criteria": "An idea you submitted is referenced by another publishers linked_app_ids.",
       "source": "community",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "greetz",
@@ -422,9 +341,7 @@
       "description": "Credit where it is due.",
       "criteria": "Credited another Brewser publisher in a published app manifest.",
       "source": "community",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "mentor",
@@ -432,11 +349,9 @@
       "tier": 5,
       "tierName": "Community",
       "description": "You spend as much time helping as building.",
-      "criteria": "Twenty-five or more comments on other publishers’ apps or ideas.",
+      "criteria": "Twenty-five or more comments on other publishers apps or ideas.",
       "source": "community",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "signal",
@@ -446,9 +361,7 @@
       "description": "You named something the community wanted.",
       "criteria": "An idea you submitted passed fifty upvotes.",
       "source": "community",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "founder",
@@ -458,9 +371,7 @@
       "description": "Here before the catalogue had anything in it.",
       "criteria": "Among the first one hundred accounts to publish an app. Permanently closed once reached.",
       "source": "community",
-      "scope": "publisher",
-      "hidden": false,
-      "levels": null
+      "scope": "publisher"
     },
     {
       "id": "played",
@@ -470,25 +381,7 @@
       "description": "People are actually running this.",
       "criteria": "Distinct play sessions recorded for a single app.",
       "source": "telemetry",
-      "scope": "app",
-      "hidden": false,
-      "levels": [
-        {
-          "level": 1,
-          "name": "Played",
-          "threshold": 100
-        },
-        {
-          "level": 2,
-          "name": "Popular",
-          "threshold": 1000
-        },
-        {
-          "level": 3,
-          "name": "Hit",
-          "threshold": 10000
-        }
-      ]
+      "scope": "app"
     },
     {
       "id": "scorekeeper",
@@ -498,9 +391,7 @@
       "description": "There is a number to beat.",
       "criteria": "App integrates the Brewser leaderboard SDK and has recorded submissions.",
       "source": "telemetry",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "persistent",
@@ -510,9 +401,7 @@
       "description": "Progress survives a power cycle.",
       "criteria": "App integrates the Brewser save SDK and has recorded writes.",
       "source": "telemetry",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     },
     {
       "id": "rock-solid",
@@ -522,9 +411,7 @@
       "description": "A thousand sessions, not one crash.",
       "criteria": "One thousand play sessions with zero crash telemetry on the current version.",
       "source": "telemetry",
-      "scope": "app",
-      "hidden": false,
-      "levels": null
+      "scope": "app"
     }
   ]
 }

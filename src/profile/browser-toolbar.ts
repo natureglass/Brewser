@@ -34,6 +34,7 @@ import {
 	RUNTIME_CONFIG_DEFAULTS,
 	type LibraryApp,
 	type LibraryTabId,
+	type LibraryTabView,
 	type NormalizedCatalogue,
 	type ParsedStats,
 } from '@switch-web/runtime';
@@ -45,26 +46,45 @@ export type ToolbarPosition = 'top' | 'bottom';
  * to the profile root unless it carries an absolute scheme (`sdmc:/…`,
  * `romfs:/…`).
  *
- * `background` is the optional per-style wallpaper path painted by the
- * shell between the per-frame page-bg fillRect and `paintLiveOverlay`
- * (see `BrowserShell.paintStyleBackground`). Used today only by
- * `styles.json`; toolbar + keyboard registries simply leave it
- * undefined. Same path-resolution rules as `path` — bare values are
- * relative to the profile root; absolute schemes pass through. Empty
- * string / undefined = no background image for that entry.
- *
  * `height` is the optional per-toolbar chrome strip height in CSS
  * pixels. Used by the toolbar registry only — selecting a toolbar (via
  * the Settings page or `selectToolbar`) caches this value into
  * `config.json`'s `toolbarHeight` so the strip resizes to whatever the
  * picked theme expects. Undefined / non-number = no auto-resize on
  * switch (the existing `toolbarHeight` is preserved). Same clamp band
- * as `loadConfig`'s `toolbarHeight` parse (28-200 px). */
+ * as `loadConfig`'s `toolbarHeight` parse (28-200 px).
+ *
+ * Wallpapers are NOT part of a style anymore — they live in their own
+ * `<profile>/themes/backgrounds.json` registry ({@link BackgroundEntry}),
+ * selected independently via `config.json`'s `themeBackground`. */
 export interface ToolbarEntry {
 	title: string;
 	path: string;
-	background?: string;
 	height?: number;
+}
+
+/** One row in `<profile>/themes/backgrounds.json` — the wallpaper
+ * registry, decoupled from styles/toolbars/keyboards so a background can
+ * be chosen independently of the CSS theme. Selected by `title` via
+ * `config.json`'s `themeBackground` (the Settings page's Background
+ * picker). Every entry needs a unique `title`; the "no wallpaper" option
+ * is a normal entry with both fields empty (conventionally titled
+ * "None").
+ *
+ * `background` is the optional static wallpaper image path, painted by
+ * the shell between the per-frame page-bg fillRect and `paintLiveOverlay`
+ * (see `BrowserShell.paintStyleBackground`).
+ *
+ * `dynamic` is the optional ANIMATED wallpaper — a self-contained WebGL1
+ * fragment-shader asset (`themes/backgrounds/*.frag`) with no per-entry settings
+ * (any tuning is baked into the shader source). When set, the shell renders
+ * it every frame in place of the static `background`, which remains the
+ * fallback when the shader is missing / fails to compile. Both path fields
+ * follow the same resolution rules as `ToolbarEntry.path`. */
+export interface BackgroundEntry {
+	title: string;
+	background?: string;
+	dynamic?: string;
 }
 
 /** In-memory `.json` → `.html` rewrite for legacy toolbar paths. The
@@ -149,6 +169,14 @@ export interface BrowserConfig {
 	 * the count past this, the oldest entry is dropped on the spot (see
 	 * `HistoryStore.record`). Clamped to [1, 10000]; default 30. */
 	maxHistory: number;
+	/** Number of app cards shown per pagination page on the Apps grid (and
+	 * the Home teaser). Drives `apps-pagination.js` client-side: only this
+	 * many cards are visible per page, and only the visible page's banners
+	 * are fetched — so a large catalogue pulls just the ~`maxPerPage` remote
+	 * `appbanner.jpg` images the user can see instead of every one up front.
+	 * Surfaced to the page scripts via the `<browser-config-maxperpage>` tag
+	 * (→ `<body data-max-per-page>`). Clamped to [1, 60]; default 12. */
+	maxPerPage: number;
 	/** User-preferred colour scheme. Sent to external pages as the
 	 * `Sec-CH-Prefers-Color-Scheme` client hint so servers can serve a
 	 * matching theme up front; also drives the engine-side viewport
@@ -263,21 +291,15 @@ export interface BrowserConfig {
 	 * up loading the picked style. Missing / unreadable falls back to
 	 * the baked default so a broken pointer can't blank the chrome. */
 	brewserStyle: string;
-	/** Cached path to the wallpaper image for the active style. Sourced
-	 * from `styles.json`'s `background` field for the entry matching
-	 * `brewserStyle`; resolved + persisted on every `saveSettings` that
-	 * stages a `brewserStyle` change (see `BrowserShell.saveSettings`).
-	 * Same path-resolution rules as `brewserStyle` itself — bare values
-	 * are relative to the profile root, absolute schemes pass through.
-	 * Empty string = no background.
-	 *
-	 * Cached in `config.json` (instead of derived at every paint from
-	 * `styles.json`) so the boot path doesn't have to crack a second
-	 * JSON file before the first frame, and the shell's boot lookup is
-	 * a single field read. The trade-off: a hand edit of `styles.json`'s
-	 * `background` field won't take effect until the user toggles their
-	 * style in Settings (which re-resolves + re-persists this cache). */
-	styleBackground: string;
+	/** Selected wallpaper — the `title` of a {@link BackgroundEntry} in
+	 * `<profile>/themes/backgrounds.json` (the Settings page's Background
+	 * picker). Decoupled from `brewserStyle` since 2026-07-30 so a
+	 * wallpaper can be chosen independently of the CSS theme. The shell
+	 * resolves this title to the entry's `background` / `dynamic` at boot +
+	 * on save (see `BrowserShell` `resolveSelectedBackground` /
+	 * `applySelectedBackground`). `"None"` / an unmatched title = no
+	 * wallpaper. */
+	themeBackground: string;
 	/** Where the browser chrome strip sits on screen — `'top'` (above
 	 * page content) or `'bottom'` (below it). Hoisted out of the
 	 * per-toolbar JSON design on 2026-06-11 so the toggle is a
@@ -414,6 +436,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	wwwRenderChunkMs: 12,
 	scrollChunkMs: 4,
 	maxHistory: 30,
+	maxPerPage: 12,
 	theme: 'light',
 	clickSounds: true,
 	mouseIdleMs: 3000,
@@ -428,7 +451,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	keyboardHeight: 400,
 	keyboard: 'themes/keyboards/default.html',
 	brewserStyle: 'themes/styles/dark.css',
-	styleBackground: '',
+	themeBackground: 'None',
 	toolbarPosition: 'top',
 	homeSection: 'featured',
 	autorunApp: '',
@@ -506,6 +529,12 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			maxHistory: typeof parsed?.maxHistory === 'number' && Number.isFinite(parsed.maxHistory)
 				? Math.max(1, Math.min(10000, Math.trunc(parsed.maxHistory)))
 				: DEFAULT_CONFIG.maxHistory,
+			// 1 is the floor (a single card per page still paginates); 60 is a
+			// generous ceiling so a user who wants "basically no paging" can set
+			// it high without the grid ever rendering an unbounded page.
+			maxPerPage: typeof parsed?.maxPerPage === 'number' && Number.isFinite(parsed.maxPerPage)
+				? Math.max(1, Math.min(60, Math.trunc(parsed.maxPerPage)))
+				: DEFAULT_CONFIG.maxPerPage,
 			theme: parsed?.theme === 'dark' || parsed?.theme === 'light'
 				? parsed.theme
 				: DEFAULT_CONFIG.theme,
@@ -556,14 +585,12 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			brewserStyle: typeof parsed?.brewserStyle === 'string' && parsed.brewserStyle.length > 0
 				? parsed.brewserStyle
 				: DEFAULT_CONFIG.brewserStyle,
-			// Permissive empty-string passthrough — unlike `brewserStyle`,
-			// "no background" is a valid persisted value (Amber + Neon
-			// ship with `background: ""` in `styles.json`). The shell
-			// treats empty as "skip the drawImage" rather than falling
-			// back to the default theme's image.
-			styleBackground: typeof parsed?.styleBackground === 'string'
-				? parsed.styleBackground
-				: DEFAULT_CONFIG.styleBackground,
+			// Selected wallpaper: a `backgrounds.json` entry title. Any
+			// non-empty string passes through (resolved against the registry
+			// at boot / save); absent → the "None" default.
+			themeBackground: typeof parsed?.themeBackground === 'string' && parsed.themeBackground.length > 0
+				? parsed.themeBackground
+				: DEFAULT_CONFIG.themeBackground,
 			toolbarPosition: parsed?.toolbarPosition === 'top' || parsed?.toolbarPosition === 'bottom'
 				? parsed.toolbarPosition
 				: DEFAULT_CONFIG.toolbarPosition,
@@ -769,10 +796,37 @@ export interface LibraryTabRender {
  * One call = one disk pass — the resource loader calls this once per
  * page render and feeds every tab tag from the same result.
  */
-export function loadLibraryTabs(appRoot: string): Record<LibraryTabId, LibraryTabRender> {
-	// Cached catalogue → normalized model. Anything but Ok → render
-	// from disk alone; the outcome is logged here and surfaced in the
-	// updates modal's report UI at sync time.
+export interface LibraryPager {
+	/** The four main tab views, each holding SORTED `LibraryApp` references
+	 * (shared across tabs — `buildLibraryTabs` copies the array, not the
+	 * objects). Mapping to card models is deferred to `pagerPageEntries`. */
+	views: Record<LibraryTabId, LibraryTabView>;
+	/** The per-user "My Apps" view, or null when no cached my-catalogue exists
+	 * (the tab + label stay hidden in that case). */
+	myApps: LibraryTabView | null;
+	stats: ParsedStats | null;
+	appRoot: string;
+}
+
+/**
+ * Parse + join + sort the whole library ONCE and retain the ordered views so a
+ * client-side pager can render ONE page at a time on demand. The catalogue can
+ * hold thousands of apps; mapping every entry × every tab up front (the old
+ * `loadLibraryTabs` shape) would both defeat the pagination and hold N×4 card
+ * models in memory. This keeps only `LibraryApp` REFERENCES (≈ the catalogue's
+ * own size, unavoidable) — `pagerPageEntries` maps just the visible page's
+ * ~maxPerPage apps to card models when asked.
+ *
+ * DISK IS AUTHORITATIVE for installedness (one enumeration, reused for both the
+ * main tabs and My Apps); the cached catalogue joins BY ID; the cached stats
+ * drive Popular / Top Rated. A missing / stale / unparseable catalogue still
+ * yields the complete installed library; missing stats degrade only the
+ * stats-driven tabs.
+ */
+export function buildLibraryPager(appRoot: string): LibraryPager {
+	// Cached catalogue → normalized model. Anything but Ok → render from disk
+	// alone; the outcome is logged here and surfaced in the updates modal's
+	// report UI at sync time.
 	const text = readTextFile(`${appRoot}configs/catalogue.json`);
 	let catalogue: NormalizedCatalogue | null = null;
 	if (text !== null) {
@@ -788,8 +842,8 @@ export function loadLibraryTabs(appRoot: string): Record<LibraryTabId, LibraryTa
 		}
 	}
 
-	// Cached stats → parsed or null (null degrades Popular/Top Rated
-	// only — deliberately NOT a failure).
+	// Cached stats → parsed or null (null degrades Popular/Top Rated only —
+	// deliberately NOT a failure).
 	const statsText = readTextFile(`${appRoot}configs/stats.json`);
 	let stats: ParsedStats | null = null;
 	if (statsText !== null) {
@@ -818,78 +872,71 @@ export function loadLibraryTabs(appRoot: string): Record<LibraryTabId, LibraryTa
 	}
 
 	const library = joinLibrary(enumeration.apps, catalogue);
-	const tabs = buildLibraryTabs(library, stats);
-	const out = {} as Record<LibraryTabId, LibraryTabRender>;
-	for (const id of ['featured', 'recent', 'popular', 'toprated'] as const) {
-		const view = tabs[id];
-		out[id] = {
-			available: view.available,
-			reason: view.reason,
-			entries: view.apps.map((a: LibraryApp) => libraryAppToCard(a, appRoot, stats)),
-		};
+	const views = buildLibraryTabs(library, stats);
+
+	// Per-user "My Apps" — a SECOND catalogue (the WordPress-generated
+	// my-catalogue restricted to the signed-in user's own apps). Absent /
+	// unparseable ⇒ null (tab + label hidden). Reuses the single enumeration
+	// above, and keeps ONLY the apps that document lists (drop installed-but-
+	// unlisted rows — My Apps is the authored set, not everything on disk).
+	let myApps: LibraryTabView | null = null;
+	const myText = readTextFile(`${appRoot}configs/my-catalogue.json`);
+	if (myText !== null) {
+		const outcome = parseCatalogue(myText);
+		if (outcome.kind === 'Ok') {
+			const myCatalogue = outcome.catalogue;
+			const myLibrary = joinLibrary(enumeration.apps, myCatalogue);
+			const mine = myLibrary.apps.filter((a: LibraryApp) => a.listing !== null);
+			myApps = buildMyAppsTab({ apps: mine, catalogueAvailable: true, revoked: myCatalogue.revoked });
+		} else {
+			console.debug(`[brewser] my-catalogue rejected (${outcome.kind}) — My Apps tab hidden`);
+		}
 	}
-	return out;
+
+	return { views, myApps, stats, appRoot };
 }
 
-/**
- * Build the "My Apps" tab from the cached per-user `configs/my-catalogue.json`
- * — the WordPress-generated document (a SECOND catalogue) restricted to the
- * signed-in user's own apps. Returns null when that file is absent, empty, or
- * rejected by the platform client, so the resource loader renders nothing and
- * the tab (label + panel) stays hidden for signed-out users / before the first
- * fetch.
- *
- * Unlike `loadLibraryTabs` (which reads the PUBLIC catalogue and shows
- * everything on disk), this joins disk truth against the my-catalogue and
- * keeps ONLY the apps that document lists — the developer's authored set,
- * published / staged / unpublished — with the lifecycle carried on each card's
- * `status`. Remote logo/launcher URLs resolve per-app via the my-catalogue's
- * `sources` table (published → Play base, staged → the staging host), so the
- * platform client's URL builder does the host routing.
- */
-export function loadMyAppsTab(appRoot: string): LibraryTabRender | null {
-	const text = readTextFile(`${appRoot}configs/my-catalogue.json`);
-	if (text === null) return null;
-	const outcome = parseCatalogue(text);
-	if (outcome.kind !== 'Ok') {
-		console.debug(`[brewser] my-catalogue rejected (${outcome.kind}) — My Apps tab hidden`);
-		return null;
-	}
-	const myCatalogue = outcome.catalogue;
+/** The sorted view for a tab id, or null for an absent My Apps. */
+function pagerViewOf(pager: LibraryPager, tab: LibraryTabId | 'myapps'): LibraryTabView | null {
+	return tab === 'myapps' ? pager.myApps : pager.views[tab];
+}
 
-	// Stats are shared with the main tabs so My Apps cards show the same
-	// rating / download chips. Missing or invalid stats degrade to 0 — never a
-	// failure (same rule as loadLibraryTabs).
-	const statsText = readTextFile(`${appRoot}configs/stats.json`);
-	let stats: ParsedStats | null = null;
-	if (statsText !== null) {
-		const so = parseStats(statsText);
-		if (so.kind === 'Ok') stats = so.parsed;
-	}
+/** Total pages for a tab at the given page size (always ≥ 1). Unavailable /
+ * empty tabs report 1 page — the renderer shows the reason / empty state and
+ * the pager collapses. */
+export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps', perPage: number): number {
+	const view = pagerViewOf(pager, tab);
+	const per = perPage > 0 ? perPage : 1;
+	if (!view || !view.available || view.apps.length === 0) return 1;
+	return Math.max(1, Math.ceil(view.apps.length / per));
+}
 
-	const enumeration = enumerateInstalledApps({
-		listAppDirs: () => {
-			try {
-				return Switch.readDirSync(`${appRoot}apps`) ?? [];
-			} catch (_) {
-				return [];
-			}
-		},
-		readAppText: (dir: string, rel: string) => readTextFile(`${appRoot}apps/${dir}/${rel}`),
-		appFileExists: (dir: string, rel: string) => appFileExists(`${appRoot}apps/${dir}/${rel}`),
-	});
+/** Map ONE page of a tab to card models — slices the sorted `LibraryApp[]` and
+ * maps only that window, so paging stays O(perPage) no matter how large the
+ * catalogue is. Clamped to [1, totalPages]. */
+export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapps', page: number, perPage: number): AppEntry[] {
+	const view = pagerViewOf(pager, tab);
+	if (!view || !view.available) return [];
+	const per = perPage > 0 ? perPage : 1;
+	const total = Math.max(1, Math.ceil(view.apps.length / per));
+	let p = Math.trunc(page);
+	if (!Number.isFinite(p) || p < 1) p = 1;
+	if (p > total) p = total;
+	return view.apps
+		.slice((p - 1) * per, p * per)
+		.map((a: LibraryApp) => libraryAppToCard(a, pager.appRoot, pager.stats));
+}
 
-	// Join disk truth with the my-catalogue, then keep ONLY apps the document
-	// lists (drop installed-but-unlisted rows — My Apps is the authored set,
-	// not everything installed on this console).
-	const library = joinLibrary(enumeration.apps, myCatalogue);
-	const mine = library.apps.filter((a: LibraryApp) => a.listing !== null);
-	const view = buildMyAppsTab({ apps: mine, catalogueAvailable: true, revoked: myCatalogue.revoked });
-	return {
-		available: view.available,
-		reason: view.reason,
-		entries: view.apps.map((a: LibraryApp) => libraryAppToCard(a, appRoot, stats)),
-	};
+/** First-page render descriptor for a tab: availability + reason + page-1
+ * entries. Feeds `renderLibraryTab` for the initial server render; the client
+ * pager (`__brewserAppsPager`) takes over for pages 2…N. Returns an
+ * unavailable/empty descriptor for an absent My Apps (the caller gates the tab
+ * on `pager.myApps` and renders nothing in that case). */
+export function pagerTabRender(pager: LibraryPager, tab: LibraryTabId | 'myapps', perPage: number): LibraryTabRender {
+	const view = pagerViewOf(pager, tab);
+	if (!view) return { available: false, reason: '', entries: [] };
+	if (!view.available) return { available: false, reason: view.reason, entries: [] };
+	return { available: true, reason: '', entries: pagerPageEntries(pager, tab, 1, perPage) };
 }
 
 /**
@@ -1067,11 +1114,6 @@ function loadThemeRegistry(
 			)
 			.map((e) => {
 				const out: ToolbarEntry = { title: e.title, path: pathMigrator(e.path) };
-				// Forward the optional `background` field (currently only
-				// `styles.json` uses it; toolbar + keyboard registries
-				// leave it absent). Treated as an opaque path string —
-				// resolution happens at paint time in the shell.
-				if (typeof e.background === 'string') out.background = e.background;
 				// Forward the optional `height` field (currently only
 				// `toolbars.json` uses it; styles + keyboards leave it
 				// absent). Clamped here to the same 28-200 px band
@@ -1107,4 +1149,35 @@ export function loadStyleRegistry(appRoot: string): ToolbarEntry[] {
 }
 export function loadToolbarRegistry(appRoot: string): ToolbarEntry[] {
 	return loadThemeRegistry(appRoot, 'toolbars.json', migrateLegacyToolbarPath);
+}
+
+/** Read the wallpaper registry `<appRoot>themes/backgrounds.json` and
+ * return its validated {@link BackgroundEntry} rows in source order.
+ * Missing / malformed file → empty array. Each entry needs a `title`
+ * (the selection key referenced by `config.json`'s `themeBackground`);
+ * the optional `background` / `dynamic` path strings are opaque here
+ * (resolved at paint time in the shell). */
+export function loadBackgroundRegistry(appRoot: string): BackgroundEntry[] {
+	let raw: ArrayBuffer | null;
+	try {
+		raw = Switch.readFileSync(`${appRoot}themes/backgrounds.json`);
+	} catch (_) {
+		return [];
+	}
+	if (!raw) return [];
+	try {
+		const parsed = JSON.parse(decoder.decode(raw));
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter((e): e is BackgroundEntry => !!e && typeof e.title === 'string')
+			.map((e) => {
+				const out: BackgroundEntry = { title: e.title };
+				if (typeof e.background === 'string') out.background = e.background;
+				if (typeof e.dynamic === 'string') out.dynamic = e.dynamic;
+				return out;
+			});
+	} catch (error) {
+		console.debug(`[brewser] themes/backgrounds.json parse failed: ${error}`);
+		return [];
+	}
 }

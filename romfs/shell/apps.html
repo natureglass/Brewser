@@ -13,7 +13,7 @@
   .updates-modal-report--drift { color: #e8b34b; }
 </style>
 </head>
-<body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>">
+<body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>" data-max-per-page="<browser-config-maxperpage/>" data-lazy-banners="paged">
 
 <!-- The four browse tabs mirror the WordPress plugin: Featured is a
      curation FILTER; Most Recent / Popular / Top Rated are sorts fed by
@@ -59,25 +59,55 @@
       <div class="app-grid">
         <browser-tab-featured></browser-tab-featured>
       </div>
+      <!-- Pagination controls (apps-pagination.js). Present in every panel,
+           hidden by default (`app-pager--hidden`) — the script removes that
+           class only when the tab spans more than one page. Prev/Next reuse
+           `.munch-link` so each theme styles them; taps fire `click` which the
+           script intercepts to page + lazy-load the new page's banners. -->
+      <div class="app-pager app-pager--hidden" data-pager>
+        <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+        <span class="app-pager__label"></span>
+        <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
+      </div>
     </section>
     <section class="tab-panel" data-tab="recent" aria-label="Most recent apps">
       <div class="app-grid">
         <browser-tab-recent></browser-tab-recent>
+      </div>
+      <div class="app-pager app-pager--hidden" data-pager>
+        <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+        <span class="app-pager__label"></span>
+        <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
       </div>
     </section>
     <section class="tab-panel" data-tab="popular" aria-label="Popular apps">
       <div class="app-grid">
         <browser-tab-popular></browser-tab-popular>
       </div>
+      <div class="app-pager app-pager--hidden" data-pager>
+        <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+        <span class="app-pager__label"></span>
+        <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
+      </div>
     </section>
     <section class="tab-panel" data-tab="toprated" aria-label="Top rated apps">
       <div class="app-grid">
         <browser-tab-toprated></browser-tab-toprated>
       </div>
+      <div class="app-pager app-pager--hidden" data-pager>
+        <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+        <span class="app-pager__label"></span>
+        <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
+      </div>
     </section>
     <section class="tab-panel" data-tab="myapps" aria-label="My apps">
       <div class="app-grid">
         <browser-tab-myapps></browser-tab-myapps>
+      </div>
+      <div class="app-pager app-pager--hidden" data-pager>
+        <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+        <span class="app-pager__label"></span>
+        <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
       </div>
     </section>
   </div>
@@ -387,5 +417,12 @@
 <script src="brewser://scripts/missing-app-modal.js"></script>
 <script src="brewser://scripts/self-update-modal.js"></script>
 <script src="brewser://scripts/updates-modal.js"></script>
+<!-- Pagination + lazy banners. banner-loader.js installs
+     `globalThis.__brewserPromoteBanners` and MUST load before
+     apps-pagination.js, which drives the Prev/Next pager and promotes only
+     the visible page's `data-src` banners to `src` (so only on-screen app
+     banners hit the network). -->
+<script src="brewser://scripts/banner-loader.js"></script>
+<script src="brewser://scripts/apps-pagination.js"></script>
 </body>
 </html>

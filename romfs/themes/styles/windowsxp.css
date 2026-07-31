@@ -251,6 +251,33 @@ input[name="apps-tab"] { display: none; }
 
 .tab-panel { display: none; }
 
+/* Pagination (apps-pagination.js) — client-side paging + lazy banners.
+   Only the current page's cards are ever in the grid (pages are rendered on
+   demand by the shell's __brewserAppsPager hook and swapped in), so there's
+   no hidden-card rule. The pager row sits centered under the grid; Prev/Next
+   reuse the `.munch-link` pill so every theme styles them for free.
+   `.app-pager--hidden` collapses the row when a tab fits on one page. */
+.app-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 22px;
+}
+.app-pager--hidden { display: none; }
+.app-pager__label {
+  color: inherit;
+  opacity: 0.72;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 104px;
+  text-align: center;
+}
+.app-pager__btn--disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* Active-tab visuals + active panel — the three `:checked` rules below
    are the whole tab-switching mechanism. Each radio sits before
    `.page-shell` in the DOM; `~ .page-shell` walks forward to the shell

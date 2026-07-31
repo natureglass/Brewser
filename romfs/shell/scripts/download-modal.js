@@ -72,6 +72,15 @@
   // after a cancel starts fresh.
   var cancelled = false;
 
+  // Set true the instant an install COMPLETES successfully; read by
+  // close() to fire ONE full-page reload on dismiss so the grid re-renders
+  // from disk with the app now installed. A missing→installed change is a
+  // SET change (the same case updates-modal.js reloads for on close), not a
+  // cosmetic in-place tweak — so we deliberately do NOT mutate the grid
+  // card while this modal is open (doing so + repainting was what left the
+  // card blank until the user manually navigated away and back).
+  var installedOnSuccess = false;
+
   function escapeHtml(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -436,6 +445,9 @@
     // `true` from a prior cancel can't immediately abort the new
     // install.
     cancelled = false;
+    // Clear the success flag so a re-tapped Download after a prior success
+    // can't fire a stale reload when THIS attempt's modal closes.
+    installedOnSuccess = false;
     try {
       if (!detail || !detail.id) {
         setError('Missing app id.');
@@ -524,19 +536,17 @@
       // success path so the modal just stays closed with no message.
       if (cancelled) return;
       if (!ok) return;
-      // Refresh the grid card in place — remove missing/upgrade state,
-      // update the version chip, swap the logo src.
-      try { refreshCardOnSuccess(detail); }
-      catch (err) { console.debug('[download-modal] refreshCardOnSuccess failed: ' + (err && err.message ? err.message : String(err))); }
-      // Force a full body-cache rebuild so the static body cache
-      // includes the post-install card state on the next paint —
-      // otherwise the user might see stale "NEW" pill / upgrade chip
-      // pixels until they navigate away. Same reason updates-modal.js
-      // calls __swbRepaint after refreshUpgradeChips.
-      if (typeof globalThis.__swbRepaint === 'function') {
-        try { globalThis.__swbRepaint(); }
-        catch (err) { console.debug('[download-modal] __swbRepaint failed: ' + (err && err.message ? err.message : String(err))); }
-      }
+      // App files are now on disk (entry file written LAST). A
+      // missing→installed transition is a SET change, not a cosmetic chip
+      // tweak, so we do NOT patch the grid card in place here: mutating the
+      // host cards + repainting WHILE this modal is open is exactly what
+      // left the card blank until a manual navigation. Instead flag a
+      // one-shot reload on dismiss (see close()), mirroring updates-modal.js's
+      // `myCatalogueRefreshed` → reload-on-close pattern — the grid then
+      // re-renders from disk with the app installed and immediately playable.
+      // (The former in-place path — refreshCardOnSuccess / patchCardOnSuccess
+      // — is retained above but intentionally no longer invoked.)
+      installedOnSuccess = true;
       setSuccess(detail.name ? (detail.name + ' is ready to play!') : 'Install complete.');
     } finally {
       inFlight = false;
@@ -579,6 +589,17 @@
     card.classList.remove('download-modal-card--error');
     card.classList.remove('download-modal-card--success');
     modalOpen = false;
+    // One-shot reload after a successful install so the grid re-renders
+    // from disk (the app is now installed) and the card returns in its
+    // playable state — without the user having to navigate away and back.
+    // Fires only AFTER the modal is closed (never mid-modal, per the
+    // no-reload-mid-modal rule); a cancelled/failed download leaves the
+    // flag false so its close is unchanged. Same shape as updates-modal.js
+    // close()'s `myCatalogueRefreshed` reload.
+    if (installedOnSuccess && typeof globalThis.__swbReload === 'function') {
+      installedOnSuccess = false;
+      try { globalThis.__swbReload(); } catch (_) {}
+    }
   }
 
   // Expose the opener globally so missing-app-modal.js can wire its

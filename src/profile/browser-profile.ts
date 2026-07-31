@@ -184,6 +184,51 @@ export class BrowserProfile implements StorageProfileLike {
 	}
 
 	/**
+	 * Synchronously seed `configs/config.json` from romfs BEFORE the async
+	 * {@link seedRomfs} walk runs.
+	 *
+	 * The shell reads `config.json` in the `BrowserShell` *constructor* — for
+	 * the colour scheme, button mapping, splash timing, history cap, momentum,
+	 * etc. — and the constructor runs BEFORE `run()` calls `seedRomfs`. On a
+	 * fresh (un-seeded) profile that first read would miss the file and fall
+	 * back to `DEFAULT_CONFIG`, so the very first launch rendered with the
+	 * compiled defaults (LIGHT theme → white UI, engine-default button mapping)
+	 * instead of the seeded `dark` config. The file only reached the SD card
+	 * once `seedRomfs` ran later in `run()`, so the *second* launch — reading a
+	 * now-present file — looked correct. This closes that window.
+	 *
+	 * Copying just this one small file synchronously (`Switch.readFileSync` /
+	 * `writeFileSync` are both sync and support the `romfs:` scheme) fixes the
+	 * ordering at the source without delaying the boot splash the way a
+	 * synchronous full-tree seed would. Missing-only, exactly like `seedRomfs`:
+	 * an existing (user-edited) `config.json` is never overwritten, and the
+	 * later `seedRomfs` walk skips the file it now finds present — so there is
+	 * no double write. A no-op on every launch after the first.
+	 */
+	seedConfigSync(): void {
+		const target = `${this.appRoot}configs/config.json`;
+		// Missing-only: never clobber a user-edited config, and let the later
+		// seedRomfs walk skip it too. (`ensure()` has already created the
+		// `configs/` dir by the time the shell constructor calls this, but
+		// mkdir defensively so the method is safe to call in isolation.)
+		if (fileExists(target)) return;
+		try { Switch.mkdirSync(`${this.appRoot}configs/`); } catch (_) { /* exists */ }
+		let bytes: ArrayBuffer | null;
+		try {
+			bytes = Switch.readFileSync('romfs:/configs/config.json');
+		} catch (error) {
+			console.debug(`[brewser] seedConfigSync read failed: ${error}`);
+			return;
+		}
+		if (!bytes) return;
+		try {
+			Switch.writeFileSync(target, new Uint8Array(bytes));
+		} catch (error) {
+			console.debug(`[brewser] seedConfigSync write failed: ${error}`);
+		}
+	}
+
+	/**
 	 * Recursively mirror everything under `romfs:/` to `<appRoot>` on the
 	 * SD card. Replaced the half-dozen per-dir allowlist seeders (BUILTIN_PAGES,
 	 * BUILTIN_DEV_PAGES, BUILTIN_ASSETS, BUILTIN_TEMPLATE_FILES,

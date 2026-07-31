@@ -889,23 +889,35 @@
 
   // Every catalog card (installed AND missing) carries data-app-detail
   // now — the modal is the universal tap target. Selecting on
-  // `[data-app-detail]` keeps the same delegation shape regardless of
-  // missing state; the branch is `currentDetail.missing` inside show().
-  var cards = document.querySelectorAll('[data-app-detail]');
-  for (var i = 0; i < cards.length; i++) {
-    (function (card) {
-      card.addEventListener('click', function (e) {
-        var raw = card.getAttribute('data-app-detail');
-        var detail = {};
-        if (raw) {
-          try { detail = JSON.parse(raw); } catch (_) { /* fall through */ }
-        }
-        show(detail);
-        if (e && e.preventDefault) e.preventDefault();
-        if (e && e.stopPropagation) e.stopPropagation();
-      });
-    })(cards[i]);
+  // `[data-app-detail]` keeps the same shape regardless of missing state;
+  // the branch is `currentDetail.missing` inside show().
+  //
+  // Wiring is per-card (LiveElement has no event delegation), so cards that
+  // apps-pagination.js swaps into the grid AFTER load would have no tap
+  // handler. `wireAppCards` is therefore idempotent (skips already-wired cards
+  // via `data-tap-wired`) and re-exposed on globalThis so the pager can call it
+  // after each page swap.
+  function wireAppCards() {
+    var cards = document.querySelectorAll('[data-app-detail]');
+    for (var i = 0; i < cards.length; i++) {
+      (function (card) {
+        if (card.getAttribute('data-tap-wired')) return;
+        card.setAttribute('data-tap-wired', '1');
+        card.addEventListener('click', function (e) {
+          var raw = card.getAttribute('data-app-detail');
+          var detail = {};
+          if (raw) {
+            try { detail = JSON.parse(raw); } catch (_) { /* fall through */ }
+          }
+          show(detail);
+          if (e && e.preventDefault) e.preventDefault();
+          if (e && e.stopPropagation) e.stopPropagation();
+        });
+      })(cards[i]);
+    }
   }
+  wireAppCards();
+  globalThis.__brewserWireAppCards = wireAppCards;
 
   cancelBtn.addEventListener('click', function (e) {
     close();

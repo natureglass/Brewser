@@ -31,9 +31,12 @@ import {
 } from '@switch-web/runtime';
 import {
 	clearAnimationFrames,
+	clearDynamicBackground,
 	clearSharedScreenGLBridge,
 	copyBridgeToScreen,
+	initDynamicBackground,
 	pageHasAnimationActivity,
+	presentDynamicBackground,
 	requestPaintTick,
 	tickAnimationFrames,
 } from '@switch-web/runtime';
@@ -158,7 +161,7 @@ import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
 import { BrowserPermissionPolicy, setLiveInputPermissionPolicy } from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
-import { type BrowserConfig, DEFAULT_CONFIG, isRevokedInCachedCatalogue, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
+import { type BrowserConfig, DEFAULT_CONFIG, isRevokedInCachedCatalogue, loadBackgroundRegistry, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { parseArtifacts, parseCatalogue, parseStats } from '@switch-web/runtime';
 import { BrowserBookmarksLoader } from './resources/browser-bookmarks-loader.js';
 import { BrowserHistoryLoader } from './resources/browser-history-loader.js';
@@ -190,6 +193,20 @@ interface SplashHandle {
 	 * `finishedFading` immediately. */
 	beginFade(): void;
 }
+
+/** Animated-wallpaper frame cap. 30 fps is plenty for slow shader swells
+ * and halves the per-frame compositing tax vs 60 (each pump frame drives a
+ * full slow-path repaint — the ~7-8 ms cache blit dominates). */
+const DYNAMIC_BG_FPS = 30;
+const DYNAMIC_BG_FRAME_MS = Math.round(1000 / DYNAMIC_BG_FPS);
+/** Global animation-clock multiplier for the shader `t` uniform: the sole,
+ * neutral speed control for every animated wallpaper. `1.0` = real elapsed
+ * seconds, i.e. the rate a standalone shader page gets at its own `SPEED = 1.0`,
+ * so a `.frag` extracted from such a page animates at its authored rate with
+ * no per-shader speed knob. Any wallpaper that wants a different pace bakes it
+ * into its own shader coefficients (self-contained, like the `zoom` constant).
+ * Lower this to slow ALL animated wallpapers at once. */
+const DYNAMIC_BG_SPEED = 1.0;
 
 export class BrowserShell {
 	private readonly policy: BrowserPermissionPolicy;
@@ -304,17 +321,34 @@ export class BrowserShell {
 	 * the live-DOM body paints over it. */
 	private pageBackground: string = DEFAULT_CONFIG.pageBackground;
 	/** Decoded wallpaper image painted between the per-frame viewport
-	 * clear and `paintLiveOverlay` (`paintStyleBackground`). Sourced
-	 * from `config.json`'s `styleBackground` (a cached snapshot of the
-	 * active `styles.json` entry's `background` field) and loaded
-	 * asynchronously at boot + on every `brewserStyle` change in
-	 * Settings. `null` when no background is configured (the typical
-	 * case for Amber / Neon) or while the decode is still in flight. */
+	 * clear and `paintLiveOverlay` (`paintStyleBackground`). Sourced from
+	 * the selected `backgrounds.json` entry's `background` field (resolved
+	 * from `config.json`'s `themeBackground` title) and loaded
+	 * asynchronously at boot + on every Background-picker change in
+	 * Settings. `null` when the selected background has no image (e.g.
+	 * "None", or a dynamic-only entry) or while the decode is in flight. */
 	private backgroundImage: HTMLImageElement | null = null;
 	/** Source path the current `backgroundImage` was loaded from, kept
-	 * so a no-op style change (radio re-stages the same value) doesn't
-	 * re-decode the same PNG. Empty when no image is configured. */
+	 * so a no-op background change (picker re-stages the same value)
+	 * doesn't re-decode the same PNG. Empty when no image is configured. */
 	private backgroundImageRel: string = '';
+	/** True when an animated wallpaper shader is armed (the selected
+	 * background has a `dynamic` field). Set by `loadStyleDynamic`; drives
+	 * `paintStyleBackground` to call `presentDynamicBackground` and drives
+	 * the per-frame wallpaper animation in the input loop's `onTick`. When
+	 * false the shell uses the static `backgroundImage` path. */
+	private dynamicBgActive: boolean = false;
+	/** Shader-asset path the current dynamic wallpaper was armed from, kept
+	 * to dedupe no-op re-arms (radio re-stages the same style). Empty when
+	 * no animated wallpaper is configured. */
+	private dynamicBgRel: string = '';
+	/** Monotonic-ish clock base (ms, from `performance.now()`) marking when
+	 * the current animated wallpaper started, so the shader's `t` uniform
+	 * is seconds-since-start. */
+	private dynamicBgStartMs: number = 0;
+	/** `performance.now()` of the last animated-wallpaper frame, so the
+	 * `onTick` driver can cap the repaint rate at {@link DYNAMIC_BG_FPS}. */
+	private lastBgFrameMs: number = 0;
 	/** Active toolbar position. Sourced from `config.json` (not the
 	 * toolbar design) since 2026-06-11 so the user can flip it from
 	 * Settings without re-skinning. Drives `publishChromeRegion` +
@@ -458,6 +492,15 @@ export class BrowserShell {
 		setLiveInputPermissionPolicy(this.policy);
 		this.profile = new BrowserProfile();
 		this.profile.ensure();
+		// Seed `configs/config.json` from romfs synchronously RIGHT HERE —
+		// before the `loadConfig` a few lines down. The async `seedRomfs` in
+		// `run()` is otherwise the first thing to put the file on disk, but
+		// that runs AFTER this constructor, so on a fresh profile the config
+		// reads below (colour scheme, button mapping, splash timing, history
+		// cap) would fall back to DEFAULT_CONFIG and the very first launch
+		// would render light-themed (white) with engine-default buttons until
+		// the next launch. Missing-only → a no-op on every seeded profile.
+		this.profile.seedConfigSync();
 		// One WebPageSession per shell — owns the per-navigation page
 		// lifecycle (scriptCtx + currentPageUrl). chromeHeight starts at 0
 		// and gets sync'd to the real toolbar height once `run()` has
@@ -870,6 +913,22 @@ export class BrowserShell {
 			resetLiveOverlayCache();
 			requestFullRepaint();
 		};
+		// Page-script-callable scroll-to-top + hard repaint. A superset
+		// of __swbRepaint: it also snaps the page's scroll offset back to
+		// the top. apps-pagination.js calls this when the user pages the
+		// app grid (Prev/Next) so the new page's first row lands at the
+		// top of the viewport instead of inheriting the previous page's
+		// scroll position. Zeroing momentumVelocity kills any residual
+		// coast so it can't immediately scroll back down. The overlay-
+		// cache reset + full-repaint request match __swbRepaint, needed
+		// because the pager also swapped grid.innerHTML in place.
+		(globalThis as { __swbScrollTop?: () => void })
+			.__swbScrollTop = () => {
+			this.currentScrollY = 0;
+			this.momentumVelocityPxPerTick = 0;
+			resetLiveOverlayCache();
+			requestFullRepaint();
+		};
 		// Boot-time snapshot of the toolbar avatar `src`. Runs BEFORE
 		// `installPolyfills` (main.ts:50) and therefore BEFORE the runtime's
 		// `installSwitchPathResolver` proxy exists, so the two auth reads go
@@ -1053,14 +1112,15 @@ export class BrowserShell {
 			setToolbarOverlayVisible(false);
 		}
 		this.publishChromeRegion();
-		// Per-style wallpaper. Cached value in `config.styleBackground`
-		// is authoritative when non-empty; an empty cache backfills from
-		// the active style's `styles.json` entry so a fresh install with
-		// no persisted value still gets the registry-default image
-		// without forcing a Settings save. Fire-and-forget (Promise) —
-		// the first paint may run without it and the image decode kicks
-		// off a repaint via `requestFullRepaint` once it lands.
-		void this.loadStyleBackground(this.resolveBootStyleBackground(shellConfig));
+		// Selected wallpaper. The STATIC image + the idle-animation flag are
+		// safe to set up now (no GL). The ANIMATED (`dynamic`) shader is
+		// deferred to after the home page's first paint (below the splash/nav
+		// block) — acquiring the shared screen GL context + enabling the GPU
+		// bridge HERE, mid-boot while the splash is still compositing 2D and
+		// before any page has painted, blanks the whole screen. Once a 2D
+		// paint has happened the GL bridge composites over it fine (the same
+		// path a runtime Background-picker change already exercises).
+		void this.loadStyleBackground(this.resolveSelectedBackground(shellConfig).background);
 		// Pre-decode the system cursor sprites + animated APNG frames from
 		// `themes/cursors.json` so `<body>`'s computed `cursor:` value can
 		// swap the on-screen cursor through the page-mouse-forwarder. Fire-
@@ -1132,6 +1192,19 @@ export class BrowserShell {
 			this.repaintAll();
 		} else {
 			await this.navigateTo(bootUrl);
+			// No splash → no repaintAll above; force one 2D paint before the
+			// deferred GL arm below so the bridge composites over an
+			// established surface (see the boot wallpaper note above).
+			this.repaintAll();
+		}
+		// Deferred animated-wallpaper arm. Now that the home page has been
+		// navigated AND painted (repaintAll above), acquiring the shared GL
+		// context + enabling the GPU bridge is safe — doing it earlier (mid
+		// boot, pre-first-paint) blanked the screen. Static wallpapers armed
+		// at boot above are unaffected; this only touches the `dynamic` shader.
+		{
+			const bootBg = this.resolveSelectedBackground(shellConfig);
+			if (bootBg.dynamic) this.loadStyleDynamic(bootBg.dynamic);
 		}
 
 		try {
@@ -1326,6 +1399,12 @@ export class BrowserShell {
 							this.repaintContent();
 							return true;
 						}
+						// Animated wallpaper: on an otherwise-idle tick (nothing
+						// above fired), advance it. Driven here rather than from a
+						// setTimeout pump so it keeps animating at full idle — and
+						// a no-op (returns false) when no dynamic wallpaper is
+						// armed, so the normal idle path is unchanged.
+						if (this.tickDynamicBackground(performance.now())) return true;
 						return false;
 					},
 				});
@@ -3006,11 +3085,9 @@ export class BrowserShell {
 	private async selectToolbar(path: string): Promise<void> {
 		const configPath = `${this.profile.appRoot}configs/config.json`;
 		// Per-toolbar height: look up the registry entry first so we can
-		// stamp `toolbarHeight` into the same write below. Mirrors the
-		// `brewserStyle → styleBackground` cache the Settings-page Save
-		// path uses (see `saveSettings`) — the source of truth is
-		// `toolbars.json`, cached into `config.json` so the boot path
-		// reads a single field instead of cracking a second JSON. A
+		// stamp `toolbarHeight` into the same write below. The source of
+		// truth is `toolbars.json`, cached into `config.json` so the boot
+		// path reads a single field instead of cracking a second JSON. A
 		// missing / non-numeric `height` leaves the existing
 		// `toolbarHeight` untouched.
 		const entry = loadToolbarRegistry(this.profile.appRoot).find((e) => e.path === path);
@@ -3139,24 +3216,12 @@ export class BrowserShell {
 		const staged = readStagedSettings();
 		if (Object.keys(staged).length === 0) return; // nothing to commit
 
-		// Style-background cache. The Settings page exposes a radio for
-		// `brewserStyle` but not for `styleBackground` (the wallpaper
-		// follows the style; the user doesn't pick it independently).
-		// Whenever `brewserStyle` is staged, look up its registry entry
-		// and inject the resolved `background` into `staged` so the
-		// existing merge + write path persists it alongside the style
-		// itself. The `'brewserStyle' in staged` guard (rather than a
-		// diff check) keeps the cache self-healing — a user who edits
-		// `styles.json`'s `background` field by hand only needs to
-		// Settings → Save once to refresh the cache, no style toggle
-		// required.
-		if ('brewserStyle' in staged && typeof staged.brewserStyle === 'string') {
-			const entry = loadStyleRegistry(this.profile.appRoot)
-				.find((e) => e.path === staged.brewserStyle);
-			staged.styleBackground = entry?.background ?? '';
-		}
-		// Toolbar-height cache. Parallel to `brewserStyle → styleBackground`
-		// above: each row in `toolbars.json` can carry a `height` field
+		// Wallpaper is selected independently now (the Settings page's
+		// Background picker stages `themeBackground` directly — a
+		// `backgrounds.json` entry title), so there's nothing to inject
+		// here; the merge + apply path below reacts to the staged value.
+		// Toolbar-height cache. Each row in `toolbars.json` can carry a
+		// `height` field
 		// (clamped by `loadToolbarRegistry`) and selecting a toolbar
 		// re-stamps `config.toolbarHeight` from it so the strip resizes
 		// to whatever the picked theme expects. Empty / missing `height`
@@ -3182,8 +3247,7 @@ export class BrowserShell {
 		// from `prior.warnings` so a partial stage doesn't clobber
 		// unchanged severities, then compose the canonical-order array
 		// and drop the three intermediate keys so they don't bake into
-		// config.json. Same shape as the `brewserStyle → styleBackground`
-		// cache injection above.
+		// config.json. Same shape as the toolbar-height injection above.
 		if ('warningLow' in staged || 'warningMedium' in staged || 'warningHigh' in staged) {
 			const pick = (key: 'warningLow' | 'warningMedium' | 'warningHigh', risk: 'low' | 'medium' | 'high'): boolean => (
 				key in staged ? !!staged[key] : prior.warnings.includes(risk)
@@ -3324,14 +3388,11 @@ export class BrowserShell {
 		if ('pageBackground' in staged && staged.pageBackground !== prior.pageBackground) {
 			this.pageBackground = fresh.pageBackground;
 		}
-		// Style wallpaper: kick off the decode for the freshly-persisted
-		// `styleBackground` (set above when `brewserStyle` was staged).
-		// `loadStyleBackground` dedupes on the source path, so a save
-		// that picks the same style as before is a no-op; an actual
-		// change clears the old image and decodes the new one, requesting
-		// a repaint when it lands.
-		if ('styleBackground' in staged && staged.styleBackground !== prior.styleBackground) {
-			void this.loadStyleBackground(fresh.styleBackground);
+		// Wallpaper: a Background-picker change re-resolves + re-applies the
+		// selected entry live (image decode + arm/disarm shader + repaint). A
+		// dynamic wallpaper then animates continuously via the onTick driver.
+		if ('themeBackground' in staged && staged.themeBackground !== prior.themeBackground) {
+			this.applySelectedBackground(fresh);
 		}
 		// Toolbar position: cache on the shell + stamp the new value on
 		// the toolbar live root so theme CSS can flip its layout via
@@ -3602,18 +3663,40 @@ export class BrowserShell {
 		this.rebuildToolbarLiveRoot();
 	}
 
-	/** Pick the effective `styleBackground` path at boot. `config.json`'s
-	 * persisted cache wins when non-empty; an empty cache falls back to
-	 * `styles.json`'s `background` field for the entry matching the
-	 * active `brewserStyle`. This backfill makes a fresh install (or
-	 * an old config that predates the `styleBackground` key) still
-	 * surface the shipped registry default without forcing the user to
-	 * toggle their style in Settings just to populate the cache. */
-	private resolveBootStyleBackground(config: ReturnType<typeof loadConfig>): string {
-		if (config.styleBackground) return config.styleBackground;
-		const entry = loadStyleRegistry(this.profile.appRoot)
-			.find((e) => e.path === config.brewserStyle);
-		return entry?.background ?? '';
+	/** Resolve the selected wallpaper from `backgrounds.json` by its title
+	 * (`config.themeBackground`, the Settings Background picker). Returns
+	 * the empty shape ({ background:'', dynamic:'' }) when the title is
+	 * missing / unmatched (e.g. "None") so the caller clears any wallpaper. */
+	private resolveSelectedBackground(
+		config: ReturnType<typeof loadConfig>,
+	): { background: string; dynamic: string } {
+		const entry = loadBackgroundRegistry(this.profile.appRoot)
+			.find((e) => e.title === config.themeBackground);
+		return {
+			background: entry?.background ?? '',
+			dynamic: entry?.dynamic ?? '',
+		};
+	}
+
+	/** Apply the selected wallpaper: kick off the static image decode and,
+	 * when the selected entry ships a `dynamic` shader, arm the animated
+	 * wallpaper (which takes precedence in `paintStyleBackground`, with the
+	 * static image as its per-frame fallback). Otherwise disarm any running
+	 * shader so the static image (or page-bg colour) shows. A dynamic
+	 * wallpaper always animates continuously (it's turned off by selecting
+	 * "None"). Used at boot and after a Settings save. Resetting
+	 * `dynamicBgRel` first defeats `loadStyleDynamic`'s path-dedupe so
+	 * re-selecting the same shader still recompiles. */
+	private applySelectedBackground(config: ReturnType<typeof loadConfig>): void {
+		const bg = this.resolveSelectedBackground(config);
+		void this.loadStyleBackground(bg.background);
+		this.dynamicBgRel = '';
+		if (bg.dynamic) {
+			this.loadStyleDynamic(bg.dynamic);
+		} else {
+			this.disarmDynamicBg();
+			requestFullRepaint();
+		}
 	}
 
 	/** Decode the wallpaper image at `rel` (resolved through
@@ -3642,6 +3725,113 @@ export class BrowserShell {
 		requestFullRepaint();
 	}
 
+	/** Arm (or disarm) the animated wallpaper for the active style. `rel`
+	 * is the fragment-shader asset path (resolved through
+	 * `profile.stylePath`, same rules as `loadStyleBackground`); empty =
+	 * no animated wallpaper. Reads the shader synchronously (a few KB) and
+	 * hands it to the runtime's `initDynamicBackground`. On success sets
+	 * `dynamicBgActive` (the input loop's `onTick` then animates it every
+	 * frame — see `tickDynamicBackground`); the static `backgroundImage`
+	 * stays cached as the fallback for any frame where the GL present
+	 * fails. On empty path / unreadable / uncompilable shader, disarms
+	 * cleanly so `paintStyleBackground` uses the static image (or page
+	 * colour). Deduped on the source path so a no-op re-select doesn't
+	 * recompile. */
+	private loadStyleDynamic(rel: string): void {
+		if (rel === this.dynamicBgRel) return;
+		this.dynamicBgRel = rel;
+		if (!rel) {
+			this.disarmDynamicBg();
+			requestFullRepaint();
+			return;
+		}
+		let src: string | null = null;
+		try {
+			const raw = Switch.readFileSync(this.profile.stylePath(rel));
+			src = raw && raw.byteLength > 0 ? new TextDecoder().decode(raw) : null;
+		} catch (_) { src = null; }
+		const ok = src ? initDynamicBackground(src) : false;
+		if (!ok) {
+			console.debug('[brewser] dynamic wallpaper unavailable — falling back to static background');
+			this.disarmDynamicBg();
+			requestFullRepaint();
+			return;
+		}
+		this.dynamicBgActive = true;
+		this.dynamicBgStartMs = performance.now();
+		this.lastBgFrameMs = 0;
+		requestFullRepaint();
+	}
+
+	/** Tear down the animated wallpaper: drop the runtime program + clear
+	 * the active flag (which stops the `onTick` animation driver).
+	 * Idempotent. The static `backgroundImage` (if any) is left untouched
+	 * so the fallback path keeps working. */
+	private disarmDynamicBg(): void {
+		this.dynamicBgActive = false;
+		clearDynamicBackground();
+	}
+
+	/** Whether the shell wallpaper (static image OR animated shader) may be
+	 * painted on the CURRENTLY active page.
+	 *
+	 * The wallpaper is the shell's *desktop* backdrop — it belongs behind the
+	 * chrome pages (home / apps launcher / settings / …), not inside a running
+	 * app or a web page. Two reasons it must be suppressed off the shell's own
+	 * pages:
+	 *   1. The animated wallpaper draws into the v1 shared screen-GL bridge FBO
+	 *      — the SAME FBO page WebGL canvases render into. Presenting it while an
+	 *      app's WebGL canvas is live overwrites the app's just-rendered FBO
+	 *      right before the shell reads it back to composite the canvas, so the
+	 *      app's canvas shows wallpaper pixels (the reported bug). The runtime's
+	 *      dynamic-bg comment states the invariant it relies on: "the wallpaper
+	 *      is only visible on the shell's own transparent-body pages, which never
+	 *      run page WebGL." This gate enforces it.
+	 *   2. Conceptually you're inside an app / on a web page — the shell's
+	 *      desktop wallpaper should not bleed through a transparent body.
+	 *
+	 * Returns false for app pages (`brewser://apps/<id>/…`, via `currentAppDir`),
+	 * external http(s) pages, and dev WebGL probes (`brewser://dev/…`); true for
+	 * every other internal shell page. Written as "exclude the known non-shell
+	 * pages" (rather than "require `brewser://`") so the brief `currentPageUrl
+	 * === ''` window mid-navigation doesn't blink the wallpaper off a shell
+	 * page. Restores automatically on app exit — walking back to a shell page
+	 * flips this true and the next paint revives the wallpaper (the runtime
+	 * self-heals the shader program if the app tore the shared GL context
+	 * down). */
+	private wallpaperAllowedOnCurrentPage(): boolean {
+		if (this.currentAppDir !== null) return false;
+		const url = this.session.currentPageUrl;
+		if (/^https?:\/\//i.test(url)) return false;
+		if (/^brewser:\/\/dev\//i.test(url)) return false;
+		return true;
+	}
+
+	/** Per-frame animated-wallpaper driver, called from the input loop's
+	 * `onTick` (which fires every ~16 ms regardless of input). Returns true
+	 * when it painted a wallpaper frame so the caller keeps the loop in its
+	 * active (vsync) poll — that's what actually presents the frame. Capped
+	 * at {@link DYNAMIC_BG_FPS}.
+	 *
+	 * This REPLACED an earlier `setTimeout`-based pump: on real hardware the
+	 * pump's timer is starved once the main loop goes fully idle (no input,
+	 * no momentum), so the wallpaper froze the instant interaction stopped
+	 * (the engine idle draw→submit gap, [[feedback-swb-idle-paint-needs-touch]]).
+	 * Driving the repaint from `onTick` + returning active keeps it animating
+	 * continuously. No-op unless a dynamic wallpaper is armed and visible
+	 * (normal mode — any fullscreen app/page/canvas/video covers it). */
+	private tickDynamicBackground(nowMs: number): boolean {
+		if (!this.dynamicBgActive || this.mode !== 'normal' || !this.wallpaperAllowedOnCurrentPage()) return false;
+		if (nowMs - this.lastBgFrameMs < DYNAMIC_BG_FRAME_MS) return false;
+		this.lastBgFrameMs = nowMs;
+		// `requestPaintTick` arms the `fired` branch (the reliable idle
+		// present path) for the next tick too; the direct repaint paints the
+		// wallpaper now.
+		try { requestPaintTick(); } catch (_) { /* swallow */ }
+		this.repaintContent();
+		return true;
+	}
+
 	/** Paint the cached wallpaper inside `viewport` using cover-fit
 	 * (center-crop) sizing. Source rect is computed in image space to
 	 * match the dst aspect ratio; `drawImage(img, sx, sy, sw, sh, …)`
@@ -3653,6 +3843,26 @@ export class BrowserShell {
 		ctx: CanvasRenderingContext2D,
 		viewport: { x: number; y: number; width: number; height: number },
 	): void {
+		// Desktop-backdrop only: never paint the wallpaper inside an app / web
+		// page / dev-WebGL probe. This is the load-bearing guard for the
+		// "dynamic background bleeds onto the app canvas" bug — the animated
+		// path below shares the v1 screen-GL bridge FBO with page WebGL, so
+		// presenting here would clobber the app's canvas (see
+		// `wallpaperAllowedOnCurrentPage`). The caller already filled the
+		// viewport with the page-bg colour, so returning early just leaves
+		// that fill in place.
+		if (!this.wallpaperAllowedOnCurrentPage()) return;
+		// Animated wallpaper first: render the shader into the shared GL
+		// bridge and blit it into the viewport. `presentDynamicBackground`
+		// returns false if the shader isn't live / GL failed this frame, in
+		// which case we fall through to the static image (or, if there's no
+		// image either, the page-bg fill the caller already laid down).
+		if (this.dynamicBgActive && viewport.width > 0 && viewport.height > 0) {
+			const t = (performance.now() - this.dynamicBgStartMs) / 1000 * DYNAMIC_BG_SPEED;
+			if (presentDynamicBackground(t, viewport.width, viewport.height, viewport.x, viewport.y)) {
+				return;
+			}
+		}
 		const img = this.backgroundImage;
 		if (!img) return;
 		const iw = img.naturalWidth;
