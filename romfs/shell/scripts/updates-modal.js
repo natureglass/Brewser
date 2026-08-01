@@ -3,13 +3,24 @@
 // bar while a real http(s) fetch of the configured catalog URL is in
 // flight, then either:
 //   - Success: rewrites `sdmc:/switch/brewser/catalogue.json` with the
-//     fetched bytes, then walks the new catalog vs. each installed
-//     app's `manifest.json` on disk to produce the "New apps" /
-//     "Updates" diff lists in the modal. The page is NOT reloaded —
-//     the user sees the diff right there, then dismisses the modal.
-//     The grid cards in the background still reflect the OLD catalog
-//     until the user navigates away and back, by design (avoids a
-//     full repaint mid-modal).
+//     fetched bytes, then produces the modal's two lists from TWO
+//     DISTINCT diffs:
+//       * "New apps"  = the store DELTA — listings whose id is in the
+//         freshly-downloaded catalogue but was NOT in the copy that was
+//         on disk a moment ago (captured in memory before the overwrite).
+//         This is "what's new in the store since your last check", NOT
+//         "every app you haven't installed" — the latter never changes
+//         between checks and was the source of the stale "always new"
+//         list. See `diffNewInCatalogue`.
+//       * "Updates"   = the installed-trailing set — apps whose on-disk
+//         `manifest.json` version now lags the catalogue's. The
+//         actionable "an update is available for something you own" list.
+//         See `diffCatalog` (its installed-state walk ALSO drives logo
+//         seeding + the in-place upgrade-chip repaint, so it stays).
+//     The page is NOT reloaded — the user sees the diff right there,
+//     then dismisses the modal. The grid cards in the background still
+//     reflect the OLD catalog until the user navigates away and back, by
+//     design (avoids a full repaint mid-modal).
 //   - Failure: flips the card into the `--error` state and surfaces a
 //     human-readable error string so the user knows the catalog was
 //     NOT updated.
@@ -94,9 +105,11 @@
   // Newly-released runtime/shell/nx.js versions are downloaded into
   // `versions.json` and compared against `current.json` (the immutable
   // "I shipped with these versions" snapshot seeded from
-  // `romfs/configs/current.json`). Any field-by-field mismatch
-  // appends a "New Brewser Version available" line to the modal
-  // summary. `current.json` is NEVER overwritten by this flow —
+  // `romfs/configs/current.json`). Only a component whose published
+  // version is STRICTLY NEWER by semver than the installed one appends a
+  // "New Brewser version available" line to the modal summary AND turns
+  // the Check-for-Updates button green — a merely-different (e.g. older
+  // published) version is not an update. `current.json` is NEVER overwritten by this flow —
   // overwriting it would make the next check always read equal and
   // never surface an upgrade. `versions.json` is downloaded on every
   // Check-for-Updates press, so a stale copy can't hide a new release.
@@ -434,15 +447,38 @@
     el.innerHTML = html;
   }
 
+  // Dotted-numeric semver compare — a plain-JS mirror of `semverCmp` in
+  // src/update/decide.ts (this romfs page script can't import the bundle).
+  // Pre-release (`-beta.5`) and build (`+…`) metadata are stripped: the
+  // release NRO's brewser version is a clean `x.y.z`, and the anti-rollback
+  // counter in the signed update manifest is the authoritative guard the
+  // real self-update flow enforces. Returns true iff `a` is STRICTLY greater
+  // than `b`; an unparseable segment fails closed to `false` (no update
+  // offered) rather than risking a false positive.
+  function semverGreater(a, b) {
+    var core = function (s) { return String(s).split('+')[0].split('-')[0]; };
+    var pa = core(a).split('.');
+    var pb = core(b).split('.');
+    var n = Math.max(pa.length, pb.length);
+    for (var i = 0; i < n; i++) {
+      var x = parseInt(pa[i] != null ? pa[i] : '0', 10);
+      var y = parseInt(pb[i] != null ? pb[i] : '0', 10);
+      if (isNaN(x) || isNaN(y)) return false;
+      if (x !== y) return x > y;
+    }
+    return false;
+  }
+
   // Download `versions.json` from the configured URL, persist it under
-  // `<appRoot>configs/versions.json`, then compare it field-by-field
-  // against the seeded `<appRoot>configs/current.json` baseline.
-  // Returns `true` iff any field differs (the modal then appends the
-  // "New Brewser Version available" line). Best-effort throughout:
-  // every failure path logs + returns `false` so a versions-check miss
-  // can't cascade into a catalogue refresh failure. `current.json` is
-  // never written by this flow — overwriting it would make every
-  // future check read equal and silently hide new releases.
+  // `<appRoot>configs/versions.json`, then compare it against the seeded
+  // `<appRoot>configs/current.json` baseline (the immutable "I shipped with
+  // these versions" snapshot). Returns `true` iff a tracked component's
+  // PUBLISHED version is strictly newer by semver than the installed one —
+  // i.e. there is genuinely a newer build to download. Best-effort
+  // throughout: every failure path logs + returns `false` so a
+  // versions-check miss can't cascade into a catalogue refresh failure.
+  // `current.json` is never written by this flow — overwriting it would
+  // make every future check read equal and silently hide new releases.
   async function checkVersionsForUpdate(remoteUrl) {
     if (!remoteUrl) {
       console.debug('[updates-modal] versions URL not configured; skipping check');
@@ -504,22 +540,29 @@
       console.debug('[updates-modal] current.json parse failed: ' + (err && err.message ? err.message : String(err)));
       return false;
     }
-    // Strict string inequality on every key present in the fetched
-    // versions.json. A field-by-field test (not a semver compare) is
-    // the contract — "is this exactly the same set of bits I shipped
-    // with?". Keys present in `current` but missing from `fetched` are
-    // ignored (the server is authoritative for what's currently
-    // released; a dropped field means that component isn't tracked
-    // anymore). A new key in `fetched` (a component that didn't exist
-    // when this install shipped) counts as a mismatch — current's
-    // implicit value is "" which won't equal the fetched string.
+    // Semver-GREATER decision (not string inequality). An update is offered
+    // ONLY when a published component version is strictly newer than the one
+    // installed — never merely different. The old string test fired in BOTH
+    // directions, so a locally-built install whose brewser version already
+    // LEADS the published versions.json was wrongly told "new version
+    // available" every check; that direction is exactly the false positive
+    // this fixes. Mirrors the semver arm of decideUpdate (the real
+    // self-update flow re-checks counter + semver before downloading, so
+    // this is just the cheap "worth offering?" hint and must agree).
+    //
+    // Only keys present on BOTH sides are compared: a key only in `fetched`
+    // (a component that didn't exist when this build shipped) or only in
+    // `current` (server stopped tracking it) is skipped rather than counted
+    // — that asymmetry was the other historical false-positive source. The
+    // brewser NRO bundles every component and its version bumps on every
+    // release, so the `brewser` key alone reliably catches a real update;
+    // iterating all shared keys is belt-and-braces.
     for (var key in fetchedParsed) {
       if (!Object.prototype.hasOwnProperty.call(fetchedParsed, key)) continue;
-      var fetchedVal = fetchedParsed[key];
-      var currentVal = Object.prototype.hasOwnProperty.call(currentParsed, key)
-        ? currentParsed[key] : '';
-      if (String(fetchedVal) !== String(currentVal)) {
-        console.debug('[updates-modal] version mismatch on "' + key + '": current=' + String(currentVal) + ' fetched=' + String(fetchedVal));
+      if (!Object.prototype.hasOwnProperty.call(currentParsed, key)) continue;
+      if (semverGreater(String(fetchedParsed[key]), String(currentParsed[key]))) {
+        console.debug('[updates-modal] newer version for "' + key + '": current='
+          + String(currentParsed[key]) + ' published=' + String(fetchedParsed[key]));
         return true;
       }
     }
@@ -527,11 +570,18 @@
   }
 
   // Walk the NORMALIZED catalogue (platform-client output — this
-  // script never reads raw catalogue fields) and bucket each app as
-  // missing (launcher not on disk under the flat `apps/<id>/<entry>`)
-  // or updated (installed manifest `version` differs from the
-  // catalogue's). Mirrors the engine-side library join so the modal's
-  // diff matches what the grid shows after the next reload.
+  // script never reads raw catalogue fields) and bucket each app by its
+  // INSTALLED state on disk:
+  //   * missing — launcher not on disk under the flat `apps/<id>/<entry>`.
+  //     Drives `seedMissingLogos` (fetch the art for apps you don't have).
+  //   * updates — installed manifest `version` differs from the
+  //     catalogue's. Drives BOTH the in-place upgrade-chip repaint
+  //     (`refreshUpgradeChips`) and the modal's "Updates" list.
+  // This is the ACTION diff (catalogue-vs-disk). It is NOT the source of
+  // the "New apps" list — that comes from the store delta computed by
+  // `diffNewInCatalogue` (old-vs-new catalogue). Mirrors the engine-side
+  // library join so the installed-state view matches the grid after the
+  // next reload.
   function diffCatalog(normalized) {
     var decoder = new TextDecoder();
     var missing = [];
@@ -582,6 +632,25 @@
     return { missing: missing, updates: updates };
   }
 
+  // Store DELTA for the "New apps" list — apps whose id is in the
+  // freshly-downloaded catalogue but was NOT in the copy that was on disk
+  // before this check. `oldIds` is a lookup map built from the previous
+  // catalogue (see runCheck); it is `null` when no usable baseline could
+  // be read/parsed, in which case there is no "previous one" to diff
+  // against so we return [] rather than flooding the modal with every
+  // listing. Each row carries just the name + version the list renders.
+  function diffNewInCatalogue(oldIds, normalized) {
+    if (!oldIds) return [];
+    var out = [];
+    var apps = normalized && Array.isArray(normalized.apps) ? normalized.apps : [];
+    for (var i = 0; i < apps.length; i++) {
+      var e = apps[i];
+      if (Object.prototype.hasOwnProperty.call(oldIds, e.id)) continue;
+      out.push({ id: e.id, name: e.name || e.id, version: e.version || '' });
+    }
+    return out;
+  }
+
   function renderNewRow(detail) {
     var name = escapeHtml(detail.name || detail.id || 'Unknown app');
     var ver = detail.version
@@ -610,26 +679,31 @@
       + '</div>';
   }
 
-  function populate(buckets) {
-    var newHtml = buckets.missing.map(renderNewRow).join('');
-    var updateHtml = buckets.updates.map(renderUpdateRow).join('');
+  // `newApps` is the store DELTA — listings that appeared since the last
+  // check (old-vs-new catalogue), NOT every uninstalled app. `updates` is
+  // the installed-trailing set (apps on disk whose version now lags the
+  // catalogue). The two lists come from deliberately different diffs —
+  // see `diffNewInCatalogue` and `diffCatalog`.
+  function populate(newApps, updates) {
+    var newHtml = newApps.map(renderNewRow).join('');
+    var updateHtml = updates.map(renderUpdateRow).join('');
     newList.innerHTML = newHtml;
     updateList.innerHTML = updateHtml;
     // Per-section empty toggle keeps the heading suppressed when its
     // list has no entries, but only one of the two needs to be empty
     // for the modal to still feel populated.
-    if (buckets.missing.length === 0) {
+    if (newApps.length === 0) {
       newSection.classList.add('updates-modal-section--empty');
     } else {
       newSection.classList.remove('updates-modal-section--empty');
     }
-    if (buckets.updates.length === 0) {
+    if (updates.length === 0) {
       updateSection.classList.add('updates-modal-section--empty');
     } else {
       updateSection.classList.remove('updates-modal-section--empty');
     }
     // Whole-results empty state: shown only when BOTH lists are empty.
-    if (buckets.missing.length === 0 && buckets.updates.length === 0) {
+    if (newApps.length === 0 && updates.length === 0) {
       resultsEl.classList.add('updates-modal-results--empty');
     } else {
       resultsEl.classList.remove('updates-modal-results--empty');
@@ -742,21 +816,59 @@
           + (outcome.message || 'unknown reason') + '. Keeping the current catalogue.');
         return;
       }
+      // Capture the PREVIOUS catalogue (the copy still on disk) before we
+      // overwrite it, so the "New apps" list can show only what changed in
+      // the store since the last check — not every uninstalled app. Read
+      // into memory (no temp file to orphan if the check is interrupted);
+      // parse it through the same platform client so the id set matches the
+      // new side exactly. A missing/corrupt/too-old baseline yields `null`
+      // → `diffNewInCatalogue` returns [] (no "previous one" to diff).
+      var oldIds = null;
+      try {
+        var oldData = Switch.readFileSync(CATALOG_PATH);
+        if (oldData) {
+          var oldText = new TextDecoder().decode(oldData);
+          var oldOutcome = client.parseCatalogue(oldText);
+          if (oldOutcome && oldOutcome.kind === 'Ok') {
+            oldIds = {};
+            var oldApps = oldOutcome.catalogue.apps || [];
+            for (var oi = 0; oi < oldApps.length; oi++) oldIds[oldApps[oi].id] = true;
+          } else {
+            console.debug('[updates-modal] previous catalogue unusable ('
+              + (oldOutcome ? oldOutcome.kind : 'no outcome') + '); New-apps delta skipped');
+          }
+        } else {
+          console.debug('[updates-modal] no previous catalogue on disk; New-apps delta skipped');
+        }
+      } catch (err) {
+        console.debug('[updates-modal] reading previous catalogue failed: '
+          + (err && err.message ? err.message : String(err)));
+      }
       try {
         Switch.writeFileSync(CATALOG_PATH, text);
       } catch (e) {
         setError('Write failed: ' + (e && e.message ? e.message : String(e)));
         return;
       }
-      // Success — compute the diff against the freshly-normalized
-      // catalogue and the on-disk manifests, then populate the modal
-      // and remove the loading state so the lists become visible.
+      // Success — compute both diffs. The installed-state diff (buckets)
+      // drives logo seeding + the upgrade chips + the "Updates" list; the
+      // store delta (newApps) drives the "New apps" list against the old
+      // catalogue captured above.
       var buckets;
       try {
         buckets = diffCatalog(outcome.catalogue);
       } catch (e) {
         setError('Diff failed: ' + (e && e.message ? e.message : String(e)));
         return;
+      }
+      var newApps;
+      try {
+        newApps = diffNewInCatalogue(oldIds, outcome.catalogue);
+      } catch (e) {
+        // A delta failure must not sink an otherwise-good sync — degrade
+        // to an empty "New apps" list and keep going.
+        console.debug('[updates-modal] New-apps delta failed: ' + (e && e.message ? e.message : String(e)));
+        newApps = [];
       }
       // Refresh the sibling telemetry files (downloads + ratings)
       // alongside the catalogue. Run in parallel with the logo seed
@@ -804,7 +916,7 @@
         try { globalThis.__swbRepaint(); }
         catch (err) { console.debug('[updates-modal] __swbRepaint failed: ' + (err && err.message ? err.message : String(err))); }
       }
-      populate(buckets);
+      populate(newApps, buckets.updates);
       renderParseReport(outcome.catalogue);
       card.classList.remove('updates-modal-card--loading');
       // Append a second line to the modal summary when the
@@ -816,6 +928,15 @@
       // [[reference-brewser-fixed-overlay-paint-cost]]).
       var statusHtml = 'Local Catalog is now synced!';
       brewserUpdateOffered = newBrewserVersionAvailable;
+      // Reflect a REAL available update on the trigger button itself so the
+      // signal persists after the modal closes: green = "an update is waiting"
+      // (the `--update-available` modifier styled in apps.html). Set/cleared
+      // from this check's result so a later "up to date" run resets it.
+      if (newBrewserVersionAvailable) {
+        triggerBtn.classList.add('apps-check-updates--update-available');
+      } else {
+        triggerBtn.classList.remove('apps-check-updates--update-available');
+      }
       if (newBrewserVersionAvailable) {
         // The whole update line is the trigger: a tap on statusEl opens the
         // self-update modal (gated by brewserUpdateOffered). Styled with the

@@ -11,6 +11,20 @@
      warning palette so drift is impossible to miss. */
   .updates-modal-report { margin-top: 10px; font-size: 13px; color: #8fa1bd; }
   .updates-modal-report--drift { color: #e8b34b; }
+  /* The Check-for-Updates button turns green when the versions check found
+     a genuinely newer Brewser to download (updates-modal.js adds the
+     modifier). Uses the theme primary token, falling back to the default
+     Brewser green. Two-class selectors so this wins over the base
+     `.apps-check-updates` yellow (and its :active rule) regardless of which
+     theme stylesheet loads and in what order. */
+  .apps-check-updates.apps-check-updates--update-available {
+    background: var(--brewser-primary, var(--hybridmag-color-primary, #65bc7b));
+    color: #ffffff;
+  }
+  .apps-check-updates.apps-check-updates--update-available:active,
+  .apps-check-updates.apps-check-updates--update-available[aria-pressed="true"] {
+    background: #4f9c66;
+  }
 </style>
 </head>
 <body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>" data-max-per-page="<browser-config-maxperpage/>" data-lazy-banners="paged">
