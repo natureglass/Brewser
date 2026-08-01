@@ -68,7 +68,12 @@ const bases = COPIES.map(([label, file]) => [label, extractBaseUrl(label, file)]
 if (new Set(bases.map(([, b]) => b)).size > 1) {
   drift.push(`  PLATFORM_BASE_URL:\n${bases.map(([l, b]) => `    ${l}: ${b}`).join('\n')}`);
 }
-const DERIVED = { catalogue: '/catalogue.json', stats: '/stats.json', versions: '/versions.json' };
+// `versions` is intentionally NOT here: versions.json moved to the
+// brewser-apps-staging repo (my.brewser.tech), so it is no longer
+// PLATFORM_BASE_URL + suffix. It is still byte-compared across the src/dist/
+// vendored copies by the generic drift loop above — just not asserted as a
+// base derivation.
+const DERIVED = { catalogue: '/catalogue.json', stats: '/stats.json' };
 for (const [label, pairs] of [ref, ...rest]) {
   const base = bases.find(([l]) => l === label)?.[1];
   for (const [key, suffix] of Object.entries(DERIVED)) {

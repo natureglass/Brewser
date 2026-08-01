@@ -17,17 +17,17 @@ In one go it:
 
 1. **Bumps** the version + build counter — `package.json` version (patch, e.g. `0.1.2 → 0.1.3`) and `scripts/update/build-info.json` `counter` (+1). The version lets the runtime **detect** a new build; the counter (baked in + signed) lets it **accept** the update and refuse a rollback.
 2. **Builds** the bundle with the new version/counter + signing keyring baked in (`scripts/build-main.mjs`), refreshes `romfs/configs/current.json` + the seed-fingerprint, and **packages** the fat NRO (reuses the prebuilt `nxjs.nro` — no devkitPro needed).
-3. **Mirrors** `current.json` → `../brewser-apps/versions.json` (served at `play.brewser.tech/versions.json` — the snapshot the runtime compares against).
+3. **Mirrors** `current.json` → `../brewser-apps-staging/versions.json` (served at `my.brewser.tech/versions.json` — the snapshot the runtime compares against).
 4. **Moves** the NRO to `dist/`, **signs** `dist/update.json` (`scripts/update/sign-release.mjs`), and **verifies** the console would accept it (`scripts/update/verify-release.mjs`). The build fails if verification fails.
 
-Output: `dist/brewser.nro` + `dist/update.json` (→ push to `natureglass/Brewser`) and `../brewser-apps/versions.json` (→ push to brewser-apps).
+Output: `dist/brewser.nro` + `dist/update.json` (→ push to `natureglass/Brewser`) and `../brewser-apps-staging/versions.json` (→ push to brewser-apps-staging).
 
 > **Every `make` bumps the version.** Re-running after a failed step advances the version again. To iterate on the shell **without** cutting a release, use `make sdmc` (Citron dev loop — builds + mirrors `romfs/` to the emulator, no bump, no sign).
 
 ### Publish + test an update
 1. Flash the **previous** build to the SD card as `sdmc:/switch/brewser.nro` (the baseline that will receive the update).
 2. `make` → produces the new signed version in `dist/` + updated `versions.json`.
-3. Push `dist/` (`brewser.nro` + `update.json`) to `natureglass/Brewser` **`main`**, and `versions.json` to brewser-apps.
+3. Push `dist/` (`brewser.nro` + `update.json`) to `natureglass/Brewser` **`main`**, and `versions.json` to brewser-apps-staging.
 4. On the baseline: **Apps → Check for Updates → Update now → Restart Now** → it downloads, verifies, applies, and reboots into the new version.
 
 ### Common targets

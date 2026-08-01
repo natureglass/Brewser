@@ -63,12 +63,13 @@ NRO_LOG           := .nro-build.log
 # natureglass/Brewser repo, which raw.githubusercontent.com serves for the
 # self-updater. `make release` lands brewser.nro here (see the `release` target).
 DIST_DIR          ?= dist
-# The sibling brewser-apps checkout — `make release` writes its versions.json
-# (served at play.brewser.tech/versions.json), which the runtime string-compares
-# against the installed current.json to recognize a new build. Mirrors
-# romfs/configs/current.json exactly (also fixes the stale collect_versions.py).
-BREWSER_APPS_DIR  ?= ../brewser-apps
-VERSIONS_JSON     := $(BREWSER_APPS_DIR)/versions.json
+# The sibling brewser-apps-staging checkout — `make release` writes its
+# versions.json (served at my.brewser.tech/versions.json), which the runtime
+# string-compares against the installed current.json to recognize a new build.
+# Mirrors romfs/configs/current.json exactly. This is now the SOLE producer of
+# versions.json — brewser-apps' old scripts/collect_versions.py was retired.
+BREWSER_STAGING_DIR ?= ../brewser-apps-staging
+VERSIONS_JSON       := $(BREWSER_STAGING_DIR)/versions.json
 # natureglass/Brewser branch the client downloads from. Keep == src/update/
 # config.ts RELEASE_REF. (Moving off v8-migration → main.)
 RELEASE_BRANCH    ?= main
@@ -224,7 +225,7 @@ bump:
 #            scripts/build-main.mjs) + regen current.json + seed-fingerprint +
 #            package the fat NRO (reusing the prebuilt nxjs.nro base — see
 #            Makefile_nxjs for the runtime build)
-#   3. mirror current.json → the served versions.json (in ../brewser-apps)
+#   3. mirror current.json → the served versions.json (in ../brewser-apps-staging)
 #   4. move the NRO into dist/, sign the manifest, and verify the console would
 #      accept it.
 # Does NOT rebuild nx.js and does NOT mirror to Citron (this NRO is for real
@@ -233,7 +234,7 @@ bump:
 release: bump
 	@$(MAKE) nro
 	@echo "[release] mirroring current.json → $(VERSIONS_JSON)"
-	@mkdir -p "$(BREWSER_APPS_DIR)"
+	@mkdir -p "$(BREWSER_STAGING_DIR)"
 	@cp romfs/configs/current.json "$(VERSIONS_JSON)"
 	@mkdir -p "$(DIST_DIR)"
 	@mv -f $(NRO) "$(DIST_DIR)/$(NRO)"
@@ -242,7 +243,7 @@ release: bump
 	@echo ""
 	@echo "[release] DONE ($(RELEASE_BRANCH)). Publish:"
 	@echo "  • push $(DIST_DIR)/$(NRO) + $(DIST_DIR)/update.json to natureglass/Brewser"
-	@echo "  • push $(VERSIONS_JSON) to brewser-apps (served at play.brewser.tech/versions.json)"
+	@echo "  • push $(VERSIONS_JSON) to brewser-apps-staging (served at my.brewser.tech/versions.json)"
 
 clean:
 	rm -rf build/ runtime/
@@ -257,7 +258,7 @@ help:
 	@echo "                   build (bakes version/counter/keyring), package the NRO into"
 	@echo "                   $(DIST_DIR)/, update $(VERSIONS_JSON), sign + verify the manifest."
 	@echo "                   Each run is a NEW, strictly-newer version. Push dist/ to"
-	@echo "                   natureglass/Brewser and versions.json to brewser-apps."
+	@echo "                   natureglass/Brewser and versions.json to brewser-apps-staging."
 	@echo "  make bump        Bump version + counter only (scripts/bump-version.mjs)"
 	@echo "  make sdmc        Citron dev loop: build + mirror romfs/ to SDMC (NO bump/sign)"
 	@echo "  make mirror-only Mirror romfs/ to SDMC without rebuilding"
