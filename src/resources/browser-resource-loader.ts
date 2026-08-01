@@ -620,15 +620,34 @@ export class BrowserResourceLoader implements ResourceLoader {
 			() => htmlEscape(homeSectionTitle(loadConfig(this.appRoot).homeSection)),
 		);
 		// `<browser-config-homesection>` — the RAW home section id
-		// (featured / recent / popular / toprated). Stamped onto the home
-		// page's grid panel as `data-tab` so `apps-pagination.js` treats it
-		// as a paginated panel and asks the `__brewserAppsPager` hook for the
-		// right tab's pages. (home.html has no tab radios, so the pager script
-		// falls back to "always active" for a panel whose `apps-tab-<id>`
-		// radio is absent — see its `isActive`.)
+		// (featured / recent / popular / toprated). Stamped onto the archived
+		// home_archived.html's grid panel as `data-tab` so `apps-pagination.js`
+		// treats it as a paginated panel and asks the `__brewserAppsPager` hook
+		// for the right tab's pages. (home_archived.html has no tab radios, so
+		// the pager script falls back to "always active" for a panel whose
+		// `apps-tab-<id>` radio is absent — see its `isActive`.) The live Home
+		// (brewser://home/, the former apps.html) DOES have tab radios and uses
+		// `<browser-home-checked>` below instead.
 		out = out.replace(
 			/<browser-config-homesection(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-homesection\s*>)?/gi,
 			() => htmlEscape(loadConfig(this.appRoot).homeSection),
+		);
+		// `<browser-home-checked section="X"/>` — emits ` checked` on the tab
+		// radio whose `section` matches `config.homeSection`, else ''. The Home
+		// landing (brewser://home/, the former apps.html) places one of these on
+		// each of its four sort radios so the page opens on the configured
+		// section's tab with no client flash — the existing `#apps-tab-X:checked`
+		// CSS reveals the matching panel from first paint. homeSection is
+		// validated to one of the four sorts (see `loadConfig`), so exactly one
+		// radio is stamped; "My Apps" is never a homeSection, so its radio is
+		// never default-checked.
+		out = out.replace(
+			/<browser-home-checked(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-checked\s*>)?/gi,
+			(_match, attrs: string | undefined) => {
+				const m = attrs ? /\bsection\s*=\s*"([^"]*)"/i.exec(attrs) : null;
+				const section = m ? m[1] : '';
+				return loadConfig(this.appRoot).homeSection === section ? ' checked' : '';
+			},
 		);
 		// `<browser-modal id="…" class="…" ...>CONTENT</browser-modal>` —
 		// the engine-blessed modal wrapper. Expanded to a `<div>` with

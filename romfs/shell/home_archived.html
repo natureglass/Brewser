@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Welcome to Brewser!</title>
+  <link rel="stylesheet" href="brewser://assets/main.css">
+</head>
+<body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>" data-max-per-page="<browser-config-maxperpage/>" data-lazy-banners="auto">
+<div class="page-shell clickable">
+  <!-- `data-tab` marks this as a paginated panel for apps-pagination.js; the
+       loader stamps it with the active `homeSection` id so the pager fetches
+       that tab's pages from the __brewserAppsPager hook. Unlike apps.html's
+       `.tab-panel`s there is no radio, so the pager treats it as always-active. -->
+  <section class="top-section" data-tab="<browser-config-homesection/>">
+    <header class="top-header">
+      <!-- Section title tracks `config.homeSection` via the
+           `<browser-home-title>` custom tag — the resource loader
+           expands it server-side to one of "Featured Apps" /
+           "Community Apps" / "Experimental Apps" based on the
+           Settings page's Home Page radio. -->
+      <h2><browser-home-title/></h2>
+      <!-- Bookmarks + History on the same line as the section title,
+           pushed right by .featured-header's space-between. -->
+      <nav class="top-links" aria-label="Browser navigation">
+        <a class="communityApps" href="brewser://home/">More apps developed by community</a>
+        <a class="munch-link" href="brewser://bookmarks/">Bookmarks</a>
+        <a class="munch-link" href="brewser://history/">History</a>
+        <a class="munch-link" href="brewser://about/">About</a>
+      </nav>
+    </header>
+    <div class="app-grid">
+      <!-- Cards for the catalog group named by `config.homeSection`.
+           Resource loader resolves the tag to renderGroup(<group>),
+           same path the `<browser-tab-*>` library-tab tags
+           on apps.html take. -->
+      <browser-home-apps></browser-home-apps>
+    </div>
+    <!-- Pagination controls — same markup + behaviour as apps.html's tab
+         panels. apps-pagination.js wires Prev/Next and swaps pages via the
+         __brewserAppsPager hook. Hidden until the section spans >1 page. -->
+    <div class="app-pager app-pager--hidden" data-pager>
+      <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+      <span class="app-pager__label"></span>
+      <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
+    </div>
+  </section>
+
+  <!-- CTA pill below the grid, flush right. Long label acts as both
+       button + invitation copy; the link targets brewser://home/
+       (the full apps catalog is now the Home landing). -->
+  <footer class="bottom-bar">
+    
+  </footer>
+</div>
+<!-- Missing-app detail modal. The `<browser-modal>` tag expands to a
+     `<div data-engine-modal="true" style="position: fixed" …>` — the
+     engine recognises the stamp and paints the subtree from its own
+     offscreen cache (`paintModalOverlay`), separate from the host
+     page's `liveCacheOffscreen`. Per-modal mutations (open / close
+     class flip, async logo onload, title text updates) route through
+     `modalTreeVersion` instead of the host's `liveTreeVersion`, so the
+     host cache stays warm AND modal pixels can never leak into it
+     (the original logo-ghost bug). See live-paint-control.ts modal-
+     layer block for the full rationale.
+
+     Hidden by default — main.css's `.app-modal-overlay { display:
+     none }` rule applies until the page script flips
+     `.app-modal-overlay--open` on Cancel / B-button / L-back. The
+     modal HTML is shared verbatim with apps.html — keep the two in
+     sync if either side changes. -->
+<browser-modal id="app-modal-overlay" class="app-modal-overlay">
+  <div id="app-modal-card" class="app-modal-card">
+    <!-- Meta strip mirrors the `.app-card__meta` strip on grid cards:
+         version chip flush left, license chip flush right, both in a
+         row above the logo. The strip is rendered conditionally by
+         the script (hidden when both fields are empty). -->
+    <div id="app-modal-meta" class="app-modal-meta">
+      <div id="app-modal-version" class="app-meta__version"></div>
+      <div id="app-modal-license" class="app-meta__license"></div>
+    </div>
+    <!-- Header row: logo flush-left, title + identifier + description
+         stacked on its right. See apps.html for the full rationale —
+         keep the two files in sync. -->
+    <div class="app-modal-header">
+      <div class="app-modal-header-text">
+        <h2 id="app-modal-title" class="app-modal-title">App</h2>
+        <p id="app-modal-identifier" class="app-modal-identifier"></p>
+        <!-- "Rating | Downloads" stats line + inline rating-message host
+             (see apps.html for the rationale). -->
+        <div id="app-modal-headstats" class="app-modal-headstats" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:8px;"></div>
+        <div id="app-modal-rating-msg-host"></div>
+      </div>
+    </div>
+    <!-- Full-width scrollable description block (sibling of the flex header
+         so its clamped max-height doesn't leave a gap) — see apps.html for
+         the full rationale. -->
+    <div id="app-modal-description" class="app-modal-description"></div>
+    <!-- Expand toggle under the description (flush right) — see apps.html for
+         the full rationale. Keep the two files in sync. -->
+    <div id="app-modal-expand-row" class="app-modal-expand-row">
+      <button id="app-modal-expand" class="app-modal-btn app-modal-expand-btn" type="button">Expand</button>
+    </div>
+    <!-- Body rows — see apps.html for the full rationale. -->
+    <div id="app-modal-body" class="app-modal-body"></div>
+    <!-- Two-slot action row (see apps.html for the rationale). -->
+    <div class="app-modal-actions">
+      <div class="app-modal-actions-side">
+        <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Update</button>
+        <!-- Install-size chip. See apps.html for the full rationale. -->
+        <span id="app-modal-size" class="app-modal-size"></span>
+        <!-- SD free-space chip. See apps.html for the full rationale. -->
+        <span id="app-modal-sd-free" class="app-modal-size app-modal-size--sd"></span>
+      </div>
+      <div class="app-modal-actions-side">
+        <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+        <a id="app-modal-play" class="app-modal-btn app-modal-btn--play app-modal-btn--hidden" role="button">Launch</a>
+        <button id="app-modal-download" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Download</button>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
+<!-- Download / Update progress modal. Mirrors apps.html exactly —
+     keep the two in sync if either side changes. See apps.html for
+     the full rationale on the markup shape. -->
+<browser-modal id="download-modal-overlay" class="app-modal-overlay download-modal-overlay">
+  <div id="download-modal-card" class="app-modal-card download-modal-card">
+    <h2 id="download-modal-title" class="app-modal-title download-modal-title">Downloading app</h2>
+    <div class="download-modal-progress">
+      <div class="download-modal-progress-track">
+        <div id="download-modal-progress-fill" class="download-modal-progress-fill"></div>
+      </div>
+      <!-- See apps.html for full rationale on this row. -->
+      <div class="download-modal-progress-row">
+        <div id="download-modal-remaining" class="download-modal-remaining"></div>
+        <div id="download-modal-counter" class="download-modal-counter"></div>
+      </div>
+    </div>
+    <div id="download-modal-error" class="download-modal-error"></div>
+    <div class="app-modal-actions download-modal-actions">
+      <div class="app-modal-actions-side">
+        <span id="download-modal-status" class="download-modal-status">Preparing…</span>
+      </div>
+      <div class="app-modal-actions-side">
+        <button id="download-modal-cancel" class="app-modal-btn app-modal-btn--download download-modal-btn-cancel" type="button">Cancel</button>
+        <button id="download-modal-close" class="app-modal-btn app-modal-btn--play download-modal-btn-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
+<!-- Permission-warnings modal. Mirrors apps.html exactly — keep the
+     two in sync if either side changes. See apps.html for the full
+     rationale on the markup shape. -->
+<browser-modal id="warnings-modal-overlay" class="app-modal-overlay warnings-modal-overlay">
+  <div class="app-modal-card warnings-modal-card">
+    <h2 class="app-modal-title warnings-modal-title">Permissions warning</h2>
+    <div id="warnings-modal-list" class="warnings-modal-list"></div>
+    <div class="app-modal-actions warnings-modal-actions">
+      <div class="app-modal-actions-side"></div>
+      <div class="app-modal-actions-side">
+        <button id="warnings-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
+        <a id="warnings-modal-launch" class="app-modal-btn app-modal-btn--play" role="button">Launch</a>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
+<!-- Load download-modal.js + warnings-modal.js + auth-shared.js FIRST
+     so their globalThis hooks (`__brewserOpenDownloadModal`,
+     `__brewserOpenWarningsModal`, `__swbAuth`) are wired before
+     missing-app-modal.js runs its click handlers — the rating-row
+     tap path reads `__swbAuth.readActiveSession()` to derive the
+     userId for the telemetry POST. -->
+<script src="brewser://scripts/download-modal.js"></script>
+<script src="brewser://scripts/warnings-modal.js"></script>
+<script src="brewser://scripts/auth-shared.js"></script>
+<script src="brewser://scripts/missing-app-modal.js"></script>
+<!-- banner-loader.js in "auto" mode (<body data-lazy-banners="auto">) promotes
+     the initial page's `data-src` banners on load; apps-pagination.js then
+     drives Prev/Next for the home section (same hook + repaint path as
+     apps.html). banner-loader MUST load before apps-pagination (it installs
+     __brewserPromoteBanners). -->
+<script src="brewser://scripts/banner-loader.js"></script>
+<script src="brewser://scripts/apps-pagination.js"></script>
+</body>
+</html>
