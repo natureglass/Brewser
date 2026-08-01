@@ -926,7 +926,14 @@
       // is purely visual — no per-frame work since the fixed-position
       // overlay is repainted from the cache (see
       // [[reference-brewser-fixed-overlay-paint-cost]]).
-      var statusHtml = 'Local Catalog is now synced!';
+      // Summary line depends on whether this check actually surfaced
+      // anything: with no store-delta apps, no installed-trailing updates and
+      // no newer Brewser, everything is current → "Everything is up to date.".
+      // Otherwise the catalogue synced and the lists / update link below show
+      // what changed. (newBrewserVersionAvailable implies somethingNew, so the
+      // "synced" wording carries the appended Update-now link.)
+      var somethingNew = newApps.length > 0 || buckets.updates.length > 0 || newBrewserVersionAvailable;
+      var statusHtml = somethingNew ? 'Local Catalog is now synced!' : 'Everything is up to date.';
       brewserUpdateOffered = newBrewserVersionAvailable;
       // Reflect a REAL available update on the trigger button itself so the
       // signal persists after the modal closes: green = "an update is waiting"

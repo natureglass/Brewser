@@ -127,8 +127,7 @@
     phase = 'staged';
     setState('success');
     setProgress(1, '');
-    statusEl.innerHTML = 'Update ready' + (res.version ? ' (v' + escapeHtml(res.version) + ')' : '')
-      + '. Restart to finish installing.';
+    statusEl.innerHTML = 'Update ready' + (res.version ? ' (v' + escapeHtml(res.version) + ')' : '');
     closeBtn.innerHTML = 'Restart Now';
   }
 

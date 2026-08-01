@@ -101,6 +101,19 @@
     return idx >= 0 ? path.slice(0, idx) : '';
   }
 
+  // Hide/restore the shell toolbar strip for the whole download. The toolbar
+  // overlay paints on top of the modal, so without this it stays visible over
+  // the download backdrop (same issue the self-update modal solved). Guarded:
+  // a build without the shell hook just keeps the toolbar (no-op). Mirrors
+  // `setChromeVisible` in self-update-modal.js verbatim.
+  function setChromeVisible(visible) {
+    try {
+      if (typeof globalThis.__brewserSetChromeVisible === 'function') {
+        globalThis.__brewserSetChromeVisible(visible);
+      }
+    } catch (_) { /* no-op */ }
+  }
+
   function setLoading() {
     card.classList.add('download-modal-card--loading');
     card.classList.remove('download-modal-card--error');
@@ -565,6 +578,10 @@
     statusEl.innerHTML = 'Preparing…';
     overlay.classList.add('app-modal-overlay--open');
     modalOpen = true;
+    // Hide the toolbar for the entire download; restored in close() on any
+    // dismiss/cancel/terminal-state. On a successful install close() fires
+    // __swbReload, which brings back a fresh toolbar anyway.
+    setChromeVisible(false);
     // Defer the work to a microtask so the modal paints in the
     // loading state on this frame; a synchronous setError (e.g.
     // missing URL) would otherwise flip the card to error before the
@@ -589,6 +606,10 @@
     card.classList.remove('download-modal-card--error');
     card.classList.remove('download-modal-card--success');
     modalOpen = false;
+    // Download is done or aborted — bring the toolbar back. Harmless on the
+    // success path (the __swbReload below repaints the whole shell anyway);
+    // essential on cancel/failure where no reload follows.
+    setChromeVisible(true);
     // One-shot reload after a successful install so the grid re-renders
     // from disk (the app is now installed) and the card returns in its
     // playable state — without the user having to navigate away and back.
