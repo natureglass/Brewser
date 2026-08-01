@@ -46,6 +46,19 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // Hide/restore the shell toolbar strip for the whole update. The toolbar
+  // overlay paints on top of the modal, so without this it stays visible
+  // over the update backdrop. Guarded: a build without the shell hook just
+  // keeps the toolbar (no-op). Restore is skipped on the restart path
+  // because the console relaunches into the staged build (fresh toolbar).
+  function setChromeVisible(visible) {
+    try {
+      if (typeof globalThis.__brewserSetChromeVisible === 'function') {
+        globalThis.__brewserSetChromeVisible(visible);
+      }
+    } catch (_) { /* no-op */ }
+  }
+
   function setState(state) {
     card.classList.remove('download-modal-card--loading');
     card.classList.remove('download-modal-card--error');
@@ -140,6 +153,9 @@
     phase = 'idle';
     stagedPath = null;
     overlay.classList.add('app-modal-overlay--open');
+    // Hide the toolbar for the entire update; restored in close() on any
+    // dismiss/abort/terminal-state, and left hidden on the restart path.
+    setChromeVisible(false);
     // Defer so the modal paints its loading state before prepare()'s first
     // synchronous step (a config/URL error would otherwise flip straight to
     // error before the user sees the modal at all).
@@ -153,6 +169,8 @@
     modalOpen = false;
     overlay.classList.remove('app-modal-overlay--open');
     setState('');
+    // Update is done or aborted — bring the toolbar back.
+    setChromeVisible(true);
   }
 
   cancelBtn.addEventListener('click', function (e) {

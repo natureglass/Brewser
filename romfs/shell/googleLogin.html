@@ -13,7 +13,28 @@
         #auth-verification-url { font-size: 28px; min-height: 48px; padding: 8px 0px; text-align: center; }
         #auth-user-code        { font-size: 64px; min-height: 88px; padding: 8px 0px; text-align: center; }
         #auth-poll-status      { font-size: 20px; min-height: 48px; padding: 12px 16px; text-align: center; }
-        #auth-hint             { width: 300px; }
+
+        /* Email stage: no input any more — just a big, screen-centred
+           "Continue with Google" button. The header/lead above are hidden on
+           this stage so the button sits in the middle of the 720px screen. */
+        body[data-auth-stage="email"] .lead { display: none; }
+        .google-login-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 620px;
+            gap: 28px;
+            text-align: center;
+        }
+        /* ~2x the default button (body font is 18px; .settings-save padding is
+           10px 22px). */
+        .google-continue-btn {
+            font-size: 38px;
+            padding: 22px 50px;
+            border-radius: 999px;
+        }
+        .google-continue-error { font-size: 22px; max-width: 760px; }
         .auth-device-grid {
             display: grid;
             grid-template-columns: 4fr 2fr;
@@ -51,18 +72,12 @@
 
         <p class="lead">Use your Google account.</p>
 
-        <!-- STAGE: email/username capture. -->
+        <!-- STAGE: start. Just a big, screen-centred "Continue with Google"
+             button (the optional email-hint input was removed). -->
         <div class="auth-stage auth-stage-email">
-            <div class="settings-form">
-                <fieldset class="settings-group">
-                    <legend>Google email (optional hint)</legend>
-                    <input id="auth-hint" name="auth-hint" type="text" class="auth-input" autocomplete="username" placeholder="you@gmail.com">
-                    <div id="auth-email-error" class="auth-inline-error"></div>
-                </fieldset>
-
-                <div class="settings-savebar">
-                    <button id="auth-submit-email" class="settings-save" type="button">Continue with Google</button>
-                </div>
+            <div class="google-login-center">
+                <button id="auth-submit-email" class="settings-save google-continue-btn" type="button">Continue with Google</button>
+                <div id="auth-email-error" class="auth-inline-error google-continue-error"></div>
             </div>
         </div>
 

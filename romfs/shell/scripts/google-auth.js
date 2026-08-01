@@ -136,6 +136,10 @@
   function captureRefs() {
     body = document.body;
     if (!body) return false;
+    // The email-hint input was removed from googleLogin.html — hintInput may
+    // be null now. It's only ever a fallback email in the persisted record
+    // (never sent to Google), and every use below is null-guarded, so this is
+    // safe. captureRefs no longer requires it (see the return).
     hintInput         = document.getElementById('auth-hint');
     submitBtn         = document.getElementById('auth-submit-email');
     emailErrorEl      = document.getElementById('auth-email-error');
@@ -148,7 +152,7 @@
     successAvatarEl   = document.getElementById('auth-success-avatar');
     logoutBtn         = document.getElementById('auth-logout');
     errorMessageEl    = document.getElementById('auth-error-message');
-    return !!(hintInput && submitBtn);
+    return !!submitBtn;
   }
 
   var pollCancelToken = null;

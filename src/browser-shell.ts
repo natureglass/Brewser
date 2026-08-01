@@ -929,6 +929,28 @@ export class BrowserShell {
 			resetLiveOverlayCache();
 			requestFullRepaint();
 		};
+		// Page-script-callable chrome (toolbar strip) visibility toggle.
+		// self-update-modal.js calls this to hide the toolbar for the ENTIRE
+		// self-update process (download → verify → stage → restart) and to
+		// restore it on dismiss/abort. Needed because the toolbar overlay is
+		// painted ON TOP of the modal overlay (paintModalOverlay THEN
+		// paintHtmlToolbarIfVisible), so the chrome strip otherwise stays
+		// visible over the update modal's backdrop. Only meaningful in normal
+		// mode — fullscreen modes already gate the strip off in
+		// paintHtmlToolbarIfVisible. On restore we repush toolbar state
+		// (renderChrome, for a current URL/avatar/network snapshot) and reset
+		// the toolbar overlay cache so the suppressed strip repaints cleanly;
+		// a full repaint applies the change on the next frame either way.
+		(globalThis as { __brewserSetChromeVisible?: (visible: boolean) => void })
+			.__brewserSetChromeVisible = (visible: boolean) => {
+			const show = !!visible;
+			setToolbarOverlayVisible(show);
+			if (show) {
+				resetToolbarOverlayCache();
+				if (this.mode === 'normal') this.renderChrome();
+			}
+			requestFullRepaint();
+		};
 		// Boot-time snapshot of the toolbar avatar `src`. Runs BEFORE
 		// `installPolyfills` (main.ts:50) and therefore BEFORE the runtime's
 		// `installSwitchPathResolver` proxy exists, so the two auth reads go
