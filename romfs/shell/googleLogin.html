@@ -65,6 +65,11 @@
             <header class="top-header">
                 <h2>Google Account</h2>
                 <nav class="top-links" aria-label="Browser navigation">
+                <!-- Favorites / Achievements links appear here only once the
+                     signed-in user has synced (configs/favorites.json +
+                     configs/my-achievements.json exist). Server-expanded,
+                     independently per-file, by the resource loader. -->
+                <browser-account-links/>
                 <a class="munch-link" href="brewser://home/">Home</a>
                 </nav>
             </header>

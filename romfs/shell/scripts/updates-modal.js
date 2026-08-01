@@ -126,6 +126,14 @@
   // client validates it. URL comes from `data-my-catalogue-url` on the trigger
   // button (`<browser-config-my-catalogue>`).
   var MY_CATALOGUE_PATH = APP_ROOT + 'configs/my-catalogue.json';
+  // Per-user Favorites (catalogue-v2) and earned Achievements documents,
+  // refreshed alongside the catalogue for a signed-in Brewser account. URLs
+  // come from `data-favorites-url` / `data-achievements-url` on the trigger
+  // button (`<browser-config-favorites>` / `<browser-config-achievements>`).
+  // Favorites reuses the catalogue file name; achievements uses `my-` to avoid
+  // clobbering the bundled `configs/achievements.json` criteria catalogue.
+  var FAVORITES_PATH = APP_ROOT + 'configs/favorites.json';
+  var ACHIEVEMENTS_PATH = APP_ROOT + 'configs/my-achievements.json';
 
   var modalOpen = false;
   var fetchInFlight = false;
@@ -719,16 +727,22 @@
   // just leaves any existing my-catalogue.json untouched and never fails the
   // overall sync (so it's safe inside the runCheck Promise.all). Returns true
   // only when a fresh document was validated + written.
-  async function refreshMyCatalogue() {
-    var url = triggerBtn.getAttribute('data-my-catalogue-url') || '';
-    if (!url) return false;
-    var token = '';
+  // Shared Bearer-token read for the per-user refreshes (my-catalogue,
+  // favorites, achievements). Returns '' when signed out (no active session).
+  function readAuthToken() {
     if (globalThis.__swbAuth && typeof globalThis.__swbAuth.readActiveSession === 'function') {
       var session = globalThis.__swbAuth.readActiveSession();
       if (session && session.record && typeof session.record.token === 'string') {
-        token = session.record.token;
+        return session.record.token;
       }
     }
+    return '';
+  }
+
+  async function refreshMyCatalogue() {
+    var url = triggerBtn.getAttribute('data-my-catalogue-url') || '';
+    if (!url) return false;
+    var token = readAuthToken();
     if (!token) return false; // signed out — nothing to fetch
     var response;
     try {
@@ -758,6 +772,86 @@
     }
     try { Switch.writeFileSync(MY_CATALOGUE_PATH, text); }
     catch (e) { console.debug('[updates-modal] my-catalogue write failed: ' + (e && e.message ? e.message : String(e))); return false; }
+    return true;
+  }
+
+  // Per-user Favorites — refreshed alongside the catalogue for a signed-in
+  // account. Validated through the platform client (it's a catalogue-v2
+  // document, same as the catalogue / my-catalogue) before persisting to
+  // configs/favorites.json. Best-effort: signed-out, missing URL, auth failure,
+  // bad body or write error leaves any existing file untouched and never fails
+  // the overall sync (safe inside the runCheck Promise.all). Returns true only
+  // when a fresh document was validated + written.
+  async function refreshFavorites() {
+    var url = triggerBtn.getAttribute('data-favorites-url') || '';
+    if (!url) return false;
+    var token = readAuthToken();
+    if (!token) return false; // signed out — nothing to fetch
+    var response;
+    try {
+      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    } catch (e) {
+      console.debug('[updates-modal] favorites fetch threw: ' + (e && e.message ? e.message : String(e)));
+      return false;
+    }
+    if (!response.ok) {
+      console.debug('[updates-modal] favorites HTTP ' + response.status);
+      return false;
+    }
+    var text;
+    try { text = await response.text(); }
+    catch (e) { return false; }
+    var client = globalThis.__brewserPlatformClient;
+    if (client && typeof client.parseCatalogue === 'function') {
+      var outcome;
+      try { outcome = client.parseCatalogue(text); }
+      catch (e) { console.debug('[updates-modal] favorites parse threw'); return false; }
+      if (!outcome || outcome.kind !== 'Ok') {
+        console.debug('[updates-modal] favorites rejected: ' + (outcome ? outcome.kind : 'no outcome'));
+        return false;
+      }
+    }
+    try { Switch.writeFileSync(FAVORITES_PATH, text); }
+    catch (e) { console.debug('[updates-modal] favorites write failed: ' + (e && e.message ? e.message : String(e))); return false; }
+    return true;
+  }
+
+  // Per-user earned Achievements — a small custom document
+  // ({ version, generated, achievements: [...] }), NOT catalogue-v2, so it's
+  // validated as JSON carrying an `achievements` array (a stray HTML 200 or a
+  // shape drift can't replace a good file) before persisting to
+  // configs/my-achievements.json. Best-effort, same rules as the others.
+  async function refreshAchievements() {
+    var url = triggerBtn.getAttribute('data-achievements-url') || '';
+    if (!url) return false;
+    var token = readAuthToken();
+    if (!token) return false; // signed out — nothing to fetch
+    var response;
+    try {
+      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+    } catch (e) {
+      console.debug('[updates-modal] achievements fetch threw: ' + (e && e.message ? e.message : String(e)));
+      return false;
+    }
+    if (!response.ok) {
+      console.debug('[updates-modal] achievements HTTP ' + response.status);
+      return false;
+    }
+    var text;
+    try { text = await response.text(); }
+    catch (e) { return false; }
+    try {
+      var parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.achievements)) {
+        console.debug('[updates-modal] achievements body missing achievements array; refusing write');
+        return false;
+      }
+    } catch (e) {
+      console.debug('[updates-modal] achievements is not valid JSON; refusing write: ' + (e && e.message ? e.message : String(e)));
+      return false;
+    }
+    try { Switch.writeFileSync(ACHIEVEMENTS_PATH, text); }
+    catch (e) { console.debug('[updates-modal] achievements write failed: ' + (e && e.message ? e.message : String(e))); return false; }
     return true;
   }
 
@@ -892,6 +986,12 @@
         checkVersionsForUpdate(versionsUrl),
         refreshStatsFile(client, statsUrl),
         refreshMyCatalogue(),
+        // Per-user Favorites + earned Achievements. Both best-effort and self-
+        // contained (signed-out = no-op); their results don't gate any modal
+        // UI — the favorites.html / achievements.html pages and the account-page
+        // links pick them up server-side on the next render.
+        refreshFavorites(),
+        refreshAchievements(),
       ]);
       var newBrewserVersionAvailable = !!results[3];
       // Record whether the per-user My Apps document was refreshed this run —

@@ -659,7 +659,10 @@
       // with `active.json` naming microsoft.
       if (globalThis.__swbAuth) {
         globalThis.__swbAuth.wipeOthers('microsoft');
-        globalThis.__swbAuth.setActiveProvider('microsoft');
+        // Re-assert only — the session is UNCHANGED, so keep the per-user
+        // caches (see the google-auth.js silent-verify note). Passing
+        // keepUserCaches stops a page visit from wiping a synced My Apps tab.
+        globalThis.__swbAuth.setActiveProvider('microsoft', { keepUserCaches: true });
       }
       return refreshed;
     } catch (e) {

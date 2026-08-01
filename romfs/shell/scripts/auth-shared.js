@@ -29,10 +29,16 @@
   var AUTH_DIR    = 'sdmc:/switch/brewser/shell/auth/';
   var ACTIVE_PATH = AUTH_DIR + 'active.json';
   var LOG_DIR     = 'sdmc:/switch/brewser/logs/';
-  // Per-user "My Apps" cache (written by the Check-for-Updates flow). Tied to a specific
-  // signed-in user's token, so it is cleared on every login + logout below
-  // and must never survive one session into another.
+  // Per-user caches written by the Check-for-Updates flow (My Apps catalogue,
+  // Favorites catalogue, earned Achievements). Each is tied to a specific
+  // signed-in user's token, so all three are cleared on a genuine login or
+  // logout below and must never survive one session into another. They are NOT
+  // cleared on an idempotent re-assert of the SAME already-active session (see
+  // `setActiveProvider`) — doing so wiped the freshly-synced My Apps tab every
+  // time the account page re-verified the session on load.
   var MY_CATALOGUE_PATH = 'sdmc:/switch/brewser/configs/my-catalogue.json';
+  var FAVORITES_PATH    = 'sdmc:/switch/brewser/configs/favorites.json';
+  var ACHIEVEMENTS_PATH = 'sdmc:/switch/brewser/configs/my-achievements.json';
 
   var PROVIDERS = ['google', 'microsoft'];
 
@@ -65,12 +71,16 @@
     try { Switch.writeFileSync(path, new Uint8Array(0)); } catch (_) {}
   }
 
-  /** Clear the cached per-user "My Apps" document. Empty bytes read as
-   * "missing" to loadMyAppsTab, so the My Apps tab disappears. Called on
-   * login (a new user must not inherit the previous user's apps) and on
-   * every logout path. */
-  function clearMyCatalogue() {
+  /** Clear the cached per-user documents (My Apps, Favorites, Achievements).
+   * Empty bytes read as "missing" to their consumers, so the My Apps tab and
+   * the account-page Favorites / Achievements links disappear. Called on a
+   * genuine login (a new user must not inherit the previous user's data) and on
+   * every logout path — but NOT on the silent re-assert of an unchanged session
+   * (that would wipe the just-synced caches on every account-page visit). */
+  function clearUserCaches() {
     safeWriteEmpty(MY_CATALOGUE_PATH);
+    safeWriteEmpty(FAVORITES_PATH);
+    safeWriteEmpty(ACHIEVEMENTS_PATH);
   }
 
   function readJson(path) {
@@ -121,8 +131,14 @@
 
   /** Write `auth/active.json` so this provider becomes the single
    * active session. Each per-provider auth.js calls this from
-   * `showSuccess` after persisting + downloading the avatar. */
-  function setActiveProvider(provider) {
+   * `showSuccess` after persisting + downloading the avatar.
+   *
+   * By default this ALSO clears the per-user caches (a fresh login must not
+   * inherit a prior user's data). Callers that merely RE-ASSERT an already-
+   * active, unchanged session — the silent-verify path that runs on every
+   * account-page load — pass `{ keepUserCaches: true }` so a page visit never
+   * wipes the freshly-synced My Apps / Favorites / Achievements caches. */
+  function setActiveProvider(provider, opts) {
     if (PROVIDERS.indexOf(provider) < 0) return;
     if (typeof Switch === 'undefined' || !Switch) return;
     try { Switch.mkdirSync(AUTH_DIR); } catch (_) {}
@@ -132,8 +148,9 @@
         JSON.stringify({ provider: provider, saved_at: Date.now() }, null, 2),
       );
     } catch (_) {}
-    // A fresh login must not inherit a prior user's cached My Apps.
-    clearMyCatalogue();
+    if (!opts || !opts.keepUserCaches) {
+      clearUserCaches();
+    }
   }
 
   /** Overwrite `auth/active.json` with empty bytes. Per-page logout
@@ -142,7 +159,7 @@
    * central login dashboard. */
   function clearActiveProvider() {
     safeWriteEmpty(ACTIVE_PATH);
-    clearMyCatalogue();
+    clearUserCaches();
   }
 
   /** Wipe every artifact the login flow may have ever written for a

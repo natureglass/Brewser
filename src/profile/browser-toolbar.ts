@@ -804,6 +804,11 @@ export interface LibraryPager {
 	/** The per-user "My Apps" view, or null when no cached my-catalogue exists
 	 * (the tab + label stay hidden in that case). */
 	myApps: LibraryTabView | null;
+	/** The per-user Favorites view, or null when no cached favorites.json
+	 * exists. Built exactly like `myApps` — a second catalogue (the WordPress-
+	 * generated favorites document) joined against the same disk enumeration —
+	 * and rendered on the standalone favorites.html page, not an apps.html tab. */
+	favorites: LibraryTabView | null;
 	stats: ParsedStats | null;
 	appRoot: string;
 }
@@ -893,18 +898,38 @@ export function buildLibraryPager(appRoot: string): LibraryPager {
 		}
 	}
 
-	return { views, myApps, stats, appRoot };
+	// Per-user Favorites — a THIRD catalogue (the WordPress-generated favorites
+	// document, published apps only). Same join-against-disk treatment as My
+	// Apps: absent / unparseable ⇒ null (the favorites.html grid + the account-
+	// page link stay hidden). Keeps only the apps the document lists.
+	let favorites: LibraryTabView | null = null;
+	const favText = readTextFile(`${appRoot}configs/favorites.json`);
+	if (favText !== null) {
+		const outcome = parseCatalogue(favText);
+		if (outcome.kind === 'Ok') {
+			const favCatalogue = outcome.catalogue;
+			const favLibrary = joinLibrary(enumeration.apps, favCatalogue);
+			const favs = favLibrary.apps.filter((a: LibraryApp) => a.listing !== null);
+			favorites = buildMyAppsTab({ apps: favs, catalogueAvailable: true, revoked: favCatalogue.revoked });
+		} else {
+			console.debug(`[brewser] favorites rejected (${outcome.kind}) — Favorites page hidden`);
+		}
+	}
+
+	return { views, myApps, favorites, stats, appRoot };
 }
 
-/** The sorted view for a tab id, or null for an absent My Apps. */
-function pagerViewOf(pager: LibraryPager, tab: LibraryTabId | 'myapps'): LibraryTabView | null {
-	return tab === 'myapps' ? pager.myApps : pager.views[tab];
+/** The sorted view for a tab id, or null for an absent My Apps / Favorites. */
+function pagerViewOf(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites'): LibraryTabView | null {
+	if (tab === 'myapps') return pager.myApps;
+	if (tab === 'favorites') return pager.favorites;
+	return pager.views[tab];
 }
 
 /** Total pages for a tab at the given page size (always ≥ 1). Unavailable /
  * empty tabs report 1 page — the renderer shows the reason / empty state and
  * the pager collapses. */
-export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps', perPage: number): number {
+export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites', perPage: number): number {
 	const view = pagerViewOf(pager, tab);
 	const per = perPage > 0 ? perPage : 1;
 	if (!view || !view.available || view.apps.length === 0) return 1;
@@ -914,7 +939,7 @@ export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps
 /** Map ONE page of a tab to card models — slices the sorted `LibraryApp[]` and
  * maps only that window, so paging stays O(perPage) no matter how large the
  * catalogue is. Clamped to [1, totalPages]. */
-export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapps', page: number, perPage: number): AppEntry[] {
+export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites', page: number, perPage: number): AppEntry[] {
 	const view = pagerViewOf(pager, tab);
 	if (!view || !view.available) return [];
 	const per = perPage > 0 ? perPage : 1;
@@ -932,7 +957,7 @@ export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapp
  * pager (`__brewserAppsPager`) takes over for pages 2…N. Returns an
  * unavailable/empty descriptor for an absent My Apps (the caller gates the tab
  * on `pager.myApps` and renders nothing in that case). */
-export function pagerTabRender(pager: LibraryPager, tab: LibraryTabId | 'myapps', perPage: number): LibraryTabRender {
+export function pagerTabRender(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites', perPage: number): LibraryTabRender {
 	const view = pagerViewOf(pager, tab);
 	if (!view) return { available: false, reason: '', entries: [] };
 	if (!view.available) return { available: false, reason: view.reason, entries: [] };

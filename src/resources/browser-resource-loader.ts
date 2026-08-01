@@ -203,13 +203,13 @@ export class BrowserResourceLoader implements ResourceLoader {
 			},
 			totalPages(tab: string): number {
 				return self.pagerData
-					? pagerTotalPages(self.pagerData, tab as LibraryTabId | 'myapps', self.pagerPerPage)
+					? pagerTotalPages(self.pagerData, tab as LibraryTabId | 'myapps' | 'favorites', self.pagerPerPage)
 					: 1;
 			},
 			render(tab: string, page: number): string {
 				if (!self.pagerData) return '';
 				return renderAppCards(
-					pagerPageEntries(self.pagerData, tab as LibraryTabId | 'myapps', page, self.pagerPerPage),
+					pagerPageEntries(self.pagerData, tab as LibraryTabId | 'myapps' | 'favorites', page, self.pagerPerPage),
 				);
 			},
 		});
@@ -440,6 +440,22 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-myapps-label(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-myapps-label\s*>)?/gi,
 			() => (pager().myApps ? '<label for="apps-tab-myapps" class="tab-label">My Apps</label>' : ''),
 		);
+		// `<browser-tab-favorites>` — the standalone favorites.html grid, rendered
+		// from `configs/favorites.json` (the WordPress-generated set of the
+		// signed-in user's favorited apps) via the SAME
+		// parseCatalogue → joinLibrary → renderAppCards path as My Apps, so the
+		// cards, `data-app-detail` contract, lazy banners and pagination are all
+		// shared. Calling `pager()` also stashes `pagerData`, so the client
+		// `__brewserAppsPager` hook can render favorites pages 2…N. A missing /
+		// unparseable document yields a neutral empty state (the page is normally
+		// only reachable once a sync has written the file, but a direct
+		// brewser://favorites/ nav must still render something sane).
+		out = out.replace(
+			/<browser-tab-favorites(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-favorites\s*>)?/gi,
+			() => (pager().favorites
+				? this.renderLibraryTab(pagerTabRender(pager(), 'favorites', perPage))
+				: '<p class="empty">No favorites synced yet. Sign in and press Check for Updates on the Apps page.</p>'),
+		);
 		// `<browser-config-catalogue>` — expands to the active
 		// `config.json` `catalogue` URL, HTML-escaped so it's safe inside
 		// either an attribute or text content. Empty string when no URL
@@ -501,6 +517,32 @@ export class BrowserResourceLoader implements ResourceLoader {
 		out = out.replace(
 			/<browser-config-my-catalogue(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-my-catalogue\s*>)?/gi,
 			() => htmlEscape(RUNTIME_CONFIG_DEFAULTS.myCatalogue),
+		);
+		// `<browser-config-favorites>` / `<browser-config-achievements>` — expand
+		// to the strict-pinned WordPress per-user Favorites / Achievements
+		// endpoints. Stamped onto the apps.html Check-for-Updates button as
+		// `data-favorites-url` / `data-achievements-url` so updates-modal.js can
+		// fetch them (with the user's Bearer token) alongside the catalogue and
+		// write `configs/favorites.json` + `configs/my-achievements.json`. Read
+		// straight from `RUNTIME_CONFIG_DEFAULTS` — page-script-only consumers,
+		// like `versions` / `myCatalogue`.
+		out = out.replace(
+			/<browser-config-favorites(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-favorites\s*>)?/gi,
+			() => htmlEscape(RUNTIME_CONFIG_DEFAULTS.favorites),
+		);
+		out = out.replace(
+			/<browser-config-achievements(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-config-achievements\s*>)?/gi,
+			() => htmlEscape(RUNTIME_CONFIG_DEFAULTS.achievements),
+		);
+		// `<browser-account-links>` — the extra Favorites / Achievements nav
+		// links on the Google account page (googleLogin.html), each emitted ONLY
+		// when its per-user document exists on disk. Independent per-file gating:
+		// Favorites needs `configs/favorites.json`, Achievements needs
+		// `configs/my-achievements.json`. A signed-out user — or one who hasn't
+		// run Check-for-Updates yet — has neither file and so sees just Home.
+		out = out.replace(
+			/<browser-account-links(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-account-links\s*>)?/gi,
+			() => this.renderAccountLinks(),
 		);
 		// `<browser-config-telemetry>` — expands to the strict-pinned
 		// `config.telemetry` URL (runtime-bundled per
@@ -641,6 +683,33 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// `tab.entries` is already the first page (the pager pre-slices via
 		// `pagerTabRender`); `apps-pagination.js` renders pages 2…N on demand.
 		return renderAppCards(tab.entries);
+	}
+
+	/** Extra nav links for the Google account page (`<browser-account-links>`).
+	 * Each link is emitted ONLY when its per-user document is present on disk,
+	 * so the account page shows Favorites / Achievements exactly when a
+	 * signed-in Check-for-Updates has written the corresponding file. `statSync`
+	 * is a cheap existence probe (no file read); a throw / null = absent. */
+	private renderAccountLinks(): string {
+		// Require a NON-EMPTY file. The auth flow "deletes" a per-user cache by
+		// writing 0 bytes (there is no unlink), so a bare existence check would
+		// keep showing the link to an empty Favorites / Achievements page right
+		// after a login clears the cache. `statSync().size` is a cheap probe (no
+		// file read); size 0 or a missing file both read as absent.
+		const has = (rel: string): boolean => {
+			try {
+				const st = Switch.statSync(`${this.appRoot}${rel}`);
+				return !!st && st.size > 0;
+			} catch (_) { return false; }
+		};
+		let links = '';
+		if (has('configs/favorites.json')) {
+			links += '<a class="munch-link" href="brewser://favorites/">Favorites</a>';
+		}
+		if (has('configs/my-achievements.json')) {
+			links += '<a class="munch-link" href="brewser://achievements/">Achievements</a>';
+		}
+		return links;
 	}
 
 	/** Render the welcome-page search bar for the active engine (per

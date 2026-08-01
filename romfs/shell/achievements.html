@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Achievements · Brewser</title>
+<link rel="stylesheet" href="brewser://assets/main.css">
+<style>
+  body { padding: 32px 28px 28px; }
+  .ach-summary { font-size: 18px; color: #8fa1bd; margin: 4px 0 24px; }
+  .ach-tier { margin-bottom: 34px; }
+  .ach-tier__head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .ach-tier__name { font-size: 22px; margin: 0; }
+  .ach-tier__blurb { font-size: 14px; color: #8fa1bd; margin: 0; }
+  .ach-tier__count { font-size: 14px; color: #8fa1bd; margin-left: auto; }
+  .ach-grid { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 14px; }
+  .ach-badge { width: 160px; text-align: center; }
+  .ach-badge__img { width: 112px; height: 112px; object-fit: contain; display: block; margin: 0 auto 10px; }
+  /* Not-yet-earned badges render at 50% opacity. */
+  .ach-badge--locked .ach-badge__img { opacity: 0.5; }
+  .ach-badge__name { font-weight: 600; font-size: 16px; }
+  .ach-badge--locked .ach-badge__name { color: #8fa1bd; }
+  .ach-empty { font-size: 16px; color: #8fa1bd; }
+</style>
+</head>
+<body>
+  <div class="page-shell">
+    <section class="top-section clickable">
+      <header class="top-header">
+        <h2>Achievements</h2>
+        <nav class="top-links" aria-label="Browser navigation">
+          <a class="munch-link" href="brewser://googleLogin/">Account</a>
+          <a class="munch-link" href="brewser://apps/">Apps</a>
+          <a class="munch-link" href="brewser://home/">Home</a>
+        </nav>
+      </header>
+    </section>
+    <p id="ach-summary" class="ach-summary"></p>
+    <div id="ach-root"></div>
+  </div>
+  <script src="brewser://scripts/achievements.js"></script>
+</body>
+</html>

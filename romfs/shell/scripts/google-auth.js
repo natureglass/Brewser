@@ -671,7 +671,11 @@
     // same rationale as the fresh-mint path.
     if (globalThis.__swbAuth) {
       globalThis.__swbAuth.wipeOthers('google');
-      globalThis.__swbAuth.setActiveProvider('google');
+      // Re-assert only — the session is UNCHANGED, so keep the per-user caches
+      // (My Apps / Favorites / Achievements) that a prior Check-for-Updates
+      // synced. Without keepUserCaches this silent verify wiped them on every
+      // account-page load, making the My Apps tab vanish on the next nav.
+      globalThis.__swbAuth.setActiveProvider('google', { keepUserCaches: true });
     }
     return stored;
   }
