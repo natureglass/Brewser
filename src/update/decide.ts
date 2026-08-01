@@ -1,11 +1,12 @@
 /**
  * src/update/decide.ts — the anti-downgrade decision (pure; host-testable).
  *
- * A NORMAL update requires BOTH: manifest.counter strictly greater than the
+ * An update requires BOTH: manifest.counter strictly greater than the
  * anti-rollback floor (never-reused counter — the primary, parse-bug-proof
  * guard) AND manifest.version strictly greater by semver (belt and braces).
- * `allowDowngrade` (RESTORE only) bypasses both; the NETWORK flow never passes
- * it, so a validly-signed OLD manifest is always refused.
+ * There is no downgrade bypass: the restore-to-previous system was removed, so
+ * a validly-signed OLD manifest is ALWAYS refused (the anti-rollback guard is
+ * now absolute).
  *
  * Extracted from the rig's flow.ts into its own pure module so the guard logic
  * is unit-tested independent of the UI-coupled flow.
@@ -43,17 +44,15 @@ export interface UpdateDecision {
 
 /**
  * Decide whether `manifest` is a legitimate forward update given the running
- * build and the anti-rollback floor. `allowDowngrade` (RESTORE only) accepts
- * unconditionally; the network flow never passes it.
+ * build and the anti-rollback floor. Forward-only: a build that is not strictly
+ * newer by BOTH counter and semver is refused (no downgrade path exists).
  */
 export function decideUpdate(
 	manifest: JournalManifest,
 	runningVersion: string,
 	runningCounter: number,
 	floor: number,
-	opts?: { allowDowngrade?: boolean },
 ): UpdateDecision {
-	const allowDowngrade = !!opts?.allowDowngrade;
 	const base = {
 		runningVersion,
 		runningCounter,
@@ -61,7 +60,6 @@ export function decideUpdate(
 		manifestVersion: manifest.version,
 		manifestCounter: manifest.counter,
 	};
-	if (allowDowngrade) return { accept: true, ...base };
 	if (manifest.counter <= floor) {
 		return { accept: false, refuseCode: 'DOWNGRADE_COUNTER', ...base };
 	}

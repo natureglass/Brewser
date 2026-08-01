@@ -90,7 +90,7 @@ function denyCurrent(input, label) {
 // ── ALLOWED: the updater's mutation surface ────────────────────────────────
 allow('sdmc:/switch/brewser.nro', 'installed NRO (swap target)');
 allow('sdmc:/switch/brewser-update.nro', 'recovery alias');
-allow('sdmc:/switch/brewser-previous.nro', 'previous / last-known-good');
+allow('sdmc:/switch/brewser-previous.nro', 'legacy previous.nro — kept deletable for boot-ok cleanup');
 allow('sdmc:/switch/.brewser.new', 'same-dir swap temp');
 allow('sdmc:/switch/brewser/update', 'staging dir itself (mkdir target)');
 allow('sdmc:/switch/brewser/update/payload.part', 'download part');

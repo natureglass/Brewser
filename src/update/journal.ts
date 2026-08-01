@@ -56,9 +56,6 @@ export interface Journal {
 	stagedPath: string | null;
 	recoveryReady: boolean;
 	appliedCounter?: number;
-	/** True only for an intentional RESTORE (older build). Audited, never a
-	 * config/env default. */
-	allowDowngrade?: boolean;
 	/** ms timestamps keyed by state transition, for the timeline. */
 	ts: Record<string, number>;
 	failReason?: string;

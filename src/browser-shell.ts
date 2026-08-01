@@ -315,6 +315,13 @@ export class BrowserShell {
 	 * replaces the old `this.chromeHeight` access path that
 	 * died with the engine-drawn `BrowserToolbar` (2026-06-14). */
 	private chromeHeight: number = DEFAULT_CONFIG.toolbarHeight;
+	/** Non-null while a page-script modal (self-update / download) has hidden
+	 * the chrome via `__brewserSetChromeVisible(false)`: holds the chromeHeight
+	 * to restore on show. Hiding collapses `chromeHeight` to 0 (mirroring
+	 * `showToolbar: false`) so the page paint fills the old strip slice — the
+	 * overlay gate alone leaves that slice layout-reserved but unpainted, so a
+	 * cache-blit re-composites the stale toolbar over the modal. */
+	private chromeHiddenRestoreHeight: number | null = null;
 	/** Fallback page background colour for dark theme. Cached from
 	 * `config.json pageBackground` at boot. Used by
 	 * `effectivePageBackground` to fill the content viewport before
@@ -930,24 +937,45 @@ export class BrowserShell {
 			requestFullRepaint();
 		};
 		// Page-script-callable chrome (toolbar strip) visibility toggle.
-		// self-update-modal.js calls this to hide the toolbar for the ENTIRE
-		// self-update process (download → verify → stage → restart) and to
-		// restore it on dismiss/abort. Needed because the toolbar overlay is
-		// painted ON TOP of the modal overlay (paintModalOverlay THEN
-		// paintHtmlToolbarIfVisible), so the chrome strip otherwise stays
-		// visible over the update modal's backdrop. Only meaningful in normal
-		// mode — fullscreen modes already gate the strip off in
-		// paintHtmlToolbarIfVisible. On restore we repush toolbar state
-		// (renderChrome, for a current URL/avatar/network snapshot) and reset
-		// the toolbar overlay cache so the suppressed strip repaints cleanly;
-		// a full repaint applies the change on the next frame either way.
+		// self-update-modal.js and download-modal.js call this to hide the
+		// toolbar for the ENTIRE download/update process (download → verify →
+		// stage → restart) and to restore it on dismiss/abort.
+		//
+		// It does the SAME thing `showToolbar: false` does at boot (see
+		// startup, ~line 1130): collapse `chromeHeight` to 0 so the layout
+		// stops reserving the top strip and the page paint fills that slice.
+		// The overlay-visibility gate ALONE (`setToolbarOverlayVisible`) is not
+		// enough: with `chromeHeight` still > 0 the strip is layout-reserved
+		// but no longer painted, so a cache-blit re-composites the stale
+		// toolbar pixels over the modal backdrop — the "toolbar still showing
+		// during Updating Brewser" bug. Restore puts the height back and
+		// repushes toolbar state (renderChrome). `resetToolbarOverlayCache` +
+		// `publishChromeRegion` mirror the settings-save toolbar path so the
+		// touch region + overlay cache track the height change; a full repaint
+		// applies it on the next frame. Only meaningful in normal mode —
+		// fullscreen modes already gate the strip off. Idempotent: a second
+		// hide keeps the first restore height; `showToolbar: false` globally
+		// means chromeHeight is already 0, so hide/restore is a 0→0 no-op.
 		(globalThis as { __brewserSetChromeVisible?: (visible: boolean) => void })
 			.__brewserSetChromeVisible = (visible: boolean) => {
 			const show = !!visible;
-			setToolbarOverlayVisible(show);
 			if (show) {
+				setToolbarOverlayVisible(true);
+				if (this.chromeHiddenRestoreHeight !== null) {
+					this.chromeHeight = this.chromeHiddenRestoreHeight;
+					this.chromeHiddenRestoreHeight = null;
+				}
 				resetToolbarOverlayCache();
+				this.publishChromeRegion();
 				if (this.mode === 'normal') this.renderChrome();
+			} else {
+				if (this.chromeHiddenRestoreHeight === null) {
+					this.chromeHiddenRestoreHeight = this.chromeHeight;
+				}
+				setToolbarOverlayVisible(false);
+				this.chromeHeight = 0;
+				resetToolbarOverlayCache();
+				this.publishChromeRegion();
 			}
 			requestFullRepaint();
 		};

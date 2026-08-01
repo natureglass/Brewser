@@ -37,8 +37,8 @@ async function main() {
 	// Self-update boot gate — BEFORE the browser shell. Config-free and cheap
 	// (one statSync of the usually-absent journal on a normal boot). Only a
 	// genuine update role dynamically loads the heavy applier, so a normal boot
-	// never evaluates the updater config/keyring. STAGED / RECOVERY / RESTORE
-	// never return (they chainload the installed NRO); POST-APPLY confirms the
+	// never evaluates the updater config/keyring. STAGED / RECOVERY never return
+	// (they chainload the installed NRO); POST-APPLY confirms the
 	// freshly-installed build, stamps current.json, then returns here so the user
 	// lands in the browser on the updated version. Any failure falls through to a
 	// normal boot — the updater must never wedge the app.

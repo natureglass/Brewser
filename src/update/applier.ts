@@ -3,15 +3,14 @@
  * boot roles. Dynamically imported by main.ts ONLY when the role is non-normal,
  * so config + the crypto/net modules never load on a normal boot.
  *
- * STAGED / RECOVERY / RESTORE run the self-apply and chainload the installed NRO
- * (never return). POST-APPLY confirms the freshly-installed build, stamps
- * current.json, then RETURNS so main.ts continues into the browser shell on the
- * new version.
+ * STAGED / RECOVERY run the self-apply and chainload the installed NRO (never
+ * return). POST-APPLY confirms the freshly-installed build, stamps current.json,
+ * then RETURNS so main.ts continues into the browser shell on the new version.
  *
  * STAGED auto-applies without a second prompt — the user already confirmed the
  * download + chainload in the in-shell modal (the "full auto two-stage" choice).
- * RECOVERY / RESTORE were launched deliberately from hbmenu, so they proceed
- * after a brief visible dwell.
+ * RECOVERY was launched deliberately from hbmenu, so it proceeds after a brief
+ * visible dwell. (The restore-to-previous role was removed.)
  */
 import * as apply from './apply';
 import { BREWSER_VERSION } from './config';
@@ -86,20 +85,8 @@ export async function runRole(role: UpdaterRole): Promise<void> {
 			splash.start('Recovering Brewser');
 			splash.splashUi.status('Reinstalling this build…');
 			await nextFrames(DWELL_FRAMES);
-			const j = await apply.buildSelfDerivedJournal(splash.splashUi, runId, getLogFile(), role.selfPath, 'recovery');
+			const j = await apply.buildSelfDerivedJournal(splash.splashUi, runId, getLogFile(), role.selfPath);
 			await apply.selfApply(splash.splashUi, j, role.selfPath); // chainloads on success
-			if (Switch.statSync(BREWSER_NRO)) await apply.chainload(BREWSER_NRO);
-			splash.stop();
-			Switch.exit();
-			return;
-		}
-
-		case 'restore': {
-			splash.start('Restoring Brewser');
-			splash.splashUi.status('Reinstalling the previous build…');
-			await nextFrames(DWELL_FRAMES);
-			const j = await apply.buildSelfDerivedJournal(splash.splashUi, runId, getLogFile(), role.selfPath, 'restore');
-			await apply.selfApply(splash.splashUi, j, role.selfPath, { allowDowngrade: true }); // chainloads
 			if (Switch.statSync(BREWSER_NRO)) await apply.chainload(BREWSER_NRO);
 			splash.stop();
 			Switch.exit();

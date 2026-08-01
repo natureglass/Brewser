@@ -14,7 +14,6 @@
 import { type Journal, readJournal } from './journal';
 import {
 	BREWSER_NRO,
-	PREVIOUS_NRO,
 	RECOVERY_ALIAS,
 	canonicalizeLaunchPath,
 	isUnderUpdate,
@@ -25,7 +24,6 @@ export type UpdaterRole =
 	| { kind: 'normal'; selfPath: string }
 	| { kind: 'staged'; selfPath: string }
 	| { kind: 'recovery'; selfPath: string }
-	| { kind: 'restore'; selfPath: string }
 	| { kind: 'post-apply'; selfPath: string; journal: Journal };
 
 export function detectUpdaterRole(): UpdaterRole {
@@ -34,7 +32,9 @@ export function detectUpdaterRole(): UpdaterRole {
 	const jr = readJournal();
 	const journal: Journal | null = jr.ok ? jr.journal : null;
 
-	if (samePath(selfPath, PREVIOUS_NRO)) return { kind: 'restore', selfPath };
+	// NB: the restore-to-previous system was removed — a leftover
+	// brewser-previous.nro launched from hbmenu now falls through to a normal
+	// boot (it is just an older Brewser build), and boot-ok deletes it.
 	if (samePath(selfPath, RECOVERY_ALIAS)) return { kind: 'recovery', selfPath };
 	if (isUnderUpdate(selfPath)) return { kind: 'staged', selfPath };
 	if (samePath(selfPath, BREWSER_NRO) && journal?.state === 'applied') {

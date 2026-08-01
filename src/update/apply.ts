@@ -1,7 +1,7 @@
 /**
  * src/update/apply.ts — stage → chainload → self-apply (copy + two renames) →
- * post-apply confirm → rollback. The destructive window (rename old away, rename
- * new in) is timed and logged in ms; on the rig's hardware run it was ~51 ms.
+ * post-apply confirm. The destructive window (rename old away, rename new in) is
+ * timed and logged in ms; on the rig's hardware run it was ~51 ms.
  *
  * ADAPTED from the brewser-updater-test rig's apply.ts. All UI goes through an
  * injected `UpdaterUi` (splash pre-shell, or the DOM modal in-shell) — this
@@ -116,21 +116,19 @@ export async function chainload(path: string): Promise<never> {
 }
 
 /**
- * STAGED / RECOVERY / RESTORE-role apply: re-verify own file, then copy + two
- * renames, then chainload the installed path. `selfPath` is the running NRO.
+ * STAGED / RECOVERY-role apply: re-verify own file, then copy + two renames,
+ * then chainload the installed path. `selfPath` is the running NRO.
  *
  * Returns without swapping (idempotent refusal) when the update is already
- * applied. `allowDowngrade` marks an intentional RESTORE (older build).
+ * applied.
  */
 export async function selfApply(
 	ui: UpdaterUi,
 	journal: Journal,
 	selfPath: string,
-	opts?: { allowDowngrade?: boolean },
 ): Promise<void> {
 	const manifest = journal.manifest;
 	if (!manifest) throw new ApplyError('NO_MANIFEST', 'journal has no manifest');
-	const allowDowngrade = !!opts?.allowDowngrade;
 
 	// 1. Re-hash own file (also proves reading our own mounted NRO works).
 	const self = await hashWithUi(ui, 'Verifying update…', selfPath);
@@ -142,24 +140,19 @@ export async function selfApply(
 
 	// 1b. IDEMPOTENT REFUSAL: if the installed build ALREADY equals the build we
 	// would install, the swap is a no-op — a stale relaunch must not re-trigger a
-	// destructive swap. Cheap size pre-filter first. Skipped for a RESTORE.
-	if (!allowDowngrade) {
-		const installed = Switch.statSync(BREWSER_NRO);
-		if (installed && installed.size === self.totalBytes) {
-			const inst = await hashWithUi(ui, 'Checking installed build…', BREWSER_NRO);
-			if (inst.rootHash === self.rootHash) {
-				log('self-apply-noop', { reason: 'already-installed', rootHash: self.rootHash });
-				return;
-			}
+	// destructive swap. Cheap size pre-filter first.
+	const installed = Switch.statSync(BREWSER_NRO);
+	if (installed && installed.size === self.totalBytes) {
+		const inst = await hashWithUi(ui, 'Checking installed build…', BREWSER_NRO);
+		if (inst.rootHash === self.rootHash) {
+			log('self-apply-noop', { reason: 'already-installed', rootHash: self.rootHash });
+			return;
 		}
 	}
 
-	let j = transition(journal, 'applying', allowDowngrade ? { allowDowngrade: true } : undefined);
+	let j = transition(journal, 'applying');
 
-	// 2. Pre-window cleanup (outside the destructive window). The visible
-	// -previous.nro is deliberately NOT removed here — it must stay launchable
-	// through the risky window in case THIS build is bad. It is superseded only
-	// at boot-ok, once this build has proven itself.
+	// 2. Pre-window cleanup (outside the destructive window).
 	gfs.removeIfExists(SWAP_TMP);
 
 	// 3. Long copy while the live binary is still intact: self → same-dir temp.
@@ -217,13 +210,13 @@ const MiB = (n: number) => `${(n / 1048576).toFixed(1)} MiB`;
 export function enumerateFootprint(): string[] {
 	const durable: Array<[string, string]> = [
 		[BREWSER_NRO, 'installed build'],
-		[PREVIOUS_NRO, 'visible last-known-good'],
 		[ANTI_ROLLBACK_PATH, 'anti-rollback high-water'],
 	];
 	const shouldBeGone: Array<[string, string]> = [
 		[STAGED_PATH, 'staged payload'],
 		[PART_PATH, 'download part'],
 		[PREV_PATH, 'transient prev.bin'],
+		[PREVIOUS_NRO, 'legacy previous.nro (restore system removed)'],
 		[RECOVERY_ALIAS, 'recovery alias'],
 		[SWAP_TMP, 'swap temp'],
 	];
@@ -275,10 +268,10 @@ async function stampCurrentJson(): Promise<void> {
 
 /**
  * POST-APPLY-role: verify the running (installed) binary matches the journal,
- * then delete the now-stale recovery alias, promote the just-replaced build to
- * the VISIBLE last-known-good -previous.nro (a rename of prev.bin, not a second
- * copy), advance the anti-rollback high-water, delete the staged payload, stamp
- * current.json, and write boot-ok.
+ * then delete the now-stale recovery alias, discard the transient prev.bin swap
+ * backup (and any leftover brewser-previous.nro from the removed restore
+ * system), advance the anti-rollback high-water, delete the staged payload,
+ * stamp current.json, and write boot-ok.
  */
 export async function postApplyConfirm(ui: UpdaterUi, journal: Journal, selfPath: string): Promise<Journal> {
 	const manifest = journal.manifest;
@@ -291,8 +284,6 @@ export async function postApplyConfirm(ui: UpdaterUi, journal: Journal, selfPath
 	}
 	const versionOk =
 		journal.toVersion === '' ||
-		journal.toVersion === '(rollback)' ||
-		journal.toVersion === '(restore)' ||
 		journal.toVersion === BREWSER_VERSION;
 	log('post-apply-check', {
 		hashOk,
@@ -312,11 +303,8 @@ export async function postApplyConfirm(ui: UpdaterUi, journal: Journal, selfPath
 
 	// Cleanup, in order:
 	gfs.removeIfExists(RECOVERY_ALIAS); // 1. the alias was the NEW build — no longer needed
-	if (Switch.statSync(PREV_PATH)) {
-		gfs.removeIfExists(PREVIOUS_NRO); // 2. promote prev.bin → visible last-known-good
-		gfs.rename(PREV_PATH, PREVIOUS_NRO);
-		log('previous-nro-promoted', { from: PREV_PATH, to: PREVIOUS_NRO });
-	}
+	gfs.removeIfExists(PREV_PATH); // 2. discard the transient swap backup (no restore system)
+	gfs.removeIfExists(PREVIOUS_NRO); // 2b. delete any leftover previous.nro from the removed restore system
 	gfs.removeIfExists(STAGED_PATH); // 3. delete the staged payload
 	const appliedCounter = manifest?.counter ?? BREWSER_COUNTER; // 4. advance high-water (never lowers)
 	let highWater = appliedCounter;
@@ -329,35 +317,24 @@ export async function postApplyConfirm(ui: UpdaterUi, journal: Journal, selfPath
 
 	const j = transition(journal, 'boot-ok', {
 		appliedCounter,
-		note: 'alias deleted; prev.bin→-previous.nro; staged deleted; high-water advanced; current.json stamped',
+		note: 'alias deleted; prev.bin discarded; leftover previous.nro deleted; staged deleted; high-water advanced; current.json stamped',
 	});
 	log('boot-ok', { appliedCounter, highWater, ...{ footprint: enumerateFootprint() } });
 	return j;
 }
 
-/** Rollback: chainload the VISIBLE last-known-good -previous.nro, which boots
- * the RESTORE role and self-applies the older build (an intentional downgrade;
- * the high-water is NOT lowered). Callable from a shell menu. */
-export async function rollback(): Promise<void> {
-	if (!Switch.statSync(PREVIOUS_NRO)) {
-		throw new ApplyError('NO_PREVIOUS', 'no -previous.nro to restore (none retained yet)');
-	}
-	await chainload(PREVIOUS_NRO); // boots RESTORE role; never returns on success
-}
-
 /**
- * Build a self-derived staged journal for RECOVERY (reinstall the new build) or
- * RESTORE (reinstall the older -previous.nro). The running binary IS the source;
- * it hashes itself and applies over the installed path.
+ * Build a self-derived staged journal for RECOVERY (reinstall the running/new
+ * build over the installed path). The running binary IS the source; it hashes
+ * itself and applies over the installed path.
  */
 export async function buildSelfDerivedJournal(
 	ui: UpdaterUi,
 	runId: string,
 	logFile: string,
 	selfPath: string,
-	kind: 'recovery' | 'restore',
 ): Promise<Journal> {
-	const self = await hashWithUi(ui, kind === 'restore' ? 'Preparing restore…' : 'Preparing recovery…', selfPath);
+	const self = await hashWithUi(ui, 'Preparing recovery…', selfPath);
 	const stat = Switch.statSync(selfPath);
 	const manifest: JournalManifest = {
 		schema: 1,
@@ -365,7 +342,7 @@ export async function buildSelfDerivedJournal(
 		version: BREWSER_VERSION,
 		counter: BREWSER_COUNTER,
 		nroSize: stat?.size ?? self.totalBytes,
-		url: kind === 'restore' ? 'local:-previous.nro' : 'local:recovery-alias',
+		url: 'local:recovery-alias',
 		chunkSize: 4 * 1024 * 1024,
 		chunks: self.chunks,
 		rootHash: self.rootHash,
@@ -374,12 +351,11 @@ export async function buildSelfDerivedJournal(
 		state: 'staged',
 		runId,
 		logFile,
-		fromVersion: kind === 'restore' ? '(installed)' : '(recovery)',
-		toVersion: kind === 'restore' ? '(restore)' : BREWSER_VERSION,
+		fromVersion: '(recovery)',
+		toVersion: BREWSER_VERSION,
 		manifest,
 		stagedPath: selfPath,
 		recoveryReady: true,
-		allowDowngrade: kind === 'restore',
 		ts: { created: Date.now(), staged: Date.now() },
 	};
 	writeJournal(j);

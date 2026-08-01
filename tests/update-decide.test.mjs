@@ -1,8 +1,8 @@
 // Host-side test of the anti-downgrade decision (src/update/decide.ts). Pure
 // module, bundled with the project's esbuild and exercised directly. Locks the
-// load-bearing invariant: the network flow accepts ONLY a strictly-newer build
-// (counter > floor AND semver strictly greater), refuses a validly-signed older
-// one, and RESTORE (allowDowngrade) bypasses both.
+// load-bearing invariant: the flow accepts ONLY a strictly-newer build
+// (counter > floor AND semver strictly greater) and refuses a validly-signed
+// older one — there is no downgrade bypass (the restore system was removed).
 //
 // Run: node tests/update-decide.test.mjs
 
@@ -64,8 +64,10 @@ ok(d.accept === false && d.refuseCode === 'DOWNGRADE_VERSION', 'newer counter bu
 d = decideUpdate(m('0.1.4', 4), '0.1.2', 2, 5);
 ok(d.accept === false && d.refuseCode === 'DOWNGRADE_COUNTER', 'counter must clear the FLOOR (5), not just running (2)');
 
-// RESTORE bypasses both guards.
-ok(decideUpdate(m('0.0.1', 1), RV, RC, FLOOR, { allowDowngrade: true }).accept === true, 'allowDowngrade (RESTORE) bypasses guards');
+// No downgrade bypass exists any more (the restore-to-previous system was
+// removed): even a validly-formed OLD build is refused, no exceptions.
+d = decideUpdate(m('0.0.1', 1), RV, RC, FLOOR);
+ok(d.accept === false, 'old build refused — no downgrade bypass (restore system removed)');
 
 // unparseable version with a passing counter → refused (semverCmp NaN !== 1).
 d = decideUpdate(m('bogus', 3), RV, RC, FLOOR);

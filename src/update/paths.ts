@@ -42,9 +42,10 @@ export const UPDATE_DIR = 'sdmc:/switch/brewser/update';
  * Top-level `.nro` so hbmenu lists it (rig's RECOVERY_ALIAS analogue). */
 export const RECOVERY_ALIAS = 'sdmc:/switch/brewser-update.nro';
 
-/** Visible last-known-good: the PREVIOUS build, promoted at boot-ok. Recovers
- * from a signed-but-bad NEW build — the one failure the recovery alias cannot
- * cover. Running FROM this path is the RESTORE role. */
+/** LEGACY — the removed restore-to-previous system's last-known-good alias.
+ * No longer created or promoted (the RESTORE role + rollback were removed).
+ * Retained ONLY so it stays in the guardPath allow-list and boot-ok can DELETE
+ * a leftover copy from an install that predates the removal. */
 export const PREVIOUS_NRO = 'sdmc:/switch/brewser-previous.nro';
 
 /** Same-directory swap temp: `selfApply` copies the new binary here (same dir
@@ -100,7 +101,8 @@ const NORM_CURRENT_JSON = normalize(CURRENT_JSON_PATH);
  * Allowed, exactly:
  *   - BREWSER_NRO
  *   - RECOVERY_ALIAS
- *   - PREVIOUS_NRO
+ *   - PREVIOUS_NRO (legacy — kept deletable so boot-ok can clean up a leftover;
+ *     never created anymore, the restore system was removed)
  *   - SWAP_TMP
  *   - UPDATE_DIR (the staging dir itself) and anything strictly under it
  * Everything else — including every user-data subtree and configs/current.json
@@ -136,7 +138,7 @@ export function guardPath(p: string): string {
 
 	if (norm === NORM_BREWSER_NRO) return p;
 	if (norm === NORM_RECOVERY) return p;
-	if (norm === NORM_PREVIOUS) return p;
+	if (norm === NORM_PREVIOUS) return p; // legacy: kept deletable for boot-ok cleanup only
 	if (norm === NORM_SWAP_TMP) return p;
 	if (norm === NORM_UPDATE_DIR) return p; // the staging dir itself (mkdir target)
 	// Strictly under UPDATE_DIR/ (the trailing slash + length check defeats a
