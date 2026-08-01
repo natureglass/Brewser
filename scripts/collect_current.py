@@ -4,8 +4,8 @@
 Reads the `version` field from (v8-migration siblings — the non-v8
 names are the retired pre-rename trees):
   - D:/Workspace/nxjs-source-v8/packages/runtime/package.json  -> "nx.js"
-  - D:/Workspace/brewser-runtime-v8/package.json               -> "runtime"
-  - D:/Workspace/brewser-v8/package.json                       -> "brewser"
+  - D:/Workspace/brewser-runtime/package.json               -> "runtime"
+  - D:/Workspace/brewser/package.json                       -> "brewser"
 
 This produces the immutable "I shipped with these versions" snapshot
 that the apps.html Check-for-Updates flow compares against the
@@ -29,7 +29,7 @@ WORKSPACE = ROOT.parent
 
 SOURCES = (
     ("nx.js", WORKSPACE / "nxjs-source-v8" / "packages" / "runtime" / "package.json"),
-    ("runtime", WORKSPACE / "brewser-runtime-v8" / "package.json"),
+    ("runtime", WORKSPACE / "brewser-runtime" / "package.json"),
     ("brewser", ROOT / "package.json"),
 )
 

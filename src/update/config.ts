@@ -19,7 +19,7 @@ import type { TrustedKey } from './verify';
 // ── Release hosting (raw.githubusercontent.com/natureglass/Brewser/dist/) ────
 
 /** The repo path the release NRO + manifest live at. `dist/` at the repo root
- * maps to D:\Workspace\brewser-v8\dist\ locally (user-set). CONFIRM the branch
+ * maps to D:\Workspace\brewser\dist\ locally (user-set). CONFIRM the branch
  * (`main` assumed) before the first release. */
 const RELEASE_OWNER_REPO = 'natureglass/Brewser';
 const RELEASE_REF = 'main';

@@ -40,7 +40,7 @@
   var TOKEN_URL       = 'https://oauth2.googleapis.com/token';
   // Brewser-owned mint route. Trades a Google id_token for the HS256
   // envelope the app-side read seam expects. Contracts:
-  //   brewser-runtime-v8/docs/CONTRACT_switch_auth_record.md
+  //   brewser-runtime/docs/CONTRACT_switch_auth_record.md
   //   brewser-WP-Plugins/.../brewser-auth/CONTRACT_device_mint_route.md
   var MINT_URL        = 'https://brewser.tech/wp-json/brewser/v1/auth/device-mint';
 

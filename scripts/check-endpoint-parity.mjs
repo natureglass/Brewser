@@ -1,7 +1,7 @@
 // Guard against vendored-dist drift: three copies of the endpoint constants
 // exist and nothing else asserts they agree —
-//   1. engine source   ../brewser-runtime-v8/src/runtime-defaults.ts
-//   2. engine dist     ../brewser-runtime-v8/dist/runtime-defaults.js
+//   1. engine source   ../brewser-runtime/src/runtime-defaults.ts
+//   2. engine dist     ../brewser-runtime/dist/runtime-defaults.js
 //   3. shell vendored  runtime/dist/runtime-defaults.js
 // Phase-0 finding: (2) and (3) shipped stale telemetry-repo URLs for weeks
 // while (1) was already fixed, because `tsc` had not been re-run before
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const RUNTIME_DIR = resolve(ROOT, process.env.BREWSER_RUNTIME_DIR || '../brewser-runtime-v8');
+const RUNTIME_DIR = resolve(ROOT, process.env.BREWSER_RUNTIME_DIR || '../brewser-runtime');
 
 const COPIES = [
   ['engine src', join(RUNTIME_DIR, 'src', 'runtime-defaults.ts')],

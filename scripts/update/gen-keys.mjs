@@ -3,7 +3,7 @@
  * scripts/update/gen-keys.mjs — generate the TWO ECDSA P-256 signing keypairs
  * the Brewser client bakes as a keyring: `active` and `backup` (key rotation).
  *
- * For each role R in {active, backup} writes under brewser-v8/keys/:
+ * For each role R in {active, backup} writes under brewser/keys/:
  *   <R>.key.pem         PKCS8 private key   (GITIGNORED — local only)
  *   <R>.pub.pem         SPKI public key (PEM, for humans)
  *   <R>.pub.spki.b64    SPKI public key (base64 DER, one line) — baked into NRO

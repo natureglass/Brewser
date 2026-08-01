@@ -4,7 +4,7 @@
   Serve from the WORKSPACE ROOT (D:\Workspace):
       cd D:\Workspace && python -m http.server 8734
       chrome --headless=new --dump-dom --virtual-time-budget=8000 \
-        http://localhost:8734/brewser-v8/tests/library-selftest.html
+        http://localhost:8734/brewser/tests/library-selftest.html
   Imports the COMPILED engine modules (dist), so it tests what ships.
 -->
 <html>
@@ -22,10 +22,10 @@ function ok(cond, label, detail) {
 
 async function main() {
   const { enumerateInstalledApps, joinLibrary } =
-    await import('/brewser-runtime-v8/dist/platform/installed-apps.js');
+    await import('/brewser-runtime/dist/platform/installed-apps.js');
   const { parseCatalogue } =
-    await import('/brewser-runtime-v8/dist/platform/catalogue-normalizer.js');
-  const v2Text = await (await fetch('/brewser-v8/tests/fixtures/platform/catalogue.v2.example.json')).text();
+    await import('/brewser-runtime/dist/platform/catalogue-normalizer.js');
+  const v2Text = await (await fetch('/brewser/tests/fixtures/platform/catalogue.v2.example.json')).text();
 
   // ---- mock disk -----------------------------------------------------------
   const goodManifest = {
@@ -159,9 +159,9 @@ async function main() {
 
   // ---- library tabs (Phase 4): Featured / Recent / Popular / Top Rated ----
   const { buildLibraryTabs } =
-    await import('/brewser-runtime-v8/dist/platform/library-view.js');
-  const { parseStats } = await import('/brewser-runtime-v8/dist/platform/stats.js');
-  const statsText = await (await fetch('/brewser-v8/tests/fixtures/platform/stats.example.json')).text();
+    await import('/brewser-runtime/dist/platform/library-view.js');
+  const { parseStats } = await import('/brewser-runtime/dist/platform/stats.js');
+  const statsText = await (await fetch('/brewser/tests/fixtures/platform/stats.example.json')).text();
   const so = parseStats(statsText);
   ok(so.kind === 'Ok', 'stats fixture parses for tabs', so.kind);
   const tabs = buildLibraryTabs(lib, so.parsed);
@@ -217,7 +217,7 @@ async function main() {
   // is a spotlight or a two-way comparison — the tab hides itself with
   // the count instead. Scores on ids OUTSIDE the library (orphans) never
   // count toward the floor.
-  const { TOP_RATED_MIN_RATED } = await import('/brewser-runtime-v8/dist/platform/library-view.js');
+  const { TOP_RATED_MIN_RATED } = await import('/brewser-runtime/dist/platform/library-view.js');
   ok(TOP_RATED_MIN_RATED === 3, 'toprated floor: constant is 3 (normative in catalogue-v2.md)');
   const oneScored = {
     generated: 'x',
@@ -270,7 +270,7 @@ async function main() {
      'no dates anywhere: recent unavailable with reason', bareTabs.recent.reason);
 
   // ---- parseArtifacts ------------------------------------------------------
-  const { parseArtifacts } = await import('/brewser-runtime-v8/dist/platform/artifacts.js');
+  const { parseArtifacts } = await import('/brewser-runtime/dist/platform/artifacts.js');
   const pa = parseArtifacts(JSON.stringify({ id: 'com.x.y', sizeBytes: 9, files: ['index.html', 'assets/a.png'] }));
   ok(pa.kind === 'Ok' && pa.artifacts.files.length === 2, 'artifacts: valid doc parses');
   ok(parseArtifacts('{ nope').kind === 'CorruptArtifacts', 'artifacts: corrupt rejected');

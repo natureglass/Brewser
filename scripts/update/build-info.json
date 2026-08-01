@@ -1,4 +1,4 @@
 {
-  "counter": 24,
+  "counter": 27,
   "_comment": "Never-reused monotonic build counter baked into the NRO as __BREWSER_COUNTER__ (anti-downgrade). BUMP THIS every release, strictly increasing, and pass the SAME counter to scripts/update/make-manifest.mjs so the signed manifest and the built NRO agree. Version comes from package.json."
 }

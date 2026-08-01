@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-FIXTURES = WORKSPACE / "brewser-v8" / "tests" / "fixtures" / "platform"
+FIXTURES = WORKSPACE / "brewser" / "tests" / "fixtures" / "platform"
 APPS_DIR = WORKSPACE / "brewser-apps" / "apps"
 
 SOURCES = {"base": "https://play.brewser.tech", "ext1": "https://play1.brewser.tech"}

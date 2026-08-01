@@ -1,10 +1,10 @@
-# Runtime Adaptation Options — bringing brewser-v8 / brewser-runtime-v8 onto the new platform contract
+# Runtime Adaptation Options — bringing brewser / brewser-runtime onto the new platform contract
 
 Companion to `PLATFORM_CONTRACT_FINDINGS.md` (breaking changes BC1–BC7 referenced below). Four genuinely different strategies. None is started; this is a decision document.
 
 **Shared baseline (needed under every option, ~zero design risk):**
-- Re-vendor `runtime/dist/` from `brewser-runtime-v8` (picks up the already-fixed WP downloads/ratings URLs — BC3).
-- Revoke the committed GitHub PAT (`brewser-runtime-v8/telemetry/Test-GitHubDispatch.ps1:38`) — independent of any option.
+- Re-vendor `runtime/dist/` from `brewser-runtime` (picks up the already-fixed WP downloads/ratings URLs — BC3).
+- Revoke the committed GitHub PAT (`brewser-runtime/telemetry/Test-GitHubDispatch.ps1:38`) — independent of any option.
 
 ---
 
@@ -33,7 +33,7 @@ Patch each of the ~8 existing consumption sites in place; keep the current archi
 
 ## Option 2 — Clean platform-client abstraction ("one door to the platform")
 
-Introduce a single `platform-client` module (living in `brewser-runtime-v8/src`, consumed by the shell) that owns fetching, parsing, validating, and **normalizing** everything platform-shaped; the shell and page scripts consume only the normalized model.
+Introduce a single `platform-client` module (living in `brewser-runtime/src`, consumed by the shell) that owns fetching, parsing, validating, and **normalizing** everything platform-shaped; the shell and page scripts consume only the normalized model.
 
 **Work order:**
 1. Baseline (re-vendor + PAT).

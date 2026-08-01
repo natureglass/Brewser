@@ -1,5 +1,5 @@
 # Makefile_nxjs — build the nx.js runtime (nxjs.nro) from ../nxjs-source-v8 and
-# overlay it into brewser-v8's node_modules so the next `make` / `make release`
+# overlay it into brewser's node_modules so the next `make` / `make release`
 # packages the freshly-built runtime instead of the vendored copy.
 #
 # Kept SEPARATE from the main Makefile on purpose: the nx.js C build needs the

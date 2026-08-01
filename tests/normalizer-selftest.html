@@ -7,7 +7,7 @@
   Serve from the WORKSPACE ROOT (D:\Workspace), not this directory:
       cd D:\Workspace && python -m http.server 8734
       chrome --headless=new --dump-dom --virtual-time-budget=8000 \
-        http://localhost:8734/brewser-v8/tests/normalizer-selftest.html
+        http://localhost:8734/brewser/tests/normalizer-selftest.html
 
   Imports the COMPILED engine module (dist), so it tests what ships.
 -->
@@ -25,9 +25,9 @@ function ok(cond, label, detail) {
 }
 
 async function main() {
-  const mod = await import('/brewser-runtime-v8/dist/platform/catalogue-normalizer.js');
+  const mod = await import('/brewser-runtime/dist/platform/catalogue-normalizer.js');
   const { parseCatalogue, summarize, permissionSlug } = mod;
-  const FIX = '/brewser-v8/tests/fixtures/platform/';
+  const FIX = '/brewser/tests/fixtures/platform/';
   const load = async (name) => (await fetch(FIX + name)).text();
 
   const v2Text = await load('catalogue.v2.example.json');
@@ -251,7 +251,7 @@ async function main() {
 
   // ---- stats.json (C2) ----------------------------------------------------
   const { parseStats, joinStats } =
-    await import('/brewser-runtime-v8/dist/platform/stats.js');
+    await import('/brewser-runtime/dist/platform/stats.js');
   const statsText = await load('stats.example.json');
   const so = parseStats(statsText);
   ok(so.kind === 'Ok', 'stats.example parses Ok', so.kind);
