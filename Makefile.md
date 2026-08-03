@@ -50,7 +50,7 @@ Overridable variables: `DIST_DIR` (default `dist`), `BREWSER_APPS_DIR` (default 
 make -f Makefile_nxjs
 ```
 
-Builds `nxjs.nro` from `../nxjs-source-v8` and overlays it into `node_modules/@nx.js/nro/dist/` so the next `make` packages the fresh runtime. It's incremental (a no-op when nothing changed).
+Builds `nxjs.nro` from `../nxjs-extended` and overlays it into `node_modules/@nx.js/nro/dist/` so the next `make` packages the fresh runtime. It's incremental (a no-op when nothing changed).
 
 > **Run this from the devkitPro shell** (the msys2 environment that sets `DEVKITPRO` and puts devkitA64 / `pkg-config` / `sed` on PATH). A generic Git Bash will fail with `Please set DEVKITPRO` or use the wrong `sed`/`pkg-config`.
 

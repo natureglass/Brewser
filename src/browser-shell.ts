@@ -4119,10 +4119,22 @@ export class BrowserShell {
 		if (!root) return;
 		pushToolbarMutationScope();
 		try {
-			// body-level flags
-			root.setAttribute('data-bookmarkable', state.bookmarkable ? 'true' : 'false');
+			// body-level flags. Guard on change: an unconditional write here
+			// bumps `toolbarTreeVersion` every renderChrome (setAttribute →
+			// invalidateLiveStyle → bumpLiveTreeVersion, routed to the toolbar
+			// counter inside the mutation scope). renderChrome fires on every
+			// `animFired` tick, so under a continuously-animating wallpaper an
+			// unconditional bump invalidated + rebuilt the toolbar overlay
+			// cache 30×/sec. Only write when the value actually changed.
+			const bookmarkable = state.bookmarkable ? 'true' : 'false';
+			if (root.getAttribute('data-bookmarkable') !== bookmarkable) {
+				root.setAttribute('data-bookmarkable', bookmarkable);
+			}
 			const urlInput = findToolbarById(root, 'url');
-			if (urlInput) setInputValue(urlInput, state.url);
+			// `setInputValue` unconditionally bumps the live tree version, so
+			// skip it when the address bar already shows this URL — the common
+			// case on every animated frame (same page, same URL).
+			if (urlInput && getInputValue(urlInput) !== state.url) setInputValue(urlInput, state.url);
 			const back = findToolbarById(root, 'backButton');
 			if (back) toggleDisabledAttr(back, !state.canGoBack);
 			const fwd = findToolbarById(root, 'forwardButton');

@@ -24,7 +24,7 @@ import {
  * live INSIDE the NRO and are read by nxjs at boot, not by the resource
  * loader, so copying them to sdmc would just produce a stale duplicate.
  * `GeistMono.ttf` + `runtime.js.map` are fat-base artifacts merged into
- * `romfs:/` by @nx.js/nro (see nxjs-source-v8/packages/nro/src/main.ts).
+ * `romfs:/` by @nx.js/nro (see nxjs-extended/packages/nro/src/main.ts).
  * They're read at runtime from the separate `nxjs:` mount
  * (`romfsMountSelf("nxjs")` in main.cc) — the terminal font from
  * `nxjs:/GeistMono.ttf`, the source map from `nxjs:/runtime.js.map`. The

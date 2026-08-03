@@ -1,11 +1,11 @@
 # brewser shell + NRO build (V8-MIGRATION FORK)
 #
 # This Makefile builds the V8-migration variant of brewser. Defaults are
-# tuned for that fork: ../brewser-runtime + ../nxjs-source-v8 siblings.
+# tuned for that fork: ../brewser-runtime + ../nxjs-extended siblings.
 # The QuickJS-era ../brewser-runtime + ../nxjs-source coexist in this
 # workspace as the migration's READ-ONLY reference and are NOT touched
 # by this Makefile — see MIGRATION_PLAN.md "Repo / branch topology" in
-# nxjs-source-v8 for the topology contract.
+# nxjs-extended for the topology contract.
 #
 #   make            # full chain: sync-runtime + current-json + build + nro + sdmc
 #   make build      # esbuild bundle only (depends on sync-runtime)
@@ -15,7 +15,7 @@
 #   make mirror-only# mirror romfs/ to SDMC WITHOUT rebuilding (romfs-only edits)
 #   make current-json
 #                   # refresh romfs/configs/current.json from the upstream
-#                   #   nxjs-source-v8 / brewser-runtime / brewser package.json
+#                   #   nxjs-extended / brewser-runtime / brewser package.json
 #   make sync-runtime
 #                   # vendor ../brewser-runtime/dist into runtime/
 #                   # (calls node scripts/sync-runtime.mjs directly with
@@ -25,7 +25,7 @@
 #   make help
 #
 # Environment requirements:
-#   * devkitPro msys2 bash for the nxjs-source-v8 sub-make (`make nro`
+#   * devkitPro msys2 bash for the nxjs-extended sub-make (`make nro`
 #     chains into `make -C $(NXJS_SOURCE_DIR)` which needs devkitARM)
 #   * npm on PATH for `runtime-build` + `npm run nro`. devkitPro msys2's
 #     PATH does NOT include nvm-installed Node by default; the recipe
@@ -48,13 +48,13 @@ BREWSER_PKG       := package.json
 # V8-migration fork: defaults point at the -v8 sibling checkouts. The
 # QuickJS-era ../brewser-runtime + ../nxjs-source live in this workspace
 # too, but they are the migration's READ-ONLY reference (see
-# MIGRATION_PLAN.md "Repo / branch topology" in nxjs-source-v8) and must
+# MIGRATION_PLAN.md "Repo / branch topology" in nxjs-extended) and must
 # NOT be built from. Use `?=` so a future shared/dual-fork build can
 # override at invocation; the immediate `:=` shape in the upstream
 # brewser/Makefile couldn't be env-overridden, which made cross-fork
 # experimentation harder than it needed to be.
 BREWSER_RUNTIME_PKG ?= ../brewser-runtime/package.json
-NXJS_PKG          ?= ../nxjs-source-v8/packages/runtime/package.json
+NXJS_PKG          ?= ../nxjs-extended/packages/runtime/package.json
 COLLECT_CURRENT   := scripts/collect_current.py
 
 NRO               := brewser.nro
@@ -75,19 +75,19 @@ VERSIONS_JSON       := versions.json
 # config.ts RELEASE_REF. (Moving off v8-migration → main.)
 RELEASE_BRANCH    ?= main
 
-# nxjs runtime build + overlay. nxjs-source-v8 produces nxjs.nro, which
+# nxjs runtime build + overlay. nxjs-extended produces nxjs.nro, which
 # the `nxjs-nro` packager (invoked by `npm run nro`) pulls from
 # node_modules/@nx.js/nro/dist/ as the runtime image. Without an explicit
 # overlay step, edits to nxjs C/TS source never reach brewser.nro.
 #
-# V8-migration default: ../nxjs-source-v8 (the v8-migration worktree).
+# V8-migration default: ../nxjs-extended (the v8-migration worktree).
 # ../nxjs-source is the QuickJS-era READ-ONLY reference and must NOT be
 # the default for this fork — see [[reference-brewser-sync-runtime-env-loss]]
 # for an example of how the wrong sibling-default silently shipped stale
 # code through the build chain before this Makefile was forked.
 # Skipped if the configured dir is missing (consumers without the
 # sibling checkout still get `make` to succeed via the postinstall path).
-NXJS_SOURCE_DIR   ?= ../nxjs-source-v8
+NXJS_SOURCE_DIR   ?= ../nxjs-extended
 NXJS_SOURCE_NRO   := $(NXJS_SOURCE_DIR)/nxjs.nro
 NXJS_OVERLAY      := node_modules/@nx.js/nro/dist/nxjs.nro
 
@@ -249,7 +249,7 @@ clean:
 	-rm -f $(NRO)
 
 help:
-	@echo "brewser Makefile (V8-migration fork). Defaults to ../brewser-runtime + ../nxjs-source-v8."
+	@echo "brewser Makefile (V8-migration fork). Defaults to ../brewser-runtime + ../nxjs-extended."
 	@echo ""
 	@echo "Targets:"
 	@echo "  make / make release"

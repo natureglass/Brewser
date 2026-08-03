@@ -704,11 +704,14 @@ export class BrowserResourceLoader implements ResourceLoader {
 		return renderAppCards(tab.entries);
 	}
 
-	/** Extra nav links for the Google account page (`<browser-account-links>`).
-	 * Each link is emitted ONLY when its per-user document is present on disk,
-	 * so the account page shows Favorites / Achievements exactly when a
-	 * signed-in Check-for-Updates has written the corresponding file. `statSync`
-	 * is a cheap existence probe (no file read); a throw / null = absent. */
+	/** Extra nav links for the account pages (`<browser-account-links>`, used by
+	 * googleLogin.html / microsoftLogin.html). Favorites is ALWAYS emitted:
+	 * enabled while a session is active, otherwise a disabled, non-navigating
+	 * pill — gated on the live session, NOT on whether favorites.json exists.
+	 * Achievements stays file-gated (emitted once a signed-in Check-for-Updates
+	 * has written my-achievements.json); the page itself renders every badge
+	 * locked when signed out, so a lingering file is harmless. `statSync` is a
+	 * cheap existence probe (no file read); a throw / null = absent. */
 	private renderAccountLinks(): string {
 		// Require a NON-EMPTY file. The auth flow "deletes" a per-user cache by
 		// writing 0 bytes (there is no unlink), so a bare existence check would
@@ -722,13 +725,44 @@ export class BrowserResourceLoader implements ResourceLoader {
 			} catch (_) { return false; }
 		};
 		let links = '';
-		if (has('configs/favorites.json')) {
+		// Favorites: gate the enabled/disabled state on the ACTIVE SESSION, not on
+		// favorites.json. Signed out → a dimmed, inert pill (no href so the
+		// engine's findTapIntent finds nothing to navigate; `pointer-events:none`
+		// is the belt-and-suspenders). Signed in → the real link. This keeps the
+		// button present-but-disabled even if a stale favorites.json lingers.
+		if (this.isSignedIn()) {
 			links += '<a class="munch-link" href="brewser://favorites/">Favorites</a>';
+		} else {
+			links += '<a class="munch-link munch-link--disabled" aria-disabled="true"'
+				+ ' style="opacity:0.45;pointer-events:none;cursor:default;">Favorites</a>';
 		}
 		if (has('configs/my-achievements.json')) {
 			links += '<a class="munch-link" href="brewser://achievements/">Achievements</a>';
 		}
 		return links;
+	}
+
+	/** Signed-in probe for the account nav. Mirrors auth-shared.js
+	 * `readActiveSession`: `auth/active.json` names a provider AND that
+	 * provider's `<provider>-auth.json` holds a record with a non-empty `id`.
+	 * Both reads target shell-owned paths (readable under the shell's grant-all
+	 * policy). Any throw / empty / malformed / unknown-provider = signed out. */
+	private isSignedIn(): boolean {
+		const readObj = (rel: string): Record<string, unknown> | null => {
+			try {
+				const data = Switch.readFileSync(`${this.appRoot}${rel}`);
+				if (!data) return null;
+				const text = decoder.decode(data);
+				if (!text.trim()) return null;
+				const parsed = JSON.parse(text);
+				return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+			} catch (_) { return null; }
+		};
+		const active = readObj('shell/auth/active.json');
+		const provider = active && typeof active.provider === 'string' ? active.provider : '';
+		if (provider !== 'google' && provider !== 'microsoft') return false;
+		const rec = readObj(`shell/auth/${provider}-auth.json`);
+		return !!(rec && typeof rec.id === 'string' && (rec.id as string).length > 0);
 	}
 
 	/** Render the welcome-page search bar for the active engine (per

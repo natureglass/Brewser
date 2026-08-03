@@ -1,4 +1,4 @@
-# Makefile_nxjs — build the nx.js runtime (nxjs.nro) from ../nxjs-source-v8 and
+# Makefile_nxjs — build the nx.js runtime (nxjs.nro) from ../nxjs-extended and
 # overlay it into brewser's node_modules so the next `make` / `make release`
 # packages the freshly-built runtime instead of the vendored copy.
 #
@@ -13,7 +13,7 @@
 # After that, a normal `make` / `make release` in the main Makefile picks up the
 # refreshed runtime.
 
-NXJS_SOURCE_DIR ?= ../nxjs-source-v8
+NXJS_SOURCE_DIR ?= ../nxjs-extended
 NXJS_SOURCE_NRO := $(NXJS_SOURCE_DIR)/nxjs.nro
 NXJS_OVERLAY    := node_modules/@nx.js/nro/dist/nxjs.nro
 

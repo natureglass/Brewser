@@ -12,13 +12,13 @@ Paste everything below into Claude Code:
 
 You are working on Brewser, a Nintendo Switch CFW homebrew browser/runtime (V8 + libuv + Skia on OpenGL ES 3.2, Mesa-Nouveau, Tegra X1). Repos, all on `v8-migration` branches:
 
-- `nxjs-source-v8` — engine fork of nx.js (remotes: upstream = TooTallNate/nx.js, origin = natureglass/nx.js_extended)
+- `nxjs-extended` — engine fork of nx.js (remotes: upstream = TooTallNate/nx.js, origin = natureglass/nx.js_extended)
 - `brewser-runtime` — runtime layer (shims, session management)
 - `brewser-apps` — read-only demo tree
 
-**MANDATORY FIRST STEP:** Read both active patch ledgers before touching anything: `nxjs-source-v8/NXJS_PATCHES_NEEDED.md` and `brewser-runtime/RUNTIME_SHIMS.md`. One global entry number space across ledgers; NEVER renumber existing entries; find the next free number from the machine-readable index (#38 is tentatively earmarked for a blob-URL trampoline — skip it and take the next free number, or confirm #38 is unused for that purpose in the ledger).
+**MANDATORY FIRST STEP:** Read both active patch ledgers before touching anything: `nxjs-extended/NXJS_PATCHES_NEEDED.md` and `brewser-runtime/RUNTIME_SHIMS.md`. One global entry number space across ledgers; NEVER renumber existing entries; find the next free number from the machine-readable index (#38 is tentatively earmarked for a blob-URL trampoline — skip it and take the next free number, or confirm #38 is unused for that purpose in the ledger).
 
-**The bug class:** All demos run in one process, one V8 context, one shared EGL/GL context. Exiting a demo (`beforeunload` → `endAppSession` cleanup-queue drain in `brewser-runtime/src/session/app-session.ts`, WebGL ref nulling in `src/webgl-shim.ts`) does NOT reset: GL server-side state (bridge `user_snap` is process-global), the boot-allocated tenant FBO (`s_fbo=3`, `s_color_tex`, `s_depth_rb` in `nxjs-source-v8/source/webgl_bridge.cc`), shim closures (`cubeStates`, `fboCubeStates`, `programRewrittenCubeUniforms`, shadow-route equivalents), JS globals, module registry, timers/RAF/listeners, or native handles. Reproduced symptom: run `webgl-postprocessing-unreal-bloom-selective`, exit, run `com.natureglass.sensors` → cube renders broken; fresh boot → sensors renders fine.
+**The bug class:** All demos run in one process, one V8 context, one shared EGL/GL context. Exiting a demo (`beforeunload` → `endAppSession` cleanup-queue drain in `brewser-runtime/src/session/app-session.ts`, WebGL ref nulling in `src/webgl-shim.ts`) does NOT reset: GL server-side state (bridge `user_snap` is process-global), the boot-allocated tenant FBO (`s_fbo=3`, `s_color_tex`, `s_depth_rb` in `nxjs-extended/source/webgl_bridge.cc`), shim closures (`cubeStates`, `fboCubeStates`, `programRewrittenCubeUniforms`, shadow-route equivalents), JS globals, module registry, timers/RAF/listeners, or native handles. Reproduced symptom: run `webgl-postprocessing-unreal-bloom-selective`, exit, run `com.natureglass.sensors` → cube renders broken; fresh boot → sensors renders fine.
 
 **The decision (do not relitigate):** Composite per-demo isolation, staged. Phase A (this task) = JS/lifecycle isolation with GL left exactly as verified. Phase B (later, separately gated on a hardware probe) = per-demo EGL context. In Phase A you must NOT touch the coexistence bracket, `user_snap` shadow-tracking (ledger #35/#36), or any engine GL context plumbing.
 
@@ -26,7 +26,7 @@ You are working on Brewser, a Nintendo Switch CFW homebrew browser/runtime (V8 +
 
 **A0 — Investigations first (report findings before implementing):**
 
-1. **Module cache keying.** Find how the nx.js V8 embedder caches ES modules (the module map / resolve callback path in `nxjs-source-v8`). Determine: per-isolate or per-context? This decides whether A2 needs a per-context module map. If the cache is per-isolate keyed by URL, a fresh context will NOT re-execute the runtime bundle and the shim closures will survive — the whole design depends on getting this right.
+1. **Module cache keying.** Find how the nx.js V8 embedder caches ES modules (the module map / resolve callback path in `nxjs-extended`). Determine: per-isolate or per-context? This decides whether A2 needs a per-context module map. If the cache is per-isolate keyed by URL, a fresh context will NOT re-execute the runtime bundle and the shim closures will survive — the whole design depends on getting this right.
 2. **Engine-held callback inventory.** Enumerate every place the engine stores a `v8::Global<Function>` (or equivalent persistent handle) fired later from libuv or native code: setTimeout/setInterval, requestAnimationFrame, DOM/Switch event listeners, fetch/network callbacks, video/audio decoder callbacks, sensor streams, cursor overlay, USB. These do NOT die with a disposed context — undisposed, they fire into the next demo's session AND pin the old context's object graph against GC.
 3. **Context boot path.** Locate where the single V8 context is created, where globalThis is populated, and where the runtime bundle is injected, in both engine and `brewser-runtime` boot code.
 
@@ -80,7 +80,7 @@ Context: Brewser (repos/branches as before; **read both ledgers first**). Phase 
 
 Scope:
 
-- **Engine (`nxjs-source-v8`):** split the shared-context creation (`sharedScreenGL`/`sharedScreenGL2` paths) into real per-demo create/destroy backed by EGL; per-demo tenant FBO + color/depth attachments allocated at demo context creation, freed at destroy (replaces boot-once `s_fbo=3`); Skia `grContext->resetContext()` at every ownership boundary; makeCurrent choreography per frame between demo context and Skia context, replacing the enter/exit bracket.
+- **Engine (`nxjs-extended`):** split the shared-context creation (`sharedScreenGL`/`sharedScreenGL2` paths) into real per-demo create/destroy backed by EGL; per-demo tenant FBO + color/depth attachments allocated at demo context creation, freed at destroy (replaces boot-once `s_fbo=3`); Skia `grContext->resetContext()` at every ownership boundary; makeCurrent choreography per frame between demo context and Skia context, replacing the enter/exit bracket.
 - **Retire, don't delete blindly:** the coexistence bracket, `user_snap` shadow tracking (#35/#36), and Phase A's A3 GL state-reset/teardown code all become dead by construction. Mark #35/#36 with ledger addenda as OBSOLETED-BY-PHASE-B (never renumber, never remove entries); remove the dead code paths; update `verify-patches.sh` checks that referenced them.
 - **Runtime (`brewser-runtime`):** demo context creation hooks into the Phase A lifecycle (V8 context + GL context + OwnershipRegistry now form the single composite teardown on `endAppSession`); routing shims install per new GL context (their per-GL-object gates now naturally reset).
 - **If design (a):** keep Phase A's shim name-tracking + deletion as the shared-object lifetime mechanism at teardown; only the state-reset table dies.

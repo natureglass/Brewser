@@ -16,14 +16,14 @@ importers:
         version: 3.2.1
     devDependencies:
       '@nx.js/nro':
-        specifier: link:../nxjs-source-v8/packages/nro
-        version: link:../nxjs-source-v8/packages/nro
+        specifier: link:../nxjs-extended/packages/nro
+        version: link:../nxjs-extended/packages/nro
       '@nx.js/nsp':
-        specifier: link:../nxjs-source-v8/packages/nsp
-        version: link:../nxjs-source-v8/packages/nsp
+        specifier: link:../nxjs-extended/packages/nsp
+        version: link:../nxjs-extended/packages/nsp
       '@nx.js/runtime':
-        specifier: link:../nxjs-source-v8/packages/runtime
-        version: link:../nxjs-source-v8/packages/runtime
+        specifier: link:../nxjs-extended/packages/runtime
+        version: link:../nxjs-extended/packages/runtime
       '@types/css-tree':
         specifier: ^2.3.11
         version: 2.3.11

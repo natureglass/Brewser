@@ -3,7 +3,7 @@
 
 Reads the `version` field from (v8-migration siblings — the non-v8
 names are the retired pre-rename trees):
-  - D:/Workspace/nxjs-source-v8/packages/runtime/package.json  -> "nx.js"
+  - D:/Workspace/nxjs-extended/packages/runtime/package.json  -> "nx.js"
   - D:/Workspace/brewser-runtime/package.json               -> "runtime"
   - D:/Workspace/brewser/package.json                       -> "brewser"
 
@@ -28,7 +28,7 @@ CURRENT_PATH = ROOT / "romfs" / "configs" / "current.json"
 WORKSPACE = ROOT.parent
 
 SOURCES = (
-    ("nx.js", WORKSPACE / "nxjs-source-v8" / "packages" / "runtime" / "package.json"),
+    ("nx.js", WORKSPACE / "nxjs-extended" / "packages" / "runtime" / "package.json"),
     ("runtime", WORKSPACE / "brewser-runtime" / "package.json"),
     ("brewser", ROOT / "package.json"),
 )

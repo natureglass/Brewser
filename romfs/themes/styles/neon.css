@@ -1495,6 +1495,46 @@ fieldset.settings-group legend {
   padding: 0 8px;
 }
 
+/* achievements.html — each tier is a <fieldset class="ach-group"> that reuses
+   the Settings fieldset/legend chrome so both pages read as the same sectioned
+   surface. Palette only; the badge grid + spacing are structural and live in
+   shell/achievements.html's inline style. */
+fieldset.ach-group {
+  background-color: rgba(13, 11, 26, 0.7);
+  border: 1px solid #9d00ff;
+  border-radius: 12px;
+  padding: 16px 18px 22px;
+}
+fieldset.ach-group legend {
+  color: #faff00;
+  font-weight: 700;
+  padding: 0 8px;
+}
+.ach-summary,
+.ach-tier__blurb,
+.ach-tier__count,
+.ach-empty { color: #7fb8d8; }
+.ach-badge__name { color: #e8f7ff; }
+.ach-badge--locked .ach-badge__name { color: #7fb8d8; }
+
+/* Badge detail modal — reuses the .app-modal chrome; these are the
+   achievement-specific accents (tier line, earned/locked status pill,
+   how-to-earn criteria). Card background + title + description colours come
+   from the shared .app-modal-card / .app-modal-title rules above. */
+.ach-modal-tier { color: #7fb8d8; }
+.ach-modal-criteria { color: #7fb8d8; }
+.ach-modal-criteria strong { color: #faff00; }
+.ach-modal-status--earned {
+  color: #00ffa3;
+  background: rgba(0, 255, 163, 0.12);
+  border-color: rgba(0, 255, 163, 0.5);
+}
+.ach-modal-status--locked {
+  color: #7fb8d8;
+  background: rgba(127, 184, 216, 0.10);
+  border-color: rgba(127, 184, 216, 0.35);
+}
+
 .settings-row {
   display: flex;
   flex-direction: column;
@@ -1927,6 +1967,35 @@ fieldset.settings-group legend {
     border-color: #d000ff;
   }
   fieldset.settings-group legend { color: #d800ff; }
+
+  /* achievements.html — tier fieldsets */
+  fieldset.ach-group {
+    background-color: rgba(255, 255, 255, 0.7);
+    border-color: #d000ff;
+  }
+  fieldset.ach-group legend { color: #d800ff; }
+  .ach-summary,
+  .ach-tier__blurb,
+  .ach-tier__count,
+  .ach-empty { color: #6a6a7a; }
+  .ach-badge__name { color: #15151c; }
+  .ach-badge--locked .ach-badge__name { color: #6a6a7a; }
+
+  /* Badge detail modal accents */
+  .ach-modal-tier { color: #6a6a7a; }
+  .ach-modal-criteria { color: #6a6a7a; }
+  .ach-modal-criteria strong { color: #d800ff; }
+  .ach-modal-status--earned {
+    color: #0a8f5e;
+    background: #e4f7ef;
+    border-color: #9fe0c6;
+  }
+  .ach-modal-status--locked {
+    color: #6a6a7a;
+    background: #f1f1f4;
+    border-color: #d6d6de;
+  }
+
   .settings-label { color: #15151c; }
   .settings-hint { color: #6a6a7a; }
   .path { color: #6a6a7a; }
