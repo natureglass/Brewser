@@ -197,10 +197,24 @@
   }
 
   var modalOpen = false;
+  // App display name captured at open() so the Launch listener can arm the
+  // shell's "Loading <name>" splash for the launch that follows.
+  var launchName = '';
+
+  // Arm the shell's black launch splash. Best-effort; a build without the
+  // hook just launches without it. Mirrors the helper in missing-app-modal.js.
+  function armLaunchSplash(name) {
+    try {
+      if (typeof globalThis.__brewserArmLaunchSplash === 'function') {
+        globalThis.__brewserArmLaunchSplash(String(name == null ? '' : name));
+      }
+    } catch (_) { /* no-op */ }
+  }
 
   function open(detail, options) {
     var opts = options || {};
     var url = typeof opts.url === 'string' ? opts.url : '';
+    launchName = (detail && detail.name) ? String(detail.name) : '';
     var matched = getMatchedWarnings(detail && detail.permissions);
     if (matched.length === 0) {
       // Caller is expected to have checked first via
@@ -238,6 +252,9 @@
   // in open(), firing navigate. We don't preventDefault — that's a
   // no-op for tap-intent navigation, and we WANT the navigation here.
   launchBtn.addEventListener('click', function (e) {
+    // Arm the launch splash BEFORE close()/navigate — the shell reads it
+    // when findTapIntent fires the navigate right after this click dispatch.
+    armLaunchSplash(launchName);
     close();
     if (e && e.stopPropagation) e.stopPropagation();
   });

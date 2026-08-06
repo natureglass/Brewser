@@ -112,6 +112,18 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	// entry, the streaming-instantiate path that Unity/Godot/Emscripten
 	// exports default to silently breaks even when raw WASM works.
 	wasm: { mime: 'application/wasm', binary: true },
+	// Unity WebGL data archive (`data.data`, "UnityWebData1.0" packed
+	// scenes/resources/StreamingAssets). Unity's `createUnityInstance`
+	// fetches it via `readAsync` alongside `code.wasm`/`framework.js`.
+	// Without a MIME entry, `classifyUrl` returns null for the unknown
+	// `.data` extension and the request 404s — and Unity's loader does
+	// NOT check the HTTP status, so it feeds the "Not found: brewser://…"
+	// 404 body into the runtime as if it were the archive, which either
+	// hangs the load (WebGL1/older loaders) or throws "Unknown data
+	// format" (WebGL2/newer). Binary octet-stream (Unity reads it as an
+	// arrayBuffer; it doesn't require a specific content-type the way
+	// `WebAssembly.instantiateStreaming` requires `application/wasm`).
+	data: { mime: 'application/octet-stream', binary: true },
 	mp3: { mime: 'audio/mpeg', binary: true },
 	ogg: { mime: 'audio/ogg', binary: true },
 	wav: { mime: 'audio/wav', binary: true },

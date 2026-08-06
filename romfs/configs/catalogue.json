@@ -1,13 +1,12 @@
 {
   "version": 1,
-  "generated": "2026-07-25T14:16:47Z",
+  "generated": "2026-08-06T11:27:11Z",
   "apps": [
     {
-      "id": "com.natureglass.fluiddynamics",
-      "name": "Fluid dynamics",
-      "version": "1.0.3",
-      "summary": "Paint glowing fluid with your finger — real-time GPU smoke & dye simulation.",
-      "description": "<p><strong>Fluid dynamics</strong> is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate.</p>\r\n<p><strong>How it works.</strong> Every frame the app runs a chain of GPU shader passes over floating-point textures. It first computes the fluid's <em>curl</em> and adds a vorticity force to keep the motion lively and turbulent, then makes the flow <em>incompressible</em> by solving for pressure over roughly twenty iterations and subtracting its gradient from the velocity field. The velocity and the coloured dye are then <em>advected</em> — carried along the flow — and both fade slightly each step so trails dissipate naturally. The simulation runs on a compact velocity grid while the dye is rendered at much higher resolution for crisp detail, with a lighting pass that shades the fluid from its own density gradients to give it depth.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — drag anywhere to inject dye and push the fluid; the <em>direction and speed</em> of your stroke become the force applied, and the colour drifts through the rainbow as you move. <em>Multi-touch is supported</em>, so several fingers stir at once.</li>\r\n<li><strong>Burst</strong> — fires several randomly aimed splats of colour and force into the field for an instant explosion of motion.</li>\r\n<li><strong>Particles</strong> — toggles a layer of ~16,000 GPU particles that ride the velocity field, brightening where the flow moves fastest, then wrap and respawn to keep coverage even.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Everything runs locally with no network access, and the app automatically probes the device for the best supported float texture formats so it degrades gracefully across GPUs.</p>",
+      "id": "com.natureglass.aether",
+      "name": "Aether",
+      "version": "1.0.0",
+      "description": "<p><strong>AETHER</strong> turns a written phrase into a fullscreen animated field. Describe a world, watch it assemble, then open the console and take it apart.</p>\r\n<p><strong>How it works</strong></p>\r\n<p>Type something like <em>stormy alien ocean at dusk</em> and press Render. AETHER reads the phrase against a vocabulary of 168 words covering subjects, moods, colours, materials, styles and times of day. Every word it recognises contributes to a set of 40 numbers — field scale, warp depth, symmetry, palette, motion, atmosphere and finish — which are weighted and averaged into a single parameter set.</p>\r\n<p>That set drives a WebGL2 fragment shader that renders the whole scene in one pass, at 60fps, with no textures and no geometry. Nothing is pre-rendered: every pixel is computed from the parameters each frame.</p>\r\n<p>The <strong>Director read</strong> panel shows which words landed and which were ignored, so you can see exactly how your phrase was interpreted rather than guessing.</p>\r\n<p>The morph</p>\r\n<p>A new phrase doesn't cut to the result. The image and the console sliders travel to their new values together over about a second, so you can watch which parameters your words actually moved.</p>\r\n<p>Seven field types</p>\r\n<ul>\r\n<li><strong>Smooth</strong> — marbled, cloud-like domain warping</li>\r\n<li><strong>Bands</strong> — topographic contour lines</li>\r\n<li><strong>Rings</strong> — concentric ripples</li>\r\n<li><strong>Veins</strong> — wood and marble grain</li>\r\n<li><strong>Terrace</strong> — stepped plateaus</li>\r\n<li><strong>Streaks</strong> — directional strata</li>\r\n<li><strong>Cells</strong> — cracked, crystalline Worley noise</li>\r\n</ul>\r\n<p>Combined with 14 palettes and optional kaleidoscopic folding, the same phrase vocabulary reaches a wide range of looks rather than recolouring one texture.</p>\r\n<p>Controls</p>\r\n<ul>\r\n<li><strong>Render</strong> — interpret whatever is in the prompt box</li>\r\n<li><strong>New prompt</strong> — deal from a bank of 50 written phrases <em>(P)</em></li>\r\n<li><strong>Surprise me</strong> — ignore language, roll the parameters directly <em>(space)</em></li>\r\n<li><strong>Console</strong> — slide out the full 40-parameter panel <em>(H)</em></li>\r\n<li><strong>Save frame</strong> — export the current image as a PNG <em>(S)</em></li>\r\n<li><strong>Copy / Load JSON</strong> — move parameter sets in and out by hand</li>\r\n</ul>\r\n<p>Render scale is adjustable if you want to trade sharpness for framerate on slower hardware. Gamepad and keyboard are both supported, and the console hides completely for fullscreen viewing.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
       "categories": [
@@ -24,17 +23,49 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-09T12:00:00Z",
-      "tags": [
-        "Fluids"
+      "publishedAt": "2026-08-06T10:27:22Z",
+      "summary": "Type a phrase, watch a world assemble. Fullscreen procedural WebGL2 art that runs offline.",
+      "features": [
+        "Gamepad"
       ],
-      "sizeBytes": 85881
+      "tags": [
+        "WebGL2",
+        "Kaleidoscope"
+      ],
+      "sizeBytes": 121545
+    },
+    {
+      "id": "com.natureglass.fluiddynamics",
+      "name": "Fluid dynamics",
+      "version": "1.0.0",
+      "description": "<p><strong>Fluid dynamics</strong> is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate.</p>\r\n<p><strong>How it works.</strong> Every frame the app runs a chain of GPU shader passes over floating-point textures. It first computes the fluid's <em>curl</em> and adds a vorticity force to keep the motion lively and turbulent, then makes the flow <em>incompressible</em> by solving for pressure over roughly twenty iterations and subtracting its gradient from the velocity field. The velocity and the coloured dye are then <em>advected</em> — carried along the flow — and both fade slightly each step so trails dissipate naturally. The simulation runs on a compact velocity grid while the dye is rendered at much higher resolution for crisp detail, with a lighting pass that shades the fluid from its own density gradients to give it depth.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — drag anywhere to inject dye and push the fluid; the <em>direction and speed</em> of your stroke become the force applied, and the colour drifts through the rainbow as you move. <em>Multi-touch is supported</em>, so several fingers stir at once.</li>\r\n<li><strong>Burst</strong> — fires several randomly aimed splats of colour and force into the field for an instant explosion of motion.</li>\r\n<li><strong>Particles</strong> — toggles a layer of ~16,000 GPU particles that ride the velocity field, brightening where the flow moves fastest, then wrap and respawn to keep coverage even.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Everything runs locally with no network access, and the app automatically probes the device for the best supported float texture formats so it degrades gracefully across GPUs.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Apps"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T10:43:09Z",
+      "summary": "Paint glowing fluid on a WebGL2 canvas with burst and particle effects.",
+      "tags": [
+        "Fluids",
+        "Visualizer"
+      ],
+      "sizeBytes": 87922
     },
     {
       "id": "com.natureglass.fractalzoom",
       "name": "Fractal Zoom",
       "version": "1.0.0",
-      "summary": "Dive endlessly into six infinite fractals, zooming in real time on the GPU.",
       "description": "<p><strong>Fractal Zoom</strong> is a GPU-powered explorer for six infinitely detailed fractals. Dive endlessly into these mathematical worlds, panning and zooming smoothly to reveal intricate structure at every scale, all rendered in real time with WebGL2.</p>\r\n<p><strong>How it works.</strong> Most of the fractals — the <em>Mandelbrot</em>, <em>Julia</em>, <em>Burning Ship</em>, <em>Phoenix</em> and <em>Koch</em> sets — are drawn by a fragment shader covering the whole screen: for every pixel it treats the point as a complex number and repeatedly applies the fractal's formula (up to around 700 times) to see how quickly the value \"escapes\". The number of steps is coloured through a smooth cosine palette, and the iteration count automatically scales up as you zoom in so detail keeps resolving no matter how deep you go. The <em>Barnsley Fern</em> works differently: thousands of points are stepped through a chaos game on the CPU and accumulated into a brightness buffer, then tone-mapped for a soft, photographic look.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Zoom &amp; pan</strong> — drag, hold, or use the scroll wheel to zoom continuously toward wherever you point; a heads-up display shows the current fractal name and zoom factor.</li>\r\n<li><strong>Fractal</strong> — cycles through the six different fractal types.</li>\r\n<li><strong>Cycle</strong> — hold to animate the colour palette, sending waves of colour through the image.</li>\r\n<li><strong>Reset</strong> — recenters and returns to the starting view.</li>\r\n<li><strong>Full screen</strong> — maximises the canvas for the best detail.</li>\r\n</ul>\r\n<p>Rendered entirely on the GPU with dithering to hide colour banding, and it needs no internet connection.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -51,27 +82,24 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-18T12:00:00Z",
-      "features": [
-        "WebGL 2"
-      ],
+      "publishedAt": "2026-08-06T10:32:41Z",
+      "summary": "A GPU-powered WebGL2 explorer for six infinitely detailed fractals.",
       "tags": [
-        "Fractals"
+        "Fractals",
+        "Visualizer"
       ],
-      "sizeBytes": 66462
+      "sizeBytes": 68119
     },
     {
       "id": "com.natureglass.gravityballs",
       "name": "Gravity Balls",
       "version": "1.0.0",
-      "summary": "A relaxing physics sandbox where gravity follows however you tilt.",
       "description": "<p><strong>Gravity Balls</strong> is a relaxing physics sandbox where a set of colourful balls fall, bounce and jostle against each other and the walls — and gravity points wherever you tilt.</p>\r\n<p><strong>How it works.</strong> A proper physics engine runs behind the scenes. Each frame is broken into several small sub-steps, and within each step the app nudges every ball's velocity by gravity, then repeatedly resolves collisions — ball-against-wall and ball-against-ball — using impulses that account for each ball's mass (bigger balls are heavier), bounciness and friction. This <em>iterative</em> approach lets balls pile up and settle into stable stacks instead of jittering or sinking through one another. Drawing is just as efficient: a single instanced WebGL2 draw call renders every ball from one shared shape, and a shader turns each into a crisp, smoothly anti-aliased disc.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Tilt to steer gravity</strong> — on a device with a motion sensor, physically tilting it pulls the balls in that direction (the display reads <em>IMU LIVE</em>).</li>\r\n<li><strong>Drag</strong> — with no motion sensor, dragging on the screen points gravity toward your finger instead.</li>\r\n<li><strong>Full screen</strong> — fills the display for the full effect.</li>\r\n</ul>\r\n<p>A lightweight, self-contained demo that runs completely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
       "categories": [
         "Apps",
-        "Demos",
-        "Games"
+        "Sensors"
       ],
       "permissions": [],
       "compatibility": [
@@ -83,20 +111,44 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-25T12:00:00Z",
-      "genre": [
-        "Simulation"
+      "publishedAt": "2026-08-06T10:25:34Z",
+      "summary": "A WebGL2 physics playground of bouncing balls under gravity.",
+      "tags": [
+        "Gyroscope"
       ],
-      "features": [
-        "Motion Sensors"
+      "sizeBytes": 37394
+    },
+    {
+      "id": "com.natureglass.metaballssim",
+      "name": "Metaballs sim",
+      "version": "1.0.0",
+      "description": "<p><strong>Metaballs sim</strong> is a relaxing fluid sandbox where dozens of soft water blobs fall, pool and merge into one gooey, rolling surface.</p>\r\n<p><strong>How it works.</strong> Two things run at once. Behind the scenes a lightweight particle simulation gives every blob <em>gravity</em>, plus <em>viscosity</em> and <em>cohesion</em> forces that pull neighbours together and let overlaps relax apart, so the crowd flows and settles like a thick liquid. On screen it uses the classic <em>metaball</em> trick: in a first pass each blob splats a soft circular <em>field</em> into an offscreen texture using <em>additive blending</em>, so wherever two blobs sit close their fields add up; a second full-screen pass then <em>thresholds</em> that combined field into flat colour bands — edge, fill and a bright dense core — making separate circles visually fuse into a single liquid shape. Everything is drawn with WebGL2 in just a couple of draw calls.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Drag</strong> — swirl the pool; blobs near your finger get pulled along with it.</li>\r\n<li><strong>Tap the top</strong> — pours fresh blobs in from above that drip down and merge into the water.</li>\r\n<li><strong>Cycle</strong> — hold to roll the colour smoothly through the spectrum, release to keep whatever hue it lands on.</li>\r\n<li><strong>Size + / Size -</strong> — makes newly poured blobs bigger or smaller.</li>\r\n<li><strong>Reset</strong> — clears everything back to the neat starting grid and the default blue.</li>\r\n<li><strong>Full screen</strong> — fills the display for the full effect.</li>\r\n</ul>\r\n<p>A self-contained demo that runs completely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
       ],
-      "sizeBytes": 35800
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T10:21:50Z",
+      "summary": "A WebGL2 metaball fluid of merging, dripping water blobs you can pour and colour.",
+      "tags": [
+        "Fluids"
+      ],
+      "sizeBytes": 30969
     },
     {
       "id": "com.natureglass.midilab",
       "name": "MIDI Lab",
       "version": "1.0.0",
-      "summary": "Plug in any MIDI controller — on-screen mirror, synth, and reactive visuals.",
       "description": "<p><strong>MIDI Lab</strong> is a universal MIDI-controller tester, synthesizer and visual playground. Plug in a keyboard, pad grid or knob controller and the app builds an on-screen mirror of your exact device, then lights up every note, pad and dial as you play it — while turning your performance into sound and reactive graphics.</p>\r\n<p><strong>How it works.</strong> The app connects to your hardware two ways, with an automatic fallback. First it tries the browser's built-in <em>Web MIDI</em> support; if that isn't available it falls back to <em>WebUSB</em>, claiming the controller directly and decoding its raw USB-MIDI packets itself. It then matches your device's name against a bundled database of known controllers to draw the right layout of pads, keys, faders and knobs (unknown gear gets a sensible generic panel). Every incoming message flows through one pipeline: it's logged in the monitor, played through the synth, and used to drive the visuals. The synthesizer is built with Web Audio — each note stacks two oscillators through a filter and envelope, then a chain of drive, bit-crushing, reverb and delay — and your knobs and faders are mapped straight onto its parameters like filter cutoff, resonance and reverb. Meanwhile a WebGL2 feedback background bursts and glows in time with your notes.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Enable Audio</strong> — unlocks sound (browsers require one tap first); do this before playing.</li>\r\n<li><strong>Pair MIDI / Pair USB</strong> — connect your controller through Web MIDI or, as a fallback, WebUSB.</li>\r\n<li><strong>Play</strong> — the on-screen widgets respond live; on devices with lights, tapping an on-screen pad even sends a signal back to illuminate the real hardware.</li>\r\n<li><strong>Monitor</strong> — a collapsible panel logs every incoming message as decoded, timestamped data, with a one-tap clear.</li>\r\n<li><strong>Full screen</strong> — expands the interface for performance.</li>\r\n</ul>\r\n<p>Self-contained and offline, with the layout adapting automatically to whatever controller you connect.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -104,7 +156,7 @@
         "Apps"
       ],
       "permissions": [
-        "Usb"
+        "usb"
       ],
       "compatibility": [
         "switch",
@@ -115,14 +167,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-16T12:00:00Z",
-      "genre": [
-        "Experience"
-      ],
+      "publishedAt": "2026-08-06T10:44:35Z",
+      "summary": "Test MIDI controllers and play a built-in synth via Web MIDI or USB.",
       "features": [
-        "WebUSB"
+        "Web MIDI",
+        "Web USB"
       ],
-      "sizeBytes": 118987
+      "tags": [
+        "MIDI"
+      ],
+      "sizeBytes": 121929
     },
     {
       "id": "com.natureglass.neuralnetworks",
@@ -146,25 +200,25 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-22T12:57:20Z",
-      "features": [
+      "publishedAt": "2026-08-06T10:36:13Z",
+      "summary": "Draw a doodle and let an on-device WebNN model guess what it is.",
+      "tags": [
+        "Probability",
         "WebNN"
       ],
-      "sizeBytes": 88451
+      "sizeBytes": 91274
     },
     {
-      "id": "com.natureglass.savedemo",
-      "name": "Save Demo",
-      "version": "1.0.0",
-      "description": "<p><strong>Save Demo</strong> is a hands-on test harness for the Brewser save system — the same building blocks any app can use to remember data across sessions and devices. Sign in with your Google/Brewser account and exercise every part of the API from one screen.</p>\r\n<p><strong>How it works.</strong> The app uses a two-tier persistence model. When you save, your data is written <em>instantly</em> to this browser's local storage, then a background sync quietly uploads it to your account a moment later, so the interface never waits on the network. When you load, the local copy always wins for speed, while <em>Pull</em> fetches the authoritative copy from the server. Signing in opens a Google sign-in popup that hands back a secure token, which the app then attaches to each request to the Brewser cloud. On top of the basic save blob it layers two higher-level tools: <em>records</em>, a simple add/update/remove/list database of individual entries, and <em>leaderboards</em>, a shared public scoreboard that keeps each player's best result.</p>\r\n<p><strong>What you can try:</strong></p>\r\n<ul>\r\n<li><strong>Save &amp; load</strong> — edit a JSON blob and Save, Load, <em>Sync now</em>, <em>Pull from account</em>, or Clear local.</li>\r\n<li><strong>Records</strong> — Put (add), Update or Remove a selected entry, and List them all.</li>\r\n<li><strong>Leaderboard</strong> — submit a score, then view the Top 10, your own rank, or the scores around you, and remove your entry.</li>\r\n<li><strong>State panels</strong> — two live views compare what's stored in this browser versus what's on the server, each with a status indicator.</li>\r\n<li><strong>Activity log</strong> — every operation is timestamped so you can watch the sync happen.</li>\r\n</ul>\r\n<p>A reference app for developers building save-enabled experiences on Brewser.</p>",
+      "id": "com.natureglass.nxjswebgl1test",
+      "name": "nxjs WebGL1 Test",
+      "version": "1.0.1",
+      "description": "<p><strong>nxjs WebGL1 Test</strong> is a WebGL1 showpiece for the nx.js runtime — a moonlit ocean at night, rendered in real time, with the nx.js logo riding a cube that bobs on the swell.</p>\r\n<p><strong>How it works.</strong> It is really a stress test of nx.js's WebGL1 path dressed up as a seascape. Four separate <em>GLSL programs</em> — sky, moon, water and cube — are marked <em>raw passthrough</em> so the engine hands them straight to the console's native graphics chip instead of emulating them. The ocean is a dense grid of roughly ninety thousand triangles whose heights are pushed around by summed <em>sine waves</em>, and the same wave maths runs on the processor so the cube can float, tilt and roll exactly with the surface beneath it. The moon is a hand-shaded billboard with <em>procedural</em> craters and glow, the stars are scattered by a hash function, and the logo is uploaded as a <em>texture</em> onto the cube's metallic faces, complete with reflections, foam and an underwater glow.</p>\r\n<p><strong>What you'll see:</strong></p>\r\n<ul>\r\n<li><strong>Moonlit sky</strong> — a graded night sky dusted with a field of stars.</li>\r\n<li><strong>Procedural moon</strong> — a softly shaded moon with maria, craters and a cool halo.</li>\r\n<li><strong>Living ocean</strong> — rolling waves with foam crests, glints and a mirrored moonpath.</li>\r\n<li><strong>Floating cube</strong> — a metallic nx.js-logo cube bobbing and turning on the water, glowing beneath the surface.</li>\r\n<li><strong>Orbit the camera</strong> — drag the screen or push the right stick to look around; the left stick zooms in and out.</li>\r\n</ul>\r\n<p>Runs entirely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
       "categories": [
         "Demos"
       ],
-      "permissions": [
-        "Storage"
-      ],
+      "permissions": [],
       "compatibility": [
         "switch",
         "web"
@@ -174,11 +228,74 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-22T11:29:42Z",
-      "tags": [
-        "Save"
+      "publishedAt": "2026-08-06T09:21:34Z",
+      "summary": "The very first WebGL1 capability demo on Switch: a moonlit ocean with a floating nx.js-logo cube",
+      "features": [
+        "Gamepad"
       ],
-      "sizeBytes": 63735
+      "tags": [
+        "WebGL1"
+      ],
+      "sizeBytes": 94850
+    },
+    {
+      "id": "com.natureglass.nxjswebgl2test",
+      "name": "nxjs WebGL2 Test",
+      "version": "1.0.1",
+      "description": "<p><strong>nxjs WebGL2 Test</strong> is a WebGL2 showpiece for the nx.js runtime — a procedural sunset sea, drawn entirely inside a single shader, with the nx.js logo on a cube drifting on the tide.</p>\r\n<p><strong>How it works.</strong> The whole scene is painted by one <em>fragment shader</em> in the ShaderToy style: a single full-screen triangle is drawn with no geometry data at all, and for every pixel the shader casts a <em>ray</em> out into an imagined world. It <em>ray-marches</em> a rippling wave surface, builds the dusk sky, sun, clouds and stars from <em>noise</em> functions, and intersects a ray against a box to place the cube. Each frame the cube's pose — its bob, spin and roll on the waves — is worked out on the processor and passed in as small <em>matrices</em>, while the marked <em>raw passthrough</em> shader runs natively on the console's graphics chip. A final cinematic <em>tonemap</em>, vignette and dither give it a filmic finish.</p>\r\n<p><strong>What you'll see:</strong></p>\r\n<ul>\r\n<li><strong>Sunset sky</strong> — a layered dusk gradient with a low sun, drifting clouds and stars coming out.</li>\r\n<li><strong>Ray-marched sea</strong> — a rippling ocean with fresnel reflections, sun glitter and sparkling glints.</li>\r\n<li><strong>Floating cube</strong> — an nx.js-logo cube bobbing and turning on the swell, casting a shadow and a reflected streak across the water.</li>\r\n<li><strong>Orbit the camera</strong> — drag the screen or push the right stick to change your view.</li>\r\n</ul>\r\n<p>Runs entirely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:22:21Z",
+      "summary": "The very first WebGL2 shader demo on Switch: a procedural sunset sea with a floating logo cube.",
+      "features": [
+        "Gamepad"
+      ],
+      "tags": [
+        "WebGL2"
+      ],
+      "sizeBytes": 75297
+    },
+    {
+      "id": "com.natureglass.savedemo",
+      "name": "Save Demo",
+      "version": "1.0.0",
+      "description": "<p><strong>Save Demo</strong> is a hands-on test harness for the Brewser save system — the same building blocks any app can use to remember data across sessions and devices. Sign in with your Google/Brewser account and exercise every part of the API from one screen.</p>\r\n<p><strong>How it works.</strong> The app uses a two-tier persistence model. When you save, your data is written <em>instantly</em> to this browser's local storage, then a background sync quietly uploads it to your account a moment later, so the interface never waits on the network. When you load, the local copy always wins for speed, while <em>Pull</em> fetches the authoritative copy from the server. Signing in opens a Google sign-in popup that hands back a secure token, which the app then attaches to each request to the Brewser cloud. On top of the basic save blob it layers two higher-level tools: <em>records</em>, a simple add/update/remove/list database of individual entries, and <em>leaderboards</em>, a shared public scoreboard that keeps each player's best result.</p>\r\n<p><strong>What you can try:</strong></p>\r\n<ul>\r\n<li><strong>Save &amp; load</strong> — edit a JSON blob and Save, Load, <em>Sync now</em>, <em>Pull from account</em>, or Clear local.</li>\r\n<li><strong>Records</strong> — Put (add), Update or Remove a selected entry, and List them all.</li>\r\n<li><strong>Leaderboard</strong> — submit a score, then view the Top 10, your own rank, or the scores around you, and remove your entry.</li>\r\n<li><strong>State panels</strong> — two live views compare what's stored in this browser versus what's on the server, each with a status indicator.</li>\r\n<li><strong>Activity log</strong> — every operation is timestamped so you can watch the sync happen.</li>\r\n</ul>\r\n<p>A reference app for developers building save-enabled experiences on Brewser.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Apps",
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T10:20:30Z",
+      "summary": "A hands-on test harness for the Brewser cloud save, records and leaderboard APIs.",
+      "tags": [
+        "Leaderboards",
+        "Save Game"
+      ],
+      "sizeBytes": 66341
     },
     {
       "id": "com.natureglass.sensorsplayground",
@@ -193,7 +310,7 @@
         "Sensors"
       ],
       "permissions": [
-        "Device Info"
+        "device_info"
       ],
       "compatibility": [
         "switch",
@@ -204,11 +321,12 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-07-02T12:00:00Z",
-      "features": [
-        "Motion Sensors"
+      "publishedAt": "2026-08-06T10:24:29Z",
+      "summary": "A live dashboard that probes your device's sensors, battery, haptics and network.",
+      "tags": [
+        "Gyroscope"
       ],
-      "sizeBytes": 99762
+      "sizeBytes": 102659
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -220,31 +338,27 @@
       "categories": [
         "Apps"
       ],
-      "permissions": [
-        "Storage"
-      ],
+      "permissions": [],
       "compatibility": [
-        "switch",
-        "web"
+        "switch"
       ],
       "allowed_origins": [],
       "developer": "Alex Daskalakis",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-04T12:00:00Z",
-      "features": [
-        "WebAudio"
-      ],
+      "publishedAt": "2026-08-06T10:28:14Z",
+      "summary": "A WebGL2 music player with playlist and live spectrum visualizers.",
       "tags": [
-        "Audio Player"
+        "Audio Player",
+        "Visualizer"
       ],
-      "sizeBytes": 156064
+      "sizeBytes": 158718
     },
     {
       "id": "com.natureglass.speedtest",
       "name": "Speed Test",
-      "version": "1.0.1",
+      "version": "1.0.0",
       "description": "<p><strong>Speed Test</strong> checks how fast your internet connection really is, measuring against Cloudflare's global network and showing the results on an animated needle gauge with live metric tiles and a diagnostics log.</p>\r\n<p><strong>How it works.</strong> Tapping start runs three phases in turn. First it measures <em>latency</em> by timing several tiny round-trips to the server and averaging them. Then it measures <em>download</em> speed by streaming a large file and recomputing the rate on every chunk that arrives — which is what drives the needle live — discarding a short warm-up so the connection has time to reach full speed. Finally it measures <em>upload</em> by sending batches of random data and timing how quickly each one completes. All of this talks directly to Cloudflare's public speed-test endpoints, and speeds are reported in megabits per second (Mbps) just like other mainstream speed tests.</p>\r\n<p><strong>It reports:</strong></p>\r\n<ul>\r\n<li><strong>Download speed</strong> — how quickly data reaches your device.</li>\r\n<li><strong>Upload speed</strong> — how quickly you can send data out.</li>\r\n<li><strong>Latency</strong> — the round-trip responsiveness of your connection.</li>\r\n</ul>\r\n<p>One tap on <strong>Start speed test</strong> (or a click on the gauge) runs the full measurement. Requires an internet connection.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -261,8 +375,12 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-05-21T12:00:00Z",
-      "sizeBytes": 59772
+      "publishedAt": "2026-08-06T10:18:02Z",
+      "summary": "Measure your internet speed against Cloudflare on an animated needle gauge.",
+      "tags": [
+        "Diagnostics"
+      ],
+      "sizeBytes": 62066
     },
     {
       "id": "com.natureglass.streamcast",
@@ -274,62 +392,28 @@
       "categories": [
         "Apps"
       ],
-      "permissions": [
-        "Network"
-      ],
+      "permissions": [],
       "compatibility": [
-        "switch",
-        "web"
+        "switch"
       ],
-      "allowed_origins": [
-        "https://usher.ttvnw.net",
-        "https://gql.twitch.tv"
-      ],
+      "allowed_origins": [],
       "developer": "Alex Daskalakis",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-05-28T12:00:00Z",
+      "publishedAt": "2026-08-06T10:33:57Z",
+      "summary": "Watch live Twitch streams natively in the Switch browser.",
       "tags": [
+        "Twitch",
         "Streaming"
       ],
-      "sizeBytes": 72375
+      "sizeBytes": 74519
     },
     {
-      "allowed_origins": [],
-      "categories": [
-        "Demos"
-      ],
-      "compatibility": [
-        "switch",
-        "web"
-      ],
-      "description": "<p><b>Unity Demos</b> is a measurement tool for Brewser, not a game. It loads a curated matrix of <b>real Unity WebGL debug builds</b> (spanning Unity 2021 LTS through Unity 6) one at a time and records exactly how far each one gets before it stalls, crashes, or completes.</p>\r\n<p>Pick a build from the table and press <b>A</b> to launch it. The harness watches the whole load and writes a per-run <b>NDJSON log</b> to <code>sdmc:/switch/brewser/logs/unity-demos/</code> capturing:</p>\r\n<ul>\r\n<li><b>Loader &amp; framework output</b> — every console line the Unity build emits.</li>\r\n<li><b>Uncaught errors</b> with the top stack frames.</li>\r\n<li><b>Missing-API hits</b> — flagged as <b>KNOWN-GAP</b> (already stubbed) or <b>NEW-GAP</b> (undiscovered).</li>\r\n<li><b>Load milestones</b>, capacity failures, and 5-second heartbeats.</li>\r\n<li>A running <b>verdict</b> — e.g. <i>COMPLETED</i>, <i>WASM-UNAVAILABLE</i>, <i>CAPACITY</i>, <i>CRASHED</i>, <i>STALLED</i>.</li>\r\n</ul>\r\n<p>Each row shows its Unity version, renderer (BiRP or URP), GL level, and whether debug symbols are <b>full</b> or <b>stripped</b>, plus the most recent verdict badge so you can see at a glance which builds already ran.</p>\r\n<p><b>How it works:</b> before the Unity loader runs, the harness installs a small, fully-disclosed set of monkey-patches (a WebAssembly-streaming polyfill, a <code>crossOriginIsolated</code> getter, and stubs for <code>SharedArrayBuffer</code>/<code>Atomics</code>/<code>Worker</code>). Every patched call still records a gap, so the log never over-claims that a missing browser API was truly filled in. On jitless runtimes such as Citron every build stops at <b>WASM-UNAVAILABLE</b> after the loader-stage gaps are harvested; on real Tegra hardware with JIT the full path runs and gives genuine first-frame timings.</p>",
-      "developer": "Alex Daskalakis",
-      "entry": "index.html",
-      "exitGame": "PLUS",
-      "features": [
-        "WebGL 1",
-        "WebGL 2"
-      ],
-      "fullscreen": true,
-      "id": "com.natureglass.unitydemoprobe",
-      "license": "MIT",
-      "logo": "assets/appbanner.jpg",
-      "name": "Unity Demo Probe",
-      "permissions": [],
-      "publishedAt": "2026-07-23T13:37:49Z",
-      "tags": [
-        "Unity"
-      ],
+      "id": "com.natureglass.threejsdynamiccubemapreflection",
+      "name": "ThreeJS Dynamic Cubemap Reflection",
       "version": "1.0.1",
-      "sizeBytes": 195195997
-    },
-    {
-      "id": "com.natureglass.webgl2threejsdemos",
-      "name": "WebGL2 - ThreeJS Demos",
-      "version": "1.0.0",
-      "description": "<p><strong>WebGL2 - ThreeJS Demos</strong> is a showcase of real-time 3D graphics powered by <em>Three.js</em> and WebGL2, running natively on the Switch browser. It's a curated gallery of sixteen self-contained examples, each built to stress a different advanced rendering technique.</p>\r\n<p><strong>How it works.</strong> The home page is a simple gallery of cards — a thumbnail and a short description for each demo. Clicking one opens that example as its own standalone page; there's no streaming or plugins involved, since a full local build of the Three.js engine ships inside the app and every scene renders live on the device's GPU through WebGL2. Together the demos act as a practical proof of what the browser's graphics stack can handle, from GPU-driven simulation and physics to modern post-processing.</p>\r\n<p><strong>What's inside:</strong></p>\r\n<ul>\r\n<li><strong>Geometry &amp; instancing</strong> — a textured spinning cube and thousands of individually animated instances drawn efficiently.</li>\r\n<li><strong>Lighting &amp; materials</strong> — soft-shadowed spotlights with light \"cookies\", real-time reflective cubemaps, EXR environment maps, and hardware-decoded video mapped onto a grid of cubes.</li>\r\n<li><strong>Post-processing</strong> — a chunky retro pixelation pass and cinematic Unreal-style bloom.</li>\r\n<li><strong>Advanced GPU techniques</strong> — a GPU-computed water surface, multiple render targets, uniform buffer objects, layered 2D texture arrays (shown as MRI slices), and a procedural atmospheric sky.</li>\r\n<li><strong>Loaders &amp; physics</strong> — glTF and Collada 3D model loading, plus a rigid-body scene driven by the Rapier physics engine compiled to WebAssembly.</li>\r\n</ul>\r\n<p>A great tour of what modern WebGL2 can do on the Switch. Runs offline.</p>",
+      "description": "<p><strong>ThreeJS Dynamic Cubemap Reflection</strong> is a shimmering showcase built around a chrome sphere that mirrors everything happening around it in real time — a tumbling cube and a twisting torus knot sweep past while the whole scene is reflected on its polished surface.</p>\r\n<p><strong>How it works.</strong> The mirror-ball trick relies on a technique called <em>dynamic cube-mapping</em>. Every frame a special six-sided camera — a <em>CubeCamera</em> — sits at the centre of the sphere and photographs the scene in all six directions, stitching the results into a <em>cube map</em>, a tiny 360° snapshot of the surroundings. That snapshot is wrapped back onto the sphere as its <em>environment map</em>, so its near-mirror finish (very low roughness, full metalness) reflects the orbiting shapes and the surrounding sky exactly as they move. The backdrop itself is a high-dynamic-range <em>HDR panorama</em> of a quarry, and <em>ACES filmic tone mapping</em> keeps the bright highlights from blowing out.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Orbit the camera</strong> — drag to swing the view around the sphere; it also drifts on its own with gentle auto-rotation.</li>\r\n<li><strong>Zoom</strong> — pinch or scroll to move in close and inspect the reflections.</li>\r\n<li><strong>Tune the surface</strong> — an on-screen panel of sliders adjusts the sphere's roughness and metalness along with the overall exposure.</li>\r\n</ul>\r\n<p>One of a set of three.js examples rendered live on the Switch's GPU inside the brewser browser, running entirely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
       "categories": [
@@ -345,11 +429,265 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-06-11T12:00:00Z",
-      "features": [
-        "WebGL 2"
+      "publishedAt": "2026-08-06T09:23:06Z",
+      "summary": "A real-time three.js demo of a chrome sphere reflecting the live scene via a CubeCamera.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
       ],
-      "sizeBytes": 40915159
+      "sizeBytes": 3750797
+    },
+    {
+      "id": "com.natureglass.threejsequirectenvreflection",
+      "name": "ThreeJS Equirect Env Reflection",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS Equirect Env Reflection</strong> is a glossy image-based-lighting demo in which a slowly spinning torus knot draws its colour and reflections entirely from a single wrap-around photograph of its surroundings.</p>\r\n<p><strong>How it works.</strong> The scene is lit by an <em>equirectangular environment map</em> — one panoramic image, stretched 360° like a flattened world map, that stands in for the sky and everything around the object. Before it can be used for realistic shading, three.js runs it through a <em>PMREM</em> step that pre-blurs the panorama into a stack of progressively rougher versions, letting the material look mirror-sharp when smooth and softly diffuse when rough. This is the heart of <em>image-based lighting (IBL)</em>: rather than placing individual lamps, the whole environment becomes the light source. The demo carries two such probes — a high-dynamic-range <em>EXR</em> lightprobe and an ordinary <em>PNG</em> — and <em>ACES filmic tone mapping</em> maps their brightness onto the display.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Orbit and zoom</strong> — drag to circle the torus knot; pinch or scroll to move within a fixed near-to-far range.</li>\r\n<li><strong>Swap environments</strong> — a control panel switches the map between the EXR and PNG probes.</li>\r\n<li><strong>Shape the material</strong> — sliders set the surface roughness, metalness and exposure.</li>\r\n<li><strong>Reveal the floor</strong> — a debug toggle drops in a ground plane that mirrors the same environment.</li>\r\n</ul>\r\n<p>One of a set of three.js examples rendered live on the Switch's GPU inside the brewser browser, running entirely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:23:48Z",
+      "summary": "A three.js image-based-lighting demo of a torus knot reflecting an equirectangular HDR environment.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 4936472
+    },
+    {
+      "id": "com.natureglass.threejsgpgpuwater",
+      "name": "ThreeJS GPGPU Water",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS GPGPU Water</strong> is a reflective pool you can stir with a fingertip — press and drag across the surface and ripples spread out, run to the rim and slowly settle.</p>\r\n<p><strong>How it works.</strong> The surface is a grid of heights held in a texture and simulated entirely on the graphics card — this is the <em>GPGPU</em> (general-purpose GPU) technique, where a shader is used for maths rather than for drawing. Each frame a <em>compute shader</em> looks at every cell and its four neighbours and applies a simple <em>wave equation</em>: the new height is the neighbours' average minus the previous height, damped by a <em>viscosity</em> factor so waves travel and gradually die away. Your pointer presses a dimple into the field to launch fresh ripples. That height texture then drives the water's vertices and surface normals, so a mirrored HDR sunrise sky reflects and warps across the moving surface.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Disturb the water</strong> — press and drag on the surface to raise ripples wherever you touch.</li>\r\n<li><strong>Orbit the camera</strong> — drag off the water to rotate and zoom around the pool.</li>\r\n<li><strong>Mouse size and depth</strong> — sliders set how large and how deep each disturbance is.</li>\r\n<li><strong>Viscosity and speed</strong> — tune how quickly ripples fade and how many simulation steps run per frame.</li>\r\n<li><strong>Wireframe and shadows</strong> — toggles reveal the underlying mesh or add cast shadows.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A self-contained three.js GPU-compute demo, simulated and rendered live on the Switch GPU with no network needed.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:24:29Z",
+      "summary": "A GPU-computed three.js water surface that ripples wherever you press and drag.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 3862056
+    },
+    {
+      "id": "com.natureglass.threejsloadercollada",
+      "name": "ThreeJS Loader Collada",
+      "version": "1.0.0",
+      "description": "<p><strong>ThreeJS Loader Collada</strong> loads a textured Elf Girl character from a Collada file and turns her slowly on the spot for a clean, close-up look.</p>\r\n<p><strong>How it works.</strong> The demo hands a <em>.dae</em> file to three.js's <em>ColladaLoader</em>, which parses the XML-based <em>COLLADA</em> interchange format — geometry, materials and its separate JPEG textures for body, face and hair — and assembles the finished scene. A <em>LoadingManager</em> waits until every asset has arrived before adding the model, so nothing pops in half-loaded. Two lights do the shading: a flat <em>ambient</em> fill plus a single <em>directional light</em> to pick out form. A frame <em>timer</em> then advances a steady rotation each tick, spinning the elf in place while an on-screen stats panel tracks the frame rate.</p>\r\n<p><strong>What you'll see:</strong></p>\r\n<ul>\r\n<li><strong>A rotating character</strong> — the elf turns continuously at a gentle, even pace.</li>\r\n<li><strong>Live performance stats</strong> — an overlay reports frames per second in real time.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A hands-off three.js WebGL2 showcase running entirely on the Switch GPU, offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:43:44Z",
+      "summary": "A Three.js demo loading and spinning a textured Collada elf on the Switch GPU.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 4889329
+    },
+    {
+      "id": "com.natureglass.threejsloadergltf",
+      "name": "ThreeJS Loader GLTF",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS Loader GLTF</strong> displays the battle-scarred Damaged Helmet — a benchmark physically based model — lit and reflected by a real-world HDR sky.</p>\r\n<p><strong>How it works.</strong> The <em>GLTFLoader</em> reads a glTF 2.0 model together with its binary geometry buffer and a full <em>physically based</em> texture set — base colour, normal, metal-roughness, ambient occlusion and emissive maps — so the metal, glass and scorched paint each respond to light correctly. An <em>UltraHDR</em> equirectangular photograph of the Royal Esplanade serves as both the backdrop and the <em>image-based lighting</em>, its surroundings mirrored across the shiny surfaces. <em>ACES filmic tone mapping</em> grades the high-dynamic-range result, the camera auto-frames the model, and shaders are compiled asynchronously so it appears without a stutter.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Orbit the model</strong> — drag to spin around the helmet with smooth damping and zoom limits.</li>\r\n<li><strong>Blur the backdrop</strong> — a slider softens the environment behind the model.</li>\r\n<li><strong>Model menu</strong> — a dropdown selects the sample on show.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A three.js WebGL2 demo rendering live on the Switch GPU, completely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:44:35Z",
+      "summary": "A Three.js demo loading a PBR glTF helmet under HDR lighting on the Switch GPU.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 6795312
+    },
+    {
+      "id": "com.natureglass.threejspostprocessingpixelation",
+      "name": "ThreeJS Postprocessing Pixelation",
+      "version": "1.0.0",
+      "description": "<p><strong>ThreeJS Postprocessing Pixelation</strong> renders a tiny 3D diorama and then crushes the whole picture down into chunky retro pixels, like a modern scene squeezed through an old console's video output.</p>\r\n<p><strong>How it works.</strong> The scene — two tilted cubes, a checkerboard floor and a glowing blue crystal that gently bobs and pulses — is drawn through an <em>effect composer</em>, a pipeline that post-processes the rendered image before it reaches the screen. A <em>pixelation pass</em> renders everything at a low internal resolution and snaps it onto a coarse grid of square pixels, then optionally traces crisp single-pixel outlines by comparing the surface <em>normals</em> and <em>depth</em> of neighbouring pixels so edges read cleanly. A pixel-aligned camera keeps the grid locked in place as you move, so the pixels stay steady instead of shimmering.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Orbit the scene</strong> — drag to rotate and pinch or scroll to zoom the diorama.</li>\r\n<li><strong>Pixel size</strong> — a slider scales the pixels from fine (1) to blocky (16).</li>\r\n<li><strong>Edge outlines</strong> — separate normal-edge and depth-edge sliders control how strongly the retro outlines are drawn.</li>\r\n<li><strong>Pixel-aligned panning</strong> — toggle whether the camera snaps to the pixel grid.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A self-contained three.js post-processing demo, rendered live on the Switch GPU completely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:46:50Z",
+      "summary": "A three.js diorama rendered through a chunky, adjustable retro pixelation pass.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 2298066
+    },
+    {
+      "id": "com.natureglass.threejsrapier3dphysics",
+      "name": "ThreeJS Rapier3d Physics",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS Rapier3d Physics</strong> is a self-running rigid-body playground: colourful boxes, spheres and rounded blocks rain down onto a grid floor, bounce, tumble and pile up under gravity.</p>\r\n<p><strong>How it works.</strong> A full physics engine — <em>Rapier</em>, written in Rust and compiled to <em>WebAssembly</em> so it runs at near-native speed in the browser — steps the world forward every frame, pulling bodies down with gravity and resolving collisions between shapes using their mass and <em>restitution</em> (bounciness). three.js simply mirrors each body's computed position and rotation onto its matching mesh, while thin outlines drawn around every collider reveal the physics shapes the engine actually sees. A new random shape is dropped in automatically once a second, and any body that falls past the floor's edge is quietly removed so the scene never overflows.</p>\r\n<p><strong>What you'll see:</strong></p>\r\n<ul>\r\n<li><strong>Automatic spawning</strong> — a fresh box, sphere or rounded box in a random colour drops from above every second.</li>\r\n<li><strong>Bouncy collisions</strong> — bodies land with springy restitution, so they bounce and jostle before settling into a heap.</li>\r\n<li><strong>Orbit the scene</strong> — drag to rotate and scroll to zoom, with smooth damped camera motion.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A mostly hands-off three.js physics showcase, computed and rendered live on the Switch GPU entirely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T09:47:43Z",
+      "summary": "A self-running three.js physics scene where Rapier-driven shapes drop and bounce.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 4662466
+    },
+    {
+      "id": "com.natureglass.threejsselectiveunrealbloom",
+      "name": "ThreeJS Selective Unreal Bloom",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS Selective Unreal Bloom</strong> shows off an animated sci-fi engine — a detailed \"Primary Ion Drive\" model whose hot, glowing core blazes with a soft cinematic halo while the rest of the hull stays sharp.</p>\r\n<p><strong>How it works.</strong> The model is drawn through an <em>effect composer</em> that lays an <em>Unreal-style bloom</em> pass over the rendered frame. Bloom works from a brightness <em>threshold</em>: only pixels brighter than the cut-off — here the emissive engine parts — are picked out, blurred across several progressively smaller buffers and added back as a glow, so the light appears to bleed selectively from just the brightest surfaces. <em>ACES filmic tone mapping</em> then compresses the high dynamic range into natural on-screen colour, while the model plays a looping animation throughout.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Orbit the model</strong> — drag to rotate and zoom within a fixed distance range so the engine stays framed.</li>\r\n<li><strong>Threshold</strong> — raise or lower which brightness levels are allowed to glow, changing how selective the bloom is.</li>\r\n<li><strong>Strength and radius</strong> — sliders set how intense the glow is and how far it spreads.</li>\r\n<li><strong>Exposure</strong> — adjusts the overall tone-mapped brightness.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A self-contained three.js post-processing demo, rendered live on the Switch GPU and running fully offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T10:11:59Z",
+      "summary": "An animated three.js ion-drive model with tunable Unreal-style bloom glowing its bright parts.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 8283924
+    },
+    {
+      "id": "com.natureglass.threejsshaderssky",
+      "name": "ThreeJS Shaders Sky",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS Shaders Sky</strong> is an interactive atmosphere — a procedurally generated sky where you can move the sun from dawn to dusk and watch the colours, haze and drifting clouds respond.</p>\r\n<p><strong>How it works.</strong> There is no sky photograph here; every pixel is computed by a shader based on the <em>Preetham analytic daylight model</em>, a physics-inspired formula for how sunlight scatters through the air. Two effects do most of the work: <em>Rayleigh scattering</em>, which spreads short blue wavelengths across the dome, and <em>Mie scattering</em>, which throws a whitish haze around the sun. Raising the <em>turbidity</em> thickens the atmosphere for a hazier, sunset feel, while the sun's <em>elevation</em> and <em>azimuth</em> decide where it sits and how the whole sky is tinted. This version layers on animated <em>fractal-noise clouds</em> that drift overhead as time advances, with their own coverage, density and height controls, and <em>ACES filmic tone mapping</em> keeps the fierce sun disc in check.</p>\r\n<p><strong>What you can adjust:</strong></p>\r\n<ul>\r\n<li><strong>Move the sun</strong> — elevation and azimuth sliders sweep it across the sky, repainting the atmosphere in real time.</li>\r\n<li><strong>Atmosphere sliders</strong> — turbidity, Rayleigh, Mie coefficient, Mie directional-G and exposure fine-tune the haze, colour and brightness.</li>\r\n<li><strong>Clouds folder</strong> — separate coverage, density and elevation controls shape the drifting cloud layer.</li>\r\n<li><strong>Sun disc toggle</strong> — show or hide the bright solar disc.</li>\r\n<li><strong>Look around</strong> — drag to rotate the view; zoom and panning are disabled.</li>\r\n</ul>\r\n<p>One of a set of three.js examples rendered live on the Switch's GPU inside the brewser browser, running entirely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T10:12:52Z",
+      "summary": "An interactive three.js atmospheric sky shader with a movable sun and drifting clouds.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 2257948
+    },
+    {
+      "id": "com.natureglass.threejsspotlightshadowcookie",
+      "name": "ThreeJS Spotlight Shadow Cookie",
+      "version": "1.0.1",
+      "description": "<p><strong>ThreeJS Spotlight Shadow Cookie</strong> lights a marble angel with a single moving spotlight that projects a patterned texture and casts a soft, shifting shadow across the floor.</p>\r\n<p><strong>How it works.</strong> A lone spotlight sweeps a slow circle above the scene, and every frame the renderer draws the view from its position into a <em>shadow map</em> so the statue blocks the light realistically. The beam also carries a projected texture — a <em>cookie</em> (or gobo) — that stencils a pattern into the light itself, while <em>penumbra</em> and <em>PCF filtering</em> feather the shadow edges into soft gradients. The centrepiece is the Stanford <em>Lucy</em> angel, a dense hundred-thousand-triangle mesh streamed from a binary PLY file, standing on a plane that catches the shadow. <em>Neutral tone mapping</em> keeps the bright highlights under control.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Orbit the camera</strong> — drag to rotate around the statue within set zoom and tilt limits.</li>\r\n<li><strong>Swap the cookie</strong> — pick the projected texture from a swirl, colour swatches, a UV grid, or none at all.</li>\r\n<li><strong>Tune the light</strong> — sliders for colour, intensity, angle, penumbra, decay, focus and shadow strength.</li>\r\n<li><strong>Show helpers</strong> — reveal the light cone and shadow-camera outline.</li>\r\n<li><strong>Full screen</strong> — fills the display.</li>\r\n</ul>\r\n<p>A three.js WebGL2 demo rendering live on the Switch GPU, completely offline.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-06T10:13:47Z",
+      "summary": "A Three.js spotlight demo projecting a textured cookie and soft shadows on the Switch GPU.",
+      "tags": [
+        "WebGL2",
+        "ThreeJS"
+      ],
+      "sizeBytes": 5152125
     }
   ]
 }

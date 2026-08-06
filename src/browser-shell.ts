@@ -79,6 +79,7 @@ import {
 	getDatePickerLiveRoot,
 	getFilePickerLiveRoot,
 	getModalModeDialogs,
+	getModalTreeVersion,
 	getKeyboardLiveRoot,
 	getKeyboardTopY,
 	getNumberPickerLiveRoot,
@@ -148,6 +149,7 @@ import {
 	installPageMouseForwarder,
 	paintCursorOverlay,
 	setCursorIdleMs,
+	setCursorOverlaySuppressed,
 } from '@switch-web/runtime';
 import { clearAppButtonOverlay, setAppButtonOverlay, setButtonMapping } from '@switch-web/runtime';
 import {
@@ -199,6 +201,12 @@ interface SplashHandle {
  * full slow-path repaint — the ~7-8 ms cache blit dominates). */
 const DYNAMIC_BG_FPS = 30;
 const DYNAMIC_BG_FRAME_MS = Math.round(1000 / DYNAMIC_BG_FPS);
+/** Minimum wall-clock the app-launch "Loading <name>" splash stays on screen.
+ * An app navigate can complete in well under a frame (local/cached files, no
+ * network wait), so without a floor the splash flashes sub-perceptibly. When
+ * the load itself takes longer than this, the splash simply covers the whole
+ * load and this floor never triggers. */
+const LAUNCH_SPLASH_MIN_MS = 600;
 /** Global animation-clock multiplier for the shader `t` uniform: the sole,
  * neutral speed control for every animated wallpaper. `1.0` = real elapsed
  * seconds, i.e. the rate a standalone shader page gets at its own `SPEED = 1.0`,
@@ -448,6 +456,14 @@ export class BrowserShell {
 	 * they'd never reach the screen — e.g. the audio player's 4 Hz
 	 * updateTimeline advancing the seek bar + time during passive playback. */
 	private lastTickTreeVersion: number = -1;
+	/** Modal-layer tree version the idle-tick path last repainted. The
+	 * `<browser-modal>` overlays (download / self-update) keep their own
+	 * `modalTreeVersion` counter — separate from the host `liveTreeVersion`
+	 * above — so per-modal churn doesn't dirty the warm host cache. A
+	 * progress bar advancing while a download runs bumps ONLY this counter,
+	 * which the host-version check misses; without comparing against this the
+	 * bar froze on a static/absent wallpaper until the user moved the cursor. */
+	private lastTickModalVersion: number = -1;
 	/** User-preferred colour scheme (config.json `theme`). Drives the
 	 * `Sec-CH-Prefers-Color-Scheme` request header on external fetches,
 	 * the `@media (prefers-color-scheme:…)` cascade in live-css, and the
@@ -479,6 +495,20 @@ export class BrowserShell {
 	 * paint pump stops itself if this drifts too far in the past
 	 * (overlay no longer painting → don't burn CPU). */
 	private cssLoadingOverlayLastPaintMs = 0;
+	/** App name armed by `__brewserArmLaunchSplash` (called from the app /
+	 * warnings modal's Launch click listener, which runs BEFORE the engine's
+	 * `findTapIntent` fires the navigate — see warnings-modal.js). `navigateTo`
+	 * consumes it one-shot: a non-null value there means this navigation is an
+	 * app LAUNCH, so paint the black "Loading <name>" splash over the whole
+	 * screen (toolbar included) until the app's first frame. Null for every
+	 * other navigation (home / settings / back / links) → no splash. */
+	private pendingLaunchName: string | null = null;
+	/** True while the launch splash's self-re-arming `nativeRaf` loop is
+	 * running. The loop early-returns (stops re-arming) once this flips false
+	 * in `stopLaunchSplash`. */
+	private launchSplashActive = false;
+	/** DIAG: frames the launch splash actually painted this launch. */
+	private launchSplashFrames = 0;
 	/** Reference to the nxjs runtime's `requestAnimationFrame`, captured
 	 * BEFORE the first page navigation. brewser-runtime's `runPageScripts`
 	 * calls `ensureRAFInstalled` which replaces `globalThis.requestAnimationFrame`
@@ -979,6 +1009,17 @@ export class BrowserShell {
 			}
 			requestFullRepaint();
 		};
+		// Arm the launch splash. The app / warnings modal's Launch click
+		// listener calls this with the app's display name; the click dispatch
+		// runs BEFORE the engine's `findTapIntent` fires the navigate (see
+		// warnings-modal.js), so the name is in place by the time `navigateTo`
+		// consumes it. Best-effort + one-shot: a build without this hook just
+		// launches without the splash (the modal guards on typeof === function).
+		(globalThis as { __brewserArmLaunchSplash?: (name: string) => void })
+			.__brewserArmLaunchSplash = (name: string) => {
+			this.pendingLaunchName = typeof name === 'string' ? name : '';
+			console.debug(`[launch-splash] armed name="${this.pendingLaunchName}"`);
+		};
 		// Boot-time snapshot of the toolbar avatar `src`. Runs BEFORE
 		// `installPolyfills` (main.ts:50) and therefore BEFORE the runtime's
 		// `installSwitchPathResolver` proxy exists, so the two auth reads go
@@ -1418,6 +1459,28 @@ export class BrowserShell {
 								return true;
 							}
 						}
+						// Modal-layer mutations (a `<browser-modal>` overlay's page
+						// script updating its own subtree — the download / self-update
+						// PROGRESS BAR advancing per file, or its MB/counter labels)
+						// route through `modalTreeVersion`, NOT the host `liveTreeVersion`
+						// the check above watches. The modal keeps its own counter so
+						// per-modal churn doesn't dirty the warm host cache — but that
+						// means the host-version check never notices it, so on a fully
+						// idle tick (static or no wallpaper, no input) nothing serviced
+						// the update and the bar froze until the user moved the cursor.
+						// A dynamic wallpaper masked it by repainting every frame via
+						// `tickDynamicBackground`. Detect the modal version change here
+						// and repaint: `repaintContent` rebuilds ONLY the small modal
+						// offscreen cache (its cache key is `getLiveTreeVersion() +
+						// getModalTreeVersion()`, see live-overlay), so the host page
+						// cache stays warm. `repaintContent` reads the version, never
+						// bumps it, so this can't self-retrigger into a paint loop.
+						const modalVersionNow = getModalTreeVersion();
+						if (modalVersionNow !== this.lastTickModalVersion) {
+							this.lastTickModalVersion = modalVersionNow;
+							this.repaintContent();
+							return true;
+						}
 						// Idle tick: nothing else fired, but if the
 						// operation mode just changed we still want to
 						// flip the toolbar label this frame. Render the
@@ -1641,11 +1704,51 @@ export class BrowserShell {
 
 	private async navigateTo(url: string): Promise<void> {
 		setNavigating(true);
+		// Launch splash. A non-null `pendingLaunchName` (armed by the Launch
+		// tap's click listener, which ran just before this) marks an app
+		// launch: black-fill the whole screen and show "Loading <name>" until
+		// the app's first frame. One-shot consume so a stray arm can't ride
+		// into a later, unrelated navigation. Every non-launch navigate leaves
+		// it null → this whole block is a no-op and behaviour is unchanged.
+		const launchName = this.pendingLaunchName;
+		this.pendingLaunchName = null;
+		console.debug(`[launch-splash] navigateTo url=${url} launchName=${JSON.stringify(launchName)}`);
+		const splashStart = performance.now();
+		if (launchName !== null) {
+			this.startLaunchSplash(launchName);
+			// The synchronous first paint above only draws into the framebuffer
+			// — it is presented by the C-side frame loop (`$.onFrame`), which
+			// runs only while the JS thread is IDLE. `navigate()` below is
+			// largely synchronous (parse / layout / GL teardown; even its
+			// network fetches fail fast, no await), so it never yields and the
+			// splash would be overwritten before it is ever shown (the observed
+			// "stop after 1 frame"). Yield here so the loop presents the splash
+			// FIRST; its last frame then persists on the framebuffer through the
+			// blocking load.
+			await new Promise<void>((resolve) => setTimeout(resolve, 48));
+		}
 		try {
 			await this.navigation.navigate(url);
 			this.renderChrome(url);
 		} finally {
 			setNavigating(false);
+			if (launchName !== null) {
+				// Hold for a minimum on-screen time so a fast (local/cached)
+				// load still shows the splash. Each idle `setTimeout` wait lets
+				// `$.onFrame` drain the splash's `nativeRaf` loop, which repaints
+				// it over the just-loaded app until we stop it.
+				for (
+					let left = LAUNCH_SPLASH_MIN_MS - (performance.now() - splashStart);
+					left > 0;
+					left = LAUNCH_SPLASH_MIN_MS - (performance.now() - splashStart)
+				) {
+					await new Promise<void>((resolve) => setTimeout(resolve, Math.min(48, left)));
+				}
+				// Stop the re-arm loop, then paint the loaded app as the final
+				// frame so the splash can't flicker back on top.
+				this.stopLaunchSplash();
+				this.repaintAll();
+			}
 		}
 	}
 
@@ -4501,6 +4604,79 @@ export class BrowserShell {
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 		this.repaintContent();
 		if (this.mode === 'normal') this.renderChrome();
+	}
+
+	/** Black fullscreen "Loading <app>" splash, shown from the moment Launch
+	 * is tapped until the launched app's first frame. Item-for-item this is
+	 * the requested launch feedback: a full-screen black fill (covering the
+	 * page AND the toolbar strip), "Loading <name>" centred with "Please
+	 * wait…" beneath, held over the perceptible gap while the app loads.
+	 *
+	 * Why a `nativeRaf` loop and not a one-shot paint: an app launch is an
+	 * `await this.navigation.navigate(url)` that BLOCKS the input loop, so
+	 * `onTick` (the normal present driver) is suspended for the whole load.
+	 * `this.nativeRaf` is the nxjs-runtime rAF queue drained by `$.onFrame`
+	 * every main-loop iteration BEFORE the framebuffer present — the same
+	 * reliable path `startBootSplash` uses to keep the boot splash on screen
+	 * across the parallel boot navigate. The SYNCHRONOUS first paint commits
+	 * the frame the next present shows; the re-arm keeps the text re-drawn
+	 * across the load's async yields so an intermediate engine paint can't
+	 * leave it half-covered. `save`/`restore` isolates the centred text align
+	 * so it can't leak into the app's own text paints after the splash stops. */
+	private startLaunchSplash(appName: string): void {
+		if (this.launchSplashActive) return;
+		this.launchSplashActive = true;
+		// Hide the software cursor for the duration. The engine composites the
+		// last-set cursor sprite onto every present independent of our black
+		// fill, and the input loop is suspended across the launch so the normal
+		// idle-hide can't clear it — it would sit frozen over the splash.
+		try { setCursorOverlaySuppressed(true); } catch (_) { /* swallow */ }
+		const canvas = nxScreen();
+		const ctx = canvas.getContext('2d');
+		const raf = this.nativeRaf;
+		// Guard against an overlong name blowing past the screen edge; the
+		// splash is feedback, not a place to render a 200-char title.
+		const rawName = typeof appName === 'string' ? appName.trim() : '';
+		const name = rawName.length > 42 ? rawName.slice(0, 41) + '…' : rawName;
+		const title = name ? `Loading ${name}` : 'Loading…';
+		this.launchSplashFrames = 0;
+		const paint = (): void => {
+			if (!this.launchSplashActive) return;
+			const w = canvas.width;
+			const h = canvas.height;
+			ctx.save();
+			ctx.fillStyle = '#000000';
+			ctx.fillRect(0, 0, w, h);
+			const cx = Math.round(w / 2);
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'alphabetic';
+			ctx.fillStyle = '#e8e8e8';
+			ctx.font = '600 44px sans-serif';
+			ctx.fillText(title, cx, Math.round(h / 2 - 6));
+			ctx.fillStyle = '#9bb1d6';
+			ctx.font = '400 24px sans-serif';
+			ctx.fillText('Please wait…', cx, Math.round(h / 2 + 40));
+			ctx.restore();
+			this.launchSplashFrames++;
+			if (this.launchSplashFrames === 1) {
+				console.debug(`[launch-splash] first paint w=${w} h=${h} title="${title}"`);
+			}
+			raf(paint);
+		};
+		// SYNCHRONOUS first paint — NO `await` may precede this. The frame
+		// committed here is presented before `navigate()` takes the JS thread,
+		// exactly like `startBootSplash`'s contract.
+		paint();
+	}
+
+	/** Stop the launch splash's re-arm loop. After this returns the next
+	 * `raf(paint)` (if one is queued) early-returns, so the caller can paint
+	 * the loaded app as the final frame with no splash flicker on top. */
+	private stopLaunchSplash(): void {
+		this.launchSplashActive = false;
+		// Restore the cursor overlay (re-syncs from the current cursor state).
+		try { setCursorOverlaySuppressed(false); } catch (_) { /* swallow */ }
+		console.debug(`[launch-splash] stop after ${this.launchSplashFrames} frame(s)`);
 	}
 
 	/** Tell the touch dispatcher where the chrome strip lives so taps

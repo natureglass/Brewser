@@ -933,6 +933,21 @@
     });
   }
 
+  // Arm the shell's black "Loading <name>" launch splash. The click
+  // dispatch runs BEFORE the engine's findTapIntent fires the navigate
+  // (see warnings-modal.js), so the name is in place when navigateTo
+  // reads it. Best-effort — a shell build without the hook just launches
+  // without the splash.
+  function armLaunchSplash(name) {
+    try {
+      console.debug('[launch-splash-page] arm attempt name=' + String(name == null ? '' : name)
+        + ' hook=' + (typeof globalThis.__brewserArmLaunchSplash));
+      if (typeof globalThis.__brewserArmLaunchSplash === 'function') {
+        globalThis.__brewserArmLaunchSplash(String(name == null ? '' : name));
+      }
+    } catch (_) { /* no-op */ }
+  }
+
   // Play (Launch) click → warnings-modal handoff when applicable.
   // pendingLaunchUrl is set in show() ONLY when this detail's
   // permissions contain matches in warnings.json AND the href was
@@ -943,7 +958,15 @@
   // handler (target === overlay test would fail anyway, but belt +
   // suspenders for the launch flow).
   playBtn.addEventListener('click', function (e) {
-    if (!pendingLaunchUrl) return;
+    if (!pendingLaunchUrl) {
+      // Direct launch (no permission warnings): the engine navigates via
+      // the play <a>'s href right after this listener. Arm the splash so
+      // the shell covers the load with "Loading <name>".
+      armLaunchSplash(currentDetail && currentDetail.name);
+      return;
+    }
+    // Warnings path: we open the warnings modal instead of launching now,
+    // so do NOT arm here — the warnings modal arms on its own Launch.
     var opener = globalThis.__brewserOpenWarningsModal;
     if (typeof opener !== 'function') {
       console.debug('[apps] warnings-modal not loaded; falling through');

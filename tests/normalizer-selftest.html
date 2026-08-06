@@ -103,6 +103,18 @@ async function main() {
   }
   ok(cat1.report.unknownEntryFields.length === 0, 'v1 report: manifest fields are known, not drift',
      JSON.stringify(cat1.report.unknownEntryFields));
+  // v1 + curation overlay: build_catalog.py stamps `featured` onto v1 entries
+  // from curation.json. It must be READ onto the entry AND recognized as a known
+  // field (no drift) — the same as v2 — so a curated v1 catalogue reports clean.
+  const v1FeatDoc = JSON.parse(v1Text);
+  v1FeatDoc.apps[0].featured = true;
+  const v1Feat = parseCatalogue(JSON.stringify(v1FeatDoc));
+  ok(v1Feat.kind === 'Ok' && v1Feat.catalogue.apps[0].featured === true,
+     'v1: curation `featured` overlay is read onto the entry',
+     JSON.stringify(v1Feat.kind === 'Ok' ? v1Feat.catalogue.apps[0].featured : v1Feat));
+  ok(v1Feat.kind === 'Ok' && !v1Feat.catalogue.report.unknownEntryFields.includes('featured'),
+     'v1: `featured` is a KNOWN field, not drift',
+     JSON.stringify(v1Feat.kind === 'Ok' ? v1Feat.catalogue.report.unknownEntryFields : v1Feat));
   ok(cat1.report.unknownPermissions.length === 0, 'v1 report: clean (usb registered)',
      JSON.stringify(cat1.report.unknownPermissions));
   ok(cat1.apps.every((a) => a.publishedAt === ''),
