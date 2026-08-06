@@ -11,6 +11,7 @@ romfs/main.js.map
 icon.jpg
 *.log
 .DS_Store
+*.nro
 # Vendored @switch-web/runtime dist — populated from sibling brewser-runtime/
 # checkout by `node scripts/sync-runtime.mjs` (also wired as a postinstall
 # hook). Excluded so per-runtime-change diffs stay lean. Consumers without
