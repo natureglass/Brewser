@@ -475,6 +475,41 @@
     return null;
   }
 
+  // Best-effort download telemetry. On a completed install/update we POST a
+  // {reqType:'download'} event to the strict-pinned telemetry endpoint so
+  // WordPress bumps the per-package counter (wp_swtel_downloads). That counter
+  // is the ONLY signal behind the runtime's Popular ("most downloaded") library
+  // tab: the daily WP cron folds it into stats.json, which Check-for-Updates
+  // fetches. Without this call nothing ever reports a download, so every app
+  // publishes downloads:0 and Popular reports "No download counts yet."
+  //
+  // Mirrors missing-app-modal.js's rating POST (same endpoint, stamped on
+  // `<body data-telemetry-url>` of home.html + apps.html; that flow uses
+  // reqType:'like'). A download event needs ONLY {reqType, packageId} — the
+  // telemetry schema makes userId/data requiredIf reqType is like/save, not
+  // download. Fire-and-forget: every failure path is swallowed so a telemetry
+  // hiccup never touches the already-successful download UI, and we do NOT
+  // await it (the success message paints immediately).
+  function reportDownload(packageId) {
+    try {
+      if (!packageId) return;
+      var body = globalThis.document && globalThis.document.body;
+      var url = body && body.getAttribute('data-telemetry-url');
+      if (typeof url !== 'string' || !url) return;
+      globalThis.fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reqType: 'download', packageId: packageId, platform: 'switch' }),
+      }).catch(function (err) {
+        console.debug('[download-modal] download telemetry POST failed: '
+          + (err && err.message ? err.message : String(err)));
+      });
+    } catch (err) {
+      console.debug('[download-modal] download telemetry skipped: '
+        + (err && err.message ? err.message : String(err)));
+    }
+  }
+
   // Fire-and-forget install for the currently-open detail. Each
   // failure flips the card into `--error`; success flips into
   // `--success` and patches the matching grid card in place.
@@ -589,6 +624,10 @@
       // (The former in-place path — refreshCardOnSuccess / patchCardOnSuccess
       // — is retained above but intentionally no longer invoked.)
       installedOnSuccess = true;
+      // Report the completed download so the Popular tab has data to rank on.
+      // Fires for both fresh installs and updates (the WP counter has no
+      // dedup — each acquisition is a download), best-effort, never awaited.
+      reportDownload(detail.id);
       setSuccess(detail.name ? (detail.name + ' is ready to play!') : 'Install complete.');
     } finally {
       inFlight = false;
