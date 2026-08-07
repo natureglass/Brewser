@@ -14,8 +14,12 @@
         <!-- Bookmarks / History / About list pages used to hang off the old
              home page's header. The Home landing is now the app catalogue
              (no room for those quick-links), so they live here next to Home
-             — the Settings page is the toolbar-reachable hub for them. -->
-        <a class="munch-link" href="brewser://bookmarks/">Bookmarks</a>
+             — the Settings page is the toolbar-reachable hub for them.
+             Bookmarks is a toolbar affordance, so the resource loader emits
+             its link only when the toolbar is enabled (Show Toolbar) — hidden
+             once Show Toolbar is unchecked + saved, same as the Toolbar +
+             Search Engine settings row. -->
+        <browser-settings-bookmarks-link/>
         <a class="munch-link" href="brewser://history/">History</a>
         <a class="munch-link" href="brewser://about/">About</a>
         <!-- Login lives on its own page (shell/login.html → brewser://login/).

@@ -25,6 +25,30 @@
   .apps-check-updates.apps-check-updates--update-available[aria-pressed="true"] {
     background: #4f9c66;
   }
+  /* Check-for-Updates summary — the per-app lists are collapsed to counts.
+     Colour is inherited from the modal card so both themes read correctly;
+     a count line hides itself when its total is zero. */
+  .updates-modal-count { font-size: 16px; line-height: 1.45; margin: 3px 0; }
+  .updates-modal-count--hidden { display: none; }
+  /* Brewser self-update callout: bold label + a bright-yellow button, shown
+     only when the versions check finds a newer Brewser. The yellow/black is a
+     deliberate theme-independent accent (per spec), so it is set here rather
+     than per-theme. */
+  .updates-modal-brewser { display: none; margin-top: 16px; }
+  .updates-modal-brewser--show { display: block; }
+  .updates-modal-brewser-label { font-weight: 700; font-size: 15px; }
+  .updates-modal-brewser-btn {
+    margin-top: 8px;
+    padding: 9px 18px;
+    border: none;
+    border-radius: 6px;
+    background: #ffdd00;
+    color: #000000;
+    font-weight: 700;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .updates-modal-brewser-btn:active { background: #e6c700; }
 </style>
 </head>
 <body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>" data-max-per-page="<browser-config-maxperpage/>" data-lazy-banners="paged">
@@ -266,13 +290,17 @@
            failure). Sits above the section list so the empty / sections
            stay hidden via the `--error` selector below. -->
       <div id="updates-modal-error" class="updates-modal-error"></div>
-      <div id="updates-modal-new-section" class="updates-modal-section">
-        <h3 class="updates-modal-section-title">New apps</h3>
-        <div id="updates-modal-new" class="updates-modal-list"></div>
-      </div>
-      <div id="updates-modal-update-section" class="updates-modal-section">
-        <h3 class="updates-modal-section-title">Updates</h3>
-        <div id="updates-modal-update" class="updates-modal-list"></div>
+      <!-- Summary counts + Brewser self-update callout. Replaces the former
+           per-app "New apps" / "Updates" lists — the modal now reports totals,
+           not a row per app. updates-modal.js sets each count's text and hides
+           the line (via `updates-modal-count--hidden`) when its total is zero;
+           the Brewser callout stays hidden until the versions check finds a
+           genuinely newer Brewser (`updates-modal-brewser--show`). -->
+      <div id="updates-modal-updates-count" class="updates-modal-count updates-modal-count--hidden"></div>
+      <div id="updates-modal-new-count" class="updates-modal-count updates-modal-count--hidden"></div>
+      <div id="updates-modal-brewser" class="updates-modal-brewser">
+        <div class="updates-modal-brewser-label">New Brewser version available</div>
+        <button id="updates-modal-brewser-btn" class="updates-modal-brewser-btn" type="button">Update Brewser</button>
       </div>
       <!-- Parse-report line — the drift-visibility payload: catalogue
            version + app count on every successful sync, plus itemized

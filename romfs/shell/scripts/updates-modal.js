@@ -17,10 +17,17 @@
 //         actionable "an update is available for something you own" list.
 //         See `diffCatalog` (its installed-state walk ALSO drives logo
 //         seeding + the in-place upgrade-chip repaint, so it stays).
-//     The page is NOT reloaded — the user sees the diff right there,
-//     then dismisses the modal. The grid cards in the background still
-//     reflect the OLD catalog until the user navigates away and back, by
-//     design (avoids a full repaint mid-modal).
+//     While the modal is OPEN the page is not reloaded — the user sees the
+//     diff right there, and in-place patches (logo seeding, upgrade chips)
+//     keep the visible cards consistent (no full repaint mid-modal). But if
+//     the sync actually CHANGED the render inputs — catalogue.json (Featured
+//     membership, new/removed apps, version bumps) and/or stats.json (the
+//     download/rating counters the Popular / Top Rated tabs rank on) — a
+//     one-shot reload fires ON CLOSE so those data-driven library tabs
+//     re-render from the fresh files (a pure counter change adds no New/Update
+//     row, so it would otherwise stay stale until a manual reload). A no-op
+//     "Everything is up to date" check never reloads. Same mechanism the
+//     per-user My Apps refresh already uses.
 //   - Failure: flips the card into the `--error` state and surfaces a
 //     human-readable error string so the user knows the catalog was
 //     NOT updated.
@@ -59,10 +66,10 @@
   var overlay = document.getElementById('updates-modal-overlay');
   var card = document.getElementById('updates-modal-card');
   var resultsEl = document.getElementById('updates-modal-results');
-  var newSection = document.getElementById('updates-modal-new-section');
-  var newList = document.getElementById('updates-modal-new');
-  var updateSection = document.getElementById('updates-modal-update-section');
-  var updateList = document.getElementById('updates-modal-update');
+  var updatesCountEl = document.getElementById('updates-modal-updates-count');
+  var newCountEl = document.getElementById('updates-modal-new-count');
+  var brewserCallout = document.getElementById('updates-modal-brewser');
+  var brewserBtn = document.getElementById('updates-modal-brewser-btn');
   var statusEl = document.getElementById('updates-modal-status');
   var errorEl = document.getElementById('updates-modal-error');
   // Two action buttons share the right slot — CSS gates which one is
@@ -73,11 +80,11 @@
   var cancelBtn = document.getElementById('updates-modal-cancel');
   var closeBtn = document.getElementById('updates-modal-close');
   var triggerBtn = document.querySelector('.apps-check-updates');
-  if (!overlay || !card || !resultsEl || !newSection || !newList || !updateSection || !updateList || !statusEl || !errorEl || !cancelBtn || !closeBtn || !triggerBtn) {
+  if (!overlay || !card || !resultsEl || !updatesCountEl || !newCountEl || !brewserCallout || !brewserBtn || !statusEl || !errorEl || !cancelBtn || !closeBtn || !triggerBtn) {
     console.debug('[updates-modal] init aborted; missing node(s): '
       + ' overlay=' + !!overlay + ' card=' + !!card + ' results=' + !!resultsEl
-      + ' newSection=' + !!newSection + ' newList=' + !!newList
-      + ' updateSection=' + !!updateSection + ' updateList=' + !!updateList
+      + ' updatesCount=' + !!updatesCountEl + ' newCount=' + !!newCountEl
+      + ' brewserCallout=' + !!brewserCallout + ' brewserBtn=' + !!brewserBtn
       + ' statusEl=' + !!statusEl + ' errorEl=' + !!errorEl
       + ' cancelBtn=' + !!cancelBtn + ' closeBtn=' + !!closeBtn
       + ' triggerBtn=' + !!triggerBtn);
@@ -144,6 +151,14 @@
   // signed-in user; drives a one-shot reload on close so the server-rendered
   // "My Apps" tab appears (the same effect the old button's reload had).
   var myCatalogueRefreshed = false;
+  // Set true when a run changed the on-disk catalogue.json and/or stats.json.
+  // Drives the SAME one-shot reload-on-close as myCatalogueRefreshed so the
+  // data-driven library tabs — Featured / Most Recent / Popular / Top Rated —
+  // re-render from the fresh files. A pure download/rating counter change adds
+  // no "New app" / "Update" row, so without this the Popular / Top Rated order
+  // stays stale until a manual reload. Left false on a no-op check, so a quiet
+  // "Everything is up to date" run still never reloads.
+  var libraryDataChanged = false;
 
   // Same inline-SVG arrow the grid cards + missing-app modal use for
   // the upgrade chip. Kept in sync verbatim so all three places paint
@@ -390,27 +405,44 @@
   // logged and skipped — deliberately NOT a sync failure: Featured and
   // Most Recent keep working, and the Popular / Top Rated tabs render
   // themselves unavailable with a reason instead.
+  // Returns true when the freshly-fetched stats DIFFER from the cached copy
+  // (so the caller can reload on close to re-rank Popular / Top Rated); false
+  // on any skip/failure or when the content is byte-identical. The server's
+  // publisher skips-when-unchanged (ignoring `generated`), so an unchanged
+  // check re-serves the identical file → identical text → no reload.
   async function refreshStatsFile(client, remoteUrl) {
     if (!remoteUrl) {
       console.debug('[updates-modal] stats URL not configured; skipping refresh');
-      return;
+      return false;
     }
     try {
       var resp = await globalThis.fetch(remoteUrl);
       if (!resp.ok) {
         console.debug('[updates-modal] stats.json HTTP ' + resp.status + ' — keeping cached stats');
-        return;
+        return false;
       }
       var text = await resp.text();
       var outcome = client.parseStats(text);
       if (outcome.kind !== 'Ok') {
         console.debug('[updates-modal] stats.json rejected (' + outcome.kind + '); keeping cached stats');
-        return;
+        return false;
       }
+      // Compare against the cached copy BEFORE overwriting so a pure counter
+      // change (which adds no New/Update row) can still trigger the re-render.
+      var changed = true;
+      try {
+        var prev = Switch.readFileSync(STATS_PATH);
+        if (prev && prev.byteLength > 0) {
+          changed = (new TextDecoder().decode(prev) !== text);
+        }
+      } catch (_) { /* no cached stats yet → treat as changed */ }
       Switch.writeFileSync(STATS_PATH, text);
-      console.debug('[updates-modal] stats.json refreshed (' + Object.keys(outcome.parsed.stats).length + ' apps)');
+      console.debug('[updates-modal] stats.json refreshed (' + Object.keys(outcome.parsed.stats).length
+        + ' apps' + (changed ? ', changed' : ', unchanged') + ')');
+      return changed;
     } catch (err) {
       console.debug('[updates-modal] stats refresh failed: ' + (err && err.message ? err.message : String(err)));
+      return false;
     }
   }
 
@@ -480,11 +512,14 @@
   // Download `versions.json` from the configured URL, persist it under
   // `<appRoot>configs/versions.json`, then compare it against the seeded
   // `<appRoot>configs/current.json` baseline (the immutable "I shipped with
-  // these versions" snapshot). Returns `true` iff a tracked component's
-  // PUBLISHED version is strictly newer by semver than the installed one —
-  // i.e. there is genuinely a newer build to download. Best-effort
-  // throughout: every failure path logs + returns `false` so a
-  // versions-check miss can't cascade into a catalogue refresh failure.
+  // these versions" snapshot). Returns `{available:true, version:'<brewser>'}`
+  // iff a tracked component's PUBLISHED version is strictly newer by semver
+  // than the installed one — i.e. there is genuinely a newer build to
+  // download (version = the published `brewser` value, for the button label).
+  // Every skip/failure/no-update path returns falsy (`false`); the caller
+  // coerces via `results[3] || {}`, so a boolean and the object both read
+  // cleanly. Best-effort throughout: a versions-check miss can't cascade into
+  // a catalogue refresh failure.
   // `current.json` is never written by this flow — overwriting it would
   // make every future check read equal and silently hide new releases.
   async function checkVersionsForUpdate(remoteUrl) {
@@ -565,16 +600,25 @@
     // brewser NRO bundles every component and its version bumps on every
     // release, so the `brewser` key alone reliably catches a real update;
     // iterating all shared keys is belt-and-braces.
+    var updateAvailable = false;
     for (var key in fetchedParsed) {
       if (!Object.prototype.hasOwnProperty.call(fetchedParsed, key)) continue;
       if (!Object.prototype.hasOwnProperty.call(currentParsed, key)) continue;
       if (semverGreater(String(fetchedParsed[key]), String(currentParsed[key]))) {
         console.debug('[updates-modal] newer version for "' + key + '": current='
           + String(currentParsed[key]) + ' published=' + String(fetchedParsed[key]));
-        return true;
+        updateAvailable = true;
+        break;
       }
     }
-    return false;
+    if (!updateAvailable) return false;
+    // Label the "Update Brewser" button with the published `brewser` version
+    // (the NRO the self-update downloads). The NRO bumps `brewser` on every
+    // release, so an update detected on any shared key coincides with a newer
+    // `brewser`; a missing/non-string value falls back to '' → the button just
+    // reads "Update Brewser".
+    var brewserVer = typeof fetchedParsed.brewser === 'string' ? fetchedParsed.brewser : '';
+    return { available: true, version: brewserVer };
   }
 
   // Walk the NORMALIZED catalogue (platform-client output — this
@@ -659,63 +703,27 @@
     return out;
   }
 
-  function renderNewRow(detail) {
-    var name = escapeHtml(detail.name || detail.id || 'Unknown app');
-    var ver = detail.version
-      ? '<span class="updates-modal-row-version">v' + escapeHtml(detail.version) + '</span>'
-      : '';
-    return '<div class="updates-modal-row">'
-      + '<span class="updates-modal-row-name">' + name + '</span>'
-      + ver
-      + '</div>';
+  // Set one summary count line: `<n> <label>` when n > 0, hidden otherwise.
+  // Singular/plural chosen from n so "1 app has…" / "6 apps have…" both read.
+  function setCountLine(el, n, singular, plural) {
+    if (n > 0) {
+      el.textContent = n + ' ' + (n === 1 ? singular : plural);
+      el.classList.remove('updates-modal-count--hidden');
+    } else {
+      el.textContent = '';
+      el.classList.add('updates-modal-count--hidden');
+    }
   }
 
-  function renderUpdateRow(detail) {
-    var name = escapeHtml(detail.name || detail.id || 'Unknown app');
-    // `v1.0.0 [→] v1.0.1` — installed on the LEFT, catalog on the
-    // RIGHT, separated by the same inline-SVG arrow used elsewhere.
-    // Critical: do NOT substitute a Unicode `→` here — the engine
-    // doesn't ship a font with that glyph and it'd render as tofu.
-    var ver = '<span class="updates-modal-row-version">'
-      + 'v' + escapeHtml(detail.installedVersion)
-      + UPGRADE_ARROW_SVG
-      + 'v' + escapeHtml(detail.version)
-      + '</span>';
-    return '<div class="updates-modal-row">'
-      + '<span class="updates-modal-row-name">' + name + '</span>'
-      + ver
-      + '</div>';
-  }
-
-  // `newApps` is the store DELTA — listings that appeared since the last
-  // check (old-vs-new catalogue), NOT every uninstalled app. `updates` is
-  // the installed-trailing set (apps on disk whose version now lags the
-  // catalogue). The two lists come from deliberately different diffs —
-  // see `diffNewInCatalogue` and `diffCatalog`.
+  // Collapse the two diffs to summary COUNTS — the modal no longer lists apps
+  // one per row. `updates` is the installed-trailing set (apps on disk whose
+  // version now lags the catalogue); `newApps` is the store DELTA (listings
+  // added since the last check). Each line hides itself at zero. The Brewser
+  // self-update callout + the whole-results empty state are driven by the
+  // caller (runCheck), which also knows the versions-check result.
   function populate(newApps, updates) {
-    var newHtml = newApps.map(renderNewRow).join('');
-    var updateHtml = updates.map(renderUpdateRow).join('');
-    newList.innerHTML = newHtml;
-    updateList.innerHTML = updateHtml;
-    // Per-section empty toggle keeps the heading suppressed when its
-    // list has no entries, but only one of the two needs to be empty
-    // for the modal to still feel populated.
-    if (newApps.length === 0) {
-      newSection.classList.add('updates-modal-section--empty');
-    } else {
-      newSection.classList.remove('updates-modal-section--empty');
-    }
-    if (updates.length === 0) {
-      updateSection.classList.add('updates-modal-section--empty');
-    } else {
-      updateSection.classList.remove('updates-modal-section--empty');
-    }
-    // Whole-results empty state: shown only when BOTH lists are empty.
-    if (newApps.length === 0 && updates.length === 0) {
-      resultsEl.classList.add('updates-modal-results--empty');
-    } else {
-      resultsEl.classList.remove('updates-modal-results--empty');
-    }
+    setCountLine(updatesCountEl, updates.length, 'app has a new update', 'apps have a new update');
+    setCountLine(newCountEl, newApps.length, 'new app available', 'new apps available');
   }
 
   // Fire-and-forget the actual update flow. Each failure path flips
@@ -938,6 +946,11 @@
         console.debug('[updates-modal] reading previous catalogue failed: '
           + (err && err.message ? err.message : String(err)));
       }
+      // Did the catalogue file itself change? Featured membership, new/removed
+      // apps and version bumps all live here and drive the library tabs, so a
+      // stale render would persist until a manual reload. `oldText` is undefined
+      // when there was no usable previous copy on disk → treat as changed.
+      var catalogueChanged = (typeof oldText !== 'string') || (oldText !== text);
       try {
         Switch.writeFileSync(CATALOG_PATH, text);
       } catch (e) {
@@ -993,10 +1006,19 @@
         refreshFavorites(),
         refreshAchievements(),
       ]);
-      var newBrewserVersionAvailable = !!results[3];
+      // `checkVersionsForUpdate` returns {available, version} on a real update,
+      // or falsy on any skip/no-update — coerce so both shapes read cleanly.
+      var versionInfo = results[3] || {};
+      var newBrewserVersionAvailable = !!versionInfo.available;
+      var newBrewserVersion = typeof versionInfo.version === 'string' ? versionInfo.version : '';
       // Record whether the per-user My Apps document was refreshed this run —
       // close() reloads once so its server-rendered tab surfaces.
       myCatalogueRefreshed = !!results[5];
+      // Reload on close when the render inputs actually changed: the catalogue
+      // (Featured / app set / versions) or stats.json (Popular / Top Rated
+      // ordering). `results[4]` is refreshStatsFile's changed-flag. A no-op
+      // check leaves both false, so it still won't reload.
+      libraryDataChanged = catalogueChanged || !!results[4];
       // Repaint upgrade chips on already-installed cards whose
       // manifest version trails the new catalog. Synchronous DOM
       // mutation — runs after the logo downloads so all card-side
@@ -1019,38 +1041,34 @@
       populate(newApps, buckets.updates);
       renderParseReport(outcome.catalogue);
       card.classList.remove('updates-modal-card--loading');
-      // Append a second line to the modal summary when the
-      // freshly-downloaded versions.json differs from the seeded
-      // current.json baseline. `<br>` keeps the original "Local Catalog
-      // is now synced!" intact + readable on its own line. The append
-      // is purely visual — no per-frame work since the fixed-position
-      // overlay is repainted from the cache (see
-      // [[reference-brewser-fixed-overlay-paint-cost]]).
-      // Summary line depends on whether this check actually surfaced
-      // anything: with no store-delta apps, no installed-trailing updates and
-      // no newer Brewser, everything is current → "Everything is up to date.".
-      // Otherwise the catalogue synced and the lists / update link below show
-      // what changed. (newBrewserVersionAvailable implies somethingNew, so the
-      // "synced" wording carries the appended Update-now link.)
+      // Status line depends on whether this check surfaced anything: with no
+      // store-delta apps, no installed-trailing updates and no newer Brewser,
+      // everything is current → "Everything is up to date."; otherwise the
+      // catalogue synced and the counts + Brewser callout show what changed.
       var somethingNew = newApps.length > 0 || buckets.updates.length > 0 || newBrewserVersionAvailable;
-      var statusHtml = somethingNew ? 'Local Catalog is now synced!' : 'Everything is up to date.';
+      statusEl.innerHTML = somethingNew ? 'Local Catalog is now synced!' : 'Everything is up to date.';
       brewserUpdateOffered = newBrewserVersionAvailable;
-      // Reflect a REAL available update on the trigger button itself so the
-      // signal persists after the modal closes: green = "an update is waiting"
-      // (the `--update-available` modifier styled in apps.html). Set/cleared
-      // from this check's result so a later "up to date" run resets it.
+      // Whole-results empty state — shown only when NOTHING surfaced (both
+      // counts hidden, Brewser callout hidden). Reveals the centered
+      // "up to date" message instead of a bare results panel.
+      if (somethingNew) {
+        resultsEl.classList.remove('updates-modal-results--empty');
+      } else {
+        resultsEl.classList.add('updates-modal-results--empty');
+      }
+      // Brewser self-update: the bold "New Brewser version available" label
+      // (static in the HTML) + the bright-yellow "Update Brewser vX.X.X" button
+      // (labelled here, wired to the self-update modal below). Also mirror the
+      // signal onto the trigger button (green `--update-available`) so it
+      // persists after the modal closes. All cleared on an up-to-date run.
       if (newBrewserVersionAvailable) {
+        brewserBtn.textContent = newBrewserVersion ? ('Update Brewser v' + newBrewserVersion) : 'Update Brewser';
+        brewserCallout.classList.add('updates-modal-brewser--show');
         triggerBtn.classList.add('apps-check-updates--update-available');
       } else {
+        brewserCallout.classList.remove('updates-modal-brewser--show');
         triggerBtn.classList.remove('apps-check-updates--update-available');
       }
-      if (newBrewserVersionAvailable) {
-        // The whole update line is the trigger: a tap on statusEl opens the
-        // self-update modal (gated by brewserUpdateOffered). Styled with the
-        // existing `munch-link` class so no new CSS is required.
-        statusHtml += '<br><span class="munch-link" role="button">New Brewser version available — Update now &rarr;</span>';
-      }
-      statusEl.innerHTML = statusHtml;
     } finally {
       fetchInFlight = false;
     }
@@ -1060,6 +1078,8 @@
     if (modalOpen) return;
     // Reset the per-run My Apps flag so a prior run's reload can't fire.
     myCatalogueRefreshed = false;
+    // Reset the catalogue/stats change flag too (same reason).
+    libraryDataChanged = false;
     // Reset the Brewser-update offer so a stale prior run can't leave the status
     // line clickable before this run's versions check settles.
     brewserUpdateOffered = false;
@@ -1068,12 +1088,14 @@
     // "checking…" each press).
     setLoading();
     statusEl.innerHTML = 'Local Catalog is now synced!';
-    // Empty the new/update lists so an old open/close cycle's content
-    // doesn't briefly flash on the next open before the fetch settles.
-    newList.innerHTML = '';
-    updateList.innerHTML = '';
-    newSection.classList.add('updates-modal-section--empty');
-    updateSection.classList.add('updates-modal-section--empty');
+    // Clear the summary counts + hide the Brewser callout so a prior
+    // open/close cycle's content can't briefly flash on the next open before
+    // the fetch settles.
+    updatesCountEl.textContent = '';
+    updatesCountEl.classList.add('updates-modal-count--hidden');
+    newCountEl.textContent = '';
+    newCountEl.classList.add('updates-modal-count--hidden');
+    brewserCallout.classList.remove('updates-modal-brewser--show');
     resultsEl.classList.add('updates-modal-results--empty');
     overlay.classList.add('app-modal-overlay--open');
     modalOpen = true;
@@ -1093,13 +1115,14 @@
     card.classList.remove('updates-modal-card--loading');
     card.classList.remove('updates-modal-card--error');
     modalOpen = false;
-    // If this sync refreshed the per-user My Apps document, reload once on
-    // dismiss so the server-rendered "My Apps" tab appears and the grid
-    // reflects the fresh catalogue. Fires AFTER the modal is closed (never
-    // mid-modal, per the no-reload-mid-modal rule up top); signed-out runs
-    // leave the flag false, so their behaviour is unchanged.
-    if (myCatalogueRefreshed && typeof globalThis.__swbReload === 'function') {
+    // Reload once on dismiss when this sync changed anything the page renders
+    // from disk: the per-user My Apps document, the catalogue (Featured / app
+    // set / versions), or stats.json (Popular / Top Rated order). Fires AFTER
+    // the modal is closed (never mid-modal, per the no-reload-mid-modal rule up
+    // top). A no-op check leaves all flags false, so its behaviour is unchanged.
+    if ((myCatalogueRefreshed || libraryDataChanged) && typeof globalThis.__swbReload === 'function') {
       myCatalogueRefreshed = false;
+      libraryDataChanged = false;
       try { globalThis.__swbReload(); } catch (_) {}
     }
   }
@@ -1125,11 +1148,11 @@
     if (e && e.stopPropagation) e.stopPropagation();
   });
 
-  // When the versions check offered a Brewser update, the status line becomes a
-  // trigger — tapping it opens the self-update modal (self-update-modal.js,
-  // loaded before this script). Gated by brewserUpdateOffered so a normal
-  // "synced!" status is inert.
-  statusEl.addEventListener('click', function (e) {
+  // The bright-yellow "Update Brewser vX.X.X" button opens the self-update
+  // modal (self-update-modal.js, loaded before this script). Only visible when
+  // the versions check offered an update; `brewserUpdateOffered` is a
+  // belt-and-braces gate so a stale click can't fire before this run settles.
+  brewserBtn.addEventListener('click', function (e) {
     if (!brewserUpdateOffered) return;
     if (typeof globalThis.__brewserOpenSelfUpdateModal === 'function') {
       globalThis.__brewserOpenSelfUpdateModal();

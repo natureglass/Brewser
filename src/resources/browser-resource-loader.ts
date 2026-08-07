@@ -398,6 +398,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			() => this.renderSettings(),
 		);
 		out = out.replace(
+			/<browser-settings-bookmarks-link(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-settings-bookmarks-link\s*>)?/gi,
+			() => this.renderSettingsBookmarksLink(),
+		);
+		out = out.replace(
 			/<browser-search(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-search\s*>)?/gi,
 			() => this.renderSearch(),
 		);
@@ -877,6 +881,16 @@ export class BrowserResourceLoader implements ResourceLoader {
 	 * Mirrors `loadConfig`'s clamps/types — the shell-side reader applies
 	 * the same bounds on the way out, so an out-of-range type-in is
 	 * silently clamped rather than rejecting the save. */
+	/** The Settings page's "Bookmarks" quick-link. Emitted only when the
+	 * toolbar is enabled — bookmarks are a toolbar affordance, so with the
+	 * toolbar turned off (Show Toolbar unchecked + saved) the link is hidden,
+	 * mirroring the Toolbar + Search Engine settings row. Reads the SAVED
+	 * config (saveSettings reloads the page). Returns '' to hide. */
+	private renderSettingsBookmarksLink(): string {
+		if (!loadConfig(this.appRoot).showToolbar) return '';
+		return '<a class="munch-link" href="brewser://bookmarks/">Bookmarks</a>';
+	}
+
 	private renderSettings(): string {
 		const config = loadConfig(this.appRoot);
 		const engines = loadSearchEngines(this.appRoot);
@@ -1094,36 +1108,55 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// (the .settings-radio rows are display:flex inline-flex items
 		// laid out by their own `margin-top: 6px`). Saves 5 wrapper
 		// nodes.
+		// 3rd row (Toolbar + Search Engine) is emitted ONLY when the toolbar is
+		// enabled. With `showToolbar` off there is no toolbar strip and no search
+		// bar, so both pickers are irrelevant — the row is omitted entirely. This
+		// reads the SAVED config (saveSettings reloads the page), so the row
+		// disappears only after Show Toolbar is unchecked AND saved, and returns
+		// when it is re-enabled + saved. Same signal hides the Settings
+		// "Bookmarks" quick-link (see renderSettingsBookmarksLink).
+		const toolbarSearchRow = config.showToolbar
+			? (
+				'<div class="settings-row-pair">'
+				+ '<fieldset class="settings-group">'
+				+ '<legend>Toolbar</legend>'
+				+ toolbarRows
+				+ '</fieldset>'
+				+ '<fieldset class="settings-group">'
+				+ '<legend>Search engine</legend>'
+				+ searchRows
+				+ '</fieldset>'
+				+ '</div>'
+			)
+			: '';
+
 		return (
 			'<div class="settings-form">'
-			+ '<div class="settings-row-pair">'
-			+ '<fieldset class="settings-group">'
-			+ '<legend>Toolbar</legend>'
-			+ toolbarRows
-			+ '</fieldset>'
-			+ '<fieldset class="settings-group">'
-			+ '<legend>Keyboard</legend>'
-			+ keyboardRows
-			+ '</fieldset>'
-			+ '<fieldset class="settings-group">'
-			+ '<legend>Style</legend>'
-			+ styleRows
-			+ '</fieldset>'
-			+ '</div>'
+			// 1st row: Background + Style
 			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Background</legend>'
 			+ backgroundRows
 			+ '</fieldset>'
 			+ '<fieldset class="settings-group">'
+			+ '<legend>Style</legend>'
+			+ styleRows
+			+ '</fieldset>'
+			+ '</div>'
+			// 2nd row: Keyboard + Home Page
+			+ '<div class="settings-row-pair">'
+			+ '<fieldset class="settings-group">'
+			+ '<legend>Keyboard</legend>'
+			+ keyboardRows
+			+ '</fieldset>'
+			+ '<fieldset class="settings-group">'
 			+ '<legend>Home Page</legend>'
 			+ homeSectionRows
 			+ '</fieldset>'
-			+ '<fieldset class="settings-group">'
-			+ '<legend>Search engine</legend>'
-			+ searchRows
-			+ '</fieldset>'
 			+ '</div>'
+			// 3rd row: Toolbar + Search Engine (hidden when the toolbar is off)
+			+ toolbarSearchRow
+			// 4th row: Appearance + System
 			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Appearance</legend>'
@@ -1138,6 +1171,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ versionsRow
 			+ '</fieldset>'
 			+ '</div>'
+			// 5th row: Performance + Behaviour
 			+ '<div class="settings-row-pair">'
 			+ '<fieldset class="settings-group">'
 			+ '<legend>Performance</legend>'
