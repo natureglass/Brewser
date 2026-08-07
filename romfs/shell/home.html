@@ -214,6 +214,10 @@
          combination. -->
     <div class="app-modal-actions">
       <div class="app-modal-actions-side">
+        <!-- Delete (uninstall) — LEFT slot, shown by missing-app-modal.js
+             ONLY for an installed app (alongside Launch). Red destructive
+             palette; opens delete-modal.js (per-file remove + progress). -->
+        <button id="app-modal-delete" class="app-modal-btn app-modal-btn--delete app-modal-btn--hidden" type="button">Delete app</button>
         <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Update</button>
         <!-- Install-size chip. Populated by missing-app-modal.js from
              `detail.sizeBytes` (catalogue.json) as a megabyte figure.
@@ -223,12 +227,6 @@
              visible (missing / installed-current cases). The script
              hides it when sizeBytes is 0 (catalog omitted the field). -->
         <span id="app-modal-size" class="app-modal-size"></span>
-        <!-- SD free-space chip. Populated by missing-app-modal.js via
-             `Switch.FileSystem.openSdmc().freeSpace()` each time the
-             modal opens. Painted in red (`--warn`) when the free
-             space is less than the catalog's `sizeBytes` so the user
-             sees at a glance why Download / Update is disabled. -->
-        <span id="app-modal-sd-free" class="app-modal-size app-modal-size--sd"></span>
       </div>
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
@@ -359,6 +357,36 @@
   </div>
 </browser-modal>
 
+<!-- Delete (uninstall) progress modal. Opened by missing-app-modal.js
+     from the app modal's "Delete app" button. delete-modal.js removes
+     every file under sdmc:/switch/brewser/apps/<id> with a progress bar,
+     then reloads the grid. Reuses the download modal's progress CSS
+     (state classes on `download-modal-card` drive show/hide). -->
+<browser-modal id="delete-modal-overlay" class="app-modal-overlay download-modal-overlay">
+  <div id="delete-modal-card" class="app-modal-card download-modal-card">
+    <h2 id="delete-modal-title" class="app-modal-title download-modal-title">Deleting app</h2>
+    <div class="download-modal-progress">
+      <div class="download-modal-progress-track">
+        <div id="delete-modal-progress-fill" class="download-modal-progress-fill"></div>
+      </div>
+      <div class="download-modal-progress-row">
+        <div id="delete-modal-remaining" class="download-modal-remaining"></div>
+        <div id="delete-modal-counter" class="download-modal-counter"></div>
+      </div>
+    </div>
+    <div id="delete-modal-error" class="download-modal-error"></div>
+    <div class="app-modal-actions download-modal-actions">
+      <div class="app-modal-actions-side">
+        <span id="delete-modal-status" class="download-modal-status">Preparing…</span>
+      </div>
+      <div class="app-modal-actions-side">
+        <button id="delete-modal-cancel" class="app-modal-btn app-modal-btn--download download-modal-btn-cancel" type="button">Cancel</button>
+        <button id="delete-modal-close" class="app-modal-btn app-modal-btn--play download-modal-btn-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
 <!-- Permission-warnings modal. Opened by missing-app-modal.js on a
      Launch tap when one or more of the app's `permissions` keys match
      an entry in `configs/warnings.json`. Lists each matched warning
@@ -432,6 +460,7 @@
      must load BEFORE missing-app-modal.js so the globals are
      available by the time its click handlers fire. -->
 <script src="brewser://scripts/download-modal.js"></script>
+<script src="brewser://scripts/delete-modal.js"></script>
 <script src="brewser://scripts/warnings-modal.js"></script>
 <script src="brewser://scripts/auth-shared.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>

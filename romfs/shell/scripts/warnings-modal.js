@@ -43,30 +43,42 @@
     return;
   }
 
-  // Warning table loaded from configs/warnings.json. Pre-fetched once
-  // at script load and cached; fetch failures leave the table as null
-  // and the matcher returns an empty array — same robustness shape as
-  // the SD-free probe in missing-app-modal.js. The matcher returning
-  // empty means "no warnings to show" and the launch path proceeds
-  // without ever opening this modal (safe fallback on broken JSON).
+  // Warning table loaded from the on-disk `configs/warnings.json`. Read
+  // SYNCHRONOUSLY by absolute sdmc path at script load and cached; any
+  // miss leaves the table null and the matcher returns an empty array —
+  // the launch path then proceeds without opening this modal (safe
+  // fallback on a missing/broken file).
+  //
+  // Why not `fetch('configs/warnings.json')` (as before): from the
+  // catalog page `brewser://home/` that relative URL resolves to the
+  // bogus `brewser://home/configs/warnings.json` — the log's "unknown
+  // brewser:// page" — so the fetch always failed, the table stayed
+  // null, and NO permission warning ever showed before launch. The
+  // brewser:// loader also only routes `apps/` to the app root, so even
+  // an absolute `brewser://configs/…` would miss (it maps under the
+  // `shell/` tree, where configs don't live). Reading the absolute sdmc
+  // path directly fixes both — and being synchronous also closes the old
+  // fetch-vs-tap race where a fast launch tap beat the async load.
   var warningTable = null;
-  globalThis.fetch('configs/warnings.json')
-    .then(function (r) { return r && r.ok ? r.json() : null; })
-    .then(function (j) {
+  (function loadWarningTable() {
+    if (typeof Switch === 'undefined' || !Switch || typeof Switch.readFileSync !== 'function') return;
+    try {
+      var raw = Switch.readFileSync('sdmc:/switch/brewser/configs/warnings.json');
+      if (!raw || !raw.byteLength) return;
       // The JSON shape is `{ "Permissions": { "<key>": { description,
       // warning, risk }, … } }`. Flatten one level so the matcher just
       // looks up `table[key]`. Falls back to the top-level object if
       // someone removes the `Permissions` wrapper later.
+      var j = JSON.parse(new TextDecoder().decode(raw));
       if (j && typeof j === 'object') {
-        if (j.Permissions && typeof j.Permissions === 'object') warningTable = j.Permissions;
-        else warningTable = j;
+        warningTable = (j.Permissions && typeof j.Permissions === 'object') ? j.Permissions : j;
         console.debug('[warnings-modal] table loaded: ' + Object.keys(warningTable).length + ' entries');
       }
-    })
-    .catch(function (err) {
-      console.debug('[warnings-modal] warnings.json fetch failed: '
+    } catch (err) {
+      console.debug('[warnings-modal] warnings.json read failed: '
         + (err && err.message ? err.message : String(err)));
-    });
+    }
+  })();
 
   // User-configured severity gate (`config.warnings`). Stamped onto
   // `<body data-warnings>` by browser-resource-loader's

@@ -43,12 +43,11 @@
   // (missing / installed-current). Optional element — `null` if the
   // page hasn't been redeployed since the markup was added.
   var sizeEl = document.getElementById('app-modal-size');
-  // SD-free chip — read each time the modal opens via
-  // `Switch.FileSystem.openSdmc().freeSpace()` so the figure stays
-  // fresh across installs. When the free space is less than the
-  // catalog's `sizeBytes`, the chip flips into a red warning palette
-  // AND we disable the Download / Update buttons.
-  var sdFreeEl = document.getElementById('app-modal-sd-free');
+  // Delete button — LEFT action slot, shown only for an INSTALLED app
+  // (i.e. whenever Launch is shown). Opens delete-modal.js which
+  // uninstalls the app (per-file remove + progress bar) and reloads the
+  // grid. Optional element so markup predating it can't break the modal.
+  var deleteBtn = document.getElementById('app-modal-delete');
   // Expand/collapse the description into a near-full-modal reading view.
   // `cardEl` is the app-detail modal card (`.app-modal-card`; an id was
   // added to the markup for this feature). Toggling `app-modal-card--expanded`
@@ -135,48 +134,34 @@
     return mb.toFixed(2) + ' MB';
   }
 
-  // Smart byte formatter for SD card free space. Mirrors the sensors
-  // app helper: GB with one decimal when >= 1 GB, MB without decimals
-  // otherwise (`X MB` reads cleaner than `0.X GB` for small values).
-  // Switch's microSD slot can hold up to 2 TB so MB granularity is
-  // unnecessary at the top end; keep the rule simple.
-  function formatBytesSmart(bytes) {
-    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes < 0) return '';
-    var gb = bytes / (1024 * 1024 * 1024);
-    if (gb >= 1) return gb.toFixed(1) + ' GB';
-    var mb = bytes / (1024 * 1024);
-    return mb.toFixed(0) + ' MB';
-  }
-
-  // Read the sdmc free space via the nx.js FileSystem API. Returns
-  // -1 on error (Switch global missing, FS open failed, runtime
-  // type mismatch) so the caller can branch and treat "unknown" the
-  // same as "skip the disable gate" — preferable to a hard refusal
-  // when the syscall fails for any non-app reason.
-  //
-  // `freeSpace()` returns a BigInt on real hardware; cast to Number
-  // for the comparison/format math. Switch SD cards top out at 2 TB
-  // (~2.2e12 bytes), well under Number.MAX_SAFE_INTEGER, so no
-  // precision loss in the conversion.
-  function getSdFreeBytes() {
-    try {
-      if (typeof Switch === 'undefined' || !Switch || !Switch.FileSystem) return -1;
-      var fs = Switch.FileSystem.openSdmc();
-      if (!fs || typeof fs.freeSpace !== 'function') return -1;
-      var v = Number(fs.freeSpace());
-      return Number.isFinite(v) && v >= 0 ? v : -1;
-    } catch (err) {
-      console.debug('[apps] sdFree read failed: ' + (err && err.message ? err.message : String(err)));
-      return -1;
-    }
-  }
-
   // Format an integer with thousands separators ("1234" → "1,234"). The
   // catalog of downloaded apps is small today but the field can grow
   // unbounded — formatting keeps four-and-five-digit counts readable.
   function formatCount(n) {
     var s = String(n | 0);
     return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  // Read + parse a JSON config from the on-disk config dir
+  // (`sdmc:/switch/brewser/configs/<name>`). Configs are read by ABSOLUTE
+  // sdmc path, never a relative `fetch('configs/…')`: from the
+  // `brewser://home/` page that relative URL resolves to the bogus
+  // `brewser://home/configs/…` ("unknown brewser:// page"), and the
+  // brewser:// loader only routes `apps/` to the app root — every other
+  // path (incl. `configs/`) maps under the `shell/` subtree, where the
+  // config files don't live. Same absolute-path pattern writeLocalRating
+  // already uses to WRITE ratings.json. Returns the parsed value or null.
+  function readJsonConfig(name) {
+    if (typeof Switch === 'undefined' || !Switch || typeof Switch.readFileSync !== 'function') return null;
+    try {
+      var raw = Switch.readFileSync('sdmc:/switch/brewser/configs/' + name);
+      if (!raw || !raw.byteLength) return null;
+      return JSON.parse(new TextDecoder().decode(raw));
+    } catch (err) {
+      console.debug('[apps] config read failed (' + name + '): '
+        + (err && err.message ? err.message : String(err)));
+      return null;
+    }
   }
 
   // Star pixel dimension. Mirrored in inline `style="width:Npx..."`
@@ -577,12 +562,11 @@
   function loadStats(appId) {
     var myToken = ++statsToken;
     if (!appId) return;
-    var dlPromise = globalThis.fetch('configs/downloads.json')
-      .then(function (r) { return r && r.ok ? r.json() : null; })
-      .catch(function () { return null; });
-    var rtPromise = globalThis.fetch('configs/ratings.json')
-      .then(function (r) { return r && r.ok ? r.json() : null; })
-      .catch(function () { return null; });
+    // Read the cached stats straight from disk (absolute sdmc path — see
+    // readJsonConfig). Wrapped in Promise.resolve so the downstream
+    // token-guarded DOM update below is unchanged.
+    var dlPromise = Promise.resolve(readJsonConfig('downloads.json'));
+    var rtPromise = Promise.resolve(readJsonConfig('ratings.json'));
     Promise.all([dlPromise, rtPromise]).then(function (results) {
       if (myToken !== statsToken) return;
       var dl = results[0];
@@ -782,50 +766,11 @@
       }
     }
 
-    // SD free-space chip + Download/Update gate. Read each open so the
-    // figure stays fresh after installs. `freeBytes === -1` means the
-    // syscall failed for some non-app reason (Switch global missing
-    // when running outside nx.js, FS open errored, etc.) — treat that
-    // as "unknown" and skip the disable gate rather than block the
-    // user on a transient failure. When the figure IS known but is
-    // less than `appSizeBytes`, paint the chip red and disable both
-    // install paths (right-side Download + left-side Update).
-    var freeBytes = getSdFreeBytes();
-    var insufficient = (appSizeBytes > 0 && freeBytes >= 0 && freeBytes < appSizeBytes);
-    if (sdFreeEl) {
-      if (freeBytes >= 0) {
-        sdFreeEl.textContent = 'Free: ' + formatBytesSmart(freeBytes);
-        sdFreeEl.classList.add('app-modal-size--visible');
-        if (insufficient) {
-          sdFreeEl.classList.add('app-modal-size--warn');
-        } else {
-          sdFreeEl.classList.remove('app-modal-size--warn');
-        }
-      } else {
-        sdFreeEl.textContent = '';
-        sdFreeEl.classList.remove('app-modal-size--visible');
-        sdFreeEl.classList.remove('app-modal-size--warn');
-      }
-    }
-    // Disable the install buttons via the `disabled` attribute (the
-    // CSS rule `[disabled]` paints them in a muted palette) AND drop
-    // them off the keyboard-tap path by mirroring with a class so the
-    // click handler can branch without re-reading the attribute every
-    // tap. `disabled` on a `<button>` already suppresses the native
-    // click event in real browsers, but the live-DOM dispatcher
-    // doesn't honour that gate today — the JS check below is the
-    // belt-and-suspenders.
-    if (insufficient) {
-      downloadBtn.setAttribute('disabled', '');
-      updateBtn.setAttribute('disabled', '');
-      downloadBtn.classList.add('app-modal-btn--disabled');
-      updateBtn.classList.add('app-modal-btn--disabled');
-    } else {
-      downloadBtn.removeAttribute('disabled');
-      updateBtn.removeAttribute('disabled');
-      downloadBtn.classList.remove('app-modal-btn--disabled');
-      updateBtn.classList.remove('app-modal-btn--disabled');
-    }
+    // (The device SD free-space chip + insufficient-space disable gate
+    // were removed — the modal no longer surfaces free space, and
+    // Download / Update stay enabled. A genuinely full disk now surfaces
+    // as a write error in the download modal instead of a pre-emptive
+    // silent disable.)
 
     var hasUpgrade = !!(currentDetail.installedVersion && currentDetail.version);
     if (currentDetail.missing) {
@@ -834,6 +779,8 @@
       pendingLaunchUrl = '';
       downloadBtn.classList.remove('app-modal-btn--hidden');
       updateBtn.classList.add('app-modal-btn--hidden');
+      // Not installed → no Delete.
+      if (deleteBtn) deleteBtn.classList.add('app-modal-btn--hidden');
     } else {
       // Warnings gate. When the catalog's permissions list contains
       // one or more keys that map to a warnings.json entry, we DON'T
@@ -864,6 +811,8 @@
       } else {
         updateBtn.classList.add('app-modal-btn--hidden');
       }
+      // Installed → offer Delete (uninstall) in the LEFT action slot.
+      if (deleteBtn) deleteBtn.classList.remove('app-modal-btn--hidden');
     }
 
     // Always open in the collapsed view — the expanded reading state is a
@@ -989,15 +938,6 @@
       console.debug('[apps] download-modal not loaded; skipping ' + mode);
       return;
     }
-    var btn = mode === 'update' ? updateBtn : downloadBtn;
-    // Respect the insufficient-SD-space gate. The live-DOM dispatcher
-    // doesn't honour the native `disabled` attribute, so the click
-    // still reaches here — silently swallow when the button is
-    // disabled rather than fire the download with an empty drive.
-    if (btn && btn.classList && btn.classList.contains('app-modal-btn--disabled')) {
-      console.debug('[apps] ' + mode + ' tap ignored — insufficient SD free space');
-      return;
-    }
     close();
     opener(detail || {}, { mode: mode });
   }
@@ -1010,6 +950,27 @@
     openDownload('update');
     if (e && e.stopPropagation) e.stopPropagation();
   });
+
+  // Hand off to delete-modal.js — it owns the recursive per-file
+  // uninstall + progress bar and reloads the grid on success. Close
+  // this modal first so the two cards don't stack (same pattern as
+  // openDownload). The delete modal resolves the app dir from the id.
+  function openDelete() {
+    var detail = currentDetail;
+    var opener = globalThis.__brewserOpenDeleteModal;
+    if (typeof opener !== 'function') {
+      console.debug('[apps] delete-modal not loaded; skipping delete');
+      return;
+    }
+    close();
+    opener(detail || {});
+  }
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', function (e) {
+      openDelete();
+      if (e && e.stopPropagation) e.stopPropagation();
+    });
+  }
 
   // Backdrop tap → close. Filter on `e.target === overlay` so a tap
   // landing inside the card (which bubbles up through the overlay)

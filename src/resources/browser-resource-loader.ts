@@ -1364,10 +1364,14 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		const statusBadge = e.status
 			? `<span class="app-card__status app-card__status--${htmlEscape(e.status)}">${htmlEscape(myAppsStatusLabel(e.status))}</span>`
 			: '';
-		// Cards with a pending upgrade get a subtly-lighter background so
-		// the upgrade-yellow chip on top has more room to breathe and the
-		// row reads as "different from the rest" at a glance. Keyed on
-		// `installedVersion` being set — same gate as the yellow chip.
+		// Cards for an installed app whose catalogue version differs from the
+		// on-disk manifest version (a new version is available to download) are
+		// flagged at render with `app-card--upgrade`, which the theme paints as
+		// a red border. Keyed on `installedVersion` being set — the same gate
+		// `libraryAppToCard` uses for the `installed-update` state. The shell's
+		// updates-modal.js adds the same class dynamically after a manual
+		// Check-for-Updates (idempotent); download-modal.js removes it on a
+		// successful install.
 		const upgradeClass = (e.installedVersion && e.version) ? ' app-card--upgrade' : '';
 		// Version + license sit in a small footer strip pinned to the
 		// card's bottom edge — `v1.0.0` chip flush left, `MIT` chip
@@ -1466,7 +1470,7 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 		// at parse regardless of cascade timing, so `width:100%` +
 		// `max-height` bound the box unconditionally. `.app-banner` still
 		// supplies the gray placeholder bg + rounded corners.
-		return `<a class="app-card"${missingAttr}${detailAttrs}>`
+		return `<a class="app-card${upgradeClass}"${missingAttr}${detailAttrs}>`
 			+ statusBadge
 			+ `<img class="app-banner" style="display:block;width:100%;height:auto;max-height:420px;object-fit:contain" width="480" height="380" data-src="${banner}"${bannerFallback} alt="${alt}">`
 			+ `<div class="app-card__body"><strong>${title}</strong>${blurb}${footer}</div>`

@@ -101,6 +101,28 @@
     return idx >= 0 ? path.slice(0, idx) : '';
   }
 
+  // Files whose CONTENT can change WITHOUT a version bump — the app's
+  // `manifest.json` (e.g. an added permission) and its banner image
+  // (`appbanner.*`, i.e. the catalogue `logo`) — get cache-busted on
+  // every (re)download so an edited manifest / banner lands even when the
+  // GitHub-Pages CDN edge still holds the old bytes. The manifest.json +
+  // appbanner.jpg are already in the artifact file list and thus already
+  // overwritten, but the CDN can serve a stale copy for minutes after a
+  // redeploy — the cache-bust query forces the origin's current bytes.
+  // The bulk asset files deliberately keep their plain, cacheable URLs:
+  // busting every file would defeat the CDN for the whole user base, and
+  // assets change alongside a version bump (which the Update flow handles).
+  function isFreshFile(rel, logoRel) {
+    var base = rel.replace(/^.*\//, '');
+    if (base === 'manifest.json') return true;
+    if (/^appbanner\.[a-z0-9]+$/i.test(base)) return true;
+    if (logoRel && rel === logoRel) return true;
+    return false;
+  }
+  function cacheBust(url) {
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_cb=' + Date.now();
+  }
+
   // Hide/restore the shell toolbar strip for the whole download. The toolbar
   // overlay paints on top of the modal, so without this it stays visible over
   // the download backdrop (same issue the self-update modal solved). Guarded:
@@ -232,6 +254,9 @@
   function patchCardOnSuccess(cardEl, detail) {
     cardEl.classList.remove('app-card--missing');
     cardEl.classList.remove('app-card--upgrade');
+    // The app is now installed, so it is no longer "not downloaded":
+    // clear the flag that dims the card banner (opacity 0.65) at render.
+    cardEl.removeAttribute('data-missing');
     // Patch the embedded detail JSON so a future tap on the same card
     // opens the modal in the installed (Play) state instead of
     // missing (Download) / upgrade (Update).
@@ -359,6 +384,10 @@
       }
       var localPath = APP_ROOT + 'apps/' + detail.id + '/' + rel;
       var remoteUrl = app.fileUrl(rel);
+      // Force manifest.json + the banner past any CDN cache so an edited
+      // manifest (new permissions) / banner refreshes on this download
+      // without waiting for the edge cache to expire (or a Check-for-Updates).
+      if (isFreshFile(rel, app && app.logoRel)) remoteUrl = cacheBust(remoteUrl);
       try {
         var dir = parentDir(localPath);
         if (dir) Switch.mkdirSync(dir);

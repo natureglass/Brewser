@@ -951,6 +951,20 @@ ul.settings-list li:active {
   color: #ff6699;
 }
 
+/* Delete (uninstall) — destructive deep-red pill, distinct from the
+   bright Download red. Shown only for an installed app (never next to
+   Download, which is missing-only), so the two reds never collide. */
+.app-modal-btn--delete {
+  background: #b3261e;
+  border-color: #7a1a15;
+  color: #ffffff;
+}
+.app-modal-btn--delete:active {
+  background: #7a1a15;
+  border-color: #b3261e;
+  color: #ffd6d2;
+}
+
 /* Action buttons whose role is gated by `detail.missing`. The script
    toggles this class on Play vs Download so only the appropriate
    button is visible. Higher specificity than `.app-modal-btn` so the
@@ -1019,8 +1033,14 @@ a.app-modal-btn.app-modal-btn--play { color: #000000; }
    already in this sheet overrides on press. */
 .app-card--upgrade {
   background: #160d2e;
-  border-color: #c800ff;
+  border-color: #ff2d55;
 }
+
+/* Not-installed apps: dim the WHOLE card (banner + title + blurb +
+   footer) so it reads as "not downloaded yet" at a glance. `data-missing`
+   is stamped on the card anchor by the resource loader and cleared on a
+   successful install by download-modal.js. */
+.app-card[data-missing="true"] { opacity: 0.6; }
 
 /* ---- Check-for-Updates modal -------------------------------------
    Triggered by the `.apps-check-updates` button on apps.html. Reuses
@@ -1819,7 +1839,7 @@ fieldset.ach-group legend {
   /* App / Featured grid cards */
   .app-card {
     color: #15151c;
-    background: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.9);
     border-color: #d000ff;
   }
   .app-card strong { color: #d800ff; }
@@ -1839,7 +1859,7 @@ fieldset.ach-group legend {
   .app-card--missing strong { color: #6a6a7a; }
   .app-card--upgrade {
     background: #fffbe0;
-    border-color: #ffb700;
+    border-color: #ff2d55;
   }
 
   /* Card meta chips */

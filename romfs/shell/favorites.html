@@ -71,9 +71,9 @@
     <div id="app-modal-body" class="app-modal-body"></div>
     <div class="app-modal-actions">
       <div class="app-modal-actions-side">
+        <button id="app-modal-delete" class="app-modal-btn app-modal-btn--delete app-modal-btn--hidden" type="button">Delete app</button>
         <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Update</button>
         <span id="app-modal-size" class="app-modal-size"></span>
-        <span id="app-modal-sd-free" class="app-modal-size app-modal-size--sd"></span>
       </div>
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>
@@ -110,6 +110,36 @@
   </div>
 </browser-modal>
 
+<!-- Delete (uninstall) progress modal. Opened by missing-app-modal.js
+     from the app modal's "Delete app" button. delete-modal.js removes
+     every file under sdmc:/switch/brewser/apps/<id> with a progress bar,
+     then reloads the grid. Reuses the download modal's progress CSS
+     (state classes on `download-modal-card` drive show/hide). -->
+<browser-modal id="delete-modal-overlay" class="app-modal-overlay download-modal-overlay">
+  <div id="delete-modal-card" class="app-modal-card download-modal-card">
+    <h2 id="delete-modal-title" class="app-modal-title download-modal-title">Deleting app</h2>
+    <div class="download-modal-progress">
+      <div class="download-modal-progress-track">
+        <div id="delete-modal-progress-fill" class="download-modal-progress-fill"></div>
+      </div>
+      <div class="download-modal-progress-row">
+        <div id="delete-modal-remaining" class="download-modal-remaining"></div>
+        <div id="delete-modal-counter" class="download-modal-counter"></div>
+      </div>
+    </div>
+    <div id="delete-modal-error" class="download-modal-error"></div>
+    <div class="app-modal-actions download-modal-actions">
+      <div class="app-modal-actions-side">
+        <span id="delete-modal-status" class="download-modal-status">Preparing…</span>
+      </div>
+      <div class="app-modal-actions-side">
+        <button id="delete-modal-cancel" class="app-modal-btn app-modal-btn--download download-modal-btn-cancel" type="button">Cancel</button>
+        <button id="delete-modal-close" class="app-modal-btn app-modal-btn--play download-modal-btn-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+</browser-modal>
+
 <!-- Permission-warnings modal — shared verbatim with apps.html. -->
 <browser-modal id="warnings-modal-overlay" class="app-modal-overlay warnings-modal-overlay">
   <div class="app-modal-card warnings-modal-card">
@@ -131,6 +161,7 @@
      card taps; banner-loader.js must precede apps-pagination.js (which promotes
      the visible page's data-src banners and drives Prev/Next). -->
 <script src="brewser://scripts/download-modal.js"></script>
+<script src="brewser://scripts/delete-modal.js"></script>
 <script src="brewser://scripts/warnings-modal.js"></script>
 <script src="brewser://scripts/auth-shared.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>
