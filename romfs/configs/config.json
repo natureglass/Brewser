@@ -5,7 +5,7 @@
   "brewserStyle": "themes/styles/dark.css",
   "themeBackground": "XMB",
   "autoRotate": true,
-  "maxPerPage": 8,
+  "maxPerPage": 16,
   "toolbarHeight": 64,
   "momentumScrolling": true,
   "toolbarPosition": "top",

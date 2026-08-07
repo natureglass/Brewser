@@ -3,6 +3,19 @@
 <head>
   <title>Settings — brewser</title>
   <link rel="stylesheet" href="brewser://assets/main.css">
+  <style>
+    /* Avatar shown to the left of the "Login" quick-link (rendered by the
+       resource loader's <browser-settings-login-link/>). Circular 22px slot;
+       vertical-align keeps it centred on the link text without relying on
+       inline-flex. */
+    .settings-login-avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+  </style>
 </head>
 
 <body>
@@ -25,8 +38,10 @@
         <!-- Login lives on its own page (shell/login.html → brewser://login/).
              A dedicated page sidesteps the per-frame paint cost of a
              fixed-position overlay on top of the settings form, and
-             keeps the device-flow stages self-contained. -->
-        <a class="munch-link" href="brewser://googleLogin/">Login</a>
+             keeps the device-flow stages self-contained. The resource loader
+             emits the link with the signed-in user's avatar (or the default
+             bitmap) to its left — same source as the toolbar avatar. -->
+        <browser-settings-login-link/>
         <a class="munch-link" href="brewser://home/">Home</a>
       </nav>
     </header>

@@ -482,6 +482,15 @@ export class BrowserShell {
 	 * by `handleScroll` from user input, decayed each non-input tick by
 	 * `tickMomentum`. Zero = no coast in flight. */
 	private momentumVelocityPxPerTick: number = 0;
+	/** True when a TOUCH page-scroll delta landed since the last poll-loop
+	 * `onTick`. Touch scrolls arrive on an async event callback (not the loop),
+	 * so unlike stick / D-pad they don't set the loop's `scrolledThisTick`.
+	 * Without this the loop would treat an active finger-drag tick as
+	 * "no user scroll" and run the momentum coast ON TOP of the finger's own
+	 * 1:1 delta — making the page travel ~1.8x the finger (the reported bug).
+	 * `onTick` reads + clears it; velocity is still captured in `handleScroll`
+	 * so the post-release flick coast is unchanged. */
+	private touchScrolledSinceTick: boolean = false;
 	/** Reference to the registered UA-injecting fetch loader, kept so
 	 * `setColorScheme` can update the outgoing Client-Hint header
 	 * without rebuilding the loader. Null when network is disabled. */
@@ -1107,7 +1116,14 @@ export class BrowserShell {
 		// session on body-content swipes and dispatches `dy` deltas
 		// through this callback. Same handler as right-stick / D-pad
 		// scrolling so the clamp + repaint path is shared.
-		setTouchScrollHandler((delta) => this.handleScroll(delta));
+		setTouchScrollHandler((delta) => {
+			// Flag the tick so `onTick` suppresses the momentum coast while the
+			// finger is actively driving the scroll (the finger delta already
+			// moves the page 1:1). Velocity is still captured in `handleScroll`
+			// for the flick that coasts after the finger lifts.
+			this.touchScrolledSinceTick = true;
+			this.handleScroll(delta);
+		});
 		// Action-bus subscribers for chrome actions whose handlers are
 		// safe to fire from the bus's synchronous dispatch:
 		//  - `bookmark` is a sync toggle, no I/O.
@@ -1408,8 +1424,22 @@ export class BrowserShell {
 							}
 							return true;
 						}
+						// Read + clear the touch-scroll flag every tick (set by the
+						// touch scroll handler on each finger-drag delta).
+						const touchScrolledThisTick = this.touchScrolledSinceTick;
+						this.touchScrolledSinceTick = false;
 						if (info.scrolledThisTick) {
 							return false; // build-continuation deferred to next idle tick
+						}
+						// A touch page-scroll delta landed this tick: the finger already
+						// moved the page 1:1. Report active (keep the loop at scroll
+						// cadence so the next touchmove is handled promptly) but DON'T
+						// coast momentum on top — that concurrent coast is what made the
+						// page outrun the finger. The captured velocity coasts once the
+						// finger lifts (no more deltas → flag stays false → tickMomentum
+						// runs below).
+						if (touchScrolledThisTick) {
+							return true;
 						}
 						// Momentum-scroll coast: user input stopped this tick but
 						// `handleScroll` left residual velocity behind. Decay one
@@ -2917,6 +2947,13 @@ export class BrowserShell {
 		canvasH: number,
 	): void {
 		if (this.mode !== 'normal') return;
+		// Nothing to paint when the strip is collapsed. Load-bearing: the
+		// overlay's size clamp (`Math.max(1, floor(height))` in
+		// paintToolbarOverlay) would otherwise render a chromeHeight-0 request
+		// as a stray 1px slice — visible at the top (y=0) and clipped off the
+		// bottom edge (y=canvasH). Also covers the transient
+		// `__brewserSetChromeVisible(false)` hide and any future 0-height caller.
+		if (this.chromeHeight <= 0) return;
 		if (!isToolbarOverlayVisible()) return;
 		const tbRoot = getToolbarLiveRoot();
 		if (!tbRoot) return;
@@ -3530,9 +3567,22 @@ export class BrowserShell {
 		// block above runs — recomputing off the fresh flag flips
 		// chromeHeight between 0 and the configured strip height so the
 		// post-save reload lays the page area out with (or without) the
-		// chrome inset.
+		// chrome inset. The paint-overlay GATE must be flipped too, mirroring
+		// the boot path (`setToolbarOverlayVisible` at init): a page reload
+		// re-renders content but does NOT re-run shell boot, so without this
+		// the gate stays armed and `paintHtmlToolbarIfVisible` keeps painting
+		// the strip at height 0 — which the overlay's `Math.max(1, …)` size
+		// clamp renders as a stray 1px line at the top. Turning it back ON also
+		// loads the toolbar root if boot skipped it (booted with the toolbar
+		// off), so re-enabling shows the strip without an app restart.
 		if ('showToolbar' in staged && staged.showToolbar !== prior.showToolbar) {
 			this.chromeHeight = fresh.showToolbar ? fresh.toolbarHeight : 0;
+			if (fresh.showToolbar) {
+				if (!getToolbarLiveRoot()) await this.loadHtmlToolbar();
+				setToolbarOverlayVisible(true);
+			} else {
+				setToolbarOverlayVisible(false);
+			}
 			resetToolbarOverlayCache();
 			this.publishChromeRegion();
 		}

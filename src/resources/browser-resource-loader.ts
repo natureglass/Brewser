@@ -402,6 +402,10 @@ export class BrowserResourceLoader implements ResourceLoader {
 			() => this.renderSettingsBookmarksLink(),
 		);
 		out = out.replace(
+			/<browser-settings-login-link(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-settings-login-link\s*>)?/gi,
+			() => this.renderSettingsLoginLink(),
+		);
+		out = out.replace(
 			/<browser-search(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-search\s*>)?/gi,
 			() => this.renderSearch(),
 		);
@@ -889,6 +893,54 @@ export class BrowserResourceLoader implements ResourceLoader {
 	private renderSettingsBookmarksLink(): string {
 		if (!loadConfig(this.appRoot).showToolbar) return '';
 		return '<a class="munch-link" href="brewser://bookmarks/">Bookmarks</a>';
+	}
+
+	/** The Settings page's "Login" quick-link, with the signed-in user's avatar
+	 * (or the default bitmap) shown to its LEFT. Same source as the toolbar
+	 * avatar: the active session's cached thumb/full bitmap under `shell/auth/`,
+	 * surfaced as a `brewser://auth/…` page URL; falls back to the default asset
+	 * when signed out or the cached file is missing. */
+	private renderSettingsLoginLink(): string {
+		const avatar = this.resolveActiveAvatarUrl();
+		return '<a class="munch-link munch-link--login" href="brewser://googleLogin/">'
+			+ `<img class="settings-login-avatar" src="${htmlEscape(avatar)}" alt="" width="22" height="22">`
+			+ '<span>Login</span>'
+			+ '</a>';
+	}
+
+	/** Resolve the active session's avatar as a `brewser://` page URL, else the
+	 * default avatar asset. Reads the same SDMC auth records the shell's toolbar
+	 * avatar resolver uses (`auth/active.json` → `<provider>-auth.json` → cached
+	 * bitmap path), converting the absolute `shell/…` path to a `brewser://…`
+	 * URL the page image loader resolves back to the same file. */
+	private resolveActiveAvatarUrl(): string {
+		const DEFAULT_AVATAR = 'brewser://assets/avatar_default.png';
+		const SHELL_ROOT = 'sdmc:/switch/brewser/shell/';
+		const AUTH_DIR = `${SHELL_ROOT}auth/`;
+		const readJson = (path: string): Record<string, unknown> | null => {
+			try {
+				const raw = Switch.readFileSync(path);
+				if (!raw || raw.byteLength === 0) return null;
+				const v = JSON.parse(decoder.decode(raw));
+				return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+			} catch { return null; }
+		};
+		const hasBytes = (path: string): boolean => {
+			try { const r = Switch.readFileSync(path); return !!(r && r.byteLength > 0); }
+			catch { return false; }
+		};
+		const active = readJson(`${AUTH_DIR}active.json`);
+		const provider = typeof active?.provider === 'string' ? active.provider : '';
+		if (provider !== 'google' && provider !== 'microsoft') return DEFAULT_AVATAR;
+		const rec = readJson(`${AUTH_DIR}${provider}-auth.json`);
+		if (!rec || typeof rec.id !== 'string' || rec.id.length === 0) return DEFAULT_AVATAR;
+		// Thumb (64×64) preferred over the full bitmap — the slot is tiny.
+		for (const cand of [rec.avatar_local_thumb_path, rec.avatar_local_path]) {
+			if (typeof cand === 'string' && cand.startsWith(SHELL_ROOT) && hasBytes(cand)) {
+				return `brewser://${cand.slice(SHELL_ROOT.length)}`;
+			}
+		}
+		return DEFAULT_AVATAR;
 	}
 
 	private renderSettings(): string {
