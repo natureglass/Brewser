@@ -2815,6 +2815,13 @@ export class BrowserShell {
 			overlayLiveAnimatedCanvases(
 				ctx, getLiveRoot(), viewport, effectiveScrollY,
 				copyBridgeToScreen,
+				// 2D-canvas analogue of forceBridgeReadbackNextPaint above:
+				// the paintLiveOverlay cache blit just stamped the canvas
+				// region with cache pixels that don't hold live 2D content,
+				// so force visible 2D canvases to re-composite here — else a
+				// DOM-mutation repaint (e.g. a doodle app rendering its
+				// per-stroke result) erases the drawing. See webnn doodle bug.
+				{ forceCanvasReblit: true },
 			);
 			// Post-canvas overlay pass. Repaints DOM elements that in
 			// DOM order come after a canvas at the same parent, so
