@@ -138,6 +138,20 @@ export interface BrowserConfig {
 	 * out of the old `BrowserToolbar.page.background` field 2026-06-14
 	 * when the engine-drawn toolbar was ripped out. */
 	pageBackground: string;
+	/** Solid "desktop" backdrop painted behind the shell's transparent-body
+	 * chrome pages (home / apps / settings / …) when the selected
+	 * `themeBackground` is "None" (no static image, no animated shader).
+	 * `backLightTheme` is used when `theme: light`, `backDarkTheme` when
+	 * `theme: dark`. Unlike {@link pageBackground} (the generic content-fill
+	 * behind ALL pages, including external web pages), this is a shell-only
+	 * desktop colour: it is painted by `paintStyleBackground`, which is gated
+	 * to shell pages, so external pages keep the web-default white fill.
+	 * Without it, a "None" background leaves the transparent-body shell pages
+	 * without a per-frame opaque fill and nav elements smear/trail on
+	 * scroll + animation (the live cache marks a `transparent` body bg as
+	 * "opaque", so the shell's page-bg backstop `fillRect` is skipped). */
+	backLightTheme: string;
+	backDarkTheme: string;
 	/** Try NVTEGRA hw-accel video decode first; on first decoder error,
 	 * live-video.ts auto-falls-back to software decode for that
 	 * element. See [[nvtegra-unreliable-on-citron]] — current Citron
@@ -431,6 +445,8 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	toolbar: 'themes/toolbars/dark.html',
 	toolbarHeight: 56,
 	pageBackground: '#0b1220',
+	backLightTheme: '#f0f0f0',
+	backDarkTheme: '#444444',
 	videoNVTEGRA: true,
 	searchEngine: 'DuckDuckGo',
 	wwwRenderChunkMs: 12,
@@ -518,6 +534,12 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			pageBackground: typeof parsed?.pageBackground === 'string' && parsed.pageBackground.length > 0
 				? parsed.pageBackground
 				: DEFAULT_CONFIG.pageBackground,
+			backLightTheme: typeof parsed?.backLightTheme === 'string' && parsed.backLightTheme.length > 0
+				? parsed.backLightTheme
+				: DEFAULT_CONFIG.backLightTheme,
+			backDarkTheme: typeof parsed?.backDarkTheme === 'string' && parsed.backDarkTheme.length > 0
+				? parsed.backDarkTheme
+				: DEFAULT_CONFIG.backDarkTheme,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)

@@ -193,6 +193,23 @@ export interface AppManifest {
 	 * canvas`) — the manifest owns the mode for the app's lifetime; L+R
 	 * / `__swbExitFullscreen` are no-ops while it's in effect. */
 	fullscreen?: boolean;
+	/** When `true`, the shell turns the whole software-mouse layer off for
+	 * this app: the left stick no longer drives a cursor, the cursor sprite
+	 * is hidden, no synthetic mouse/pointer events are dispatched, and the
+	 * mouse layer stops consuming A/B/ZR (so they reach the Gamepad API
+	 * directly). Intended for gamepad games where the on-screen pointer is
+	 * pure interference. Shell-level actions (L=back, PLUS=exit, L+R) are
+	 * unaffected. Reset per navigation, so it only applies while an app
+	 * declaring it is running. */
+	mouseDisable?: boolean;
+	/** When `true`, exiting this app relaunches brewser in a fresh process
+	 * (chainload) instead of returning to the shell in the same one. Intended
+	 * for memory-heavy WASM apps (e.g. Unity/Emscripten builds) whose WASM
+	 * linear memory is not reclaimable within the nx.js process lifetime — a
+	 * clean process on the next launch is the only way to avoid accumulating
+	 * that memory across launches until it OOM-crashes. Costs a ~2-3 s brewser
+	 * restart on exit; opt-in per app. */
+	freshProcessOnExit?: boolean;
 }
 
 /**

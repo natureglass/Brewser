@@ -127,6 +127,7 @@ import {
 	loadAppManifestButtonMapping,
 	resolveNavUrl,
 } from './shell/nav-helpers.js';
+import { canonicalizeLaunchPath } from './update/paths.js';
 import { isSaveButtonDisabled, readStagedSettings } from './shell/staged-settings.js';
 import { subscribeShellAction } from './input/shell-actions.js';
 import {
@@ -150,6 +151,7 @@ import {
 	paintCursorOverlay,
 	setCursorIdleMs,
 	setCursorOverlaySuppressed,
+	setMouseForwardingDisabled,
 } from '@switch-web/runtime';
 import { clearAppButtonOverlay, setAppButtonOverlay, setButtonMapping } from '@switch-web/runtime';
 import {
@@ -335,6 +337,15 @@ export class BrowserShell {
 	 * `effectivePageBackground` to fill the content viewport before
 	 * the live-DOM body paints over it. */
 	private pageBackground: string = DEFAULT_CONFIG.pageBackground;
+	/** Solid desktop backdrop colours for the "no wallpaper" (Background =
+	 * "None") case, cached from `config.json` at boot. `desktopBackColor()`
+	 * picks between them by `colorScheme`. Painted full-viewport by
+	 * `paintStyleBackground` on shell pages so the transparent-body chrome
+	 * pages get an opaque per-frame fill (kills scroll/animation trailing)
+	 * without touching `effectivePageBackground` — the generic content fill
+	 * that must stay web-default white behind external pages. */
+	private backLightTheme: string = DEFAULT_CONFIG.backLightTheme;
+	private backDarkTheme: string = DEFAULT_CONFIG.backDarkTheme;
 	/** Decoded wallpaper image painted between the per-frame viewport
 	 * clear and `paintLiveOverlay` (`paintStyleBackground`). Sourced from
 	 * the selected `backgrounds.json` entry's `background` field (resolved
@@ -399,6 +410,12 @@ export class BrowserShell {
 	 * key the active button-router overlay. `null` when the current page
 	 * is anything else (launcher, settings, home, external WWW page). */
 	private currentAppDir: string | null = null;
+	/** Set from the current app's `manifest.freshProcessOnExit`. When true,
+	 * the `exit` action relaunches brewser in a fresh process (chainload)
+	 * instead of walking history back to the launcher — the only way to shed
+	 * a memory-heavy WASM app's process-lifetime linear memory before the
+	 * next launch. Reset every navigation (see handleHtmlResponseLive). */
+	private currentAppFreshProcessOnExit = false;
 	/** The focused `<video>` element while `mode === 'video-fullscreen'`,
 	 * `null` otherwise. Drives `overlayLiveAnimatedCanvases`'s
 	 * fullscreen-video paint branch. */
@@ -1211,6 +1228,8 @@ export class BrowserShell {
 		// re-introduce the strip.
 		this.chromeHeight = shellConfig.showToolbar ? shellConfig.toolbarHeight : 0;
 		this.pageBackground = shellConfig.pageBackground;
+		this.backLightTheme = shellConfig.backLightTheme;
+		this.backDarkTheme = shellConfig.backDarkTheme;
 		this.toolbarPosition = shellConfig.toolbarPosition;
 		if (shellConfig.showToolbar) {
 			await this.loadHtmlToolbar();
@@ -1581,6 +1600,45 @@ export class BrowserShell {
 						// any non-app page, the historical shell-quit
 						// semantic holds and we return from the input loop.
 						if (this.currentAppDir) {
+							// Manifest `freshProcessOnExit`: relaunch brewser in a
+							// clean process instead of returning to the shell in
+							// this one. A memory-heavy WASM app (Unity/Emscripten)
+							// leaks its multi-hundred-MB linear memory for the
+							// process lifetime — unreclaimable in-process (gc /
+							// LowMemoryNotification proven ineffective), so the
+							// next in-session launch OOM-crashes. A fresh process
+							// sheds it. The chainload never returns (process exits
+							// on the next tick); paint a splash first so the ~2-3 s
+							// restart reads as intentional.
+							if (this.currentAppFreshProcessOnExit) {
+								// Resolve the self NRO path BEFORE tearing anything
+								// down (argv is stable; do it while all machinery is
+								// intact).
+								const selfPath = canonicalizeLaunchPath(
+									(Switch.argv && Switch.argv[0]) || '',
+								);
+								// Reset to shell (grant-all): the brewser NRO lives
+								// OUTSIDE the app sandbox, so under the app policy
+								// `Switch.Application(nroPath)`'s read is denied and
+								// launch() silently no-ops (→ hang). Grant-all lets
+								// the relaunch read the NRO and actually exit.
+								this.policy.setManifestPermissions(null, null, null);
+								// Tear the app session down: stops Unity's rAF/timers/
+								// listeners (quiets the loop so the queued exit lands)
+								// and closes its AudioContext (music stops under the
+								// splash).
+								try { this.webView.stop(); } catch (_) { /* best-effort */ }
+								// Hold a ~2 s "restarting" splash (nativeRaf-driven so
+								// it stays on screen with the input loop suspended),
+								// then relaunch INLINE — NOT via `import('./update/
+								// apply.js')`: stop() tears down the session's module
+								// loader/fetch, so a dynamic import here hangs. The
+								// launch()+suspend inside restartWithSplash queues
+								// envSetNextLoad so the process exits on the next tick.
+								this.restartWithSplash(selfPath);
+								await new Promise<never>(() => {}); // process exits next tick
+								break; // unreachable
+							}
 							// Skip exitFullscreen for the manifest-owned
 							// `fullscreen-app` mode — the onNavigate delegate
 							// at goBack() will reset the mode cleanly, and
@@ -2260,8 +2318,24 @@ export class BrowserShell {
 			// hide, so the mode flip is a no-op (paint gates + CSS
 			// viewport already match).
 			appLaunchFullscreen = manifest?.fullscreen === true && this.chromeHeight > 0;
+			// Manifest `"mouseDisable": true` — turn the whole software-mouse
+			// layer off for this app (hide cursor + stop synthetic mouse/
+			// pointer forwarding + stop consuming A/B/ZR as clicks). Set per
+			// navigation so a non-mouseDisable app / shell page always resets
+			// it to false below. Gamepad games (left stick = movement, A =
+			// action) want this so the stick doesn't drive a cursor and A
+			// doesn't inject clicks.
+			setMouseForwardingDisabled(manifest?.mouseDisable === true);
+			// Manifest `"freshProcessOnExit": true` — exit relaunches brewser
+			// in a clean process (chainload) so a memory-heavy WASM app's
+			// unreclaimable linear memory doesn't accumulate across launches.
+			this.currentAppFreshProcessOnExit = manifest?.freshProcessOnExit === true;
 		} else {
 			clearAppButtonOverlay();
+			// Shell page (launcher / settings / home): always restore the
+			// software-mouse layer.
+			setMouseForwardingDisabled(false);
+			this.currentAppFreshProcessOnExit = false;
 			// Shell page (brewser://home/, brewser://settings/, ...): grant
 			// all manifest-scoped gates. The global `network` toggle in
 			// Settings still applies via `policy.networkEnabled`, but
@@ -2410,6 +2484,16 @@ export class BrowserShell {
 	private effectivePageBackground(): string {
 		if (this.colorScheme === 'light') return '#ffffff';
 		return this.pageBackground;
+	}
+
+	/** Solid desktop-backdrop colour for the "no wallpaper" case, picked by
+	 * the active theme (`backLightTheme` / `backDarkTheme` from config).
+	 * Painted by `paintStyleBackground` on shell pages when Background =
+	 * "None". Distinct from `effectivePageBackground` on purpose: that is the
+	 * generic content fill behind every page (kept web-default white for
+	 * external pages); this is the shell's own desktop colour. */
+	private desktopBackColor(): string {
+		return this.colorScheme === 'dark' ? this.backDarkTheme : this.backLightTheme;
 	}
 
 	/**
@@ -3591,6 +3675,15 @@ export class BrowserShell {
 		if ('pageBackground' in staged && staged.pageBackground !== prior.pageBackground) {
 			this.pageBackground = fresh.pageBackground;
 		}
+		// Desktop backdrop colours (Background = "None"): cache so
+		// `desktopBackColor` picks them up on the next paint. A `theme`
+		// change (handled above) flips which one is used automatically.
+		if ('backLightTheme' in staged && staged.backLightTheme !== prior.backLightTheme) {
+			this.backLightTheme = fresh.backLightTheme;
+		}
+		if ('backDarkTheme' in staged && staged.backDarkTheme !== prior.backDarkTheme) {
+			this.backDarkTheme = fresh.backDarkTheme;
+		}
 		// Wallpaper: a Background-picker change re-resolves + re-applies the
 		// selected entry live (image decode + arm/disarm shader + repaint). A
 		// dynamic wallpaper then animates continuously via the onTick driver.
@@ -4035,13 +4128,20 @@ export class BrowserShell {
 		return true;
 	}
 
-	/** Paint the cached wallpaper inside `viewport` using cover-fit
-	 * (center-crop) sizing. Source rect is computed in image space to
-	 * match the dst aspect ratio; `drawImage(img, sx, sy, sw, sh, …)`
-	 * lets the engine scale + crop in a single op without a `ctx.clip`
-	 * stack frame. No-op when no image is loaded — caller already
-	 * filled the viewport with the page-bg colour, so we just leave
-	 * that fill in place. */
+	/** Paint the shell desktop backdrop inside `viewport`. Wallpaper takes
+	 * precedence: an animated shader (`presentDynamicBackground`) or a cached
+	 * static image drawn cover-fit (center-crop) — source rect computed in
+	 * image space to match the dst aspect ratio so `drawImage(img, sx, sy, sw,
+	 * sh, …)` scales + crops in one op without a `ctx.clip` stack frame. When
+	 * no wallpaper renders this frame (Background = "None", a dynamic shader
+	 * that failed/isn't armed, or a static image still decoding) it fills the
+	 * viewport with the theme's solid `desktopBackColor()` so the shell's
+	 * transparent-body chrome pages get a guaranteed opaque per-frame clear —
+	 * the caller's page-bg backstop `fillRect` is skipped for a transparent
+	 * body (the live cache reports `transparent` as "covered"), which without
+	 * this fill leaves nav elements smearing on scroll + animation. Shell
+	 * pages only (early-returns off app / web / dev-WebGL pages, which keep the
+	 * generic `effectivePageBackground` fill the caller laid down). */
 	private paintStyleBackground(
 		ctx: CanvasRenderingContext2D,
 		viewport: { x: number; y: number; width: number; height: number },
@@ -4067,11 +4167,22 @@ export class BrowserShell {
 			}
 		}
 		const img = this.backgroundImage;
-		if (!img) return;
-		const iw = img.naturalWidth;
-		const ih = img.naturalHeight;
-		if (iw <= 0 || ih <= 0) return;
+		const iw = img ? img.naturalWidth : 0;
+		const ih = img ? img.naturalHeight : 0;
 		if (viewport.width <= 0 || viewport.height <= 0) return;
+		// No wallpaper renders this frame — Background = "None", a
+		// dynamic shader that failed/isn't armed yet, or a static image
+		// still decoding. Paint the theme's solid desktop backdrop over
+		// the whole viewport so the shell's transparent-body chrome pages
+		// stay opaque every frame. Without this the caller's page-bg
+		// backstop `fillRect` is the only clear — and it is skipped for a
+		// transparent body (the live cache reports a `transparent` bg as
+		// "covered"), so nav elements smear/trail on scroll + animation.
+		if (!img || iw <= 0 || ih <= 0) {
+			ctx.fillStyle = this.desktopBackColor();
+			ctx.fillRect(viewport.x, viewport.y, viewport.width, viewport.height);
+			return;
+		}
 		const dstAspect = viewport.width / viewport.height;
 		const srcAspect = iw / ih;
 		let sx = 0, sy = 0, sw = iw, sh = ih;
@@ -4673,6 +4784,59 @@ export class BrowserShell {
 	 * across the load's async yields so an intermediate engine paint can't
 	 * leave it half-covered. `save`/`restore` isolates the centred text align
 	 * so it can't leak into the app's own text paints after the splash stops. */
+	/** Hold a full-screen "restarting" splash for ~2 s, then relaunch brewser
+	 * in a fresh process. Used by the `freshProcessOnExit` app-exit path so the
+	 * shell restart reads as an intentional "freeing memory" step, not a crash.
+	 *
+	 * The caller has already stopped the app session, so the normal paint loop
+	 * is gone — we drive the splash with the native rAF (`this.nativeRaf`, the
+	 * same re-arm the launch/boot splashes use), which keeps ticking even with
+	 * the shell's input loop suspended. After the hold elapses we fire the
+	 * relaunch once and stop re-arming; the caller's suspend lets the queued
+	 * process-exit land. */
+	private restartWithSplash(selfPath: string): void {
+		const canvas = nxScreen();
+		const ctx = canvas.getContext('2d');
+		const raf = this.nativeRaf;
+		const startedAt = performance.now();
+		const HOLD_MS = 3000;
+		let launched = false;
+		const paint = (): void => {
+			try {
+				const w = canvas.width;
+				const h = canvas.height;
+				ctx.save();
+				ctx.fillStyle = '#000000';
+				ctx.fillRect(0, 0, w, h);
+				const cx = Math.round(w / 2);
+				const cy = Math.round(h / 2);
+				ctx.textAlign = 'center';
+				ctx.textBaseline = 'alphabetic';
+				ctx.fillStyle = '#e8e8e8';
+				ctx.font = '600 42px sans-serif';
+				ctx.fillText('Brewser is restarting…', cx, cy - 8);
+				ctx.fillStyle = '#9bb1d6';
+				ctx.font = '400 24px sans-serif';
+				ctx.fillText('Freeing memory so the next launch runs smoothly', cx, cy + 36);
+				ctx.restore();
+			} catch (_) { /* best-effort — a black hold is acceptable */ }
+			if (performance.now() - startedAt >= HOLD_MS) {
+				if (!launched) {
+					launched = true;
+					try {
+						new Switch.Application(selfPath).launch();
+					} catch (e) {
+						console.debug('[brewser] fresh-process relaunch failed: '
+							+ (e instanceof Error ? e.message : String(e)));
+					}
+				}
+				return; // stop re-arming; caller's suspend lets the exit land
+			}
+			raf(paint);
+		};
+		paint();
+	}
+
 	private startLaunchSplash(appName: string): void {
 		if (this.launchSplashActive) return;
 		this.launchSplashActive = true;
