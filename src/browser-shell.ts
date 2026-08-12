@@ -62,7 +62,7 @@ import {
 	videoToggleMute,
 } from '@switch-web/runtime';
 import {
-	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, isAnyModalOpen, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
+	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, hasPendingScreenBlits, isAnyModalOpen, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
 	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveAboveCanvasOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
@@ -147,6 +147,7 @@ import {
 import { KeyboardOverlay, setKeyboardRepaintDriver } from '@switch-web/runtime';
 import { installPageTouchForwarder } from '@switch-web/runtime';
 import {
+	getLastCursorDrawRect,
 	installPageMouseForwarder,
 	paintCursorOverlay,
 	setCursorIdleMs,
@@ -467,6 +468,12 @@ export class BrowserShell {
 	private lastRepaintedLiveVersion: number = -1;
 	private lastRepaintedViewportW: number = -1;
 	private lastRepaintedViewportH: number = -1;
+	/** Modal-layer tree version last FULLY painted. The cursor dirty-rect
+	 * fast path checks this (alongside the live version) so it only recomposits
+	 * a small region when the modal content is byte-identical to the last full
+	 * paint — a modal mutation (rating stars, progress bar) bumps the modal
+	 * version and forces the full path. -1 forces the slow path on first paint. */
+	private lastRepaintedModalVersion: number = -1;
 	/** Live tree version the idle-tick path last repainted. Page-script
 	 * timer mutations (setTimeout/setInterval) bump the tree version but
 	 * fire no rAF / video frame / tap, so without comparing against this
@@ -1557,8 +1564,18 @@ export class BrowserShell {
 						// repaintContent JSDoc), cheap enough to run on
 						// every cursor-move tick. Animated cursors also
 						// need this every tick so the spinner advances.
+						//
+						// Cursor dirty-rect fast path: when the ONLY thing that
+						// changed is the cursor position (page + modal byte-
+						// identical to the last full paint), `repaintCursorRegions`
+						// recomposits just the small rect the old cursor occupied
+						// instead of the whole screen — the win is largest with a
+						// `<browser-modal>` open, where a full repaint pays TWO
+						// full-viewport blits (body cache + modal offscreen). Falls
+						// back to `repaintContent` internally when its
+						// preconditions aren't met.
 						if (mouseTick.cursorChanged) {
-							this.repaintContent();
+							this.repaintCursorRegions();
 							return true;
 						}
 						// Animated wallpaper: on an otherwise-idle tick (nothing
@@ -2551,6 +2568,108 @@ export class BrowserShell {
 		paintCursorOverlay(ctx, canvas);
 	}
 
+	/** Cursor dirty-rect fast path. When a cursor move is the ONLY change
+	 * since the last full paint, the entire screen is byte-identical to that
+	 * paint EXCEPT for the old cursor sprite. Instead of a full re-composite
+	 * (which the modal makes especially costly — body cache blit + backdrop
+	 * fill + modal offscreen blit, two full-viewport `drawImage`s), we clip to
+	 * the small rect the old cursor occupied and recomposite ONLY that region
+	 * from the already-warm caches, erasing the old cursor. The new cursor is
+	 * then stamped (unclipped) over pixels that were already correct — nothing
+	 * was drawn there last frame, so a src-over stamp is exact.
+	 *
+	 * Reuses the same `drawImage`-from-cache composite as the slow path (alpha-
+	 * correct), NOT a `getImageData`/`putImageData` save/restore — that
+	 * approach was tried for the cursor before and reverted for Skia premult
+	 * corruption (see page-mouse-forwarder `isCursorVisible` note). Skia bounds
+	 * rasterisation to the clip, so each clipped full-viewport blit only
+	 * touches ~cursor-sized pixels.
+	 *
+	 * Bails to a full `repaintContent` whenever a precondition fails: no prior
+	 * cursor rect (bootstrap / just un-hidden), unbuilt cache, queued image
+	 * blits (a clipped paint would drop pixels outside the cursor rect — the
+	 * cache blit clears that queue unconditionally), any system overlay up
+	 * (keyboard / pickers paint only on the slow path), a dynamic wallpaper
+	 * (it must re-present every frame or it freezes outside the clip), or any
+	 * version / scroll / viewport drift from the last full paint. */
+	private repaintCursorRegions(): void {
+		const oldR = getLastCursorDrawRect();
+		if (
+			oldR === null
+			|| !(this.mode === 'normal' || this.mode === 'fullscreen-page' || this.mode === 'fullscreen-app')
+			|| this.dynamicBgActive
+			|| !isLiveCacheReady()
+			|| isLiveCacheBuilding()
+			|| hasPendingScreenBlits()
+			|| isExternalCssLoading()
+			|| isKeyboardOverlayVisible()
+			|| isFilePickerOverlayVisible()
+			|| isSelectModalOverlayVisible()
+			|| isDatePickerOverlayVisible()
+			|| isTimePickerOverlayVisible()
+			|| isColorPickerOverlayVisible()
+			|| isNumberPickerOverlayVisible()
+			|| getLiveTreeVersion() !== this.lastRepaintedLiveVersion
+			|| getModalTreeVersion() !== this.lastRepaintedModalVersion
+		) {
+			this.repaintContent();
+			return;
+		}
+		const canvas = nxScreen();
+		const ctx = canvas.getContext('2d');
+		const chromeHeight = this.chromeHeight;
+		const isBottomToolbar = this.toolbarPosition === 'bottom';
+		const paintTopInset = this.mode === 'normal' && !isBottomToolbar ? chromeHeight : 0;
+		const paintBottomInset = this.mode === 'normal' && isBottomToolbar ? chromeHeight : 0;
+		const effectiveScrollY = this.currentScrollY + this.paintScrollAdjust();
+		const viewport = {
+			x: 0,
+			y: paintTopInset,
+			width: canvas.width,
+			height: canvas.height - paintTopInset - paintBottomInset,
+		};
+		// The warm caches + modal offscreen are positioned for the last full
+		// paint's scroll/viewport; a mismatch means a resize/scroll slipped in
+		// without a repaint — fall back rather than blit stale-positioned pixels.
+		if (
+			effectiveScrollY !== this.lastRepaintedScrollY
+			|| viewport.width !== this.lastRepaintedViewportW
+			|| viewport.height !== this.lastRepaintedViewportH
+		) {
+			this.repaintContent();
+			return;
+		}
+		const t0 = performance.now();
+		ctx.save();
+		try {
+			// Clip to the padded old-cursor rect (±1px covers AA fringe). The
+			// composite below only rasterises inside this rect.
+			ctx.beginPath();
+			ctx.rect(oldR.x - 1, oldR.y - 1, oldR.w + 2, oldR.h + 2);
+			ctx.clip();
+			// Same composite order as the slow path in `repaintContentInner`
+			// (page-bg backstop → wallpaper → live cache → modal → toolbar),
+			// minus the animation/overlay passes that the preconditions above
+			// ruled out. Each call is clipped, so all the full-viewport blits
+			// cost only the cursor-rect area.
+			if (!liveCacheCoversViewportOpaque(viewport.height)) {
+				ctx.fillStyle = this.effectivePageBackground();
+				ctx.fillRect(0, paintTopInset, canvas.width, canvas.height - paintTopInset - paintBottomInset);
+			}
+			this.paintStyleBackground(ctx, viewport);
+			paintLiveOverlay(ctx, getLiveRoot(), viewport, effectiveScrollY);
+			paintModalOverlay(ctx, viewport);
+			this.paintHtmlToolbarIfVisible(ctx, canvas.width, canvas.height);
+		} finally {
+			ctx.restore();
+		}
+		// Stamp the cursor at its new position (unclipped) over now-correct
+		// pixels, and record the new rect for next frame's erase.
+		paintCursorOverlay(ctx, canvas);
+		this.lastCpuPresentMs = performance.now() - t0;
+		this.cpuPresentCallCount++;
+	}
+
 	private repaintContentInner(
 		ctx: CanvasRenderingContext2D,
 		canvas: ReturnType<typeof nxScreen>,
@@ -2889,6 +3008,7 @@ export class BrowserShell {
 		this.cpuPresentCallCount++;
 		this.lastRepaintedScrollY = effectiveScrollY;
 		this.lastRepaintedLiveVersion = getLiveTreeVersion();
+		this.lastRepaintedModalVersion = getModalTreeVersion();
 		this.lastRepaintedViewportW = viewport.width;
 		this.lastRepaintedViewportH = viewport.height;
 	}
@@ -3259,6 +3379,7 @@ export class BrowserShell {
 		this.cpuPresentCallCount++;
 		this.lastRepaintedScrollY = effectiveScrollY;
 		this.lastRepaintedLiveVersion = getLiveTreeVersion();
+		this.lastRepaintedModalVersion = getModalTreeVersion();
 		this.lastRepaintedViewportW = viewport.width;
 		this.lastRepaintedViewportH = viewport.height;
 	}
