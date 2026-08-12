@@ -1,7 +1,42 @@
 {
   "version": 1,
-  "generated": "2026-08-06T11:27:11Z",
+  "generated": "2026-08-11T14:17:38Z",
   "apps": [
+    {
+      "id": "com.natureglass.2dplatformermicrogame",
+      "name": "2D Platformer Microgame",
+      "version": "1.0.3",
+      "description": "<p><strong>2D Platformer Microgame</strong> is Unity's official learning template — a complete little side-scroller — compiled to WebGL and running natively on the Switch GPU, entirely offline.</p>\r\n<p><strong>How it works.</strong> This is a real Unity engine build (Unity 2021.3 LTS, Universal Render Pipeline) exported to WebAssembly. The whole game — physics, tilemap, animation, the Cinemachine follow-camera and TextMeshPro UI — runs inside the Brewser runtime through its <em>WebGL bridge</em>, which forwards the engine's draw calls to the console's graphics chip. The compressed build was unpacked so it loads from local storage with no web server.</p>\r\n<p><strong>How you play:</strong></p>\r\n<ul>\r\n<li><strong>Move</strong> — left stick or D-pad to run left and right.</li>\r\n<li><strong>Jump</strong> — the jump button to hop between platforms.</li>\r\n<li><strong>Collect &amp; avoid</strong> — grab pickups and dodge hazards through the level.</li>\r\n</ul>\r\n<p>A full Unity game engine, rendered live on Switch. Built from Unity's free 2D Platformer Microgame template.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Demos",
+        "Games"
+      ],
+      "permissions": [
+        "storage"
+      ],
+      "compatibility": [
+        "switch"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "mouseDisable": true,
+      "freshProcessOnExit": true,
+      "publishedAt": "2026-08-08T11:36:13Z",
+      "summary": "Unity's official 2D Platformer learning template, compiled to WebGL and running on the Switch GPU of",
+      "genre": [
+        "Platformer"
+      ],
+      "features": [
+        "Gamepad",
+        "Media Devices"
+      ],
+      "sizeBytes": 29104133
+    },
     {
       "id": "com.natureglass.aether",
       "name": "Aether",
@@ -32,12 +67,41 @@
         "WebGL2",
         "Kaleidoscope"
       ],
-      "sizeBytes": 121545
+      "sizeBytes": 121545,
+      "featured": true
+    },
+    {
+      "id": "com.natureglass.compass",
+      "name": "Compass",
+      "version": "1.0.1",
+      "description": "<p><strong>Compass</strong> is a working magnetic compass rendered entirely in WebGL. It reads your device's orientation sensors to point at magnetic north, showing a precise heading in degrees and the cardinal direction you're facing — on a hand-drawn dial that swings smoothly like the real thing.</p>\r\n<p><strong>How it works.</strong> Every part of the dial — the graduated ring, the tick marks, the degree numbers, the cardinal letters and the needle — is built from scratch as WebGL geometry, with the text baked into a small glyph atlas so it stays crisp at any size. The app listens to your device's <em>absolute</em> orientation sensor (falling back to relative orientation, or Safari's compass heading on iOS) and corrects for however the screen itself is rotated, then eases the dial toward that heading with a damped spring so the needle settles naturally instead of snapping. When no compass hardware is feeding it — on a desktop, say — it drifts gently in a demo mode, and you can grab the dial and spin it yourself. Because orientation sensors are privacy-sensitive, some devices show an <em>Enable compass</em> button to grant permission first.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Point</strong> — hold the device flat and turn; the dial rotates to keep north fixed while the readout shows your live heading and cardinal direction.</li>\r\n<li><strong>Enable compass</strong> — on devices that ask, tap once to grant sensor permission (the status switches from <em>DEMO</em> to <em>LIVE</em>).</li>\r\n<li><strong>Drag</strong> — with no live sensor connected, drag the dial to spin it by hand.</li>\r\n<li><strong>Day / Night</strong> — toggle the light and dark themes with the button, or the <em>N</em>, <em>D</em> and space keys; it also picks one automatically based on the time of day.</li>\r\n</ul>\r\n<p>A compact, framework-free compass that works fully offline and falls back gracefully wherever a sensor or WebGL isn't available.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Apps",
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "mobile",
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "mouseDisable": true,
+      "freshProcessOnExit": false,
+      "publishedAt": "2026-08-10T12:06:24Z",
+      "summary": "A hand-drawn WebGL compass that points to magnetic north from your device's sensors.",
+      "sizeBytes": 38072
     },
     {
       "id": "com.natureglass.fluiddynamics",
       "name": "Fluid dynamics",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "<p><strong>Fluid dynamics</strong> is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate.</p>\r\n<p><strong>How it works.</strong> Every frame the app runs a chain of GPU shader passes over floating-point textures. It first computes the fluid's <em>curl</em> and adds a vorticity force to keep the motion lively and turbulent, then makes the flow <em>incompressible</em> by solving for pressure over roughly twenty iterations and subtracting its gradient from the velocity field. The velocity and the coloured dye are then <em>advected</em> — carried along the flow — and both fade slightly each step so trails dissipate naturally. The simulation runs on a compact velocity grid while the dye is rendered at much higher resolution for crisp detail, with a lighting pass that shades the fluid from its own density gradients to give it depth.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — drag anywhere to inject dye and push the fluid; the <em>direction and speed</em> of your stroke become the force applied, and the colour drifts through the rainbow as you move. <em>Multi-touch is supported</em>, so several fingers stir at once.</li>\r\n<li><strong>Burst</strong> — fires several randomly aimed splats of colour and force into the field for an instant explosion of motion.</li>\r\n<li><strong>Particles</strong> — toggles a layer of ~16,000 GPU particles that ride the velocity field, brightening where the flow moves fastest, then wrap and respawn to keep coverage even.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Everything runs locally with no network access, and the app automatically probes the device for the best supported float texture formats so it degrades gracefully across GPUs.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -60,12 +124,13 @@
         "Fluids",
         "Visualizer"
       ],
-      "sizeBytes": 87922
+      "sizeBytes": 86917,
+      "featured": true
     },
     {
       "id": "com.natureglass.fractalzoom",
       "name": "Fractal Zoom",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "<p><strong>Fractal Zoom</strong> is a GPU-powered explorer for six infinitely detailed fractals. Dive endlessly into these mathematical worlds, panning and zooming smoothly to reveal intricate structure at every scale, all rendered in real time with WebGL2.</p>\r\n<p><strong>How it works.</strong> Most of the fractals — the <em>Mandelbrot</em>, <em>Julia</em>, <em>Burning Ship</em>, <em>Phoenix</em> and <em>Koch</em> sets — are drawn by a fragment shader covering the whole screen: for every pixel it treats the point as a complex number and repeatedly applies the fractal's formula (up to around 700 times) to see how quickly the value \"escapes\". The number of steps is coloured through a smooth cosine palette, and the iteration count automatically scales up as you zoom in so detail keeps resolving no matter how deep you go. The <em>Barnsley Fern</em> works differently: thousands of points are stepped through a chaos game on the CPU and accumulated into a brightness buffer, then tone-mapped for a soft, photographic look.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Zoom &amp; pan</strong> — drag, hold, or use the scroll wheel to zoom continuously toward wherever you point; a heads-up display shows the current fractal name and zoom factor.</li>\r\n<li><strong>Fractal</strong> — cycles through the six different fractal types.</li>\r\n<li><strong>Cycle</strong> — hold to animate the colour palette, sending waves of colour through the image.</li>\r\n<li><strong>Reset</strong> — recenters and returns to the starting view.</li>\r\n<li><strong>Full screen</strong> — maximises the canvas for the best detail.</li>\r\n</ul>\r\n<p>Rendered entirely on the GPU with dithering to hide colour banding, and it needs no internet connection.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -88,12 +153,12 @@
         "Fractals",
         "Visualizer"
       ],
-      "sizeBytes": 68119
+      "sizeBytes": 67053
     },
     {
       "id": "com.natureglass.gravityballs",
       "name": "Gravity Balls",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "description": "<p><strong>Gravity Balls</strong> is a relaxing physics sandbox where a set of colourful balls fall, bounce and jostle against each other and the walls — and gravity points wherever you tilt.</p>\r\n<p><strong>How it works.</strong> A proper physics engine runs behind the scenes. Each frame is broken into several small sub-steps, and within each step the app nudges every ball's velocity by gravity, then repeatedly resolves collisions — ball-against-wall and ball-against-ball — using impulses that account for each ball's mass (bigger balls are heavier), bounciness and friction. This <em>iterative</em> approach lets balls pile up and settle into stable stacks instead of jittering or sinking through one another. Drawing is just as efficient: a single instanced WebGL2 draw call renders every ball from one shared shape, and a shader turns each into a crisp, smoothly anti-aliased disc.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Tilt to steer gravity</strong> — on a device with a motion sensor, physically tilting it pulls the balls in that direction (the display reads <em>IMU LIVE</em>).</li>\r\n<li><strong>Drag</strong> — with no motion sensor, dragging on the screen points gravity toward your finger instead.</li>\r\n<li><strong>Full screen</strong> — fills the display for the full effect.</li>\r\n</ul>\r\n<p>A lightweight, self-contained demo that runs completely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -116,12 +181,13 @@
       "tags": [
         "Gyroscope"
       ],
-      "sizeBytes": 37394
+      "sizeBytes": 35320,
+      "featured": true
     },
     {
       "id": "com.natureglass.metaballssim",
       "name": "Metaballs sim",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "<p><strong>Metaballs sim</strong> is a relaxing fluid sandbox where dozens of soft water blobs fall, pool and merge into one gooey, rolling surface.</p>\r\n<p><strong>How it works.</strong> Two things run at once. Behind the scenes a lightweight particle simulation gives every blob <em>gravity</em>, plus <em>viscosity</em> and <em>cohesion</em> forces that pull neighbours together and let overlaps relax apart, so the crowd flows and settles like a thick liquid. On screen it uses the classic <em>metaball</em> trick: in a first pass each blob splats a soft circular <em>field</em> into an offscreen texture using <em>additive blending</em>, so wherever two blobs sit close their fields add up; a second full-screen pass then <em>thresholds</em> that combined field into flat colour bands — edge, fill and a bright dense core — making separate circles visually fuse into a single liquid shape. Everything is drawn with WebGL2 in just a couple of draw calls.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Drag</strong> — swirl the pool; blobs near your finger get pulled along with it.</li>\r\n<li><strong>Tap the top</strong> — pours fresh blobs in from above that drip down and merge into the water.</li>\r\n<li><strong>Cycle</strong> — hold to roll the colour smoothly through the spectrum, release to keep whatever hue it lands on.</li>\r\n<li><strong>Size + / Size -</strong> — makes newly poured blobs bigger or smaller.</li>\r\n<li><strong>Reset</strong> — clears everything back to the neat starting grid and the default blue.</li>\r\n<li><strong>Full screen</strong> — fills the display for the full effect.</li>\r\n</ul>\r\n<p>A self-contained demo that runs completely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -143,13 +209,13 @@
       "tags": [
         "Fluids"
       ],
-      "sizeBytes": 30969
+      "sizeBytes": 29999
     },
     {
-      "id": "com.natureglass.midilab",
-      "name": "MIDI Lab",
-      "version": "1.0.0",
-      "description": "<p><strong>MIDI Lab</strong> is a universal MIDI-controller tester, synthesizer and visual playground. Plug in a keyboard, pad grid or knob controller and the app builds an on-screen mirror of your exact device, then lights up every note, pad and dial as you play it — while turning your performance into sound and reactive graphics.</p>\r\n<p><strong>How it works.</strong> The app connects to your hardware two ways, with an automatic fallback. First it tries the browser's built-in <em>Web MIDI</em> support; if that isn't available it falls back to <em>WebUSB</em>, claiming the controller directly and decoding its raw USB-MIDI packets itself. It then matches your device's name against a bundled database of known controllers to draw the right layout of pads, keys, faders and knobs (unknown gear gets a sensible generic panel). Every incoming message flows through one pipeline: it's logged in the monitor, played through the synth, and used to drive the visuals. The synthesizer is built with Web Audio — each note stacks two oscillators through a filter and envelope, then a chain of drive, bit-crushing, reverb and delay — and your knobs and faders are mapped straight onto its parameters like filter cutoff, resonance and reverb. Meanwhile a WebGL2 feedback background bursts and glows in time with your notes.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Enable Audio</strong> — unlocks sound (browsers require one tap first); do this before playing.</li>\r\n<li><strong>Pair MIDI / Pair USB</strong> — connect your controller through Web MIDI or, as a fallback, WebUSB.</li>\r\n<li><strong>Play</strong> — the on-screen widgets respond live; on devices with lights, tapping an on-screen pad even sends a signal back to illuminate the real hardware.</li>\r\n<li><strong>Monitor</strong> — a collapsible panel logs every incoming message as decoded, timestamped data, with a one-tap clear.</li>\r\n<li><strong>Full screen</strong> — expands the interface for performance.</li>\r\n</ul>\r\n<p>Self-contained and offline, with the layout adapting automatically to whatever controller you connect.</p>",
+      "id": "com.natureglass.midisurface",
+      "name": "MIDI Surface",
+      "version": "1.0.3",
+      "description": "<p><strong>MIDI Surface</strong> is a touch-driven MIDI control surface and sample instrument. It draws your controller as an on-screen grid of glowing pads, knobs and faders that light up as you play the real hardware — and, on devices with lit pads, tapping the screen sends the signal back to illuminate the hardware in return. Every pad can also fire a looping audio sample shaped by live effects.</p>\r\n<p><strong>How it works.</strong> The app connects to your controller through the browser's <em>Web MIDI</em> and reads a bundled profile (shipping with an AKAI LPD8 preset) that describes the grid and one or more channel <em>banks</em> of pads, knobs and faders. Incoming notes and CC messages light the matching control on screen; touching a control sends MIDI straight back out on the same channel the hardware speaks on, so the device's LEDs stay in sync. Each pad holds a looping sample played through a Web Audio engine, and every pad carries its own effect chain — volume, pitch, reverb and chorus. Knobs and faders are assigned to drive an effect on a chosen pad, so a dial becomes, say, the reverb on pad 3. Pads can be momentary or sticky (<em>switch</em>) toggles, and speak either notes or CC for controllers running in CC mode.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Enable audio</strong> — tap once to unlock sound (browsers require a first tap) before you play.</li>\r\n<li><strong>Play the grid</strong> — tap pads to trigger their samples and drag a knob or fader up and down to sweep its effect; hardware and touch stay mirrored.</li>\r\n<li><strong>Channel banks</strong> — switch between mapping banks with the CH buttons in the header.</li>\r\n<li><strong>REC learn</strong> — arm a trigger, then hit a pad or turn a knob on your controller to assign its note or CC automatically.</li>\r\n<li><strong>Stop all</strong> — release every held pad and silence all audio in a single press.</li>\r\n<li><strong>Settings</strong> — pick a controller, edit each trigger's type and note, assign or browse local samples, map knobs to pad effects, and Load or Export the whole setup as JSON.</li>\r\n</ul>\r\n<p>Self-contained and offline — plug in a USB MIDI controller, or play the surface entirely by touch.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
       "categories": [
@@ -159,6 +225,7 @@
         "usb"
       ],
       "compatibility": [
+        "mobile",
         "switch",
         "web"
       ],
@@ -167,21 +234,22 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "publishedAt": "2026-08-06T10:44:35Z",
-      "summary": "Test MIDI controllers and play a built-in synth via Web MIDI or USB.",
+      "mouseDisable": true,
+      "freshProcessOnExit": false,
+      "publishedAt": "2026-08-10T21:22:28Z",
+      "summary": "A touch MIDI control surface that mirrors your hardware and triggers looping samples with live effec",
       "features": [
-        "Web MIDI",
-        "Web USB"
+        "Web MIDI"
       ],
       "tags": [
         "MIDI"
       ],
-      "sizeBytes": 121929
+      "sizeBytes": 2978271
     },
     {
       "id": "com.natureglass.neuralnetworks",
       "name": "Neural Networks",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "description": "<p><strong>Neural Networks</strong> is a live handwriting classifier that runs a real convolutional neural network right in the browser. Draw a digit from 0 to 9 and the model instantly guesses what it is, showing its confidence and a probability bar for every possible digit — and no data ever leaves your device.</p>\r\n<p><strong>How it works.</strong> The app is a working demonstration of <em>WebNN</em>, a browser standard for running machine-learning models with hardware acceleration. It builds a small network — two convolution-and-pooling stages followed by a classification layer and a softmax — and loads the pre-trained weights that were learned from the classic MNIST handwriting dataset. If your browser supports WebNN it runs the network on the native engine (potentially on the GPU or a neural accelerator); if not, it transparently falls back to a built-in pure-JavaScript engine that computes the exact same math, so it always works. When you finish a stroke, the app cleans up your drawing the same way the training data was prepared: it finds the ink, crops and scales it, and re-centres it by its centre of mass into a small 28×28 grid before feeding it to the network. The ten output scores are ranked, and the winner becomes the prediction.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — sketch a digit on the pad (touch and mouse both work); it classifies automatically when you lift your finger.</li>\r\n<li><strong>Clear</strong> — wipes the pad to start a new doodle.</li>\r\n<li><strong>Benchmark</strong> — runs the network many times in a row and reports the average and fastest inference time.</li>\r\n<li><strong>Status readouts</strong> — chips show which engine is active (turning amber when running on the JavaScript fallback rather than native WebNN), the device, and the last run's timing.</li>\r\n</ul>\r\n<p>A compact, framework-free look at in-browser neural networks that works fully offline once loaded.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -200,13 +268,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "mouseDisable": true,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:36:13Z",
       "summary": "Draw a doodle and let an on-device WebNN model guess what it is.",
       "tags": [
         "Probability",
         "WebNN"
       ],
-      "sizeBytes": 91274
+      "sizeBytes": 91324,
+      "featured": true
     },
     {
       "id": "com.natureglass.nxjswebgl1test",
@@ -326,7 +397,8 @@
       "tags": [
         "Gyroscope"
       ],
-      "sizeBytes": 102659
+      "sizeBytes": 102659,
+      "featured": true
     },
     {
       "id": "com.natureglass.spectraplay",
@@ -353,7 +425,8 @@
         "Audio Player",
         "Visualizer"
       ],
-      "sizeBytes": 158718
+      "sizeBytes": 158718,
+      "featured": true
     },
     {
       "id": "com.natureglass.speedtest",
@@ -383,6 +456,31 @@
       "sizeBytes": 62066
     },
     {
+      "id": "com.natureglass.speedwatch",
+      "name": "Speed Watch",
+      "version": "1.0.1",
+      "description": "<p><strong>Speed Watch</strong> turns your device into a GPS speedometer with a live map and automatic speed-limit alerts — a full driving head-up dashboard in a single page, with no libraries, no API keys, and no account.</p>\r\n<p><strong>How it works<br /></strong>A large canvas speedometer is the hero: your live speed swings an eased needle around a 270° dial styled after European road signage, with a big digital readout and a green \"legal\" zone that turns red past the posted limit.</p>\r\n<p>Speed comes straight from the device's GPS through the standard geolocation API — and where the hardware doesn't report speed directly, the app derives it from how far you've moved between fixes, smoothing the reading so a parked device settles to zero instead of creeping.</p>\r\n<p>Alongside the dial, a hand-written renderer paints OpenStreetMap tiles directly onto a canvas (no mapping library) and marks your position with a heading arrow and a GPS-accuracy ring; you can drag, pinch and zoom it, or let it follow you and tap <strong>Re-center</strong> to snap back.</p>\r\n<p>The posted speed limit is looked up live from OpenStreetMap's Overpass service for the road you are actually on — matched by both distance and heading so a parallel side-street doesn't fool it — and shown as a speed-sign roundel on the gauge. When you go over the limit (plus your chosen tolerance), a \"speed robot\" chirps a warning, keeps nagging until you slow down, and flashes a <strong>SLOW DOWN</strong> banner.</p>\r\n<p><strong>What it gives you:</strong><br /><strong>Live speedometer</strong> — an eased needle and digital readout on a road-sign-style dial, in km/h or mph.<br /><strong>Automatic speed limits</strong> — the posted limit for your current road, pulled live from OpenStreetMap (no API key) and drawn as a European limit roundel. - <br /><strong>Over-limit alerts</strong> — audible beeps with an adjustable tolerance (0, +3, +5, +10) and hysteresis, so it warns you without chattering at the threshold.<br /><strong>Live map</strong> — a canvas OpenStreetMap view with your heading arrow and accuracy ring; drag, pinch-zoom, follow, and re-center.<br /><strong>Night mode</strong> — a dark theme with an inverted map for comfortable driving after dark.</p>\r\n<p><strong>Keep-awake</strong> — an optional screen Wake Lock so the display stays on while you drive.</p>\r\n<p><strong>Demo drive</strong> — a fake-GPS circuit that ramps up and down over a limit, so you can try everything from your desk with no movement required.</p>\r\n<p>Your preferences (units, alert tolerance, night mode, sound) are remembered on the device. <strong>Requires location (GPS) access and an internet connection</strong> — the map tiles and speed-limit lookups both come from OpenStreetMap. It's happiest on a phone mounted in a vehicle; flip on <strong>Demo drive</strong> in Settings to explore it while stationary.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Apps",
+        "Automation"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "mobile",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "publishedAt": "2026-08-09T12:49:28Z",
+      "summary": "Free GPS speedometer with a live map and automatic speed-limit alerts",
+      "sizeBytes": 68537
+    },
+    {
       "id": "com.natureglass.streamcast",
       "name": "Stream Cast",
       "version": "1.0.0",
@@ -392,11 +490,17 @@
       "categories": [
         "Apps"
       ],
-      "permissions": [],
+      "permissions": [
+        "network"
+      ],
       "compatibility": [
         "switch"
       ],
-      "allowed_origins": [],
+      "allowed_origins": [
+        "https://gql.twitch.tv",
+        "https://usher.ttvnw.net",
+        "https://player.twitch.tv"
+      ],
       "developer": "Alex Daskalakis",
       "license": "MIT",
       "exitGame": "PLUS",
@@ -407,7 +511,8 @@
         "Twitch",
         "Streaming"
       ],
-      "sizeBytes": 74519
+      "sizeBytes": 74650,
+      "featured": true
     },
     {
       "id": "com.natureglass.threejsdynamiccubemapreflection",
@@ -547,7 +652,8 @@
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 6795312
+      "sizeBytes": 6795312,
+      "featured": true
     },
     {
       "id": "com.natureglass.threejspostprocessingpixelation",
