@@ -129,6 +129,12 @@
     setProgress(1, '');
     statusEl.innerHTML = 'Update ready' + (res.version ? ' (v' + escapeHtml(res.version) + ')' : '');
     closeBtn.innerHTML = 'Restart Now';
+    // Auto-restart: staging is complete, so fire the exact action the "Restart
+    // Now" button triggers instead of waiting for a click. The button stays as a
+    // fallback (doRestart() falls back to close() if applyStaged is missing), and
+    // the `!modalOpen` guard above already suppresses this if the user dismissed
+    // the modal mid-download.
+    doRestart();
   }
 
   async function doRestart() {

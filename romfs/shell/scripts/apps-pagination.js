@@ -45,6 +45,7 @@
     recent: 'apps-tab-recent',
     popular: 'apps-tab-popular',
     toprated: 'apps-tab-toprated',
+    downloads: 'apps-tab-downloads',
     myapps: 'apps-tab-myapps',
   };
 

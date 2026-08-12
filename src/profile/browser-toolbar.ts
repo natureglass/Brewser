@@ -25,6 +25,7 @@
  */
 
 import {
+	buildDownloadsTab,
 	buildLibraryTabs,
 	buildMyAppsTab,
 	enumerateInstalledApps,
@@ -823,6 +824,12 @@ export interface LibraryPager {
 	 * (shared across tabs — `buildLibraryTabs` copies the array, not the
 	 * objects). Mapping to card models is deferred to `pagerPageEntries`. */
 	views: Record<LibraryTabId, LibraryTabView>;
+	/** The "Downloads" facet: apps physically installed on this SD card
+	 * (`installed !== null`) — the same disk truth that dims not-installed
+	 * cards. Never null: unlike My Apps / Favorites it needs no signed-in
+	 * document, so the tab is always present (an empty install set renders the
+	 * plain empty state). */
+	downloads: LibraryTabView;
 	/** The per-user "My Apps" view, or null when no cached my-catalogue exists
 	 * (the tab + label stay hidden in that case). */
 	myApps: LibraryTabView | null;
@@ -901,6 +908,10 @@ export function buildLibraryPager(appRoot: string): LibraryPager {
 	const library = joinLibrary(enumeration.apps, catalogue);
 	const views = buildLibraryTabs(library, stats);
 
+	// "Downloads" — the local-install facet from the SAME disk enumeration
+	// (installed apps only), always present regardless of catalogue / sign-in.
+	const downloads = buildDownloadsTab(library);
+
 	// Per-user "My Apps" — a SECOND catalogue (the WordPress-generated
 	// my-catalogue restricted to the signed-in user's own apps). Absent /
 	// unparseable ⇒ null (tab + label hidden). Reuses the single enumeration
@@ -938,20 +949,21 @@ export function buildLibraryPager(appRoot: string): LibraryPager {
 		}
 	}
 
-	return { views, myApps, favorites, stats, appRoot };
+	return { views, downloads, myApps, favorites, stats, appRoot };
 }
 
 /** The sorted view for a tab id, or null for an absent My Apps / Favorites. */
-function pagerViewOf(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites'): LibraryTabView | null {
+function pagerViewOf(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites' | 'downloads'): LibraryTabView | null {
 	if (tab === 'myapps') return pager.myApps;
 	if (tab === 'favorites') return pager.favorites;
+	if (tab === 'downloads') return pager.downloads;
 	return pager.views[tab];
 }
 
 /** Total pages for a tab at the given page size (always ≥ 1). Unavailable /
  * empty tabs report 1 page — the renderer shows the reason / empty state and
  * the pager collapses. */
-export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites', perPage: number): number {
+export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites' | 'downloads', perPage: number): number {
 	const view = pagerViewOf(pager, tab);
 	const per = perPage > 0 ? perPage : 1;
 	if (!view || !view.available || view.apps.length === 0) return 1;
@@ -961,7 +973,7 @@ export function pagerTotalPages(pager: LibraryPager, tab: LibraryTabId | 'myapps
 /** Map ONE page of a tab to card models — slices the sorted `LibraryApp[]` and
  * maps only that window, so paging stays O(perPage) no matter how large the
  * catalogue is. Clamped to [1, totalPages]. */
-export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites', page: number, perPage: number): AppEntry[] {
+export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites' | 'downloads', page: number, perPage: number): AppEntry[] {
 	const view = pagerViewOf(pager, tab);
 	if (!view || !view.available) return [];
 	const per = perPage > 0 ? perPage : 1;
@@ -979,7 +991,7 @@ export function pagerPageEntries(pager: LibraryPager, tab: LibraryTabId | 'myapp
  * pager (`__brewserAppsPager`) takes over for pages 2…N. Returns an
  * unavailable/empty descriptor for an absent My Apps (the caller gates the tab
  * on `pager.myApps` and renders nothing in that case). */
-export function pagerTabRender(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites', perPage: number): LibraryTabRender {
+export function pagerTabRender(pager: LibraryPager, tab: LibraryTabId | 'myapps' | 'favorites' | 'downloads', perPage: number): LibraryTabRender {
 	const view = pagerViewOf(pager, tab);
 	if (!view) return { available: false, reason: '', entries: [] };
 	if (!view.available) return { available: false, reason: view.reason, entries: [] };

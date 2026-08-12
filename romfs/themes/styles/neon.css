@@ -275,6 +275,7 @@ input[name="apps-tab"] { display: none; }
 #apps-tab-recent:checked ~ .page-shell .tab-label[for="apps-tab-recent"],
 #apps-tab-popular:checked ~ .page-shell .tab-label[for="apps-tab-popular"],
 #apps-tab-toprated:checked ~ .page-shell .tab-label[for="apps-tab-toprated"],
+#apps-tab-downloads:checked ~ .page-shell .tab-label[for="apps-tab-downloads"],
 #apps-tab-myapps:checked ~ .page-shell .tab-label[for="apps-tab-myapps"] {
   color: #05060a;
   background: #faff00;
@@ -285,6 +286,7 @@ input[name="apps-tab"] { display: none; }
 #apps-tab-recent:checked ~ .page-shell .tab-panel[data-tab="recent"],
 #apps-tab-popular:checked ~ .page-shell .tab-panel[data-tab="popular"],
 #apps-tab-toprated:checked ~ .page-shell .tab-panel[data-tab="toprated"],
+#apps-tab-downloads:checked ~ .page-shell .tab-panel[data-tab="downloads"],
 #apps-tab-myapps:checked ~ .page-shell .tab-panel[data-tab="myapps"] {
   display: block;
 }

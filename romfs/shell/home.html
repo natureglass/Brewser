@@ -70,6 +70,10 @@
 <input type="radio" id="apps-tab-recent" name="apps-tab"<browser-home-checked section="recent"/>>
 <input type="radio" id="apps-tab-popular" name="apps-tab"<browser-home-checked section="popular"/>>
 <input type="radio" id="apps-tab-toprated" name="apps-tab"<browser-home-checked section="toprated"/>>
+<!-- "Downloads" facet — apps installed on this SD card. Always reachable
+     (static label below, no server gate); never a homeSection, so like My
+     Apps its radio never starts checked. -->
+<input type="radio" id="apps-tab-downloads" name="apps-tab"<browser-home-checked section="downloads"/>>
 <!-- Per-user "My Apps" tab. The radio is always present, but its label
      (`<browser-myapps-label/>`) renders only when a cached
      configs/my-catalogue.json exists — so without one the tab is
@@ -88,6 +92,7 @@
       <label for="apps-tab-recent" class="tab-label">Most Recent</label>
       <label for="apps-tab-popular" class="tab-label">Popular</label>
       <label for="apps-tab-toprated" class="tab-label">Top Rated</label>
+      <label for="apps-tab-downloads" class="tab-label">Downloads</label>
       <!-- Rendered only when a cached my-catalogue.json exists (see the
            radio comment above). -->
       <browser-myapps-label></browser-myapps-label>
@@ -137,6 +142,16 @@
     <section class="tab-panel" data-tab="toprated" aria-label="Top rated apps">
       <div class="app-grid">
         <browser-tab-toprated></browser-tab-toprated>
+      </div>
+      <div class="app-pager app-pager--hidden" data-pager>
+        <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>
+        <span class="app-pager__label"></span>
+        <button type="button" class="munch-link app-pager__btn app-pager__next">Next &#8250;</button>
+      </div>
+    </section>
+    <section class="tab-panel" data-tab="downloads" aria-label="Downloaded apps">
+      <div class="app-grid">
+        <browser-tab-downloads></browser-tab-downloads>
       </div>
       <div class="app-pager app-pager--hidden" data-pager>
         <button type="button" class="munch-link app-pager__btn app-pager__prev">&#8249; Prev</button>

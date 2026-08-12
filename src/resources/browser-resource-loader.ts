@@ -215,13 +215,13 @@ export class BrowserResourceLoader implements ResourceLoader {
 			},
 			totalPages(tab: string): number {
 				return self.pagerData
-					? pagerTotalPages(self.pagerData, tab as LibraryTabId | 'myapps' | 'favorites', self.pagerPerPage)
+					? pagerTotalPages(self.pagerData, tab as LibraryTabId | 'myapps' | 'favorites' | 'downloads', self.pagerPerPage)
 					: 1;
 			},
 			render(tab: string, page: number): string {
 				if (!self.pagerData) return '';
 				return renderAppCards(
-					pagerPageEntries(self.pagerData, tab as LibraryTabId | 'myapps' | 'favorites', page, self.pagerPerPage),
+					pagerPageEntries(self.pagerData, tab as LibraryTabId | 'myapps' | 'favorites' | 'downloads', page, self.pagerPerPage),
 				);
 			},
 		});
@@ -443,6 +443,15 @@ export class BrowserResourceLoader implements ResourceLoader {
 			/<browser-tab-toprated(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-toprated\s*>)?/gi,
 			() => libraryTab('toprated'),
 		);
+		// "Downloads" - the local-install facet: every app physically present on
+		// this SD card (`installed !== null`), the SAME disk truth that dims
+		// not-installed cards. Unlike My Apps / Favorites it needs no signed-in
+		// document, so it is ALWAYS rendered (its view is never null); an empty
+		// install set falls through to renderLibraryTab's plain empty state.
+		out = out.replace(
+			/<browser-tab-downloads(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-tab-downloads\s*>)?/gi,
+			() => this.renderLibraryTab(pagerTabRender(pager(), 'downloads', perPage)),
+		);
 		// "My Apps" (per-user) — a SEPARATE cached document
 		// (`configs/my-catalogue.json`, the WordPress-generated set of the
 		// signed-in user's own apps), carried on `pager().myApps`. Both the tab's
@@ -661,12 +670,29 @@ export class BrowserResourceLoader implements ResourceLoader {
 		// validated to one of the four sorts (see `loadConfig`), so exactly one
 		// radio is stamped; "My Apps" is never a homeSection, so its radio is
 		// never default-checked.
+		// One-shot Home-tab override: a page script (download-modal.js after a
+		// completed install) sets `globalThis.__brewserPendingHomeTab` right before
+		// `__swbReload()` to make the reloaded Home open on a specific tab (e.g.
+		// "downloads") instead of `config.homeSection`. Read-and-CLEAR on the first
+		// tag so it applies to exactly ONE render (this reload); the next Home render
+		// falls back to the configured section. Consumed only when the page actually
+		// carries <browser-home-checked> tags (i.e. Home), so a sub-resource fetch
+		// can't swallow it. Only known tab ids are honored.
+		let homeCheckedSection: string | null = null;
 		out = out.replace(
 			/<browser-home-checked(\s+[^>]*)?\s*\/?>(?:\s*<\/browser-home-checked\s*>)?/gi,
 			(_match, attrs: string | undefined) => {
+				if (homeCheckedSection === null) {
+					const g = globalThis as { __brewserPendingHomeTab?: unknown };
+					const pending = typeof g.__brewserPendingHomeTab === 'string' ? g.__brewserPendingHomeTab : '';
+					if (g.__brewserPendingHomeTab !== undefined) delete g.__brewserPendingHomeTab;
+					homeCheckedSection = (pending === 'featured' || pending === 'recent'
+						|| pending === 'popular' || pending === 'toprated' || pending === 'downloads')
+						? pending : loadConfig(this.appRoot).homeSection;
+				}
 				const m = attrs ? /\bsection\s*=\s*"([^"]*)"/i.exec(attrs) : null;
 				const section = m ? m[1] : '';
-				return loadConfig(this.appRoot).homeSection === section ? ' checked' : '';
+				return homeCheckedSection === section ? ' checked' : '';
 			},
 		);
 		// `<browser-modal id="…" class="…" ...>CONTENT</browser-modal>` —

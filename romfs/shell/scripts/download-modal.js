@@ -687,6 +687,11 @@
     // close()'s `myCatalogueRefreshed` reload.
     if (installedOnSuccess && typeof globalThis.__swbReload === 'function') {
       installedOnSuccess = false;
+      // Land the reloaded Home on the "Downloads" tab so the user sees the app
+      // they just installed. One-shot hint the resource loader reads (+clears)
+      // when it re-renders home's <browser-home-checked> radios — applies to
+      // exactly this reload, then Home falls back to the configured homeSection.
+      try { globalThis.__brewserPendingHomeTab = 'downloads'; } catch (_) {}
       try { globalThis.__swbReload(); } catch (_) {}
     }
   }
