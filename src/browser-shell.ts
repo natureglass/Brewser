@@ -417,6 +417,19 @@ export class BrowserShell {
 	 * a memory-heavy WASM app's process-lifetime linear memory before the
 	 * next launch. Reset every navigation (see handleHtmlResponseLive). */
 	private currentAppFreshProcessOnExit = false;
+	/** Set from the current app's `manifest.hideMouseDocked` /
+	 * `manifest.hideMouseUndocked`. Each hides the whole software-mouse layer
+	 * (cursor sprite + synthetic mouse/pointer forwarding + A/B/ZR-as-click)
+	 * while the console is in the matching mode; `applyMouseHideForDockState`
+	 * picks the flag for the CURRENT mode and re-applies on every dock/undock.
+	 * Both default false (cursor shown). Reset every navigation; forced false
+	 * on shell pages so the launcher/settings always keep a cursor. */
+	private currentAppHideMouseDocked = false;
+	private currentAppHideMouseUndocked = false;
+	/** Last operation-mode `applyMouseHideForDockState` acted on, so onTick
+	 * only re-evaluates the mouse-hide decision when the dock state actually
+	 * flips. Separate from `lastChromeOperationMode` (the chrome-repaint gate). */
+	private lastMouseDockMode: number | undefined = undefined;
 	/** The focused `<video>` element while `mode === 'video-fullscreen'`,
 	 * `null` otherwise. Drives `overlayLiveAnimatedCanvases`'s
 	 * fullscreen-video paint branch. */
@@ -1435,6 +1448,11 @@ export class BrowserShell {
 						// video activity firing.
 						const modeNow = readOperationMode();
 						const modeChanged = modeNow !== this.lastChromeOperationMode;
+						// Dock/undock also flips which hideMouse* flag applies to the
+						// running app — re-apply the software-mouse suppression so the
+						// cursor hides or reappears the instant the console changes mode,
+						// regardless of what painted this tick.
+						if (modeNow !== this.lastMouseDockMode) { this.applyMouseHideForDockState(); }
 						if (fired) {
 							// Video-only fast path eligibility: only video
 							// ticked this turn, no scroll input, mode is
@@ -1909,6 +1927,23 @@ export class BrowserShell {
 	}
 
 	/**
+	 * Recompute + apply the software-mouse suppression for the CURRENT dock
+	 * state from the running app's `hideMouseDocked` / `hideMouseUndocked`
+	 * flags. The whole software-mouse layer (cursor sprite + synthetic mouse/
+	 * pointer forwarding + A/B/ZR-as-click consumption) is turned off when the
+	 * app asked to hide it in whichever mode the console is in right now.
+	 * Called per navigation (fresh flags) AND from onTick whenever
+	 * `readOperationMode` flips between ticks, so docking / undocking mid-app
+	 * shows or hides the cursor immediately. Mode -1 (shim missing on older
+	 * runtimes) is treated as undocked, so the handheld choice wins. */
+	private applyMouseHideForDockState(): void {
+		const mode = readOperationMode();
+		this.lastMouseDockMode = mode;
+		const hide = mode === 1 ? this.currentAppHideMouseDocked : this.currentAppHideMouseUndocked;
+		setMouseForwardingDisabled(hide);
+	}
+
+	/**
 	 * Star-button handler: toggle the current URL in the bookmarks
 	 * store, then redraw the chrome so the star colour reflects the
 	 * new state. URL with no current page (e.g. immediately after a
@@ -2335,14 +2370,17 @@ export class BrowserShell {
 			// hide, so the mode flip is a no-op (paint gates + CSS
 			// viewport already match).
 			appLaunchFullscreen = manifest?.fullscreen === true && this.chromeHeight > 0;
-			// Manifest `"mouseDisable": true` — turn the whole software-mouse
-			// layer off for this app (hide cursor + stop synthetic mouse/
-			// pointer forwarding + stop consuming A/B/ZR as clicks). Set per
-			// navigation so a non-mouseDisable app / shell page always resets
-			// it to false below. Gamepad games (left stick = movement, A =
-			// action) want this so the stick doesn't drive a cursor and A
-			// doesn't inject clicks.
-			setMouseForwardingDisabled(manifest?.mouseDisable === true);
+			// Manifest `"hideMouseDocked"` / `"hideMouseUndocked"` — hide the whole
+			// software-mouse layer (cursor + synthetic mouse/pointer forwarding +
+			// A/B/ZR-as-click consumption) while the console is in the matching dock
+			// state. Captured per navigation; applyMouseHideForDockState picks the
+			// flag for the CURRENT mode now and re-applies whenever docking flips
+			// mid-app. Gamepad games hide the pointer so the stick doesn't drive a
+			// cursor and A doesn't inject clicks; an app can keep the cursor in just
+			// one mode by hiding only the other. Reset to shown on shell pages below.
+			this.currentAppHideMouseDocked = manifest?.hideMouseDocked === true;
+			this.currentAppHideMouseUndocked = manifest?.hideMouseUndocked === true;
+			this.applyMouseHideForDockState();
 			// Manifest `"freshProcessOnExit": true` — exit relaunches brewser
 			// in a clean process (chainload) so a memory-heavy WASM app's
 			// unreclaimable linear memory doesn't accumulate across launches.
@@ -2351,7 +2389,9 @@ export class BrowserShell {
 			clearAppButtonOverlay();
 			// Shell page (launcher / settings / home): always restore the
 			// software-mouse layer.
-			setMouseForwardingDisabled(false);
+			this.currentAppHideMouseDocked = false;
+			this.currentAppHideMouseUndocked = false;
+			this.applyMouseHideForDockState();
 			this.currentAppFreshProcessOnExit = false;
 			// Shell page (brewser://home/, brewser://settings/, ...): grant
 			// all manifest-scoped gates. The global `network` toggle in

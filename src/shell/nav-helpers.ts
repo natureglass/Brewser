@@ -193,15 +193,22 @@ export interface AppManifest {
 	 * canvas`) — the manifest owns the mode for the app's lifetime; L+R
 	 * / `__swbExitFullscreen` are no-ops while it's in effect. */
 	fullscreen?: boolean;
-	/** When `true`, the shell turns the whole software-mouse layer off for
-	 * this app: the left stick no longer drives a cursor, the cursor sprite
-	 * is hidden, no synthetic mouse/pointer events are dispatched, and the
-	 * mouse layer stops consuming A/B/ZR (so they reach the Gamepad API
-	 * directly). Intended for gamepad games where the on-screen pointer is
-	 * pure interference. Shell-level actions (L=back, PLUS=exit, L+R) are
+	/** When `true`, the shell hides the whole software-mouse layer for this
+	 * app WHILE THE CONSOLE IS DOCKED: the left stick no longer drives a
+	 * cursor, the cursor sprite is hidden, no synthetic mouse/pointer events
+	 * are dispatched, and the mouse layer stops consuming A/B/ZR (so they
+	 * reach the Gamepad API directly). Intended for gamepad games where the
+	 * on-screen pointer is pure interference. Paired with `hideMouseUndocked`;
+	 * the shell re-applies whichever flag matches the console's current mode
+	 * on every dock/undock. Shell-level actions (L=back, PLUS=exit, L+R) are
 	 * unaffected. Reset per navigation, so it only applies while an app
-	 * declaring it is running. */
-	mouseDisable?: boolean;
+	 * declaring it is running. Default false (cursor shown). */
+	hideMouseDocked?: boolean;
+	/** When `true`, the shell hides the software-mouse layer for this app
+	 * WHILE THE CONSOLE IS UNDOCKED (handheld) — the handheld-mode counterpart
+	 * of `hideMouseDocked`, with the same effect. Default false (cursor shown);
+	 * a gamepad game typically sets both. */
+	hideMouseUndocked?: boolean;
 	/** When `true`, exiting this app relaunches brewser in a fresh process
 	 * (chainload) instead of returning to the shell in the same one. Intended
 	 * for memory-heavy WASM apps (e.g. Unity/Emscripten builds) whose WASM
