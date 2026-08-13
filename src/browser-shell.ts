@@ -319,6 +319,22 @@ export class BrowserShell {
 	 * `allowStorage()` on every read/write, so a manifest that omits
 	 * `storage` gets denied at the storage API boundary. */
 	getPermissionPolicy(): BrowserPermissionPolicy { return this.policy; }
+	/** Manifest permission gate for the hardware device chooser, keyed by
+	 * the engine's device-chooser `kind`. Shell pages (null manifest) grant
+	 * all; apps must declare the matching permission. */
+	private isHardwareAllowed(
+		kind: 'usb' | 'bluetooth' | 'serial' | 'hid' | 'midi' | 'nfc',
+	): boolean {
+		switch (kind) {
+			case 'usb': return this.policy.allowUsb();
+			case 'bluetooth': return this.policy.allowBluetooth();
+			case 'serial': return this.policy.allowSerial();
+			case 'hid': return this.policy.allowHid();
+			case 'midi': return this.policy.allowMidi();
+			case 'nfc': return this.policy.allowNfc();
+			default: return false;
+		}
+	}
 	private mode: BrowserMode = 'normal';
 	/** Active chrome strip height (px). Cached from `config.json
 	 * toolbarHeight` at boot and refreshed on settings save. Read by
@@ -859,6 +875,66 @@ export class BrowserShell {
 		// to the ± stepper / direct-edit overlay (replaces the keyboard
 		// fall-through).
 		setNumberPickerOpener((options) => this.numberPicker.open(options));
+			// ── Hardware device chooser ──────────────────────────────────
+			// Route the engine's hardware Web APIs (WebUSB / Web Bluetooth,
+			// and later WebSerial / WebHID / Web MIDI / Web NFC) through the
+			// on-canvas select modal + the manifest permission gate. The
+			// engine publishes its registration setter on the global
+			// `__nxjsSetDeviceChooser` — the shell is bundled separately from
+			// the NRO-embedded runtime, so a normal import wouldn't reach the
+			// same module instance. When no chooser is registered the engine
+			// falls back to first-match, so bare nx.js apps are unaffected.
+			const registerChooser = (
+				globalThis as {
+					__nxjsSetDeviceChooser?: (
+						fn:
+							| ((req: {
+									kind: 'usb' | 'bluetooth' | 'serial' | 'hid' | 'midi' | 'nfc';
+									mode: 'select' | 'confirm';
+									candidates: { id: string; name: string; detail?: string }[];
+									title?: string;
+							  }) => Promise<string | null>)
+							| null,
+					) => void;
+				}
+			).__nxjsSetDeviceChooser;
+			if (typeof registerChooser === 'function') {
+				registerChooser(async (req) => {
+					// Permission gate first — a denied manifest never even
+					// sees the picker. Shell pages (null manifest) grant all.
+					if (!this.isHardwareAllowed(req.kind)) return null;
+					if (req.mode === 'confirm') {
+						const grant = req.candidates[0];
+						const result = await this.selectModal.open({
+							title: req.title ?? 'Allow device access?',
+							multiple: false,
+							selected: new Set<string>(),
+							groups: [{
+								label: null,
+								options: [{ value: '__grant__', label: grant?.name ?? 'Allow' }],
+							}],
+						});
+						return result &&
+							result.kind === 'single' &&
+							result.value === '__grant__'
+							? '__grant__'
+							: null;
+					}
+					const result = await this.selectModal.open({
+						title: req.title ?? 'Select a device',
+						multiple: false,
+						selected: new Set<string>(),
+						groups: [{
+							label: null,
+							options: req.candidates.map((c) => ({
+								value: c.id,
+								label: c.detail ? `${c.name}  —  ${c.detail}` : c.name,
+							})),
+						}],
+					});
+					return result && result.kind === 'single' ? result.value : null;
+				});
+			}
 		// Wire `<input>.focus()` calls from page scripts (Cocos Creator's
 		// EditBox does `document.createElement('input')` + appendChild +
 		// focus()) into the same KeyboardOverlay path that live-DOM form

@@ -239,6 +239,27 @@ async function main() {
   ok(r.catalogue.revoked.includes('com.natureglass.ghostapp'),
      'revoked id with no entry survives on the envelope (Phase 3 needs it)');
 
+  // ---- platform gate: non-switch compatibility dropped, reported ----------
+  // The runtime only runs Switch-compatible apps. An entry whose
+  // `compatibility` does not list `switch` (e.g. `["mobile","web"]`) is
+  // dropped at normalize time and itemized — the single chokepoint the render
+  // path and the Check-for-Updates persist guard both share. A multi-platform
+  // entry that DOES list `switch` (e.g. `["mobile","switch","web"]`) is kept.
+  const plat = JSON.parse(v2Text);
+  plat.apps[0].compatibility = ['mobile', 'web'];            // no switch -> dropped
+  plat.apps[1].compatibility = ['mobile', 'switch', 'web'];  // lists switch -> kept
+  const pg = parseCatalogue(JSON.stringify(plat));
+  ok(pg.kind === 'Ok' && pg.catalogue.apps.length === 11,
+     'non-switch app dropped, switch apps kept (12 -> 11)',
+     String(pg.kind === 'Ok' ? pg.catalogue.apps.length : pg.kind));
+  ok(pg.kind === 'Ok' && !pg.catalogue.apps.some((a) => a.id === plat.apps[0].id),
+     'the mobile/web-only app is absent from the normalized list');
+  const pgDrop = pg.kind === 'Ok' ? pg.catalogue.report.dropped : [];
+  ok(pgDrop.length === 1 && pgDrop[0].id === plat.apps[0].id && /switch/.test(pgDrop[0].reason),
+     'drop is itemized with id + a switch-compatibility reason', JSON.stringify(pgDrop));
+  ok(pg.kind === 'Ok' && pg.catalogue.apps.some((a) => a.id === plat.apps[1].id),
+     'multi-platform app that lists switch is kept');
+
   // ---- summarize(): boundaries + character counting -----------------------
   const s400 = 'a'.repeat(400);
   ok(summarize(s400) === s400, 'exactly 400 chars: unchanged');
