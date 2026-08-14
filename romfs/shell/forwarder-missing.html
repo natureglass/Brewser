@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>App not installed — brewser</title>
+<style>
+  body { background-color: #10151a; color: #e6eef5; font-size: 18px;
+         padding: 48px; display: flex; flex-direction: column;
+         align-items: center; text-align: center; }
+  h1 { color: #6cb0ff; }
+  .name { color: #bcd6f2; }
+  .hint { color: #90a4b8; font-size: 14px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1><span class="name" id="fwd-missing-name">This app</span> isn't installed</h1>
+<p>This shortcut couldn't find the app on your SD card. Open Brewser to download
+it again.</p>
+<p class="hint">Press <kbd>+</kbd> to return to your Homebrew Menu.</p>
+<script>
+  // Stamped by the shell's forwarder boot path just before navigating here.
+  var id = globalThis.__brewserForwarderMissingApp;
+  if (typeof id === 'string' && id) {
+    var el = document.getElementById('fwd-missing-name');
+    if (el) el.textContent = id;
+  }
+</script>
+</body>
+</html>

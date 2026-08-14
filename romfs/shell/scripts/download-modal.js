@@ -613,6 +613,25 @@
       // success path so the modal just stays closed with no message.
       if (cancelled) return;
       if (!ok) return;
+      // Persist the app's file inventory (relative PATHS only) so the offline
+      // "Create App Forwarder" generator has an authoritative allowlist of the
+      // installable bundle without re-fetching artifacts/<id>.json. Per-file
+      // sizes are computed by statSync at generation time (FORWARDER_CONTRACT.md
+      // §5.2 / decision D2), so paths are all we store. Written OUTSIDE
+      // apps/<id>/ so the snapshot never has to exclude it. Best-effort: the app
+      // is already installed; a sidecar failure only affects future embed
+      // forwarders, never this install. writeFileSync auto-creates parent dirs.
+      try {
+        Switch.writeFileSync(
+          APP_ROOT + 'configs/app-inventory/' + detail.id + '.json',
+          JSON.stringify({
+            id: detail.id,
+            entry: detail.entry || (app && app.entryRel) || 'index.html',
+            version: detail.version || (app && app.version) || '',
+            files: artifacts.artifacts.files.slice()
+          })
+        );
+      } catch (e) { /* non-fatal: embed will fall back per D1 */ }
       // App files are now on disk (entry file written LAST). A
       // missing→installed transition is a SET change, not a cosmetic chip
       // tweak, so we do NOT patch the grid card in place here: mutating the

@@ -2,6 +2,7 @@ import { installPolyfills } from '@switch-web/runtime';
 import { BrowserShell } from './browser-shell.js';
 import { detectUpdaterRole } from './update/role.js';
 import { installSelfUpdateSeam } from './update/seam.js';
+import { installForwarderSeam } from './forwarder/seam.js';
 
 // Boot timing anchor for the boot-splash residual diagnostic. Captured at
 // the very top of the JS entry — first line of execution after import
@@ -56,6 +57,11 @@ async function main() {
 	// heavy flow/apply modules load lazily on first use, so this never evaluates
 	// the updater config/keyring on a normal boot.
 	installSelfUpdateSeam();
+
+	// Expose the in-shell "Create App Forwarder" API for the app modal. Cheap:
+	// the generator + pack library load lazily on first use (probe/create), so a
+	// normal boot never evaluates them.
+	installForwarderSeam();
 
 	// Shell is constructed BEFORE the polyfill install block so the
 	// storage drivers receive its profile + currentPageUrl closure —

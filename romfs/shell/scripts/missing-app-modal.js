@@ -48,6 +48,9 @@
   // uninstalls the app (per-file remove + progress bar) and reloads the
   // grid. Optional element so markup predating it can't break the modal.
   var deleteBtn = document.getElementById('app-modal-delete');
+  // "Create shortcut" (app forwarder) — LEFT action slot, shown only for an
+  // INSTALLED app (like Delete). Opens forwarder-modal.js. Optional element.
+  var forwarderBtn = document.getElementById('app-modal-forwarder');
   // Expand/collapse the description into a near-full-modal reading view.
   // `cardEl` is the app-detail modal card (`.app-modal-card`; an id was
   // added to the markup for this feature). Toggling `app-modal-card--expanded`
@@ -779,8 +782,9 @@
       pendingLaunchUrl = '';
       downloadBtn.classList.remove('app-modal-btn--hidden');
       updateBtn.classList.add('app-modal-btn--hidden');
-      // Not installed → no Delete.
+      // Not installed → no Delete, no shortcut (embed/link both need the app).
       if (deleteBtn) deleteBtn.classList.add('app-modal-btn--hidden');
+      if (forwarderBtn) forwarderBtn.classList.add('app-modal-btn--hidden');
     } else {
       // Warnings gate. When the catalog's permissions list contains
       // one or more keys that map to a warnings.json entry, we DON'T
@@ -811,8 +815,9 @@
       } else {
         updateBtn.classList.add('app-modal-btn--hidden');
       }
-      // Installed → offer Delete (uninstall) in the LEFT action slot.
+      // Installed → offer Delete (uninstall) + Create shortcut in the LEFT slot.
       if (deleteBtn) deleteBtn.classList.remove('app-modal-btn--hidden');
+      if (forwarderBtn) forwarderBtn.classList.remove('app-modal-btn--hidden');
     }
 
     // Always open in the collapsed view — the expanded reading state is a
@@ -968,6 +973,26 @@
   if (deleteBtn) {
     deleteBtn.addEventListener('click', function (e) {
       openDelete();
+      if (e && e.stopPropagation) e.stopPropagation();
+    });
+  }
+
+  // Hand off to forwarder-modal.js — it owns the confirmation dialog +
+  // on-device generation. Close this modal first so the cards don't stack
+  // (same pattern as openDownload / openDelete).
+  function openForwarder() {
+    var detail = currentDetail;
+    var opener = globalThis.__brewserOpenForwarderModal;
+    if (typeof opener !== 'function') {
+      console.debug('[apps] forwarder-modal not loaded; skipping shortcut');
+      return;
+    }
+    close();
+    opener(detail || {});
+  }
+  if (forwarderBtn) {
+    forwarderBtn.addEventListener('click', function (e) {
+      openForwarder();
       if (e && e.stopPropagation) e.stopPropagation();
     });
   }

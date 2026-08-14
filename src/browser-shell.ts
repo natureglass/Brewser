@@ -433,6 +433,25 @@ export class BrowserShell {
 	 * a memory-heavy WASM app's process-lifetime linear memory before the
 	 * next launch. Reset every navigation (see handleHtmlResponseLive). */
 	private currentAppFreshProcessOnExit = false;
+	/** Forwarder mode: this Brewser session was launched by an app forwarder
+	 * (`--fwd=1` in Switch.argv). No catalogue chrome; `exit` quits to hbmenu at
+	 * the app root; `freshProcessOnExit` is ignored (a relaunch would boot the
+	 * plain catalogue). See FORWARDER_CONTRACT.md. Inert on Citron (no argv). */
+	private forwarderMode = false;
+	/** The app id from a forwarder's `--app=<id>` (overrides `autorunApp`). */
+	private forwarderAppId: string | null = null;
+	/** True from run()-top until the forwarder's app has loaded. While set, the
+	 * input loop paints the "Loading <app>" splash on top of the (still-building)
+	 * page each frame — painting it FROM the loop avoids the JS-thread starvation
+	 * a separate nativeRaf splash suffers when the loop runs concurrently. */
+	private forwarderLoading = false;
+	/** App display name for the forwarder loading splash. */
+	private forwarderLoadingName = '';
+	/** D4 (plain-autorun exit fix — independently revertable): true when this
+	 * boot navigated straight into a `config.json autorunApp` target (not a
+	 * forwarder). Such an app is the sole history entry, so at its root `exit`
+	 * quits to hbmenu instead of no-op'ing. Grep `// D4:` for the full change. */
+	private autoranApp = false;
 	/** Set from the current app's `manifest.hideMouseDocked` /
 	 * `manifest.hideMouseUndocked`. Each hides the whole software-mouse layer
 	 * (cursor sprite + synthetic mouse/pointer forwarding + A/B/ZR-as-click)
@@ -1193,17 +1212,55 @@ export class BrowserShell {
 	}
 
 	async run(): Promise<void> {
-		// Boot splash: HOISTED to the first statement of run() so its
-		// synchronous first paint commits to canvas->data BEFORE any of
-		// the awaiting setup work below (seedRomfs, 8× loadHtml*,
-		// modal/toolbar parses, navigateTo + grid build) takes the JS
-		// thread. Reads `this.startupConfig` (sync-captured in the
-		// constructor) so no awaiting `loadConfig` precedes the paint.
-		// `startBootSplash`'s first `rafCallback()` runs synchronously
-		// inside its own body — see its contract comment.
-		const splashHandle: SplashHandle | null = this.startupConfig.showSplash
-			? this.startBootSplash(this.startupConfig.splashFadeMs)
-			: null;
+		// Forwarder mode detection (argv) — done HERE, before the splash, so a
+		// forwarder launch shows the app launch splash ("Loading <app>") instead of
+		// Brewser's own boot splash. `--fwd=1` = forwarder mode; `--app=<id>`
+		// overrides autorunApp; unknown `--` flags ignored (FORWARDER_CONTRACT.md).
+		// argv reaches JS via Switch.argv (engine #120); Citron doesn't populate it.
+		{
+			const argv = Switch.argv;
+			if (Array.isArray(argv)) {
+				for (const a of argv) {
+					if (a === '--fwd=1') this.forwarderMode = true;
+					else if (a.startsWith('--app=')) this.forwarderAppId = a.slice(6);
+				}
+			}
+		}
+		let forwarderAppName = '';
+		if (this.forwarderMode && this.forwarderAppId) {
+			// Read the app's display name early, for the "Loading <name>" splash.
+			try {
+				const mb = Switch.readFileSync(
+					`${this.profile.appRoot}apps/${this.forwarderAppId}/manifest.json`,
+				);
+				if (mb) {
+					const m = JSON.parse(new TextDecoder().decode(mb));
+					if (m && typeof m.name === 'string' && m.name) forwarderAppName = m.name;
+				}
+			} catch (_) {
+				/* name optional — splash falls back to "Loading…" */
+			}
+		}
+
+		// Splash: HOISTED to the first paint of run() so its synchronous first
+		// paint commits to canvas->data BEFORE the awaiting setup work below
+		// (seedRomfs, 8× loadHtml*, navigateTo + grid build) takes the JS thread.
+		// In forwarder mode we show the app-launch splash ("Loading <app>" / "Please
+		// wait…") for the whole boot instead of Brewser's boot splash. It is painted
+		// from the input loop's onTick (see `forwarderLoading`), NOT a separate
+		// nativeRaf loop — that would starve for the JS thread against the loop and
+		// freeze mid-paint. Cleared once navigateTo resolves (app loaded).
+		let splashHandle: SplashHandle | null = null;
+		if (this.forwarderMode) {
+			this.forwarderLoadingName = forwarderAppName;
+			this.forwarderLoading = true;
+			try { setCursorOverlaySuppressed(true); } catch (_) { /* swallow */ }
+			this.paintForwarderSplash(); // synchronous first paint
+		} else {
+			splashHandle = this.startupConfig.showSplash
+				? this.startBootSplash(this.startupConfig.splashFadeMs)
+				: null;
+		}
 		this.webView.initialize();
 		// Touch listener must be installed after the WebView has touched up
 		// the canvas; it stays installed for the whole shell lifetime. It
@@ -1322,12 +1379,15 @@ export class BrowserShell {
 		// the `syncCanvasSize` viewport calc), and skipping the overlay
 		// load + leaving it invisible means no fullscreen-exit path can
 		// re-introduce the strip.
-		this.chromeHeight = shellConfig.showToolbar ? shellConfig.toolbarHeight : 0;
+		// Forwarder mode forces the chrome strip off regardless of the device's
+		// config.json, so a forwarder looks identical on every install.
+		this.chromeHeight =
+			shellConfig.showToolbar && !this.forwarderMode ? shellConfig.toolbarHeight : 0;
 		this.pageBackground = shellConfig.pageBackground;
 		this.backLightTheme = shellConfig.backLightTheme;
 		this.backDarkTheme = shellConfig.backDarkTheme;
 		this.toolbarPosition = shellConfig.toolbarPosition;
-		if (shellConfig.showToolbar) {
+		if (shellConfig.showToolbar && !this.forwarderMode) {
 			await this.loadHtmlToolbar();
 			setToolbarOverlayVisible(true);
 		} else {
@@ -1405,8 +1465,61 @@ export class BrowserShell {
 		// pass through. Any parse issue falls back to home. The Home
 		// button still targets `DEFAULT_HOME_URL` so autorun doesn't
 		// trap the user in the app.
-		const bootUrl = resolveAutorunUrl(shellConfig.autorunApp) ?? DEFAULT_HOME_URL;
-		if (splashHandle) {
+		// Forwarder mode boots straight into the `--app` target; otherwise the
+		// normal autorunApp/home logic applies.
+		let bootUrl: string;
+		if (this.forwarderMode && this.forwarderAppId) {
+			const appId = this.forwarderAppId;
+			const appDir = `${this.profile.appRoot}apps/${appId}/`;
+			// Installed-test: manifest.json present AND its entry file present. Read
+			// the manifest for the entry ONLY after confirming manifest.json exists,
+			// so the missing-app screen never depends on a readable manifest
+			// (correction 5).
+			let installed = false;
+			let entry = 'index.html';
+			if (Switch.statSync(`${appDir}manifest.json`)) {
+				const mb = Switch.readFileSync(`${appDir}manifest.json`);
+				if (mb) {
+					try {
+						const m = JSON.parse(new TextDecoder().decode(mb));
+						if (m && typeof m.entry === 'string' && m.entry) entry = m.entry;
+					} catch {
+						/* unparseable manifest → keep default entry, test still runs */
+					}
+				}
+				installed = !!Switch.statSync(`${appDir}${entry}`);
+			}
+			if (installed) {
+				bootUrl = `brewser://apps/${appId}/${entry}`;
+			} else {
+				(globalThis as { __brewserForwarderMissingApp?: string }).__brewserForwarderMissingApp =
+					appId;
+				bootUrl = 'brewser://forwarder-missing/';
+			}
+		} else {
+			const autoUrl = resolveAutorunUrl(shellConfig.autorunApp);
+			this.autoranApp = autoUrl !== null; // D4: remember a plain-autorun boot
+			bootUrl = autoUrl ?? DEFAULT_HOME_URL;
+		}
+		if (this.forwarderMode) {
+			// Forwarder mode boots straight into the app. The app's page scripts
+			// (especially WebGL ones) await requestAnimationFrame / frames during
+			// init, and rAF is only serviced by the input loop below (onTick). So
+			// AWAITING the navigation here deadlocks: the app waits for a frame the
+			// not-yet-started loop would deliver, and boot never reaches the loop.
+			// Fire it non-awaited instead — the loop drives it to completion, and
+			// the loop-painted "Loading <app>" splash (forwarderLoading) covers the
+			// wait until this resolves.
+			const endLoadingSplash = (): void => {
+				this.forwarderLoading = false;
+				try { setCursorOverlaySuppressed(false); } catch (_) { /* swallow */ }
+				this.repaintAll();
+			};
+			void this.navigateTo(bootUrl).then(endLoadingSplash, (e) => {
+				console.debug('[brewser] forwarder navigation failed:', e);
+				endLoadingSplash();
+			});
+		} else if (splashHandle) {
 			await this.navigateTo(bootUrl);
 			splashHandle.beginFade();
 			await splashHandle.finishedFading;
@@ -1425,10 +1538,13 @@ export class BrowserShell {
 		// boot, pre-first-paint) blanked the screen. Static wallpapers armed
 		// at boot above are unaffected; this only touches the `dynamic` shader.
 		{
+			// Skip the dynamic-wallpaper GL arm in forwarder mode: the forwarder
+			// boots straight into the app (often WebGL), and arming the shared
+			// screen GL context on top of the app's WebGL can blank the screen.
+			// The app fills the screen anyway, so no wallpaper is needed.
 			const bootBg = this.resolveSelectedBackground(shellConfig);
-			if (bootBg.dynamic) this.loadStyleDynamic(bootBg.dynamic);
+			if (bootBg.dynamic && !this.forwarderMode) this.loadStyleDynamic(bootBg.dynamic);
 		}
-
 		try {
 			while (true) {
 				const input = await waitForControllerInput({
@@ -1483,6 +1599,17 @@ export class BrowserShell {
 						// `fired` flag drives the chrome-redraw decision.
 						const animFired = tickAnimationFrames();
 						const videoFired = tickVideo();
+						if (this.forwarderLoading) {
+							// Forwarder boot: drive the app's live-DOM build to
+							// completion (repaintContent advances the chunked build +
+							// lays out the <canvas> the app grabs its WebGL context
+							// from) but paint the "Loading <app>" splash on top each
+							// frame so the still-building page doesn't show. Cleared
+							// when navigateTo resolves (app loaded).
+							this.repaintContent({});
+							this.paintForwarderSplash();
+							return true;
+						}
 						const fired = animFired || videoFired;
 						// Phase 1.5+1.6 follow-up: live-form's handleFormTap
 						// flags `requestFullRepaint()` after a tap mutates
@@ -1704,6 +1831,21 @@ export class BrowserShell {
 						// still works.
 						if (document.getElementById("__swb_quit_prompt")) break;
 						if (closeTopmostModalModeDialog()) break;
+						// Forwarder mode: the whole session is one app (or its
+						// missing-app screen) — there is no catalogue to return to.
+						// Walk back within the app if there's in-app history, else
+						// quit to hbmenu. Closes the confirmed I1 exit gap;
+						// freshProcessOnExit is ignored here (a relaunch would boot
+						// the plain catalogue, not the forwarder).
+						if (this.forwarderMode) {
+							if (this.currentAppDir && this.navigation.controller.canGoBack) {
+								if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
+								await this.runNavigation(() => this.navigation.goBack());
+							} else {
+								Switch.exit();
+							}
+							break;
+						}
 						// Context-aware. While an app page is active (URL
 						// under `brewser://apps/<group>/<id>/...`), "exit"
 						// means EXIT THE APP — close any fullscreen-canvas
@@ -1757,6 +1899,15 @@ export class BrowserShell {
 							// the next mode fresh (returning to launcher =
 							// normal; nested fullscreen app page = re-enter).
 							if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
+							// D4 (plain-autorun exit fix): an app reached via autorunApp
+							// is the sole history entry, so goBack() no-ops and the user
+							// is stuck. At the app root, quit to hbmenu instead. Gated on
+							// `autoranApp` so a normal catalogue → app → exit still walks
+							// back to the catalogue. (Forwarder mode is handled earlier.)
+							if (this.autoranApp && !this.navigation.controller.canGoBack) {
+								Switch.exit();
+								break;
+							}
 							await this.runNavigation(() => this.navigation.goBack());
 							break;
 						}
@@ -5079,6 +5230,37 @@ export class BrowserShell {
 			raf(paint);
 		};
 		paint();
+	}
+
+	/** Paints one "Loading <app>" / "Please wait…" frame for the forwarder boot
+	 * splash. Synchronous (draws straight to the screen canvas) so it can be
+	 * called both for the first paint and from the input loop's onTick each frame
+	 * while `forwarderLoading` — mirrors `startLaunchSplash`'s look without its
+	 * self-driving nativeRaf loop (which would starve against the input loop). */
+	private paintForwarderSplash(): void {
+		const canvas = nxScreen();
+		const ctx = canvas.getContext('2d');
+		const w = canvas.width;
+		const h = canvas.height;
+		const rawName =
+			typeof this.forwarderLoadingName === 'string'
+				? this.forwarderLoadingName.trim()
+				: '';
+		const name = rawName.length > 42 ? rawName.slice(0, 41) + '…' : rawName;
+		const title = name ? `Loading ${name}` : 'Loading…';
+		ctx.save();
+		ctx.fillStyle = '#000000';
+		ctx.fillRect(0, 0, w, h);
+		const cx = Math.round(w / 2);
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'alphabetic';
+		ctx.fillStyle = '#e8e8e8';
+		ctx.font = '600 44px sans-serif';
+		ctx.fillText(title, cx, Math.round(h / 2 - 6));
+		ctx.fillStyle = '#9bb1d6';
+		ctx.font = '400 24px sans-serif';
+		ctx.fillText('Please wait…', cx, Math.round(h / 2 + 40));
+		ctx.restore();
 	}
 
 	private startLaunchSplash(appName: string): void {

@@ -39,6 +39,11 @@ const SEED_SKIP_ROOT_FILES: ReadonlySet<string> = new Set([
 	// read from romfs:/ directly by the versioned seeder and tracked via a
 	// separately-written profile marker — never mirrored to the profile as-is.
 	'seed-fingerprint',
+	// The generic forwarder stub is read from romfs:/forwarder-stub.nro directly
+	// by the on-device forwarder generator (FORWARDER_CONTRACT.md / I8). Mirroring
+	// it to the SD card would leave a stale, missing-only copy after self-updates;
+	// keeping it NRO-only makes it auto version-locked to the runtime.
+	'forwarder-stub.nro',
 ]);
 
 /** Romfs subtrees the seeder must NOT recurse into. Each entry is a

@@ -217,6 +217,15 @@
         console.debug('[delete-modal] removeSync(appDir) failed: '
           + (err && err.message ? err.message : String(err)));
       }
+
+      // Remove the forwarder generator's inventory sidecar for this app
+      // (configs/app-inventory/<id>.json) so it doesn't orphan after uninstall.
+      // Best-effort — absent for legacy installs; a leftover would be harmless
+      // anyway (the app dir is gone, so the generator's installed-test fails).
+      try {
+        Switch.removeSync(APP_ROOT + 'configs/app-inventory/' + id + '.json');
+      } catch (err) { /* no sidecar / already gone — fine */ }
+
       if (total === 0) setProgress(1, 1); // show a full bar for a no-file app
 
       deletedOnSuccess = true;
