@@ -553,7 +553,7 @@
       }
       if (!app) {
         // my-catalogue points each entry at its real host: the base repo for
-        // published/unpublished, the my.brewser.tech staging host for staged.
+        // published/unpublished, the my.brewser.io staging host for staged.
         // Both serve an artifacts/<id>.json, so the install path is identical.
         app = findInMyCatalogue(client, detail.id);
       }

@@ -314,8 +314,8 @@
   "generated": "2026-07-25T14:16:47Z",
   "revoked": [],
   "sources": {
-    "base": "https://play.brewser.tech",
-    "ext1": "https://play1.brewser.tech"
+    "base": "https://play.brewser.io",
+    "ext1": "https://play1.brewser.io"
   },
   "version": 2
 }

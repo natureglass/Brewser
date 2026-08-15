@@ -49,7 +49,7 @@ async function main() {
 
   for (const a of cat2.apps) {
     const expectHost = a.id === 'com.natureglass.unitydemoprobe'
-      ? 'https://play1.brewser.tech' : 'https://play.brewser.tech';
+      ? 'https://play1.brewser.io' : 'https://play.brewser.io';
     ok(a.entryUrl === `${expectHost}/apps/${a.id}/index.html`,
        `v2 entryUrl ${a.id}`, a.entryUrl);
     const urls = [a.entryUrl, a.logoUrl, a.artifactsUrl, a.fileUrl('x/y.png')];
@@ -78,7 +78,7 @@ async function main() {
      'v2: every app carries a parseable publishedAt');
   ok(byId.midilab.publishedAt === '2026-07-16T12:00:00Z', 'v2 publishedAt round-trips (real backfill date)',
      byId.midilab.publishedAt);
-  ok(byId.midilab.fileUrl('./assets/x.bin') === 'https://play.brewser.tech/apps/com.natureglass.midilab/assets/x.bin',
+  ok(byId.midilab.fileUrl('./assets/x.bin') === 'https://play.brewser.io/apps/com.natureglass.midilab/assets/x.bin',
      'fileUrl strips leading ./', byId.midilab.fileUrl('./assets/x.bin'));
 
   // ---- v1 live fixture ----------------------------------------------------
@@ -89,7 +89,7 @@ async function main() {
   ok(JSON.stringify(cat1.apps.map((a) => a.id).sort()) ===
      JSON.stringify(cat2.apps.map((a) => a.id).sort()), 'v1: same id set as v2');
   ok(cat1.apps.every((a) => a.source === 'base'), 'v1: implicit base source');
-  ok(cat1.apps.every((a) => a.entryUrl === `https://play.brewser.tech/apps/${a.id}/index.html`),
+  ok(cat1.apps.every((a) => a.entryUrl === `https://play.brewser.io/apps/${a.id}/index.html`),
      'v1: entry URLs on the pin, no <group>');
   ok(cat1.apps.every((a) => a.summary.length > 0 && [...a.summary].length <= 400 && !a.summary.includes('<')),
      'v1: summaries derived, <=400 chars, no markup');

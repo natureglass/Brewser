@@ -37,7 +37,7 @@ WORKSPACE = Path(__file__).resolve().parents[3]
 FIXTURES = WORKSPACE / "brewser" / "tests" / "fixtures" / "platform"
 APPS_DIR = WORKSPACE / "brewser-apps" / "apps"
 
-SOURCES = {"base": "https://play.brewser.tech", "ext1": "https://play1.brewser.tech"}
+SOURCES = {"base": "https://play.brewser.io", "ext1": "https://play1.brewser.io"}
 DEFAULT_SOURCE = "base"
 EXT1_APPS = {"com.natureglass.unitydemoprobe"}
 FEATURED = ["com.natureglass.fluiddynamics", "com.natureglass.midilab"]

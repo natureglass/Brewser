@@ -4,7 +4,7 @@
 // Limited Input Device flow is Google's RFC 8628 variant. Endpoints:
 //   * https://oauth2.googleapis.com/device/code       (device auth)
 //   * https://oauth2.googleapis.com/token             (token exchange)
-//   * https://brewser.tech/wp-json/brewser/v1/auth/device-mint
+//   * https://brewser.io/wp-json/brewser/v1/auth/device-mint
 //                                                     (Brewser mint route)
 //
 // The OAuth client registered in Google Cloud Console MUST be of type
@@ -42,7 +42,7 @@
   // envelope the app-side read seam expects. Contracts:
   //   brewser-runtime/docs/CONTRACT_switch_auth_record.md
   //   brewser-WP-Plugins/.../brewser-auth/CONTRACT_device_mint_route.md
-  var MINT_URL        = 'https://brewser.tech/wp-json/brewser/v1/auth/device-mint';
+  var MINT_URL        = 'https://brewser.io/wp-json/brewser/v1/auth/device-mint';
 
   // openid → emits sub. email → email field on /userinfo. profile →
   // name + picture. All three are on Google's Limited Input Device
@@ -602,7 +602,7 @@
       mint = await mintEnvelope(idToken);
     } catch (e) {
       log('mintEnvelope threw (network): ' + (e && e.message ? e.message : String(e)));
-      setPollStatus('Could not reach brewser.tech to complete sign-in.', 'error');
+      setPollStatus('Could not reach brewser.io to complete sign-in.', 'error');
       return;
     }
     if (!mint.ok) {

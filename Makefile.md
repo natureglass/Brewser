@@ -17,7 +17,7 @@ In one go it:
 
 1. **Bumps** the version + build counter — `package.json` version (patch, e.g. `0.1.2 → 0.1.3`) and `scripts/update/build-info.json` `counter` (+1). The version lets the runtime **detect** a new build; the counter (baked in + signed) lets it **accept** the update and refuse a rollback.
 2. **Builds** the bundle with the new version/counter + signing keyring baked in (`scripts/build-main.mjs`), refreshes `romfs/configs/current.json` + the seed-fingerprint, and **packages** the fat NRO (reuses the prebuilt `nxjs.nro` — no devkitPro needed).
-3. **Mirrors** `current.json` → `../brewser-apps-staging/versions.json` (served at `my.brewser.tech/versions.json` — the snapshot the runtime compares against).
+3. **Mirrors** `current.json` → `../brewser-apps-staging/versions.json` (served at `my.brewser.io/versions.json` — the snapshot the runtime compares against).
 4. **Moves** the NRO to `dist/`, **signs** `dist/update.json` (`scripts/update/sign-release.mjs`), and **verifies** the console would accept it (`scripts/update/verify-release.mjs`). The build fails if verification fails.
 
 Output: `dist/brewser.nro` + `dist/update.json` (→ push to `natureglass/Brewser`) and `../brewser-apps-staging/versions.json` (→ push to brewser-apps-staging).

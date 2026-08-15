@@ -48,7 +48,7 @@ Introduce a single `platform-client` module (living in `brewser-runtime/src`, co
 
 **Later cost:** low and shrinking. New platform capability = new method on the client; next drift = one parser + one fixture to update. The romfs page scripts stop encoding contract knowledge entirely, which also de-risks the eventual shell/page refactors you already do routinely.
 
-**Risk on CFW:** front-loaded but observable. The client is pure data-in/data-out, so it's fully testable off-console (fixtures + headless Chrome harness) before any Switch build; the residual hardware risk is nxjs `fetch` behavior against `brewser.tech`/raw.githubusercontent (TLS, redirects), which is *already* the current risk surface, unchanged. Early detection: the `parseReport` is rendered on the updates modal, so a drifted contract says "12 apps, 3 fields unknown" instead of rendering nothing.
+**Risk on CFW:** front-loaded but observable. The client is pure data-in/data-out, so it's fully testable off-console (fixtures + headless Chrome harness) before any Switch build; the residual hardware risk is nxjs `fetch` behavior against `brewser.io`/raw.githubusercontent (TLS, redirects), which is *already* the current risk surface, unchanged. Early detection: the `parseReport` is rendered on the updates modal, so a drifted contract says "12 apps, 3 fields unknown" instead of rendering nothing.
 
 **Platform-side needs:** none mandatory; benefits from the Option 4 items if you choose to do them.
 
@@ -74,7 +74,7 @@ Invert the default: make the platform emit what the runtime needs, so runtime-si
 
 - **P1 — permission slugs:** manifest builder emits taxonomy term slugs instead of names (`class-brewser-sub-manifest.php:50` + validator term-name→slug), aligning manifests with `permissions.json`/`warnings.json`/engine keys. Kills BC5 at the source for every future consumer (web player included). Needs a resubmission/regeneration pass for the 12 live apps.
 - **P2 — export featured:** catalogue generator (or WP on approve) writes `featured: true` from `_brewser_featured` into the entry, restoring a data-driven Featured rail (Open Q2).
-- **P3 — canonical base URL decision:** settle `play.brewser.tech` vs `raw.githubusercontent` vs `natureglass.github.io` once, and set both the WP `play_base_url` default and the runtime pins to it (Open Q1).
+- **P3 — canonical base URL decision:** settle `play.brewser.io` vs `raw.githubusercontent` vs `natureglass.github.io` once, and set both the WP `play_base_url` default and the runtime pins to it (Open Q1).
 - **P4 — `usb` entry in `permissions.json`** + reconcile the three permission vocabularies.
 - Runtime side then does: baseline + BC1/BC2 flattening + BC4 payload fix + reseed (i.e. Option 1 minus the vocabulary shim, minus rail redesign).
 

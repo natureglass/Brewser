@@ -91,7 +91,7 @@ LAUNCH (from hbmenu, fully offline)
 ### 2.2 Launch flow (exact)
 1. `romfsInit()` + mount self romfs; open `romfs:/forwarder.json`.
 2. Parse `forwarder.json` (§5.2). `contract != 1` → `consoleInit`, print a one-line "this forwarder is newer than… update Brewser" error, wait for `+`, exit. Extract `appId`, and (embed only) `entry` + `files[]`.
-3. **Verify `sdmc:/switch/brewser/brewser.nro` exists** (`stat`). Absent → friendly console message "Brewser isn't installed. Get it at play.brewser.tech" → wait → exit. (Never die silently — directive §A.)
+3. **Verify `sdmc:/switch/brewser/brewser.nro` exists** (`stat`). Absent → friendly console message "Brewser isn't installed. Get it at play.brewser.io" → wait → exit. (Never die silently — directive §A.)
 4. **Bundle present?**
    - **No (lite):** skip the installed-test; go to step 7 (Brewser handles present/missing).
    - **Yes (embed):** run the **installed-test** — `apps/<id>/manifest.json` exists **and** `apps/<id>/<entry>` exists (exactly Brewser's definition, `installed-apps.ts:113,135`).
@@ -220,7 +220,7 @@ An app is "installed" ⟺ `apps/<id>/manifest.json` exists **and** `apps/<id>/<e
 - The forwarder's RomFS is **immutable**; app updates via Brewser never touch it; it refreshes only on regeneration.
 
 ### 5.7 Failure behaviors
-- `brewser.nro` absent → "install Brewser (play.brewser.tech)" console message → exit.
+- `brewser.nro` absent → "install Brewser (play.brewser.io)" console message → exit.
 - Seed failure (space/write/size) → "couldn't restore <title>" → clean exit; live install untouched.
 - Unknown `contract` → error → exit.
 - Applet-mode → optional one-line informational notice.
@@ -332,7 +332,7 @@ Two-sentence register, no jargon ("chainload"/"RomFS"/"NRO" never appear). `<App
 > Re-download <App> in Brewser first to include a copy in the shortcut.
 
 **Stub / forwarder-mode screens (shown on launch):**
-- Brewser missing: `Brewser isn't installed. Get it at play.brewser.tech, then open this shortcut again.`
+- Brewser missing: `Brewser isn't installed. Get it at play.brewser.io, then open this shortcut again.`
 - App deleted, no embedded copy (Brewser missing-app screen): `<App> isn't installed. Open Brewser to download it again.`
 - Restore failed (SD full): `Couldn't restore <App> — your SD card may be full. Open Brewser to reinstall.`
 - Applet-mode notice (optional, one line): `Tip: for the smoothest experience, launch with more memory.`

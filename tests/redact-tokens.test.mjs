@@ -61,10 +61,10 @@ const cases = [
 // anchor — these prove the shipped pattern has both.
 const mustSurvive = [
   'index.html',
-  'play.brewser.tech',
+  'play.brewser.io',
   'manifest.json',
   'com.natureglass.midilab',
-  'fetch https://play.brewser.tech/apps/com.natureglass.midilab/manifest.json -> 200',
+  'fetch https://play.brewser.io/apps/com.natureglass.midilab/manifest.json -> 200',
   'entry=index.html logo=assets/appbanner.jpg id=com.natureglass.sensorsplayground',
 ];
 

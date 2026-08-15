@@ -233,7 +233,7 @@ by the argv contract (§1) — old forwarders keep working forever.
 
 | Condition | Behaviour |
 |---|---|
-| `brewser.nro` absent | Stub: "install Brewser (play.brewser.tech)" → exit |
+| `brewser.nro` absent | Stub: "install Brewser (play.brewser.io)" → exit |
 | Unknown `forwarder.json contract` | Stub: "made by a newer Brewser" → exit |
 | Seed failure (space/write/size) | Stub: "couldn't restore <app>" → clean exit; live install untouched |
 | Lite forwarder, app deleted | Brewser forwarder-missing screen → + exits to hbmenu |
