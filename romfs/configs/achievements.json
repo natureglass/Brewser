@@ -199,7 +199,7 @@
       "tier": 2,
       "tierName": "Craft",
       "description": "You showed it running instead of describing it.",
-      "criteria": "A valid YouTube demo URL is attached to the submission.",
+      "criteria": "A demo or trailer video link is attached to the submission.",
       "source": "manifest",
       "scope": "app"
     },

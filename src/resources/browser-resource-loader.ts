@@ -1265,6 +1265,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ toggleRow('autoRotate', 'Auto-rotate canvas', config.autoRotate, 'reserved — no consumer wired up today, value round-trips through Save')
 			+ toggleRow('clickSounds', 'Click sounds', config.clickSounds, 'short click.wav on link / button / chrome activation')
 			+ toggleRow('momentumScrolling', 'Momentum scrolling', config.momentumScrolling, 'scroll content coasts to a stop with friction after right-stick release / finger lift')
+			+ toggleRow('showFps', 'Show FPS', config.showFps, 'small semi-transparent FPS counter at the top-left; stays on across the shell and every app')
 			+ '</fieldset>'
 			+ '</div>'
 			+ '</div>'

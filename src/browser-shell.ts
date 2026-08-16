@@ -1363,6 +1363,7 @@ export class BrowserShell {
 		setLiveBuildChunkMs(shellConfig.wwwRenderChunkMs);
 		setLiveScrollChunkMs(shellConfig.scrollChunkMs);
 		setCursorIdleMs(shellConfig.mouseIdleMs);
+		this.applyFpsOverlay(shellConfig.showFps);
 		// Config-driven keyboard panel height. The kb paint pass, the
 		// touch-routing branch in controller-shortcuts, and the gamepad
 		// A path in keyboard-overlay all read this via getKeyboardTopY().
@@ -3991,6 +3992,9 @@ export class BrowserShell {
 		if ('videoNVTEGRA' in staged) {
 			setVideoTryHwAccel(fresh.videoNVTEGRA);
 		}
+		if ('showFps' in staged) {
+			this.applyFpsOverlay(fresh.showFps);
+		}
 		if ('wwwRenderChunkMs' in staged) {
 			this.wwwRenderChunkMs = fresh.wwwRenderChunkMs;
 			setLiveBuildChunkMs(fresh.wwwRenderChunkMs);
@@ -5151,6 +5155,23 @@ export class BrowserShell {
 	 * transition where parts of the canvas that used to be chrome are
 	 * now content (or vice versa) and stale pixels would otherwise show
 	 * through. */
+	/** Toggle the engine-side FPS overlay (nxjs-extended fps.cc) via the
+	 * `screen.setFpsOverlayEnabled` native binding. The overlay is composited
+	 * at present time, so it persists across the shell and every in-runtime
+	 * app with no per-paint-path plumbing here. Feature-detected: an older
+	 * `nxjs.nro` without the binding silently no-ops (the shell still runs;
+	 * the toggle just has no visible effect until the engine is rebuilt). */
+	private applyFpsOverlay(enabled: boolean): void {
+		try {
+			const screen = nxScreen() as unknown as {
+				setFpsOverlayEnabled?: (on: boolean) => void;
+			};
+			screen.setFpsOverlayEnabled?.(enabled);
+		} catch (_) {
+			/* binding absent / threw — non-fatal, overlay stays off */
+		}
+	}
+
 	private repaintAll(): void {
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');

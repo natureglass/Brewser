@@ -223,6 +223,12 @@ export interface BrowserConfig {
 	 * with friction so the content coasts to a stop instead of stopping
 	 * dead. Off makes every scroll input a pure 1:1 delta. */
 	momentumScrolling: boolean;
+	/** When true, the engine composites a small semi-transparent FPS box at
+	 * the top-left of the screen at present time (nxjs-extended fps.cc,
+	 * `screen.setFpsOverlayEnabled`). Because it's drawn in the native
+	 * compositor — not the DOM — it persists across the shell and every
+	 * in-runtime app (WebGL included). Off by default. */
+	showFps: boolean;
 	/** Enable navigation-flow diagnostic logging to
 	 * `sdmc:/switch/brewser/logs/shell-nav-diag.log`. Off by default;
 	 * flip on when investigating a hung navigation, a click that didn't
@@ -459,6 +465,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	mouseIdleMs: 3000,
 	autoRotate: true,
 	momentumScrolling: true,
+	showFps: false,
 	navDebug: false,
 	swbImgDebug: false,
 	showSplash: true,
@@ -573,6 +580,9 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			momentumScrolling: typeof parsed?.momentumScrolling === 'boolean'
 				? parsed.momentumScrolling
 				: DEFAULT_CONFIG.momentumScrolling,
+			showFps: typeof parsed?.showFps === 'boolean'
+				? parsed.showFps
+				: DEFAULT_CONFIG.showFps,
 			navDebug: typeof parsed?.navDebug === 'boolean'
 				? parsed.navDebug
 				: DEFAULT_CONFIG.navDebug,
