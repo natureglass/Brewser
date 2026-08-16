@@ -230,9 +230,18 @@
          the meta strip, header and body rows hide and the description grows
          to fill the card (min-height 600px) so a long write-up reads nearly
          full-screen; only the bottom action row stays visible. The state is
-         reset to collapsed on every open, and the script hides this whole row
-         for apps that carry no description. -->
+         reset to collapsed on every open. The install-size chip shares this
+         row, flush-right just LEFT of the Expand button (moved here from the
+         bottom action slot). The button is hidden for apps with no description
+         and the whole row is hidden only when neither the button nor the size
+         chip is showing — see missing-app-modal.js. -->
     <div id="app-modal-expand-row" class="app-modal-expand-row">
+      <!-- Install-size chip. Populated by missing-app-modal.js from
+           `detail.sizeBytes` (catalogue.json) as a megabyte figure. Sits to
+           the LEFT of the Expand button. Independent of the description, so
+           the script keeps this row visible for size-only apps even when the
+           Expand button is hidden. Hidden when sizeBytes is 0. -->
+      <span id="app-modal-size" class="app-modal-size"></span>
       <button id="app-modal-expand" class="app-modal-btn app-modal-expand-btn" type="button">Expand</button>
     </div>
     <!-- Body rows: missing-app-modal.js prepends Downloads + Rating
@@ -263,14 +272,8 @@
              break the modal. -->
         <button id="app-modal-forwarder" class="app-modal-btn app-modal-btn--hidden" type="button">Create shortcut</button>
         <button id="app-modal-update" class="app-modal-btn app-modal-btn--download app-modal-btn--hidden" type="button">Update</button>
-        <!-- Install-size chip. Populated by missing-app-modal.js from
-             `detail.sizeBytes` (catalogue.json) as a megabyte figure.
-             Lives in the LEFT action slot so it sits flush-left below
-             the card — alongside the Update button when one is shown
-             (upgrade case), or alone when no left-side button is
-             visible (missing / installed-current cases). The script
-             hides it when sizeBytes is 0 (catalog omitted the field). -->
-        <span id="app-modal-size" class="app-modal-size"></span>
+        <!-- Install-size chip moved up to the Expand row (flush-right, left of
+             the Expand button) — see #app-modal-size there. -->
       </div>
       <div class="app-modal-actions-side">
         <button id="app-modal-cancel" class="app-modal-btn" type="button">Cancel</button>

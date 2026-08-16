@@ -885,8 +885,8 @@ ul.settings-list li:active {
   align-items: center;
 }
 
-/* Install-size chip in the LEFT action slot. See main.css for full
-   rationale. Amber-tinted muted palette so it reads as metadata. */
+/* Install-size chip. Lives in the Expand row, flush-right just LEFT of
+   the Expand button. Amber-tinted muted palette so it reads as metadata. */
 .app-modal-size {
   display: none;
   font-weight: 700;
@@ -994,6 +994,8 @@ a.app-modal-btn.app-modal-btn--play { color: #ffffff; }
 .app-modal-expand-row {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
   margin: 0 0 14px;
 }
 .app-modal-expand-row.app-modal-expand-row--hidden { display: none; }

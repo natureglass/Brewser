@@ -681,10 +681,14 @@
     }
     // Only surface the Expand toggle when there's a description to expand —
     // mirrors the description block's own `:empty { display:none }` rule so
-    // we never leave an orphaned button under a hidden block.
-    if (expandRow) {
-      if (hasDescription) expandRow.classList.remove('app-modal-expand-row--hidden');
-      else expandRow.classList.add('app-modal-expand-row--hidden');
+    // we never leave an orphaned button under a hidden block. The install-size
+    // chip now shares this row (to the button's LEFT) but is independent of the
+    // description, so we hide only the BUTTON here and defer the ROW's
+    // visibility to after the size chip is populated below (the row stays
+    // visible whenever either the button or the size chip is showing).
+    if (expandBtn) {
+      if (hasDescription) expandBtn.classList.remove('app-modal-btn--hidden');
+      else expandBtn.classList.add('app-modal-btn--hidden');
     }
 
     // Detail rows in the order requested: category → features →
@@ -767,6 +771,17 @@
         sizeEl.textContent = '';
         sizeEl.classList.remove('app-modal-size--visible');
       }
+    }
+
+    // Surface the shared Expand row when EITHER the Expand button (present
+    // only when there's a description) or the install-size chip is showing;
+    // hide it only when both are absent so we never leave an empty
+    // 14px-margin strip under the description. Runs after the size chip is
+    // populated so the `--visible` class reflects this app.
+    if (expandRow) {
+      var sizeVisible = !!(sizeEl && sizeEl.classList.contains('app-modal-size--visible'));
+      if (hasDescription || sizeVisible) expandRow.classList.remove('app-modal-expand-row--hidden');
+      else expandRow.classList.add('app-modal-expand-row--hidden');
     }
 
     // (The device SD free-space chip + insufficient-space disable gate
