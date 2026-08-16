@@ -1,6 +1,8 @@
-Brewser is an online platform for creators, tinkerers, and developers — a curiosity-driven playground for sharing your ideas and projects with the world. If you've ever built something clever and then watched it vanish into the void, you're exactly who we made this for.
+# Brewser
 
-At its core, Brewser lets you build modern web applications using contemporary Web APIs that are cross-compatible with the **Brewser Homebrew runtime for Nintendo Switch**. Write once with standard web technologies, and your work runs across PC, mobile, and modded Switch consoles — no rewrites, no native toolchain, no fuss.
+Brewser is a platform for creators, tinkerers, and developers — a curiosity-driven playground for sharing your ideas and projects with the world. If you've ever built something clever and then watched it vanish into the void, you're exactly who we made this for.
+
+At its core, Brewser lets you build modern web applications using contemporary Web APIs that are cross-compatible with the **Brewser Runtime for Nintendo Switch**. Write once with standard web technologies, and your work runs across PC, mobile, and modded Switch consoles — no rewrites, no native toolchain, no fuss.
 
 ### Bringing hidden work into the light
 
@@ -25,4 +27,24 @@ Brewser also doubles as a demoscene environment. Whether it's a polished WebGL e
 
 ---
 
+## Getting your work out there
+
+Publishing and managing your apps happens on the **[brewser.io](https://brewser.io)** website. Sign in, submit your app, try it out in staging on a real Switch, and publish when it's ready. Once it's live, anyone running Brewser Runtime can find and launch it.
+
+## Documentation
+
+Guides, Web API references, and everything about building for Brewser live at:
+
+**[docs.brewser.io/docs](https://docs.brewser.io/docs)**
+
+---
+
 Whatever you're building — a hardware experiment, a graphical demo, or a full-blown web app — Brewser gives your work a place to live, an audience to reach, and a runtime that follows it from the browser to the console.
+
+---
+
+## Disclaimer
+
+Brewser is an independent homebrew project and is not affiliated with, endorsed by, sponsored by, licensed by, or approved by Nintendo.
+
+Brewser does not include, distribute, or provide Nintendo software, firmware, games, ROMs, encryption keys, copyrighted assets, exploits, or tools/instructions for bypassing technological protection measures. Users and contributors are responsible for complying with applicable laws and third-party terms.
