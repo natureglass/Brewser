@@ -71,6 +71,14 @@ DIST_DIR          ?= dist
 # versions.json (moved off the brewser-apps-staging repo; brewser-apps' old
 # scripts/collect_versions.py was retired).
 VERSIONS_JSON       := versions.json
+# SHA256 manifest of the release binaries in dist/ (brewser.nro +
+# brewser-forwarder.nsp). Written in the standard `sha256sum` format so
+# `cd dist && sha256sum -c checksums.txt` verifies the published files.
+CHECKSUMS           := $(DIST_DIR)/checksums.txt
+# Binaries hashed into $(CHECKSUMS). $(NRO) is (re)built by `release`; the
+# forwarder .nsp is a static artifact that just lives in dist/ — either is
+# skipped (with a note) if it happens to be absent.
+CHECKSUM_FILES      := $(NRO) brewser-forwarder.nsp
 # natureglass/Brewser branch the client downloads from. Keep == src/update/
 # config.ts RELEASE_REF. (Moving off v8-migration → main.)
 RELEASE_BRANCH    ?= main
@@ -91,7 +99,7 @@ NXJS_SOURCE_DIR   ?= ../nxjs-extended
 NXJS_SOURCE_NRO   := $(NXJS_SOURCE_DIR)/nxjs.nro
 NXJS_OVERLAY      := node_modules/@nx.js/nro/dist/nxjs.nro
 
-.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json seed-fingerprint build nro sdmc mirror-only clean help nxjs-runtime release bump
+.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json seed-fingerprint build nro sdmc mirror-only clean help nxjs-runtime release bump checksums
 
 # Default target is now a full self-update RELEASE (bump + sign → dist/), since
 # the primary workflow is producing installable/updatable builds. For the
@@ -240,9 +248,24 @@ release: bump
 	@mv -f $(NRO) "$(DIST_DIR)/$(NRO)"
 	@node scripts/update/sign-release.mjs
 	@node scripts/update/verify-release.mjs
+	@$(MAKE) checksums
 	@echo ""
 	@echo "[release] DONE ($(RELEASE_BRANCH)). Publish to natureglass/Brewser:"
-	@echo "  • push $(DIST_DIR)/$(NRO) + $(DIST_DIR)/update.json + $(VERSIONS_JSON)"
+	@echo "  • push $(DIST_DIR)/$(NRO) + $(DIST_DIR)/update.json + $(VERSIONS_JSON) + $(CHECKSUMS)"
+
+# Generate dist/checksums.txt: a plain (whole-file) SHA256 line per release
+# binary, in the standard `sha256sum` text format (`<hex>  <filename>`, so
+# `cd dist && sha256sum -c checksums.txt` verifies them and the values match
+# `Get-FileHash -Algorithm SHA256`). Runs as the last step of `release`, and
+# standalone via `make checksums` to re-hash whatever currently sits in dist/
+# (e.g. after dropping in a freshly-built forwarder .nsp).
+#
+# Delegated to a Node script on purpose: under Windows/MSYS `make`, a shell
+# `for … sha256sum >> file` loop silently drops the large NRO's line (the
+# recipe shell + cygwin O_APPEND race). Node's crypto+fs is immune.
+checksums:
+	@mkdir -p "$(DIST_DIR)"
+	@node scripts/update/gen-checksums.mjs "$(DIST_DIR)" $(CHECKSUM_FILES)
 
 clean:
 	rm -rf build/ runtime/
@@ -262,6 +285,7 @@ help:
 	@echo "  make sdmc        Citron dev loop: build + mirror romfs/ to SDMC (NO bump/sign)"
 	@echo "  make mirror-only Mirror romfs/ to SDMC without rebuilding"
 	@echo "  make nro         Package $(NRO) at repo root (build + current-json + seed-fingerprint)"
+	@echo "  make checksums   (Re)write $(CHECKSUMS) with SHA256 of the dist/ binaries"
 	@echo "  make build       esbuild bundle with baked defines (depends on sync-runtime)"
 	@echo "  make current-json  Refresh $(CURRENT_JSON) from upstream package.json files"
 	@echo "  make clean       Remove build/, runtime/, $(NRO)"
