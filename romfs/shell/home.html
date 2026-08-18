@@ -556,6 +556,10 @@
 <script src="brewser://scripts/forwarder-modal.js"></script>
 <script src="brewser://scripts/warnings-modal.js"></script>
 <script src="brewser://scripts/auth-shared.js"></script>
+<!-- Shared per-user catalogue sync (My Apps / Favorites / Achievements). MUST
+     load before updates-modal.js, which delegates its per-user refreshes to
+     `globalThis.__brewserUserSync`. -->
+<script src="brewser://scripts/user-sync.js"></script>
 <script src="brewser://scripts/missing-app-modal.js"></script>
 <script src="brewser://scripts/self-update-modal.js"></script>
 <script src="brewser://scripts/updates-modal.js"></script>

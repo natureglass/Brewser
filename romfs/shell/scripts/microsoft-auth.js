@@ -633,6 +633,17 @@
       globalThis.__swbAuth.setActiveProvider('microsoft');
     }
     showSuccess(record);
+    // Fresh login only: auto-sync this user's per-user catalogue (My Apps +
+    // Favorites + Achievements) behind a loading dialog so the My Apps tab is
+    // ready without a manual Check for Updates. `setActiveProvider` just wiped
+    // those caches, so this re-populates exactly what login cleared. NOT
+    // awaited — the success card is already shown; the dialog overlays it and
+    // settles async. Best-effort (the sync + dialog swallow their own errors).
+    // Deliberately NOT called from trySilentVerify (an unchanged session keeps
+    // its caches; re-syncing on every account-page visit would be wasteful).
+    if (globalThis.__brewserPostLoginSync && typeof globalThis.__brewserPostLoginSync.run === 'function') {
+      try { globalThis.__brewserPostLoginSync.run(); } catch (_) {}
+    }
   }
 
   async function trySilentVerify() {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-08-11T14:17:38Z",
+  "generated": "2026-08-17T21:24:21Z",
   "apps": [
     {
       "id": "com.natureglass.2dplatformermicrogame",
@@ -24,9 +24,11 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "mouseDisable": true,
+      "hideMouseDocked": true,
+      "hideMouseUndocked": true,
       "freshProcessOnExit": true,
       "publishedAt": "2026-08-08T11:36:13Z",
+      "updatedAt": "2026-08-08T11:36:13Z",
       "summary": "Unity's official 2D Platformer learning template, compiled to WebGL and running on the Switch GPU of",
       "genre": [
         "Platformer"
@@ -35,12 +37,12 @@
         "Gamepad",
         "Media Devices"
       ],
-      "sizeBytes": 29104133
+      "sizeBytes": 30141014
     },
     {
       "id": "com.natureglass.aether",
       "name": "Aether",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "description": "<p><strong>AETHER</strong> turns a written phrase into a fullscreen animated field. Describe a world, watch it assemble, then open the console and take it apart.</p>\r\n<p><strong>How it works</strong></p>\r\n<p>Type something like <em>stormy alien ocean at dusk</em> and press Render. AETHER reads the phrase against a vocabulary of 168 words covering subjects, moods, colours, materials, styles and times of day. Every word it recognises contributes to a set of 40 numbers — field scale, warp depth, symmetry, palette, motion, atmosphere and finish — which are weighted and averaged into a single parameter set.</p>\r\n<p>That set drives a WebGL2 fragment shader that renders the whole scene in one pass, at 60fps, with no textures and no geometry. Nothing is pre-rendered: every pixel is computed from the parameters each frame.</p>\r\n<p>The <strong>Director read</strong> panel shows which words landed and which were ignored, so you can see exactly how your phrase was interpreted rather than guessing.</p>\r\n<p>The morph</p>\r\n<p>A new phrase doesn't cut to the result. The image and the console sliders travel to their new values together over about a second, so you can watch which parameters your words actually moved.</p>\r\n<p>Seven field types</p>\r\n<ul>\r\n<li><strong>Smooth</strong> — marbled, cloud-like domain warping</li>\r\n<li><strong>Bands</strong> — topographic contour lines</li>\r\n<li><strong>Rings</strong> — concentric ripples</li>\r\n<li><strong>Veins</strong> — wood and marble grain</li>\r\n<li><strong>Terrace</strong> — stepped plateaus</li>\r\n<li><strong>Streaks</strong> — directional strata</li>\r\n<li><strong>Cells</strong> — cracked, crystalline Worley noise</li>\r\n</ul>\r\n<p>Combined with 14 palettes and optional kaleidoscopic folding, the same phrase vocabulary reaches a wide range of looks rather than recolouring one texture.</p>\r\n<p>Controls</p>\r\n<ul>\r\n<li><strong>Render</strong> — interpret whatever is in the prompt box</li>\r\n<li><strong>New prompt</strong> — deal from a bank of 50 written phrases <em>(P)</em></li>\r\n<li><strong>Surprise me</strong> — ignore language, roll the parameters directly <em>(space)</em></li>\r\n<li><strong>Console</strong> — slide out the full 40-parameter panel <em>(H)</em></li>\r\n<li><strong>Save frame</strong> — export the current image as a PNG <em>(S)</em></li>\r\n<li><strong>Copy / Load JSON</strong> — move parameter sets in and out by hand</li>\r\n</ul>\r\n<p>Render scale is adjustable if you want to trade sharpness for framerate on slower hardware. Gamepad and keyboard are both supported, and the console hides completely for fullscreen viewing.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -48,7 +50,9 @@
         "Apps",
         "Demos"
       ],
-      "permissions": [],
+      "permissions": [
+        "storage"
+      ],
       "compatibility": [
         "switch",
         "web"
@@ -58,7 +62,11 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:27:22Z",
+      "updatedAt": "2026-08-17T11:18:20Z",
       "summary": "Type a phrase, watch a world assemble. Fullscreen procedural WebGL2 art that runs offline.",
       "features": [
         "Gamepad"
@@ -67,13 +75,13 @@
         "WebGL2",
         "Kaleidoscope"
       ],
-      "sizeBytes": 121545,
+      "sizeBytes": 3042623,
       "featured": true
     },
     {
       "id": "com.natureglass.compass",
       "name": "Compass",
-      "version": "1.0.1",
+      "version": "1.0.4",
       "description": "<p><strong>Compass</strong> is a working magnetic compass rendered entirely in WebGL. It reads your device's orientation sensors to point at magnetic north, showing a precise heading in degrees and the cardinal direction you're facing — on a hand-drawn dial that swings smoothly like the real thing.</p>\r\n<p><strong>How it works.</strong> Every part of the dial — the graduated ring, the tick marks, the degree numbers, the cardinal letters and the needle — is built from scratch as WebGL geometry, with the text baked into a small glyph atlas so it stays crisp at any size. The app listens to your device's <em>absolute</em> orientation sensor (falling back to relative orientation, or Safari's compass heading on iOS) and corrects for however the screen itself is rotated, then eases the dial toward that heading with a damped spring so the needle settles naturally instead of snapping. When no compass hardware is feeding it — on a desktop, say — it drifts gently in a demo mode, and you can grab the dial and spin it yourself. Because orientation sensors are privacy-sensitive, some devices show an <em>Enable compass</em> button to grant permission first.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Point</strong> — hold the device flat and turn; the dial rotates to keep north fixed while the readout shows your live heading and cardinal direction.</li>\r\n<li><strong>Enable compass</strong> — on devices that ask, tap once to grant sensor permission (the status switches from <em>DEMO</em> to <em>LIVE</em>).</li>\r\n<li><strong>Drag</strong> — with no live sensor connected, drag the dial to spin it by hand.</li>\r\n<li><strong>Day / Night</strong> — toggle the light and dark themes with the button, or the <em>N</em>, <em>D</em> and space keys; it also picks one automatically based on the time of day.</li>\r\n</ul>\r\n<p>A compact, framework-free compass that works fully offline and falls back gracefully wherever a sensor or WebGL isn't available.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -92,24 +100,33 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "mouseDisable": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "freshProcessOnExit": false,
       "publishedAt": "2026-08-10T12:06:24Z",
+      "updatedAt": "2026-08-17T17:11:10Z",
       "summary": "A hand-drawn WebGL compass that points to magnetic north from your device's sensors.",
-      "sizeBytes": 38072
+      "tags": [
+        "PWA"
+      ],
+      "sizeBytes": 1020045
     },
     {
-      "id": "com.natureglass.fluiddynamics",
-      "name": "Fluid dynamics",
-      "version": "1.0.1",
-      "description": "<p><strong>Fluid dynamics</strong> is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate.</p>\r\n<p><strong>How it works.</strong> Every frame the app runs a chain of GPU shader passes over floating-point textures. It first computes the fluid's <em>curl</em> and adds a vorticity force to keep the motion lively and turbulent, then makes the flow <em>incompressible</em> by solving for pressure over roughly twenty iterations and subtracting its gradient from the velocity field. The velocity and the coloured dye are then <em>advected</em> — carried along the flow — and both fade slightly each step so trails dissipate naturally. The simulation runs on a compact velocity grid while the dye is rendered at much higher resolution for crisp detail, with a lighting pass that shades the fluid from its own density gradients to give it depth.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — drag anywhere to inject dye and push the fluid; the <em>direction and speed</em> of your stroke become the force applied, and the colour drifts through the rainbow as you move. <em>Multi-touch is supported</em>, so several fingers stir at once.</li>\r\n<li><strong>Burst</strong> — fires several randomly aimed splats of colour and force into the field for an instant explosion of motion.</li>\r\n<li><strong>Particles</strong> — toggles a layer of ~16,000 GPU particles that ride the velocity field, brightening where the flow moves fastest, then wrap and respawn to keep coverage even.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Everything runs locally with no network access, and the app automatically probes the device for the best supported float texture formats so it degrades gracefully across GPUs.</p>",
+      "id": "com.natureglass.dusk",
+      "name": "Dusk - Sky Atlas",
+      "version": "1.0.3",
+      "description": "<p><strong>Dusk</strong> is a pocket planetarium that draws the real night sky in WebGL. For any moment and place it renders the stars, constellations, Milky Way, deep-sky objects and planets exactly where they sit in the sky above you — wrapped in a warm dusk glow that fades from the horizon up to the zenith.</p>\r\n<p><strong>How it works.</strong> Everything you see is placed by genuine astronomy rather than a static picture. The whole celestial sphere is rotated for your latitude, longitude and the current clock using sidereal time, so the sky turns through the night just as the real one does. Thousands of stars are coloured from true blue–white to orange–red using each star's colour index and sized by brightness, and they twinkle gently. The seven naked-eye planets are computed live from Keplerian orbital elements, and the Sun and Moon from their own series, so their positions — and the glow the Sun casts along the horizon — match reality. Constellation figures, the softly-painted band of the Milky Way, and a catalogue of galaxies, nebulae and star clusters complete the scene, all fading away as they sink below a horizon ring marked N, E, S and W.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Look around</strong> — drag to pan across the sky, and pinch or scroll to zoom the field of view in and out.</li>\r\n<li><strong>Identify anything</strong> — tap a star, planet or deep-sky object and an engraved plate names it, with its designation, constellation and magnitude.</li>\r\n<li><strong>Point at the sky</strong> — switch on motion mode to steer the view by physically aiming your device at the real sky; drag sideways to line up the compass heading.</li>\r\n<li><strong>Tour the highlights</strong> — the focus button glides you from one notable sight to the next among everything currently above your horizon: the Moon, the planets, famous nebulae and the brightest named stars.</li>\r\n<li><strong>Choose your layers</strong> — toggle stars, constellation lines, the Milky Way and deep-sky objects on or off.</li>\r\n<li><strong>Set your place</strong> — tap the location chip to chart the sky for where you actually are, or pin coordinates in the URL; your layers and location are remembered for next time.</li>\r\n</ul>\r\n<p>Dusk bundles its star catalogues so it runs completely offline, charting the live sky for your location and clock.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
       "categories": [
-        "Apps"
+        "Apps",
+        "Demos"
       ],
-      "permissions": [],
+      "permissions": [
+        "storage"
+      ],
       "compatibility": [
+        "mobile",
         "switch",
         "web"
       ],
@@ -118,13 +135,47 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
+      "publishedAt": "2026-08-16T11:46:35Z",
+      "updatedAt": "2026-08-16T14:47:30Z",
+      "summary": "A pocket planetarium that charts the real night sky — stars, planets, constellations and the Milky W",
+      "sizeBytes": 5933934
+    },
+    {
+      "id": "com.natureglass.fluiddynamics",
+      "name": "Fluid dynamics",
+      "version": "1.0.3",
+      "description": "<p><strong>Fluid dynamics</strong> is a real-time fluid simulation you paint with your finger. Under the hood it solves the same equations that describe real smoke and water — the Navier–Stokes equations — entirely on the GPU using WebGL2, so thick, swirling dye reacts to every stroke at full frame rate.</p>\r\n<p><strong>How it works.</strong> Every frame the app runs a chain of GPU shader passes over floating-point textures. It first computes the fluid's <em>curl</em> and adds a vorticity force to keep the motion lively and turbulent, then makes the flow <em>incompressible</em> by solving for pressure over roughly twenty iterations and subtracting its gradient from the velocity field. The velocity and the coloured dye are then <em>advected</em> — carried along the flow — and both fade slightly each step so trails dissipate naturally. The simulation runs on a compact velocity grid while the dye is rendered at much higher resolution for crisp detail, with a lighting pass that shades the fluid from its own density gradients to give it depth.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — drag anywhere to inject dye and push the fluid; the <em>direction and speed</em> of your stroke become the force applied, and the colour drifts through the rainbow as you move. <em>Multi-touch is supported</em>, so several fingers stir at once.</li>\r\n<li><strong>Burst</strong> — fires several randomly aimed splats of colour and force into the field for an instant explosion of motion.</li>\r\n<li><strong>Particles</strong> — toggles a layer of ~16,000 GPU particles that ride the velocity field, brightening where the flow moves fastest, then wrap and respawn to keep coverage even.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Everything runs locally with no network access, and the app automatically probes the device for the best supported float texture formats so it degrades gracefully across GPUs.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Apps",
+        "Demos"
+      ],
+      "permissions": [],
+      "compatibility": [
+        "mobile",
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": true,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:43:09Z",
+      "updatedAt": "2026-08-17T20:50:43Z",
       "summary": "Paint glowing fluid on a WebGL2 canvas with burst and particle effects.",
       "tags": [
         "Fluids",
         "Visualizer"
       ],
-      "sizeBytes": 86917,
+      "sizeBytes": 3332960,
       "featured": true
     },
     {
@@ -147,18 +198,22 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:32:41Z",
+      "updatedAt": "2026-08-06T19:36:56Z",
       "summary": "A GPU-powered WebGL2 explorer for six infinitely detailed fractals.",
       "tags": [
         "Fractals",
         "Visualizer"
       ],
-      "sizeBytes": 67053
+      "sizeBytes": 2838682
     },
     {
       "id": "com.natureglass.gravityballs",
       "name": "Gravity Balls",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "description": "<p><strong>Gravity Balls</strong> is a relaxing physics sandbox where a set of colourful balls fall, bounce and jostle against each other and the walls — and gravity points wherever you tilt.</p>\r\n<p><strong>How it works.</strong> A proper physics engine runs behind the scenes. Each frame is broken into several small sub-steps, and within each step the app nudges every ball's velocity by gravity, then repeatedly resolves collisions — ball-against-wall and ball-against-ball — using impulses that account for each ball's mass (bigger balls are heavier), bounciness and friction. This <em>iterative</em> approach lets balls pile up and settle into stable stacks instead of jittering or sinking through one another. Drawing is just as efficient: a single instanced WebGL2 draw call renders every ball from one shared shape, and a shader turns each into a crisp, smoothly anti-aliased disc.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Tilt to steer gravity</strong> — on a device with a motion sensor, physically tilting it pulls the balls in that direction (the display reads <em>IMU LIVE</em>).</li>\r\n<li><strong>Drag</strong> — with no motion sensor, dragging on the screen points gravity toward your finger instead.</li>\r\n<li><strong>Full screen</strong> — fills the display for the full effect.</li>\r\n</ul>\r\n<p>A lightweight, self-contained demo that runs completely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -168,6 +223,7 @@
       ],
       "permissions": [],
       "compatibility": [
+        "mobile",
         "switch",
         "web"
       ],
@@ -176,18 +232,56 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:25:34Z",
+      "updatedAt": "2026-08-17T19:25:11Z",
       "summary": "A WebGL2 physics playground of bouncing balls under gravity.",
       "tags": [
         "Gyroscope"
       ],
-      "sizeBytes": 35320,
+      "sizeBytes": 405796,
       "featured": true
+    },
+    {
+      "id": "com.natureglass.matrixstudio",
+      "name": "Matrix Studio",
+      "version": "1.0.2",
+      "description": "<p><strong>Matrix Studio</strong> is a design-and-control studio for addressable-LED matrix panels. Draw straight onto a glowing on-screen grid, stir it like fluid, or run built-in animations — then stream the picture live to a real ESP32-driven panel over USB serial or Bluetooth.</p>\r\n<p><strong>How it works.</strong> The whole canvas is a WebGL “LED wall”: every pixel is drawn as a rounded, softly glowing dot on a dark grid, so the preview reads like the real panel. Everything you paint lives in a single framebuffer that the app maps onto your strip’s exact wiring — you describe the panel’s width, height and per-panel height, whether it is wired in columns or rows, whether it snakes back and forth (<em>serpentine</em>), and any X/Y flips, and the app computes the pixel→LED order for you. An <strong>IDENTIFY</strong> pattern marks the corners (red = top-left, green = top-right, blue = bottom-left) and sweeps left→right so you can dial in the wiring until the on-screen layout matches the hardware. When you connect, each frame is packed into a compact binary packet and pushed to the panel, while the data pin, LED count and brightness are sent as a config packet on connect and whenever you save.</p>\r\n<p><strong>Connecting to hardware.</strong> There are two paths, and the app is fully functional offline — a link only mirrors the canvas to the panel. <em>Web Serial over USB</em> comfortably runs 30–60 fps at high baud, while <em>Web Bluetooth</em> (using the Nordic UART service) tops out around 10–15 fps for a 512-LED frame. Brightness is applied on-device for power limiting — 512 LEDs at full white pull about 30 A. A matching ESP32 sketch is bundled in the app’s assets so you can flash your own controller.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> — pick a colour and brush size, then paint on the grid; strokes interpolate into smooth lines.</li>\r\n<li><strong>Fluid</strong> — a real-time stable-fluid mode where dragging injects colour and motion that swirls and dissipates.</li>\r\n<li><strong>Demo</strong> — cycle through built-in animations (Rainbow, Plasma, Fire, Rain and Bounce) that you can also poke to disturb.</li>\r\n<li><strong>Clear</strong> — wipe the grid back to black.</li>\r\n<li><strong>Settings</strong> — set the matrix layout, wiring and flips, the ESP32 data pin and brightness, and the connection type, baud and max send rate; run <strong>IDENTIFY</strong> to verify the mapping, and <strong>SAVE</strong> to persist it all.</li>\r\n<li><strong>Full screen</strong> — expands the canvas edge-to-edge.</li>\r\n</ul>\r\n<p>Runs entirely on-device with your layout and preferences remembered between sessions. Bring your own ESP32 and addressable-LED panel to see your artwork light up for real.</p>",
+      "logo": "assets/appbanner.jpg",
+      "entry": "index.html",
+      "categories": [
+        "Apps"
+      ],
+      "permissions": [
+        "usb"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "allowed_origins": [],
+      "developer": "Alex Daskalakis",
+      "license": "MIT",
+      "exitGame": "PLUS",
+      "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
+      "publishedAt": "2026-08-15T15:44:03Z",
+      "updatedAt": "2026-08-16T17:59:30Z",
+      "summary": "Design LED-matrix art and stream it live to a real ESP32 panel over USB or Bluetooth.",
+      "features": [
+        "Web Bluetooth",
+        "Web Serial"
+      ],
+      "sizeBytes": 1510801
     },
     {
       "id": "com.natureglass.metaballssim",
       "name": "Metaballs sim",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "description": "<p><strong>Metaballs sim</strong> is a relaxing fluid sandbox where dozens of soft water blobs fall, pool and merge into one gooey, rolling surface.</p>\r\n<p><strong>How it works.</strong> Two things run at once. Behind the scenes a lightweight particle simulation gives every blob <em>gravity</em>, plus <em>viscosity</em> and <em>cohesion</em> forces that pull neighbours together and let overlaps relax apart, so the crowd flows and settles like a thick liquid. On screen it uses the classic <em>metaball</em> trick: in a first pass each blob splats a soft circular <em>field</em> into an offscreen texture using <em>additive blending</em>, so wherever two blobs sit close their fields add up; a second full-screen pass then <em>thresholds</em> that combined field into flat colour bands — edge, fill and a bright dense core — making separate circles visually fuse into a single liquid shape. Everything is drawn with WebGL2 in just a couple of draw calls.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Drag</strong> — swirl the pool; blobs near your finger get pulled along with it.</li>\r\n<li><strong>Tap the top</strong> — pours fresh blobs in from above that drip down and merge into the water.</li>\r\n<li><strong>Cycle</strong> — hold to roll the colour smoothly through the spectrum, release to keep whatever hue it lands on.</li>\r\n<li><strong>Size + / Size -</strong> — makes newly poured blobs bigger or smaller.</li>\r\n<li><strong>Reset</strong> — clears everything back to the neat starting grid and the default blue.</li>\r\n<li><strong>Full screen</strong> — fills the display for the full effect.</li>\r\n</ul>\r\n<p>A self-contained demo that runs completely offline.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -204,12 +298,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:21:50Z",
+      "updatedAt": "2026-08-17T20:13:36Z",
       "summary": "A WebGL2 metaball fluid of merging, dripping water blobs you can pour and colour.",
       "tags": [
         "Fluids"
       ],
-      "sizeBytes": 29999
+      "sizeBytes": 444599
     },
     {
       "id": "com.natureglass.midisurface",
@@ -234,9 +332,11 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "mouseDisable": true,
+      "hideMouseDocked": true,
+      "hideMouseUndocked": true,
       "freshProcessOnExit": false,
       "publishedAt": "2026-08-10T21:22:28Z",
+      "updatedAt": "2026-08-10T21:22:28Z",
       "summary": "A touch MIDI control surface that mirrors your hardware and triggers looping samples with live effec",
       "features": [
         "Web MIDI"
@@ -244,7 +344,7 @@
       "tags": [
         "MIDI"
       ],
-      "sizeBytes": 2978271
+      "sizeBytes": 3810169
     },
     {
       "id": "com.natureglass.neuralnetworks",
@@ -268,15 +368,17 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
-      "mouseDisable": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": true,
       "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:36:13Z",
+      "updatedAt": "2026-08-09T21:02:18Z",
       "summary": "Draw a doodle and let an on-device WebNN model guess what it is.",
       "tags": [
         "Probability",
         "WebNN"
       ],
-      "sizeBytes": 91324,
+      "sizeBytes": 1007555,
       "featured": true
     },
     {
@@ -299,7 +401,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:21:34Z",
+      "updatedAt": "2026-08-06T09:21:34Z",
       "summary": "The very first WebGL1 capability demo on Switch: a moonlit ocean with a floating nx.js-logo cube",
       "features": [
         "Gamepad"
@@ -307,7 +412,7 @@
       "tags": [
         "WebGL1"
       ],
-      "sizeBytes": 94850
+      "sizeBytes": 2852928
     },
     {
       "id": "com.natureglass.nxjswebgl2test",
@@ -329,7 +434,10 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:22:21Z",
+      "updatedAt": "2026-08-06T09:22:21Z",
       "summary": "The very first WebGL2 shader demo on Switch: a procedural sunset sea with a floating logo cube.",
       "features": [
         "Gamepad"
@@ -337,7 +445,7 @@
       "tags": [
         "WebGL2"
       ],
-      "sizeBytes": 75297
+      "sizeBytes": 2095254
     },
     {
       "id": "com.natureglass.savedemo",
@@ -360,13 +468,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T10:20:30Z",
+      "updatedAt": "2026-08-06T10:20:30Z",
       "summary": "A hands-on test harness for the Brewser cloud save, records and leaderboard APIs.",
       "tags": [
         "Leaderboards",
         "Save Game"
       ],
-      "sizeBytes": 66341
+      "sizeBytes": 66432
     },
     {
       "id": "com.natureglass.sensorsplayground",
@@ -392,12 +503,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:24:29Z",
+      "updatedAt": "2026-08-06T10:24:29Z",
       "summary": "A live dashboard that probes your device's sensors, battery, haptics and network.",
       "tags": [
         "Gyroscope"
       ],
-      "sizeBytes": 102659,
+      "sizeBytes": 1581245,
       "featured": true
     },
     {
@@ -419,13 +534,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T10:28:14Z",
+      "updatedAt": "2026-08-06T10:28:14Z",
       "summary": "A WebGL2 music player with playlist and live spectrum visualizers.",
       "tags": [
         "Audio Player",
         "Visualizer"
       ],
-      "sizeBytes": 158718,
+      "sizeBytes": 1462462,
       "featured": true
     },
     {
@@ -448,17 +566,21 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:18:02Z",
+      "updatedAt": "2026-08-06T10:18:02Z",
       "summary": "Measure your internet speed against Cloudflare on an animated needle gauge.",
       "tags": [
         "Diagnostics"
       ],
-      "sizeBytes": 62066
+      "sizeBytes": 1250743
     },
     {
       "id": "com.natureglass.speedwatch",
       "name": "Speed Watch",
-      "version": "1.0.1",
+      "version": "1.0.4",
       "description": "<p><strong>Speed Watch</strong> turns your device into a GPS speedometer with a live map and automatic speed-limit alerts — a full driving head-up dashboard in a single page, with no libraries, no API keys, and no account.</p>\r\n<p><strong>How it works<br /></strong>A large canvas speedometer is the hero: your live speed swings an eased needle around a 270° dial styled after European road signage, with a big digital readout and a green \"legal\" zone that turns red past the posted limit.</p>\r\n<p>Speed comes straight from the device's GPS through the standard geolocation API — and where the hardware doesn't report speed directly, the app derives it from how far you've moved between fixes, smoothing the reading so a parked device settles to zero instead of creeping.</p>\r\n<p>Alongside the dial, a hand-written renderer paints OpenStreetMap tiles directly onto a canvas (no mapping library) and marks your position with a heading arrow and a GPS-accuracy ring; you can drag, pinch and zoom it, or let it follow you and tap <strong>Re-center</strong> to snap back.</p>\r\n<p>The posted speed limit is looked up live from OpenStreetMap's Overpass service for the road you are actually on — matched by both distance and heading so a parallel side-street doesn't fool it — and shown as a speed-sign roundel on the gauge. When you go over the limit (plus your chosen tolerance), a \"speed robot\" chirps a warning, keeps nagging until you slow down, and flashes a <strong>SLOW DOWN</strong> banner.</p>\r\n<p><strong>What it gives you:</strong><br /><strong>Live speedometer</strong> — an eased needle and digital readout on a road-sign-style dial, in km/h or mph.<br /><strong>Automatic speed limits</strong> — the posted limit for your current road, pulled live from OpenStreetMap (no API key) and drawn as a European limit roundel. - <br /><strong>Over-limit alerts</strong> — audible beeps with an adjustable tolerance (0, +3, +5, +10) and hysteresis, so it warns you without chattering at the threshold.<br /><strong>Live map</strong> — a canvas OpenStreetMap view with your heading arrow and accuracy ring; drag, pinch-zoom, follow, and re-center.<br /><strong>Night mode</strong> — a dark theme with an inverted map for comfortable driving after dark.</p>\r\n<p><strong>Keep-awake</strong> — an optional screen Wake Lock so the display stays on while you drive.</p>\r\n<p><strong>Demo drive</strong> — a fake-GPS circuit that ramps up and down over a limit, so you can try everything from your desk with no movement required.</p>\r\n<p>Your preferences (units, alert tolerance, night mode, sound) are remembered on the device. <strong>Requires location (GPS) access and an internet connection</strong> — the map tiles and speed-limit lookups both come from OpenStreetMap. It's happiest on a phone mounted in a vehicle; flip on <strong>Demo drive</strong> in Settings to explore it while stationary.</p>",
       "logo": "assets/appbanner.jpg",
       "entry": "index.html",
@@ -476,9 +598,17 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-09T12:49:28Z",
+      "updatedAt": "2026-08-17T17:10:32Z",
       "summary": "Free GPS speedometer with a live map and automatic speed-limit alerts",
-      "sizeBytes": 68537
+      "tags": [
+        "PWA",
+        "Maps"
+      ],
+      "sizeBytes": 3317402
     },
     {
       "id": "com.natureglass.streamcast",
@@ -505,13 +635,20 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
+      "freshProcessOnExit": false,
       "publishedAt": "2026-08-06T10:33:57Z",
+      "updatedAt": "2026-08-06T10:33:57Z",
       "summary": "Watch live Twitch streams natively in the Switch browser.",
+      "features": [
+        "Gamepad"
+      ],
       "tags": [
         "Twitch",
         "Streaming"
       ],
-      "sizeBytes": 74650,
+      "sizeBytes": 4413451,
       "featured": true
     },
     {
@@ -534,13 +671,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:23:06Z",
+      "updatedAt": "2026-08-06T09:23:06Z",
       "summary": "A real-time three.js demo of a chrome sphere reflecting the live scene via a CubeCamera.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 3750797
+      "sizeBytes": 6661754
     },
     {
       "id": "com.natureglass.threejsequirectenvreflection",
@@ -562,13 +702,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:23:48Z",
+      "updatedAt": "2026-08-06T09:23:48Z",
       "summary": "A three.js image-based-lighting demo of a torus knot reflecting an equirectangular HDR environment.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 4936472
+      "sizeBytes": 7932902
     },
     {
       "id": "com.natureglass.threejsgpgpuwater",
@@ -590,13 +733,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:24:29Z",
+      "updatedAt": "2026-08-06T09:24:29Z",
       "summary": "A GPU-computed three.js water surface that ripples wherever you press and drag.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 3862056
+      "sizeBytes": 6205766
     },
     {
       "id": "com.natureglass.threejsloadercollada",
@@ -618,13 +764,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:43:44Z",
+      "updatedAt": "2026-08-06T09:43:44Z",
       "summary": "A Three.js demo loading and spinning a textured Collada elf on the Switch GPU.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 4889329
+      "sizeBytes": 5725334
     },
     {
       "id": "com.natureglass.threejsloadergltf",
@@ -646,13 +795,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:44:35Z",
+      "updatedAt": "2026-08-06T09:44:35Z",
       "summary": "A Three.js demo loading a PBR glTF helmet under HDR lighting on the Switch GPU.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 6795312,
+      "sizeBytes": 9865725,
       "featured": true
     },
     {
@@ -675,13 +827,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:46:50Z",
+      "updatedAt": "2026-08-06T09:46:50Z",
       "summary": "A three.js diorama rendered through a chunky, adjustable retro pixelation pass.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 2298066
+      "sizeBytes": 3291245
     },
     {
       "id": "com.natureglass.threejsrapier3dphysics",
@@ -703,13 +858,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T09:47:43Z",
+      "updatedAt": "2026-08-06T09:47:43Z",
       "summary": "A self-running three.js physics scene where Rapier-driven shapes drop and bounce.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 4662466
+      "sizeBytes": 5797728
     },
     {
       "id": "com.natureglass.threejsselectiveunrealbloom",
@@ -731,13 +889,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T10:11:59Z",
+      "updatedAt": "2026-08-06T10:11:59Z",
       "summary": "An animated three.js ion-drive model with tunable Unreal-style bloom glowing its bright parts.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 8283924
+      "sizeBytes": 10934733
     },
     {
       "id": "com.natureglass.threejsshaderssky",
@@ -759,13 +920,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T10:12:52Z",
+      "updatedAt": "2026-08-06T10:12:52Z",
       "summary": "An interactive three.js atmospheric sky shader with a movable sun and drifting clouds.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 2257948
+      "sizeBytes": 4154409
     },
     {
       "id": "com.natureglass.threejsspotlightshadowcookie",
@@ -787,13 +951,16 @@
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
+      "hideMouseDocked": false,
+      "hideMouseUndocked": false,
       "publishedAt": "2026-08-06T10:13:47Z",
+      "updatedAt": "2026-08-06T10:13:47Z",
       "summary": "A Three.js spotlight demo projecting a textured cookie and soft shadows on the Switch GPU.",
       "tags": [
         "WebGL2",
         "ThreeJS"
       ],
-      "sizeBytes": 5152125
+      "sizeBytes": 7073607
     }
   ]
 }

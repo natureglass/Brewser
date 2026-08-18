@@ -127,20 +127,14 @@
   // the platform client parses it; a bad/missing stats.json is NOT a
   // sync failure (Popular / Top Rated degrade visibly instead).
   var STATS_PATH = APP_ROOT + 'configs/stats.json';
-  // Per-user "My Apps" document — folded in from the retired standalone
-  // "Fetch my Apps" button. Refreshed alongside the catalogue when a Brewser
-  // account is signed in (Bearer token), written verbatim after the platform
-  // client validates it. URL comes from `data-my-catalogue-url` on the trigger
-  // button (`<browser-config-my-catalogue>`).
-  var MY_CATALOGUE_PATH = APP_ROOT + 'configs/my-catalogue.json';
-  // Per-user Favorites (catalogue-v2) and earned Achievements documents,
-  // refreshed alongside the catalogue for a signed-in Brewser account. URLs
-  // come from `data-favorites-url` / `data-achievements-url` on the trigger
-  // button (`<browser-config-favorites>` / `<browser-config-achievements>`).
-  // Favorites reuses the catalogue file name; achievements uses `my-` to avoid
-  // clobbering the bundled `configs/achievements.json` criteria catalogue.
-  var FAVORITES_PATH = APP_ROOT + 'configs/favorites.json';
-  var ACHIEVEMENTS_PATH = APP_ROOT + 'configs/my-achievements.json';
+  // Per-user "My Apps" / Favorites / Achievements documents are refreshed
+  // alongside the catalogue when a Brewser account is signed in. The fetch /
+  // validate / write for all three now lives in the shared `user-sync.js`
+  // module (`globalThis.__brewserUserSync`), so the same logic drives both this
+  // Check-for-Updates flow AND the post-login auto-sync dialog. This script
+  // only supplies the endpoint URLs (from `data-my-catalogue-url` /
+  // `data-favorites-url` / `data-achievements-url` on the trigger button) and
+  // records whether My Apps changed (for the reload-on-close).
 
   var modalOpen = false;
   var fetchInFlight = false;
@@ -729,138 +723,33 @@
   // Fire-and-forget the actual update flow. Each failure path flips
   // the card into `--error` and surfaces a message; success leaves
   // the modal open with the diff lists populated. Nothing escapes.
-  // Folded-in "Fetch my Apps": when a Brewser account is signed in, refresh
-  // the per-user My Apps document alongside the catalogue. Best-effort — a
-  // signed-out user, missing URL, auth failure, bad response, or write error
-  // just leaves any existing my-catalogue.json untouched and never fails the
-  // overall sync (so it's safe inside the runCheck Promise.all). Returns true
-  // only when a fresh document was validated + written.
-  // Shared Bearer-token read for the per-user refreshes (my-catalogue,
-  // favorites, achievements). Returns '' when signed out (no active session).
-  function readAuthToken() {
-    if (globalThis.__swbAuth && typeof globalThis.__swbAuth.readActiveSession === 'function') {
-      var session = globalThis.__swbAuth.readActiveSession();
-      if (session && session.record && typeof session.record.token === 'string') {
-        return session.record.token;
-      }
-    }
-    return '';
-  }
+  //
+  // Per-user refreshes ("My Apps" / Favorites / Achievements) delegate to the
+  // shared `user-sync.js` module (`globalThis.__brewserUserSync`) — the exact
+  // same fetch / validate / write the post-login auto-sync dialog uses, so the
+  // two callers can't drift. Each is best-effort (signed-out, missing URL, auth
+  // failure, bad response, or write error just leaves the existing file
+  // untouched and returns false), so they stay safe inside the runCheck
+  // Promise.all. The URLs are read here from the trigger button's data-*
+  // attributes (server-expanded from `<browser-config-*/>`).
+  function userSync() { return globalThis.__brewserUserSync || null; }
 
   async function refreshMyCatalogue() {
-    var url = triggerBtn.getAttribute('data-my-catalogue-url') || '';
-    if (!url) return false;
-    var token = readAuthToken();
-    if (!token) return false; // signed out — nothing to fetch
-    var response;
-    try {
-      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
-    } catch (e) {
-      console.debug('[updates-modal] my-catalogue fetch threw: ' + (e && e.message ? e.message : String(e)));
-      return false;
-    }
-    if (!response.ok) {
-      console.debug('[updates-modal] my-catalogue HTTP ' + response.status);
-      return false;
-    }
-    var text;
-    try { text = await response.text(); }
-    catch (e) { return false; }
-    // Validate through the platform client before persisting — never write a
-    // document the runtime can't read (same rule as the catalogue itself).
-    var client = globalThis.__brewserPlatformClient;
-    if (client && typeof client.parseCatalogue === 'function') {
-      var outcome;
-      try { outcome = client.parseCatalogue(text); }
-      catch (e) { console.debug('[updates-modal] my-catalogue parse threw'); return false; }
-      if (!outcome || outcome.kind !== 'Ok') {
-        console.debug('[updates-modal] my-catalogue rejected: ' + (outcome ? outcome.kind : 'no outcome'));
-        return false;
-      }
-    }
-    try { Switch.writeFileSync(MY_CATALOGUE_PATH, text); }
-    catch (e) { console.debug('[updates-modal] my-catalogue write failed: ' + (e && e.message ? e.message : String(e))); return false; }
-    return true;
+    var s = userSync();
+    if (!s) return false;
+    return s.syncMyCatalogue(triggerBtn.getAttribute('data-my-catalogue-url') || '');
   }
 
-  // Per-user Favorites — refreshed alongside the catalogue for a signed-in
-  // account. Validated through the platform client (it's a catalogue-v2
-  // document, same as the catalogue / my-catalogue) before persisting to
-  // configs/favorites.json. Best-effort: signed-out, missing URL, auth failure,
-  // bad body or write error leaves any existing file untouched and never fails
-  // the overall sync (safe inside the runCheck Promise.all). Returns true only
-  // when a fresh document was validated + written.
   async function refreshFavorites() {
-    var url = triggerBtn.getAttribute('data-favorites-url') || '';
-    if (!url) return false;
-    var token = readAuthToken();
-    if (!token) return false; // signed out — nothing to fetch
-    var response;
-    try {
-      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
-    } catch (e) {
-      console.debug('[updates-modal] favorites fetch threw: ' + (e && e.message ? e.message : String(e)));
-      return false;
-    }
-    if (!response.ok) {
-      console.debug('[updates-modal] favorites HTTP ' + response.status);
-      return false;
-    }
-    var text;
-    try { text = await response.text(); }
-    catch (e) { return false; }
-    var client = globalThis.__brewserPlatformClient;
-    if (client && typeof client.parseCatalogue === 'function') {
-      var outcome;
-      try { outcome = client.parseCatalogue(text); }
-      catch (e) { console.debug('[updates-modal] favorites parse threw'); return false; }
-      if (!outcome || outcome.kind !== 'Ok') {
-        console.debug('[updates-modal] favorites rejected: ' + (outcome ? outcome.kind : 'no outcome'));
-        return false;
-      }
-    }
-    try { Switch.writeFileSync(FAVORITES_PATH, text); }
-    catch (e) { console.debug('[updates-modal] favorites write failed: ' + (e && e.message ? e.message : String(e))); return false; }
-    return true;
+    var s = userSync();
+    if (!s) return false;
+    return s.syncFavorites(triggerBtn.getAttribute('data-favorites-url') || '');
   }
 
-  // Per-user earned Achievements — a small custom document
-  // ({ version, generated, achievements: [...] }), NOT catalogue-v2, so it's
-  // validated as JSON carrying an `achievements` array (a stray HTML 200 or a
-  // shape drift can't replace a good file) before persisting to
-  // configs/my-achievements.json. Best-effort, same rules as the others.
   async function refreshAchievements() {
-    var url = triggerBtn.getAttribute('data-achievements-url') || '';
-    if (!url) return false;
-    var token = readAuthToken();
-    if (!token) return false; // signed out — nothing to fetch
-    var response;
-    try {
-      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
-    } catch (e) {
-      console.debug('[updates-modal] achievements fetch threw: ' + (e && e.message ? e.message : String(e)));
-      return false;
-    }
-    if (!response.ok) {
-      console.debug('[updates-modal] achievements HTTP ' + response.status);
-      return false;
-    }
-    var text;
-    try { text = await response.text(); }
-    catch (e) { return false; }
-    try {
-      var parsed = JSON.parse(text);
-      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.achievements)) {
-        console.debug('[updates-modal] achievements body missing achievements array; refusing write');
-        return false;
-      }
-    } catch (e) {
-      console.debug('[updates-modal] achievements is not valid JSON; refusing write: ' + (e && e.message ? e.message : String(e)));
-      return false;
-    }
-    try { Switch.writeFileSync(ACHIEVEMENTS_PATH, text); }
-    catch (e) { console.debug('[updates-modal] achievements write failed: ' + (e && e.message ? e.message : String(e))); return false; }
-    return true;
+    var s = userSync();
+    if (!s) return false;
+    return s.syncAchievements(triggerBtn.getAttribute('data-achievements-url') || '');
   }
 
   async function runCheck() {

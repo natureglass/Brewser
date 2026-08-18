@@ -36,6 +36,10 @@
             width: 300px;
         }
 
+        /* Post-login sync dialog: hide the "View My Apps" button when the sync
+           found nothing to show / failed (post-login-sync.js toggles this). */
+        .postlogin-hidden { display: none !important; }
+
     </style>
   </head>
 
@@ -137,7 +141,44 @@
 
     </div>
 
+    <!-- Post-login auto-sync dialog. Opened by post-login-sync.js right after a
+         fresh sign-in to fetch the user's My Apps / Favorites / Achievements so
+         the My Apps tab is ready without a manual Check for Updates. Reuses the
+         Check-for-Updates modal's classes (`app-modal-overlay`, `updates-modal-*`)
+         so it styles identically in every theme with no CSS additions.
+         Visibility flips via `.app-modal-overlay--open` (never `style.display`).
+         Endpoint URLs are server-expanded from `<browser-config-*/>` onto the
+         overlay's `data-*` attributes. -->
+    <browser-modal id="postlogin-sync-overlay" class="app-modal-overlay updates-modal-overlay"
+      data-my-catalogue-url="<browser-config-my-catalogue/>"
+      data-favorites-url="<browser-config-favorites/>"
+      data-achievements-url="<browser-config-achievements/>">
+      <div id="postlogin-sync-card" class="app-modal-card updates-modal-card">
+        <h2 id="postlogin-sync-title" class="app-modal-title updates-modal-title">Loading your apps…</h2>
+        <!-- Loading bar — visible only while the card carries `--loading`. -->
+        <div class="updates-modal-loading">
+          <div class="updates-modal-loading-bar"></div>
+        </div>
+        <!-- Results — hidden during loading, revealed when the sync settles. -->
+        <div class="updates-modal-results">
+          <div id="postlogin-sync-error" class="updates-modal-error"></div>
+          <div id="postlogin-sync-summary" class="updates-modal-count"></div>
+        </div>
+        <div class="app-modal-actions updates-modal-actions">
+          <div class="app-modal-actions-side">
+            <span id="postlogin-sync-status" class="updates-modal-status"></span>
+          </div>
+          <div class="app-modal-actions-side">
+            <button id="postlogin-sync-close" class="app-modal-btn app-modal-btn--download updates-modal-btn-close" type="button">Close</button>
+            <a id="postlogin-sync-goto" class="app-modal-btn app-modal-btn--play updates-modal-btn-close" href="brewser://home/">View My Apps</a>
+          </div>
+        </div>
+      </div>
+    </browser-modal>
+
     <script src="brewser://scripts/auth-shared.js"></script>
+    <script src="brewser://scripts/user-sync.js"></script>
+    <script src="brewser://scripts/post-login-sync.js"></script>
     <script src="brewser://scripts/microsoft-auth.js"></script>
 
   </body>
