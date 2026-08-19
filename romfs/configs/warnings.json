@@ -53,6 +53,18 @@
             "risk": "medium",
             "description": "Talks to connected USB devices.",
             "warning": "Allows this app to communicate with USB devices plugged into the console (controllers, MIDI gear, adapters). A malicious app could read from or send commands to connected hardware."
+        },
+        "bluetooth": {
+            "show": true,
+            "risk": "medium",
+            "description": "Connects to nearby Bluetooth devices.",
+            "warning": "Allows this app to discover and connect to nearby Bluetooth Low Energy devices, which could read data from or send commands to your wireless hardware."
+        },
+        "nfc": {
+            "show": true,
+            "risk": "medium",
+            "description": "Reads and writes NFC tags.",
+            "warning": "Allows this app to read data from and write data to NFC tags (including amiibo) held near the console, which could expose tag contents or overwrite and corrupt them."
         }
     }
 }
