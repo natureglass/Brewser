@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in Brewser isn't working right
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! The details below help fix it faster - especially the version info.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Nintendo Switch
+        - PC
+        - Mobile
+    validations:
+      required: true
+
+  - type: input
+    id: brewser-version
+    attributes:
+      label: Brewser version
+      description: Shown in Brewser's settings/about screen
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: switch-details
+    attributes:
+      label: Switch details (if applicable)
+      description: Model, firmware version, and Atmosphere version - plus docked or handheld
+      placeholder: "OLED, FW 18.1.0, Atmosphere 1.7.1, handheld"
+
+  - type: input
+    id: app
+    attributes:
+      label: Affected app
+      description: The catalogue app where the problem occurs, or "Brewser itself"
+      placeholder: "DUSK / Brewser itself"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs. actual behavior
+      placeholder: "Expected: ... / Actual: ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, photos, or anything else
+      description: A photo of the Switch screen is perfectly fine
