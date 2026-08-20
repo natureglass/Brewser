@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💡 Feature ideas & voting
+    url: https://brewser.io/brewser-ideas/
+    about: Feature requests live on the Brewser Ideas Board, where you can vote on what gets built next.
+  - name: 💬 Questions & general discussion
+    url: https://gbatemp.net/
+    about: For questions, setup help, or general discussion, the GBAtemp release thread is the place.
+  - name: 🔒 Security issues
+    url: mailto:security@brewser.io
+    about: Please report security vulnerabilities privately by email, not in public issues.
