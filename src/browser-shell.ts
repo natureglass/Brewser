@@ -23,6 +23,74 @@ function _shellInputDiag(label: string): void {
 	} catch { /* swallow */ }
 }
 
+// --- Boot-timing probe (DIAGNOSTIC — safe to remove) -----------------------
+// Writes a per-phase boot timeline to `sdmc:/switch/brewser/logs/boot-timing.log`
+// so a hardware boot can be measured precisely. A FILE is the only reliable
+// channel: the production safe-console redirect no-ops `console.debug`
+// (brewser-runtime/src/polyfills/safe-console.ts), so the pre-existing `[boot]`
+// console lines never surface on a shipping build.
+//
+// Columns: `+Nms` = ms since js-t0 (`globalThis.__bootT0`, stamped at the top of
+// main.ts, i.e. the start of bundle top-level eval); `ΔNms` = gap since the
+// previous mark — that Δ column is the cost of each boot phase. The file is
+// reset at run() entry so it always holds exactly the most recent boot; each
+// mark is appended live so a mid-boot hang still leaves a partial trail.
+//
+// Pairs with the C-side `[skia] GPU screen surface … ready (+Nms since t0)` line
+// in `sdmc:/switch/nxjs-debug.log` (t0 = C `main()` start). The
+// compile+instantiate cost (t0 → js-t0, i.e. cold-compiling runtime.js +
+// main.js) ≈ that skia delta MINUS this probe's `splash armed` mark, because
+// both are measured at the same first `getContext`. The pre-`main()` NRO load
+// (~70 MB from SD) is before t0 and needs an external stopwatch.
+const _BOOT_PROBE_PATH = 'sdmc:/switch/brewser/logs/boot-timing.log';
+let _bootProbeLast = 0;
+// True only during the boot sequence (run() entry → main loop entry). Gates the
+// per-navigation sub-marks (delegate `html parsed`, runtime `populateLiveRoot` /
+// `runPageScripts`) so ONLY the boot navigation writes to the log — later
+// navigations call the same hook but it no-ops. The runtime reaches the hook via
+// `globalThis.__bootProbeMark` (installed in `_bootProbeReset`) since it can't
+// import this shell-private helper.
+let _bootPhaseActive = false;
+function _bootProbeSwitch(): {
+	appendFileSync?: (p: string, d: string) => void;
+	writeFileSync?: (p: string, d: Uint8Array) => void;
+} | undefined {
+	return (globalThis as {
+		Switch?: {
+			appendFileSync?: (p: string, d: string) => void;
+			writeFileSync?: (p: string, d: Uint8Array) => void;
+		};
+	}).Switch;
+}
+function _bootProbeReset(): void {
+	try {
+		const t0 = (globalThis as { __bootT0?: number }).__bootT0 ?? Date.now();
+		_bootProbeLast = t0;
+		_bootPhaseActive = true;
+		// Expose a boot-only mark hook the runtime (web-page-session, browser-
+		// profile) can call without importing this module. Inert once boot ends.
+		(globalThis as { __bootProbeMark?: (label: string) => void }).__bootProbeMark = (label) => {
+			if (_bootPhaseActive) _bootProbe(label);
+		};
+		_bootProbeSwitch()?.writeFileSync?.(
+			_BOOT_PROBE_PATH,
+			new TextEncoder().encode('# brewser boot-timing — "+ms" = since js-t0, "Δ" = since previous mark\n'),
+		);
+	} catch { /* swallow — must never block boot */ }
+}
+function _bootProbe(label: string): void {
+	try {
+		const now = Date.now();
+		const t0 = (globalThis as { __bootT0?: number }).__bootT0 ?? now;
+		const delta = now - _bootProbeLast;
+		_bootProbeLast = now;
+		_bootProbeSwitch()?.appendFileSync?.(
+			_BOOT_PROBE_PATH,
+			`+${now - t0}ms\tΔ${delta}ms\t${label}\n`,
+		);
+	} catch { /* swallow */ }
+}
+
 import {
 	BROWSER_INTERNAL_ORIGIN,
 	DEFAULT_CANVAS_HEIGHT,
@@ -160,6 +228,14 @@ import {
 	setClickSoundEnabled,
 	setClickSoundPath,
 } from '@switch-web/runtime';
+import {
+	preloadShellMusic,
+	setShellMusicEnabled,
+	setShellMusicPath,
+	setShellMusicVolume,
+	startShellMusic,
+	stopShellMusic,
+} from '@switch-web/runtime';
 import { BookmarksStore } from './navigation/bookmarks-store.js';
 import { BrowserNavigation } from './navigation/browser-navigation.js';
 import { HistoryStore } from './navigation/history-store.js';
@@ -175,6 +251,12 @@ import { loadOptionalImage } from '@switch-web/runtime';
 import { LocalSchemeFetchLoader } from '@switch-web/runtime';
 import { SwitchUaFetchLoader } from '@switch-web/runtime';
 import { loadCursorRegistry } from '@switch-web/runtime';
+
+// This build's semver, baked in by esbuild `--define` (scripts/build-main.mjs)
+// — same value as `configs/current.json` `brewser`. Referenced directly (not
+// via update/config.ts) so the boot splash's version label costs nothing and
+// never pulls the updater keyring onto the normal-boot path.
+declare const __BREWSER_VERSION__: string;
 
 /**
  * Top-level orchestrator for the browser shell.
@@ -197,6 +279,11 @@ interface SplashHandle {
 	 * `splashFadeMs <= 0`, jumps straight to `done` and resolves
 	 * `finishedFading` immediately. */
 	beginFade(): void;
+	/** Upgrade the splash from the default (black + version label) to the
+	 * branded `loading.jpg` image (which carries its own first-launch wording).
+	 * Called only on a long (first-launch / after-update) boot once the seed-fingerprint
+	 * check resolves; a fast boot never calls it and stays on the text. */
+	showFirstLaunch(): void;
 }
 
 /** Animated-wallpaper frame cap. 30 fps is plenty for slow shader swells
@@ -666,6 +753,17 @@ export class BrowserShell {
 		setClickSoundEnabled(startupConfig.clickSounds);
 		setClickSoundPath(this.profile.assetPath('click.wav'));
 		void preloadClickSound();
+		// Shell background music. `shellMusic` gates the feature and
+		// `shellMusicVol` (1–10) sets the intensity; the track is read
+		// straight from the baked romfs (no SD seed needed). Preload the
+		// decode now so the first shell landing can start the loop without
+		// an audible gap. Actual start/stop is driven per-navigation in
+		// `handleHtmlResponseLive` (shell pages start it, app pages stop it),
+		// so the music never bleeds into a running app.
+		setShellMusicEnabled(startupConfig.shellMusic);
+		setShellMusicVolume(startupConfig.shellMusicVol);
+		setShellMusicPath('romfs:/themes/assets/theme.mp3');
+		if (startupConfig.shellMusic) void preloadShellMusic();
 		this.momentumEnabled = startupConfig.momentumScrolling;
 		this.colorScheme = startupConfig.theme;
 		// Push the colour-scheme preference into the CSS cascade up front so
@@ -777,8 +875,10 @@ export class BrowserShell {
 			},
 			onHtmlResponse: async (url, html) => {
 				const tree = parseHtml(html);
+				if (_bootPhaseActive) _bootProbe('  · html fetched+expanded+parsed');
 				this.navigation.setCurrentTitle(extractTitle(tree));
 				await this.handleHtmlResponseLive(url, tree);
+				if (_bootPhaseActive) _bootProbe('  · handleHtmlResponseLive done');
 			},
 		};
 		this.webView = new WebView(
@@ -1212,6 +1312,8 @@ export class BrowserShell {
 	}
 
 	async run(): Promise<void> {
+		_bootProbeReset();
+		_bootProbe('run() entry');
 		// Forwarder mode detection (argv) — done HERE, before the splash, so a
 		// forwarder launch shows the app launch splash ("Loading <app>") instead of
 		// Brewser's own boot splash. `--fwd=1` = forwarder mode; `--app=<id>`
@@ -1260,7 +1362,20 @@ export class BrowserShell {
 			splashHandle = this.startupConfig.showSplash
 				? this.startBootSplash(this.startupConfig.splashFadeMs)
 				: null;
+			// Tiered splash: the boot splash starts as black + the version label
+			// (the fast-boot common case). If the upcoming seed will
+			// actually re-copy files — a first launch or an after-update boot,
+			// the genuinely long one — upgrade to the branded image + "first
+			// launch may take longer" note. Fire-and-forget so the splash's
+			// synchronous first paint above never waits on the fingerprint read.
+			if (splashHandle) {
+				const handle = splashHandle;
+				void this.profile.willSeedDoWork().then((long) => {
+					if (long) handle.showFirstLaunch();
+				}).catch(() => { /* stay on the text treatment */ });
+			}
 		}
+		_bootProbe('splash armed');
 		this.webView.initialize();
 		// Touch listener must be installed after the WebView has touched up
 		// the canvas; it stays installed for the whole shell lifetime. It
@@ -1319,7 +1434,9 @@ export class BrowserShell {
 		// from romfs into the profile dir. Cheap on every launch
 		// (existence check + skip for files that already exist) so the
 		// user's edits survive but a deleted file is restored next run.
+		_bootProbe('webview+input installed');
 		await this.profile.seedRomfs();
+		_bootProbe('seedRomfs done');
 		// HTML-driven keyboard: parse `keyboard.html` once into a second
 		// live-DOM root. Painted below `KEYBOARD_LAYOUT.topY` when
 		// `KeyboardOverlay.open()` flips the overlay-visible flag on.
@@ -1349,6 +1466,7 @@ export class BrowserShell {
 		// 2026-06-18 number picker — same shape.
 		await this.loadHtmlNumberPicker();
 		setNumberPickerRepaintDriver(() => this.repaintContent());
+		_bootProbe('overlays parsed (7x loadHtml)');
 		// Apply shell-level preferences from config.json. Done before
 		// scanForAutoplayVideos runs (it reads videoTryHwAccel via
 		// openDecoder) and before the toolbar live root is built so the
@@ -1413,6 +1531,7 @@ export class BrowserShell {
 			this.profile.stylePath('themes/cursors.json'),
 			(rel) => this.profile.stylePath(rel),
 		);
+		_bootProbe('config+toolbar+bg+cursor (loadHtmlToolbar awaited)');
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
 		// restricted memory that the live-DOM content cache's
@@ -1428,6 +1547,7 @@ export class BrowserShell {
 		if (!isApplication) {
 			await this.showLibraryAppletWarning(appletType);
 		}
+		_bootProbe('applet check (incl. any warning wait)');
 		// Kick off the network probe in the background — don't block boot
 		// on its ~1–15 s round-trip. The toolbar reachability indicator
 		// (green/red dot) reads `__browserNetworkStatus` per render and
@@ -1502,6 +1622,7 @@ export class BrowserShell {
 			this.autoranApp = autoUrl !== null; // D4: remember a plain-autorun boot
 			bootUrl = autoUrl ?? DEFAULT_HOME_URL;
 		}
+		_bootProbe(`navigate start → ${bootUrl}`);
 		if (this.forwarderMode) {
 			// Forwarder mode boots straight into the app. The app's page scripts
 			// (especially WebGL ones) await requestAnimationFrame / frames during
@@ -1522,16 +1643,21 @@ export class BrowserShell {
 			});
 		} else if (splashHandle) {
 			await this.navigateTo(bootUrl);
+			_bootProbe('navigate(home) done — home built');
 			splashHandle.beginFade();
 			await splashHandle.finishedFading;
+			_bootProbe('splash faded');
 			// Warm-cache repaint. Should be ~10 ms (cache blit only).
 			this.repaintAll();
+			_bootProbe('first home paint done');
 		} else {
 			await this.navigateTo(bootUrl);
+			_bootProbe('navigate(home) done — home built (no splash)');
 			// No splash → no repaintAll above; force one 2D paint before the
 			// deferred GL arm below so the bridge composites over an
 			// established surface (see the boot wallpaper note above).
 			this.repaintAll();
+			_bootProbe('first home paint done');
 		}
 		// Deferred animated-wallpaper arm. Now that the home page has been
 		// navigated AND painted (repaintAll above), acquiring the shared GL
@@ -1546,6 +1672,8 @@ export class BrowserShell {
 			const bootBg = this.resolveSelectedBackground(shellConfig);
 			if (bootBg.dynamic && !this.forwarderMode) this.loadStyleDynamic(bootBg.dynamic);
 		}
+		_bootProbe('main loop entry (boot complete)');
+		_bootPhaseActive = false;
 		try {
 			while (true) {
 				const input = await waitForControllerInput({
@@ -2689,6 +2817,10 @@ export class BrowserShell {
 			// in a clean process (chainload) so a memory-heavy WASM app's
 			// unreclaimable linear memory doesn't accumulate across launches.
 			this.currentAppFreshProcessOnExit = manifest?.freshProcessOnExit === true;
+			// Entering an installed app: silence the shell background music
+			// so it never bleeds into the app's own audio. Idempotent — a
+			// no-op if the music was already stopped (feature off, app→app).
+			stopShellMusic();
 		} else {
 			clearAppButtonOverlay();
 			// Shell page (launcher / settings / home): always restore the
@@ -2702,6 +2834,11 @@ export class BrowserShell {
 			// Settings still applies via `policy.networkEnabled`, but
 			// no manifest declaration is required for shell code paths.
 			this.policy.setManifestPermissions(null, null, null);
+			// Back on the shell (or an external web page): resume the
+			// background music if enabled. Idempotent while a loop is
+			// already playing (shell→shell keeps it continuous); after an
+			// app run it starts a fresh voice FROM THE BEGINNING.
+			startShellMusic();
 		}
 		// Snapshot the toolbar avatar `src` for this navigation. MUST run
 		// AFTER the `setManifestPermissions` swap above AND gated to shell
@@ -4054,6 +4191,20 @@ export class BrowserShell {
 		}
 		if ('clickSounds' in staged) {
 			setClickSoundEnabled(fresh.clickSounds);
+		}
+		// Shell music: push the new enabled flag + volume into the runtime
+		// so they're live BEFORE the post-save reload. Toggling off stops
+		// any looping voice immediately; toggling on preloads the decode so
+		// the reload's shell landing (`startShellMusic` in
+		// handleHtmlResponseLive) can begin the loop without a gap. The
+		// actual start is left to that navigation hook — no need to start it
+		// here since we're about to reload the (shell) Settings page.
+		if ('shellMusic' in staged) {
+			setShellMusicEnabled(fresh.shellMusic);
+			if (fresh.shellMusic) void preloadShellMusic();
+		}
+		if ('shellMusicVol' in staged) {
+			setShellMusicVolume(fresh.shellMusicVol);
 		}
 		if ('local' in staged) {
 			setDateInputDefaultPlaceholder(fresh.local);
@@ -5475,11 +5626,17 @@ export class BrowserShell {
 		const canvas = nxScreen();
 		const ctx = canvas.getContext('2d');
 
-		// Per-frame paint state. The image starts null and gets filled
-		// in by the fire-and-forget `loadOptionalImage` continuation
-		// below; the rAF callback null-guards the `drawImage` so the
-		// first frame (and any frame before the image lands) paints a
-		// pure-black backdrop.
+		// Two boot-splash treatments (per the tiered-splash strategy):
+		//   - FAST boot (default): just black + the version label — no image is
+		//     loaded and no "loading" text (a normal boot is too fast for text to
+		//     read as anything but a flash).
+		//   - LONG boot (first launch / after an update — the seed will re-copy):
+		//     the branded `loading.jpg` (which carries its own "first launch may
+		//     take longer" wording). Selected by the caller via `showFirstLaunch()`
+		//     once the async seed-fingerprint check resolves, so the synchronous
+		//     first paint below never waits on it.
+		// Both treatments show this build's version bottom-right.
+		let splashMode: 'text' | 'image' = 'text';
 		let splashImg: unknown = null;
 		let lw = 0;
 		let lh = 0;
@@ -5494,14 +5651,32 @@ export class BrowserShell {
 			resolveFinished = resolve;
 		});
 
+		// This build's version (e.g. "v0.1.99"), drawn bottom-right on both
+		// treatments. `__BREWSER_VERSION__` is the esbuild-baked package version,
+		// identical to `configs/current.json` `brewser`.
+		const versionLabel = `v${typeof __BREWSER_VERSION__ !== 'undefined' ? __BREWSER_VERSION__ : '0.0.0'}`;
+		const drawVersionLabel = (): void => {
+			ctx.fillStyle = '#6b7a90';
+			ctx.font = '18px system-ui';
+			ctx.textAlign = 'right';
+			ctx.textBaseline = 'alphabetic';
+			ctx.fillText(versionLabel, canvas.width - 24, canvas.height - 20);
+			ctx.textAlign = 'start';
+		};
+
 		const raf = this.nativeRaf;
 		const rafCallback = (): void => {
 			if (phase === 'done') return;
 			ctx.fillStyle = '#000';
 			ctx.fillRect(0, 0, canvas.width, canvas.height);
-			if (splashImg && lw > 0 && lh > 0) {
+			if (splashMode === 'image' && splashImg && lw > 0 && lh > 0) {
+				// Long boot: the branded image (carries its own text). A fast boot
+				// shows just the black backdrop above — no "loading" text (a normal
+				// boot is too fast for it to read as anything but a flash).
 				ctx.drawImage(splashImg as CanvasImageSource, dx, dy, lw, lh);
 			}
+			// Version label (bottom-right), before the fade overlay so it fades too.
+			drawVersionLabel();
 			if (phase === 'fade') {
 				const dt = Date.now() - fadeStart;
 				const t = splashFadeMs > 0 ? Math.min(1, dt / splashFadeMs) : 1;
@@ -5541,23 +5716,27 @@ export class BrowserShell {
 			console.debug('[boot] splash-first-paint');
 		}
 
-		// Async image load — fire and forget. The rAF callback picks
-		// up the image automatically once these vars are populated;
-		// until then it paints the black backdrop alone (which is what
-		// the user sees for the first few frames, then the logo fades
-		// in via the next rAF tick).
-		void loadOptionalImage('romfs:/shell/assets/loading.jpg').then((img) => {
-			if (!img) return;
-			const si = img as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number };
-			const w = si.naturalWidth || si.width || 0;
-			const h = si.naturalHeight || si.height || 0;
-			if (w <= 0 || h <= 0) return;
-			lw = w;
-			lh = h;
-			dx = Math.round((canvas.width - lw) / 2);
-			dy = Math.round((canvas.height - lh) / 2);
-			splashImg = img;
-		});
+		// LONG-boot upgrade. Switches the splash to the branded image treatment
+		// and kicks off the image load (fire-and-forget; the rAF callback picks
+		// it up once decoded, showing black + the version until then). Called by
+		// the caller ONLY when the seed will actually re-copy (first launch /
+		// after an update). A fast boot never calls this, so it never loads the
+		// image — keeping the common-case splash to a single text draw.
+		const showFirstLaunch = (): void => {
+			splashMode = 'image';
+			void loadOptionalImage('romfs:/shell/assets/loading.jpg').then((img) => {
+				if (!img) return;
+				const si = img as unknown as { naturalWidth?: number; width?: number; naturalHeight?: number; height?: number };
+				const w = si.naturalWidth || si.width || 0;
+				const h = si.naturalHeight || si.height || 0;
+				if (w <= 0 || h <= 0) return;
+				lw = w;
+				lh = h;
+				dx = Math.round((canvas.width - lw) / 2);
+				dy = Math.round((canvas.height - lh) / 2);
+				splashImg = img;
+			});
+		};
 
 		const beginFade = (): void => {
 			if (phase !== 'dwell') return;
@@ -5570,7 +5749,7 @@ export class BrowserShell {
 			fadeStart = Date.now();
 		};
 
-		return { finishedFading, beginFade };
+		return { finishedFading, beginFade, showFirstLaunch };
 	}
 
 	/**

@@ -17,6 +17,8 @@
   "scrollChunkMs": 12,
   "maxHistory": 30,
   "clickSounds": true,
+  "shellMusic": true,
+  "shellMusicVol": 3,
   "mouseIdleMs": 3000,
   "keyboardHeight": 400,
   "checkVerOnBoot": true,

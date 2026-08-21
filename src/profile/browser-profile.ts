@@ -16,7 +16,10 @@ import {
  * missing-only, so edits persist; the app-owned UI (`shell/` + `themes/`)
  * is RE-SEEDED whenever the bundle changed (a build-time content
  * fingerprint drives it), so a rebuilt shell reaches an existing profile
- * without a manual mirror.
+ * without a manual mirror. When the fingerprint of the whole seeded set
+ * matches what the profile already holds, `seedRomfs()` skips the entire
+ * tree walk — on a Switch SD card that no-op `readDir`/`statSync` storm
+ * otherwise costs ~23 s and dominated boot.
  */
 
 /** Filenames at the romfs root that the seeder must NEVER mirror to
@@ -262,29 +265,69 @@ export class BrowserProfile implements StorageProfileLike {
 	async seedRomfs(): Promise<void> {
 		const embedded = await this.readRomfsFingerprint();
 		const stored = this.readStoredFingerprint();
-		// Re-seed app-owned files (shell/ + themes/) when the bundle's
-		// fingerprint differs from what we last wrote to this profile. On a
-		// fresh profile `stored` is '' so this is true, but there is nothing to
-		// overwrite yet — the walk is then identical to a first-run missing-only
-		// seed. When the fingerprint is unavailable (`embedded === ''`, e.g. an
-		// older bundle without the file) we keep the pure missing-only behavior,
-		// so a missing marker never wipes anything.
+		// FAST PATH — the single largest boot-time win. `embedded` is a content
+		// hash of the ENTIRE seeded set (shell/ + themes/ + configs/ + root
+		// files — everything `seedRomfsDir` mirrors, per gen-seed-fingerprint.sh
+		// which is kept in lockstep with the SEED_SKIP_* lists below). When it
+		// matches what we last wrote to this profile, every seeded file is
+		// already present and current, so there is NOTHING to do — skip the
+		// whole tree walk. That walk is `readDir`×12 + `statSync`×181, and on a
+		// Switch SD card each `statSync` is a ~130 ms fsdev round-trip, so the
+		// no-op walk costs ~23 s on hardware (measured). Skipping it drops boot
+		// from ~29 s to ~6 s. `embedded === ''` (older bundle with no fingerprint
+		// file) falls through to the walk so a missing marker can never wedge
+		// seeding. Trade-off: a file the user MANUALLY deletes is no longer
+		// auto-restored on the next boot (config.json still is — `seedConfigSync`
+		// in the constructor covers it); a bundle change (which flips the
+		// fingerprint) still re-seeds everything.
+		if (embedded !== '' && embedded === stored) {
+			(globalThis as { __bootProbeMark?: (l: string) => void }).__bootProbeMark?.(
+				`  · seed: SKIPPED — fingerprint match (${embedded.slice(0, 8)})`,
+			);
+			return;
+		}
+		// Re-seed app-owned files (shell/ + themes/) when the bundle changed;
+		// configs/ + apps/ stay missing-only. On a fresh profile `stored` is ''
+		// so this is a first full seed (forceApp true, but nothing to overwrite
+		// yet). `embedded === ''` keeps the pure missing-only behavior.
 		const forceApp = embedded !== '' && embedded !== stored;
 		if (forceApp) {
 			console.debug(`[brewser] seed: bundle changed (${stored || 'none'} → ${embedded}) — re-seeding shell/ + themes/`);
 		}
+		// Boot-timing probe: this branch means a real walk ran (fresh profile or
+		// changed bundle) — records why, so boot-timing.log explains a slow seed.
+		(globalThis as { __bootProbeMark?: (l: string) => void }).__bootProbeMark?.(
+			`  · seed: WALK forceApp=${forceApp} (embedded=${embedded ? embedded.slice(0, 8) : '-'} stored=${stored ? stored.slice(0, 8) : '-'})`,
+		);
 		await this.seedRomfsDir('', forceApp);
-		// Record the applied fingerprint so the next boot skips the re-seed
-		// until the bundle changes again (an unchanged rebuild is then a no-op).
-		if (forceApp) {
+		// Record the applied fingerprint so the NEXT boot takes the fast path
+		// above. Written whenever we actually walked with a real fingerprint (not
+		// only on forceApp), so a fresh-profile first seed also arms the skip.
+		if (embedded !== '') {
 			this.writeStoredFingerprint(embedded);
 		}
 	}
 
-	/** Content fingerprint of the app-owned romfs (shell/ + themes/) baked
-	 * into the NRO at build time by `scripts/gen-seed-fingerprint.sh`. '' when
-	 * the file is absent (older bundle / generation skipped) — callers then
-	 * keep the missing-only behavior. */
+	/** True when the upcoming {@link seedRomfs} will do real work — a fresh
+	 * profile or a changed bundle — rather than take the fingerprint-match skip
+	 * fast-path. That's exactly the "long" first-launch / after-update boot the
+	 * boot splash wants to flag with the branded image + "first launch may take
+	 * longer" note; a normal (fast) boot returns false and gets the light
+	 * plain black + version splash instead. Async (the romfs fingerprint is read via
+	 * fetch); the splash starts in text mode and upgrades if this resolves true,
+	 * so no `await` sits in front of the splash's synchronous first paint. */
+	async willSeedDoWork(): Promise<boolean> {
+		const embedded = await this.readRomfsFingerprint();
+		const stored = this.readStoredFingerprint();
+		return !(embedded !== '' && embedded === stored);
+	}
+
+	/** Content fingerprint of the ENTIRE seeded romfs set (shell/ + themes/ +
+	 * configs/ + root files — everything `seedRomfsDir` mirrors) baked into the
+	 * NRO at build time by `scripts/gen-seed-fingerprint.sh`. A match with the
+	 * profile's stored copy means the whole seed can be skipped (see
+	 * `seedRomfs`). '' when the file is absent (older bundle / generation
+	 * skipped) — callers then keep the missing-only walk behavior. */
 	private async readRomfsFingerprint(): Promise<string> {
 		try {
 			const response = await fetch('romfs:/seed-fingerprint');

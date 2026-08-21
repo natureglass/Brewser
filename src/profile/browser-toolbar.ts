@@ -213,6 +213,17 @@ export interface BrowserConfig {
 	 * from `romfs:/shell/assets/click.wav` into
 	 * `<storageRoot>assets/click.wav` on first run. */
 	clickSounds: boolean;
+	/** Loop `romfs:/themes/assets/theme.mp3` as background music while the
+	 * user is on the shell (launcher / settings / home) or an external web
+	 * page. Goes silent whenever an installed app is running so the music
+	 * never bleeds into the app's own audio; the loop restarts from the
+	 * beginning on the next return to the shell. Off by default. Volume is
+	 * set by {@link shellMusicVol}. */
+	shellMusic: boolean;
+	/** Shell-music playback intensity, 1–10 (mapped linearly onto a
+	 * [0.1, 1.0] gain). Only meaningful when {@link shellMusic} is on.
+	 * Default 10. */
+	shellMusicVol: number;
 	/** Milliseconds of stick-idle (no left-stick motion past the
 	 * cursor deadzone, no A-press) before the software cursor hides
 	 * itself. Reappears on the next motion or A-press. Set to a very
@@ -470,6 +481,8 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	maxPerPage: 12,
 	theme: 'light',
 	clickSounds: true,
+	shellMusic: false,
+	shellMusicVol: 10,
 	mouseIdleMs: 3000,
 	autoRotate: true,
 	momentumScrolling: true,
@@ -580,6 +593,14 @@ export function loadConfig(appRoot: string): BrowserConfig {
 			clickSounds: typeof parsed?.clickSounds === 'boolean'
 				? parsed.clickSounds
 				: DEFAULT_CONFIG.clickSounds,
+			shellMusic: typeof parsed?.shellMusic === 'boolean'
+				? parsed.shellMusic
+				: DEFAULT_CONFIG.shellMusic,
+			// 1..10 intensity; clamp + integer-trunc to match the Settings
+			// number field's bounds so the on-disk value is always valid.
+			shellMusicVol: typeof parsed?.shellMusicVol === 'number' && Number.isFinite(parsed.shellMusicVol)
+				? Math.max(1, Math.min(10, Math.trunc(parsed.shellMusicVol)))
+				: DEFAULT_CONFIG.shellMusicVol,
 			mouseIdleMs: typeof parsed?.mouseIdleMs === 'number' && Number.isFinite(parsed.mouseIdleMs)
 				? Math.max(0, Math.min(3_600_000, parsed.mouseIdleMs))
 				: DEFAULT_CONFIG.mouseIdleMs,
