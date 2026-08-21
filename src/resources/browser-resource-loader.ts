@@ -1266,6 +1266,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ toggleRow('clickSounds', 'Click sounds', config.clickSounds, 'short click.wav on link / button / chrome activation')
 			+ toggleRow('momentumScrolling', 'Momentum scrolling', config.momentumScrolling, 'scroll content coasts to a stop with friction after right-stick release / finger lift')
 			+ toggleRow('showFps', 'Show FPS', config.showFps, 'small semi-transparent FPS counter at the top-left; stays on across the shell and every app')
+			+ toggleRow('browsingWarning', 'Internet browsing warning', config.browsingWarning, 'warn before opening any http(s) website — internet browsing is experimental and may crash the app')
 			+ '</fieldset>'
 			+ '</div>'
 			+ '</div>'

@@ -2053,7 +2053,25 @@ export class BrowserShell {
 		return resolveNavUrl(url, this.session.currentPageUrl);
 	}
 
-	private async navigateTo(url: string): Promise<void> {
+	private async navigateTo(url: string, skipBrowsingWarning = false): Promise<void> {
+		// Internet-browsing warning gate. With the "Internet browsing
+		// warning" setting on (config.browsingWarning), the first attempt to
+		// open an http(s) URL pops a confirm modal instead of loading —
+		// "Continue" re-enters here with `skipBrowsingWarning` set, "Cancel"
+		// drops the request. `brewser://` internal pages + app launches never
+		// match the http(s) test, and Back/Forward history replay routes
+		// through `goBack`/`goForward` (not this method), so revisiting an
+		// already-open external page never re-warns. Config is read fresh so a
+		// Settings save — which reloads the page, not the whole shell — is
+		// honored without a restart.
+		if (!skipBrowsingWarning && (url.startsWith('http://') || url.startsWith('https://'))) {
+			try {
+				if (loadConfig(this.profile.appRoot).browsingWarning) {
+					this.openBrowsingWarningModal(url);
+					return;
+				}
+			} catch (_) { /* config unreadable — fall through and navigate */ }
+		}
 		setNavigating(true);
 		// Launch splash. A non-null `pendingLaunchName` (armed by the Launch
 		// tap's click listener, which ran just before this) marks an app
@@ -2254,6 +2272,64 @@ export class BrowserShell {
 		});
 		const no = document.getElementById('__swb_quit_no');
 		if (no) no.addEventListener('click', () => {
+			try { dialog.close(); } catch (_) { /* swallow */ }
+		});
+		try { dialog.showModal(); } catch (_) { /* swallow */ }
+		this.repaintAll();
+	}
+
+	/** Internet-browsing warning modal. Shown by {@link navigateTo} when
+	 * the user attempts to open an http(s) URL while `config.browsingWarning`
+	 * is on. Same injected-`<dialog>` + `showModal()` shape as
+	 * {@link openQuitConfirmModal}: a viewport-filling transparent dialog
+	 * flex-centres a card, and the runtime's `paintModalOverlay` dims the
+	 * page underneath. "Continue" re-issues the navigation with the warning
+	 * suppressed (deferred a tick so this click handler unwinds and the modal
+	 * tears down before the load begins); "Cancel" (or B / back via the
+	 * standard modal-mode close gate) drops the request and leaves the
+	 * current page in place. Guarded by id so a repeat trigger can't stack. */
+	private openBrowsingWarningModal(url: string): void {
+		if (document.getElementById('__swb_browsing_warning')) return;
+		const dialog = document.createElement('dialog') as unknown as HTMLDialogElement;
+		dialog.id = '__swb_browsing_warning';
+		dialog.setAttribute('style',
+			'position:fixed;top:0;left:0;width:100vw;height:100vh;' +
+			'margin:0;padding:0;background:transparent;border:none;' +
+			'color:#eaf2ff;display:flex;align-items:center;' +
+			'justify-content:center;');
+		dialog.innerHTML =
+			'<div style="width:640px;padding:44px 48px 36px;background:#14202d;' +
+			'border:1px solid #314672;border-radius:16px;text-align:center;' +
+			'box-shadow:0 24px 72px rgba(0,0,0,0.6);">' +
+			'<h1 style="font-size:28px;font-weight:700;margin:0 0 14px;">Browse the internet?</h1>' +
+			'<p style="color:#9bb1d6;font-size:15px;margin:0 0 30px;line-height:1.5;">' +
+			'Browsing the internet is experimental, not safe, not tested, it might ' +
+			'crash the app, proceed at your own risk!</p>' +
+			'<div style="display:flex;gap:18px;justify-content:center;">' +
+			'<button id="__swb_browsing_cancel" autofocus style="min-width:200px;padding:14px 24px;' +
+			'font-size:15px;font-weight:600;border-radius:10px;border:1px solid #2f4d80;' +
+			'background:#1f3a64;color:#eaf2ff;cursor:pointer;">Cancel</button>' +
+			'<button id="__swb_browsing_continue" style="min-width:200px;padding:14px 24px;' +
+			'font-size:15px;font-weight:600;border-radius:10px;border:1px solid #ef4444;' +
+			'background:#dc2626;color:#eaf2ff;cursor:pointer;">Continue</button>' +
+			'</div>' +
+			'<div style="margin-top:22px;font-size:12px;color:#6b7c9a;">' +
+			'Press A on the highlighted button, or B to cancel.</div>' +
+			'</div>';
+		document.body.appendChild(dialog);
+		const cleanup = () => {
+			try { dialog.parentNode?.removeChild(dialog); } catch (_) { /* swallow */ }
+		};
+		dialog.addEventListener('close', cleanup);
+		const cont = document.getElementById('__swb_browsing_continue');
+		if (cont) cont.addEventListener('click', () => {
+			try { dialog.close(); } catch (_) { /* swallow */ }
+			// Defer so this click dispatch unwinds and the modal node is torn
+			// down before `navigation.navigate` blocks on the load.
+			setTimeout(() => { void this.navigateTo(url, true); }, 0);
+		});
+		const cancel = document.getElementById('__swb_browsing_cancel');
+		if (cancel) cancel.addEventListener('click', () => {
 			try { dialog.close(); } catch (_) { /* swallow */ }
 		});
 		try { dialog.showModal(); } catch (_) { /* swallow */ }

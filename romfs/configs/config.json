@@ -1,6 +1,6 @@
 {
   "theme": "dark",
-  "toolbar": "themes/toolbars/light.html",
+  "toolbar": "themes/toolbars/dark.html",
   "keyboard": "themes/keyboards/dark.html",
   "brewserStyle": "themes/styles/dark.css",
   "themeBackground": "XMB",
@@ -24,6 +24,7 @@
   "swbImgDebug": false,
   "showSplash": true,
   "showToolbar": true,
+  "showFps": false,
   "splashFadeMs": 250,
   "local": "dd/mm/yyyy",
   "homeSection": "recent",

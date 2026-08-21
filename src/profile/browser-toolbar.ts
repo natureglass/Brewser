@@ -159,6 +159,13 @@ export interface BrowserConfig {
 	 * builds always hit the fallback; real Switch hw is expected to
 	 * stay on the hw path. */
 	videoNVTEGRA: boolean;
+	/** When true, the first attempt to open an `http(s)://` URL (address
+	 * bar, link, or search) pops a confirm modal warning that internet
+	 * browsing is experimental before loading — Continue proceeds, Cancel
+	 * drops the request. `brewser://` internal pages, app launches, and
+	 * Back/Forward history replay are never gated. Read fresh per
+	 * navigation by `BrowserShell.navigateTo`. Default true. */
+	browsingWarning: boolean;
 	/** Title of the active search engine (matched against an entry's
 	 * `title` in `search_engines.json`). Drives the welcome page's
 	 * search-bar logo + where the query is sent. */
@@ -455,6 +462,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	backLightTheme: '#f0f0f0',
 	backDarkTheme: '#444444',
 	videoNVTEGRA: true,
+	browsingWarning: true,
 	searchEngine: 'DuckDuckGo',
 	wwwRenderChunkMs: 12,
 	scrollChunkMs: 4,
@@ -549,6 +557,7 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				? parsed.backDarkTheme
 				: DEFAULT_CONFIG.backDarkTheme,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
+			browsingWarning: typeof parsed?.browsingWarning === 'boolean' ? parsed.browsingWarning : DEFAULT_CONFIG.browsingWarning,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)
 				? Math.max(1, Math.min(1000, parsed.wwwRenderChunkMs))
