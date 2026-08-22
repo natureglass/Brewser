@@ -36,15 +36,38 @@
     return '';
   }
 
+  // Per-request network deadline (mirrors updates-modal.js). abort does NOT
+  // reliably interrupt a stuck connect on hardware, so race the fetch against
+  // an INDEPENDENT timer that rejects on its own — a hung per-user endpoint
+  // can't stall the Check-for-Updates `Promise.all` (or the post-login sync)
+  // forever. Optional `signal` is wired to the request for best-effort
+  // cancellation (Check-for-Updates Cancel aborts it). 20s matches the
+  // catalogue-side deadline in updates-modal.js.
+  var FETCH_TIMEOUT_MS = 20000;
+  function fetchWithTimeout(url, init, signal) {
+    var timer = null;
+    var timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        reject(new Error('Request timed out after ' + FETCH_TIMEOUT_MS + 'ms: ' + url));
+      }, FETCH_TIMEOUT_MS);
+    });
+    var opts = init || {};
+    if (signal) opts.signal = signal;
+    var fetchP = globalThis.fetch(url, opts);
+    return Promise.race([fetchP, timeout]).finally(function () {
+      if (timer !== null) clearTimeout(timer);
+    });
+  }
+
   // Shared authed GET → response text. Returns null on any skip / failure
-  // (missing URL, signed out, network throw, non-2xx, body read error).
-  async function fetchAuthedText(url, label) {
+  // (missing URL, signed out, network throw, timeout, non-2xx, body read error).
+  async function fetchAuthedText(url, label, signal) {
     if (!url) return null;
     var token = readAuthToken();
     if (!token) return null; // signed out — nothing to fetch
     var response;
     try {
-      response = await globalThis.fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+      response = await fetchWithTimeout(url, { headers: { 'Authorization': 'Bearer ' + token } }, signal);
     } catch (e) {
       console.debug('[user-sync] ' + label + ' fetch threw: ' + (e && e.message ? e.message : String(e)));
       return null;
@@ -77,8 +100,8 @@
 
   // "My Apps" — the per-user catalogue-v2 document (the user's own published /
   // staged / unpublished apps). Validated then written to my-catalogue.json.
-  async function syncMyCatalogue(url) {
-    var text = await fetchAuthedText(url, 'my-catalogue');
+  async function syncMyCatalogue(url, signal) {
+    var text = await fetchAuthedText(url, 'my-catalogue', signal);
     if (text === null) return false;
     if (!catalogueValid(text)) return false;
     try { Switch.writeFileSync(MY_CATALOGUE_PATH, text); }
@@ -88,8 +111,8 @@
 
   // Favorites — also a catalogue-v2 document (published apps the user starred),
   // same validation path as My Apps, written to favorites.json.
-  async function syncFavorites(url) {
-    var text = await fetchAuthedText(url, 'favorites');
+  async function syncFavorites(url, signal) {
+    var text = await fetchAuthedText(url, 'favorites', signal);
     if (text === null) return false;
     if (!catalogueValid(text)) return false;
     try { Switch.writeFileSync(FAVORITES_PATH, text); }
@@ -103,8 +126,8 @@
   // shape drift can't replace a good file). Written to my-achievements.json —
   // NOT achievements.json (that's the bundled 38-achievement CRITERIA
   // catalogue, which must not be clobbered).
-  async function syncAchievements(url) {
-    var text = await fetchAuthedText(url, 'achievements');
+  async function syncAchievements(url, signal) {
+    var text = await fetchAuthedText(url, 'achievements', signal);
     if (text === null) return false;
     try {
       var parsed = JSON.parse(text);

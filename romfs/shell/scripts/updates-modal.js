@@ -138,6 +138,35 @@
 
   var modalOpen = false;
   var fetchInFlight = false;
+  // AbortController for the in-flight `runCheck` (null when idle). `close()`
+  // aborts it on Cancel so the orphaned run stops touching the page; its
+  // `signal` is threaded into every fetch + the logo-seed loop so an aborted
+  // run releases its sockets (best-effort) and bails before mutating more
+  // cards. Captured per run so a later re-run can't clear an older run's lock.
+  var activeAbort = null;
+  // Per-request network deadline. On hardware `abort()` does NOT reliably
+  // interrupt a stuck connect (see src/update/net.ts), so `fetchWithTimeout`
+  // races each fetch against an INDEPENDENT timer that rejects on its own even
+  // if the socket never settles — this is what stops one dead remote from
+  // wedging the whole check (and, with it, the terminal cache repaint) forever.
+  // 20s matches CONNECT_TIMEOUT_MS / MANIFEST_TIMEOUT_MS in update/config.ts.
+  var FETCH_TIMEOUT_MS = 20000;
+  // fetch() raced against an independent deadline. `signal` (optional) is wired
+  // to the underlying request for best-effort cancellation; the timer is the
+  // real guarantee. Rejects with a timeout Error when the deadline wins — the
+  // caller's existing try/catch treats it like any other network failure.
+  function fetchWithTimeout(url, signal) {
+    var timer = null;
+    var timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        reject(new Error('Request timed out after ' + FETCH_TIMEOUT_MS + 'ms: ' + url));
+      }, FETCH_TIMEOUT_MS);
+    });
+    var fetchP = globalThis.fetch(url, signal ? { signal: signal } : undefined);
+    return Promise.race([fetchP, timeout]).finally(function () {
+      if (timer !== null) clearTimeout(timer);
+    });
+  }
   // Set true when the versions check found a newer Brewser than installed; gates
   // whether tapping the status line opens the self-update modal.
   var brewserUpdateOffered = false;
@@ -331,9 +360,14 @@
   // successful write the card on the visible Apps page gets its
   // `<img src>` rewritten in-place so the user sees the real glyph
   // without a reload.
-  async function seedMissingLogos(missing) {
+  async function seedMissingLogos(missing, signal) {
     if (!missing || missing.length === 0) return;
     for (var i = 0; i < missing.length; i++) {
+      // Stop mid-loop the moment this run is aborted (user hit Cancel). Each
+      // iteration rewrites a grid card's <img src> in place, which dirties the
+      // host live tree — continuing after Cancel would re-trigger the very
+      // scroll-rebuild flashing that cancelling is supposed to end.
+      if (signal && signal.aborted) return;
       var detail = missing[i];
       var logoRel = detail.logo ? stripLeadingSlashes(detail.logo) : '';
       if (!logoRel || !detail.logoUrl) continue;
@@ -347,7 +381,7 @@
         continue;
       }
       try {
-        var resp = await globalThis.fetch(remoteUrl);
+        var resp = await fetchWithTimeout(remoteUrl, signal);
         if (!resp.ok) {
           console.debug('[updates-modal] logo HTTP ' + resp.status + ' for ' + remoteUrl);
           continue;
@@ -370,13 +404,13 @@
   // good file with garbage. Every failure path is logged + swallowed —
   // a downloads.json HTTP 500 should NOT block a successful catalog
   // refresh. Empty URL is treated as "skip silently".
-  async function refreshConfigFile(remoteUrl, localPath, label) {
+  async function refreshConfigFile(remoteUrl, localPath, label, signal) {
     if (!remoteUrl) {
       console.debug('[updates-modal] ' + label + ' URL not configured; skipping refresh');
       return;
     }
     try {
-      var resp = await globalThis.fetch(remoteUrl);
+      var resp = await fetchWithTimeout(remoteUrl, signal);
       if (!resp.ok) {
         console.debug('[updates-modal] ' + label + ' HTTP ' + resp.status + ' for ' + remoteUrl);
         return;
@@ -404,13 +438,13 @@
   // on any skip/failure or when the content is byte-identical. The server's
   // publisher skips-when-unchanged (ignoring `generated`), so an unchanged
   // check re-serves the identical file → identical text → no reload.
-  async function refreshStatsFile(client, remoteUrl) {
+  async function refreshStatsFile(client, remoteUrl, signal) {
     if (!remoteUrl) {
       console.debug('[updates-modal] stats URL not configured; skipping refresh');
       return false;
     }
     try {
-      var resp = await globalThis.fetch(remoteUrl);
+      var resp = await fetchWithTimeout(remoteUrl, signal);
       if (!resp.ok) {
         console.debug('[updates-modal] stats.json HTTP ' + resp.status + ' — keeping cached stats');
         return false;
@@ -516,14 +550,14 @@
   // a catalogue refresh failure.
   // `current.json` is never written by this flow — overwriting it would
   // make every future check read equal and silently hide new releases.
-  async function checkVersionsForUpdate(remoteUrl) {
+  async function checkVersionsForUpdate(remoteUrl, signal) {
     if (!remoteUrl) {
       console.debug('[updates-modal] versions URL not configured; skipping check');
       return false;
     }
     var fetchedText;
     try {
-      var resp = await globalThis.fetch(remoteUrl);
+      var resp = await fetchWithTimeout(remoteUrl, signal);
       if (!resp.ok) {
         console.debug('[updates-modal] versions HTTP ' + resp.status + ' for ' + remoteUrl);
         return false;
@@ -734,26 +768,37 @@
   // attributes (server-expanded from `<browser-config-*/>`).
   function userSync() { return globalThis.__brewserUserSync || null; }
 
-  async function refreshMyCatalogue() {
+  async function refreshMyCatalogue(signal) {
     var s = userSync();
     if (!s) return false;
-    return s.syncMyCatalogue(triggerBtn.getAttribute('data-my-catalogue-url') || '');
+    return s.syncMyCatalogue(triggerBtn.getAttribute('data-my-catalogue-url') || '', signal);
   }
 
-  async function refreshFavorites() {
+  async function refreshFavorites(signal) {
     var s = userSync();
     if (!s) return false;
-    return s.syncFavorites(triggerBtn.getAttribute('data-favorites-url') || '');
+    return s.syncFavorites(triggerBtn.getAttribute('data-favorites-url') || '', signal);
   }
 
-  async function refreshAchievements() {
+  async function refreshAchievements(signal) {
     var s = userSync();
     if (!s) return false;
-    return s.syncAchievements(triggerBtn.getAttribute('data-achievements-url') || '');
+    return s.syncAchievements(triggerBtn.getAttribute('data-achievements-url') || '', signal);
   }
 
   async function runCheck() {
     if (fetchInFlight) return;
+    // Own an AbortController for this run so Cancel (`close()`) can orphan it.
+    // `signal` is threaded into every fetch + the logo-seed loop; the `finally`
+    // only releases the lock when THIS run still owns it (a cancelled run's
+    // lock was already cleared by close(); a superseded run must not clobber a
+    // newer run's). Constructed defensively — if the runtime lacks
+    // AbortController the run degrades to timeout-only (no best-effort abort),
+    // but must never throw here and leave `fetchInFlight` wedged.
+    var ac = null;
+    try { ac = new AbortController(); } catch (_) { ac = null; }
+    activeAbort = ac;
+    var signal = ac ? ac.signal : null;
     fetchInFlight = true;
     try {
       var url = triggerBtn.getAttribute('data-catalogue-url') || '';
@@ -763,7 +808,7 @@
       }
       var response;
       try {
-        response = await globalThis.fetch(url);
+        response = await fetchWithTimeout(url, signal);
       } catch (e) {
         setError('Network error: ' + (e && e.message ? e.message : String(e)));
         return;
@@ -881,20 +926,28 @@
       // independent failure mode. `Promise.all` is safe here only
       // because every task swallows its own errors; if any of these
       // ever start rejecting, switch to `Promise.allSettled`.
+      // Cancelled during the catalogue fetch/parse? Skip the whole refresh
+      // batch — close() already aborted this run and reset the overlay cache.
+      if (signal && signal.aborted) return;
       var results = await Promise.all([
-        seedMissingLogos(buckets.missing),
-        refreshConfigFile(downloadsUrl, DOWNLOADS_PATH, 'downloads.json'),
-        refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json'),
-        checkVersionsForUpdate(versionsUrl),
-        refreshStatsFile(client, statsUrl),
-        refreshMyCatalogue(),
+        seedMissingLogos(buckets.missing, signal),
+        refreshConfigFile(downloadsUrl, DOWNLOADS_PATH, 'downloads.json', signal),
+        refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json', signal),
+        checkVersionsForUpdate(versionsUrl, signal),
+        refreshStatsFile(client, statsUrl, signal),
+        refreshMyCatalogue(signal),
         // Per-user Favorites + earned Achievements. Both best-effort and self-
         // contained (signed-out = no-op); their results don't gate any modal
         // UI — the favorites.html / achievements.html pages and the account-page
         // links pick them up server-side on the next render.
-        refreshFavorites(),
-        refreshAchievements(),
+        refreshFavorites(signal),
+        refreshAchievements(signal),
       ]);
+      // Cancelled mid-batch: bail before the terminal DOM / cache mutations so
+      // we don't re-dirty the page (which would resume the scroll-rebuild
+      // flashing) or fight the repaint close() already did. The catalogue write
+      // above stands — it's the point of the check; only the UI reveal is skipped.
+      if (signal && signal.aborted) return;
       // `checkVersionsForUpdate` returns {available, version} on a real update,
       // or falsy on any skip/no-update — coerce so both shapes read cleanly.
       var versionInfo = results[3] || {};
@@ -959,7 +1012,14 @@
         triggerBtn.classList.remove('apps-check-updates--update-available');
       }
     } finally {
-      fetchInFlight = false;
+      // Release the lock only if THIS run still owns it. A cancelled run had
+      // its lock cleared (and `activeAbort` replaced/aborted) by close(), and a
+      // re-run started after cancel now owns `activeAbort` — clearing here
+      // unconditionally would unlock that newer run. Guard on identity + abort.
+      if (activeAbort === ac) {
+        fetchInFlight = false;
+        activeAbort = null;
+      }
     }
   }
 
@@ -1004,6 +1064,31 @@
     card.classList.remove('updates-modal-card--loading');
     card.classList.remove('updates-modal-card--error');
     modalOpen = false;
+    // Cancel during the loading phase: the check is still running. Orphan it so
+    // the user isn't left watching the app grid re-bake on every scroll — while
+    // the page's live tree is dirty (from the check's in-flight card mutations),
+    // the overlay engine drops the cheap cache-blit scroll path and does a full
+    // chunked rebuild each scroll, which reads as all cards "flashing/reloading".
+    //   (a) abort the run's fetches (best-effort — a stuck connect is really
+    //       killed by fetchWithTimeout's deadline; the abort also makes
+    //       seedMissingLogos bail before mutating more cards),
+    //   (b) release the in-flight lock so the next "Check for Updates" tap isn't
+    //       swallowed by the `if (fetchInFlight) return` guard, and
+    //   (c) reconcile the overlay cache NOW (__swbRepaint → resetLiveOverlayCache)
+    //       so scrolling returns to the cheap blit path immediately instead of
+    //       waiting for the orphaned run (or a navigation) to settle.
+    // The orphaned runCheck sees `signal.aborted` at its next guard and returns
+    // without touching the page further; its `finally` no-ops (activeAbort has
+    // moved on), so it can't clobber a subsequent run's lock.
+    if (fetchInFlight) {
+      if (activeAbort) { try { activeAbort.abort(); } catch (_) {} }
+      activeAbort = null;
+      fetchInFlight = false;
+      if (typeof globalThis.__swbRepaint === 'function') {
+        try { globalThis.__swbRepaint(); }
+        catch (err) { console.debug('[updates-modal] cancel repaint failed: ' + (err && err.message ? err.message : String(err))); }
+      }
+    }
     // Reload once on dismiss when this sync changed anything the page renders
     // from disk: the per-user My Apps document, the catalogue (Featured / app
     // set / versions), or stats.json (Popular / Top Rated order). Fires AFTER
@@ -1024,10 +1109,10 @@
 
   // Cancel (during the loading phase) and Close (after the check
   // completes) both fire `close()`. Two separate listeners keep each
-  // button's intent self-documenting at the call site. Cancel only
-  // dismisses the modal — the in-flight fetch continues to settle in
-  // the background; the success path then populates the (now-hidden)
-  // modal, which is harmless.
+  // button's intent self-documenting at the call site. Cancel aborts the
+  // in-flight run and reconciles the overlay cache (see `close()`), so a
+  // dismissed check leaves the page in a clean, non-flashing state and a
+  // fresh check can start immediately.
   cancelBtn.addEventListener('click', function (e) {
     close();
     if (e && e.stopPropagation) e.stopPropagation();
