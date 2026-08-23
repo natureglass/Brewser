@@ -49,6 +49,11 @@
   // `BREWSER_APP_ROOT` in src/browser-config.ts) — the same path
   // updates-modal.js seeds logos into and loadCatalogGroup reads from.
   var APP_ROOT = 'sdmc:/switch/brewser/';
+  // The cached PUBLIC catalogue — the same file the platform bridge's
+  // `readCachedCatalogue` reads and updates-modal.js's Check-for-Updates
+  // rewrites (see CATALOG_PATH there). We reconcile it against the version
+  // we actually just installed (see `reconcileCatalogue`).
+  var CATALOG_PATH = APP_ROOT + 'configs/catalogue.json';
 
   // Same upgrade-arrow polygon used by the grid card / missing-app /
   // updates modals. Kept in sync verbatim so the chip looks identical
@@ -475,6 +480,144 @@
     return null;
   }
 
+  // Read the `version` string from an installed app's on-disk
+  // `apps/<id>/manifest.json` — the AUTHORITATIVE record of what we just
+  // wrote (the manifest is one of the artifact files, fetched fresh each
+  // download). Returns '' when the file is missing / unparseable / has no
+  // string version, so callers can treat "no signal" distinctly from a
+  // real mismatch.
+  function readInstalledVersion(id) {
+    try {
+      var raw = Switch.readFileSync(APP_ROOT + 'apps/' + id + '/manifest.json');
+      if (!raw || !raw.byteLength) return '';
+      var m = JSON.parse(new TextDecoder().decode(raw));
+      return m && typeof m.version === 'string' ? m.version : '';
+    } catch (_) { return ''; }
+  }
+
+  // The version the LOCAL (cached) public catalogue.json claims for this
+  // app id. Read through the platform client so the shape matches every
+  // other consumer. Returns:
+  //   - a string (possibly '') when the app IS in the cached catalogue, or
+  //   - null when there is no usable cached catalogue OR the app isn't in
+  //     it (e.g. a My-Apps-only staged/unpublished app) — nothing to
+  //     reconcile against, so callers skip.
+  function catalogueVersionFor(client, id) {
+    var cached = null;
+    try { cached = client.readCachedCatalogue(); } catch (_) { return null; }
+    if (!cached || cached.kind !== 'Ok') return null;
+    var apps = (cached.catalogue && cached.catalogue.apps) || [];
+    for (var i = 0; i < apps.length; i++) {
+      if (apps[i].id === id) return apps[i].version || '';
+    }
+    return null;
+  }
+
+  // The configured catalogue URL, read from the Check-for-Updates button
+  // (`.apps-check-updates[data-catalogue-url]` on home.html — populated
+  // server-side from `config.json`'s `catalogue`). Same source
+  // updates-modal.js's Check-for-Updates uses; download-modal.js has no
+  // trigger button of its own, so it borrows that one. Returns '' when the
+  // button/attribute is absent (older markup) → reconcile is skipped.
+  function catalogueUrl() {
+    try {
+      var btns = document.querySelectorAll('.apps-check-updates');
+      for (var i = 0; i < btns.length; i++) {
+        var u = btns[i].getAttribute('data-catalogue-url');
+        if (u) return u;
+      }
+    } catch (_) { /* no-op */ }
+    return '';
+  }
+
+  function readCatalogueText() {
+    try {
+      var raw = Switch.readFileSync(CATALOG_PATH);
+      return raw && raw.byteLength > 0 ? new TextDecoder().decode(raw) : null;
+    } catch (_) { return null; }
+  }
+
+  // Set true when this install refreshed the on-disk catalogue.json (see
+  // reconcileCatalogue). Read by close() as a reload trigger (OR'd with
+  // installedOnSuccess) so the grid re-renders from the fresh catalogue.
+  // Mirrors updates-modal.js's `libraryDataChanged` reload-on-close flag.
+  var catalogueRefreshed = false;
+
+  // After the app's files (including its manifest.json) land, reconcile the
+  // LOCAL catalogue.json against what we actually installed. The catalogue
+  // drives the grid's version chips + the "update available" state, and it
+  // can lag the app's real artifacts: the artifact bundle may have been
+  // bumped again since the last Check-for-Updates rebuilt/cached the
+  // catalogue (or the GitHub-Pages CDN served a stale catalogue). If the
+  // version we just wrote differs from the version the cached catalogue
+  // claims, the catalogue is stale — leaving it would show a phantom
+  // "update available" chip on the card the user just updated. So we pull a
+  // fresh catalogue.json and, when it actually changed, let the success
+  // reload re-render from it.
+  //
+  // Best-effort throughout: the app is already installed by the time this
+  // runs, so every failure path just leaves the (stale) catalogue in place
+  // — never turns a good install into an error. Only a client-validated
+  // (`kind === 'Ok'`) catalogue is ever persisted, matching updates-modal.js's
+  // one-door rule (D2b).
+  async function reconcileCatalogue(client, detail) {
+    if (!client || !detail || !detail.id) return;
+    var installed = readInstalledVersion(detail.id);
+    // No version in the app's manifest → no signal to compare; leave the
+    // catalogue as-is.
+    if (!installed) return;
+    var claimed = catalogueVersionFor(client, detail.id);
+    // App not in the cached public catalogue (My-Apps-only) → nothing to
+    // reconcile.
+    if (claimed === null) return;
+    // Catalogue already matches what we installed — we're good.
+    if (claimed === installed) return;
+    // Mismatch: the cached catalogue is stale relative to the artifacts we
+    // just pulled. Refresh it from the configured URL.
+    var url = catalogueUrl();
+    if (!url) return;
+    statusEl.innerHTML = 'Syncing catalogue…';
+    var resp;
+    try {
+      // Cache-bust: the whole reason we're here is that the cached catalogue
+      // is stale, and the GH-Pages edge may still be serving that same stale
+      // copy (same CDN issue the manifest/banner cache-bust above solves).
+      // Force the origin's current bytes so we don't reconcile against the
+      // very copy we're trying to replace.
+      resp = await globalThis.fetch(cacheBust(url));
+    } catch (_) {
+      return; // network error — keep the current catalogue
+    }
+    if (cancelled) return;
+    if (!resp || !resp.ok) return;
+    var text;
+    try {
+      text = await resp.text();
+    } catch (_) {
+      return;
+    }
+    if (cancelled) return;
+    // Validate before persisting — a corrupt / too-new catalogue must not
+    // clobber the usable cached copy.
+    var outcome;
+    try { outcome = client.parseCatalogue(text); } catch (_) { return; }
+    if (!outcome || outcome.kind !== 'Ok') return;
+    // Only rewrite (and flag a catalogue refresh) when the bytes actually
+    // changed — an identical catalogue means the mismatch was purely a
+    // stale local read that the fetch already agrees with.
+    var oldText = readCatalogueText();
+    var changed = (oldText === null) || (oldText !== text);
+    if (!changed) return;
+    try {
+      Switch.writeFileSync(CATALOG_PATH, text);
+    } catch (_) {
+      return;
+    }
+    catalogueRefreshed = true;
+    console.debug('[download-modal] catalogue reconciled for ' + detail.id
+      + ' (installed=' + installed + ' catalogue-was=' + claimed + ')');
+  }
+
   // Best-effort download telemetry. On a completed install/update we POST a
   // {reqType:'download'} event to the strict-pinned telemetry endpoint so
   // WordPress bumps the per-package counter (wp_swtel_downloads). That counter
@@ -525,6 +668,8 @@
     // Clear the success flag so a re-tapped Download after a prior success
     // can't fire a stale reload when THIS attempt's modal closes.
     installedOnSuccess = false;
+    // Clear the per-run catalogue-refresh note (see reconcileCatalogue).
+    catalogueRefreshed = false;
     try {
       if (!detail || !detail.id) {
         setError('Missing app id.');
@@ -642,7 +787,25 @@
       // re-renders from disk with the app installed and immediately playable.
       // (The former in-place path — refreshCardOnSuccess / patchCardOnSuccess
       // — is retained above but intentionally no longer invoked.)
+      //
+      // Set the reload flag BEFORE the (awaited) catalogue reconcile: the
+      // files are on disk, so the app is installed no matter what the
+      // catalogue fetch does — a Cancel/Close during the reconcile must
+      // still reload into the installed state.
       installedOnSuccess = true;
+      // Reconcile the local catalogue against the version we actually
+      // installed. When the artifacts we pulled are newer than the cached
+      // catalogue claims (a bumped bundle the last Check-for-Updates missed,
+      // or a stale CDN copy), this pulls a fresh catalogue.json so the
+      // success reload re-renders from it instead of showing a phantom
+      // "update available" chip. Awaited so the fresh catalogue is on disk
+      // before the user can dismiss (and trigger the reload); a no-op in the
+      // common case where the versions already match. Best-effort — never
+      // fails the install.
+      await reconcileCatalogue(client, detail);
+      // Cancelled during the reconcile fetch → bail without painting
+      // success; close() already handled the reload (installedOnSuccess).
+      if (cancelled) return;
       // Report the completed download so the Popular tab has data to rank on.
       // Fires for both fresh installs and updates (the WP counter has no
       // dedup — each acquisition is a download), best-effort, never awaited.
@@ -704,8 +867,17 @@
     // no-reload-mid-modal rule); a cancelled/failed download leaves the
     // flag false so its close is unchanged. Same shape as updates-modal.js
     // close()'s `myCatalogueRefreshed` reload.
-    if (installedOnSuccess && typeof globalThis.__swbReload === 'function') {
+    //
+    // `catalogueRefreshed` is OR'd in for the same reason updates-modal.js
+    // reloads on a changed catalogue: reconcileCatalogue may have pulled a
+    // fresh catalogue.json (the installed version outran the cached
+    // catalogue's), and the reload re-renders the grid from it so the card
+    // drops its now-satisfied "update available" chip. On the success path
+    // installedOnSuccess is already true whenever catalogueRefreshed is, so
+    // this only makes the intent explicit — it never adds a spurious reload.
+    if ((installedOnSuccess || catalogueRefreshed) && typeof globalThis.__swbReload === 'function') {
       installedOnSuccess = false;
+      catalogueRefreshed = false;
       // Land the reloaded Home on the "Downloads" tab so the user sees the app
       // they just installed. One-shot hint the resource loader reads (+clears)
       // when it re-renders home's <browser-home-checked> radios — applies to
