@@ -476,9 +476,14 @@
 
   // Render the platform client's parse report into the modal — the
   // drift-visibility payload of the whole architecture. Always shows
-  // version + app count; itemizes dropped entries and unknown
-  // fields/permissions/sources/entities only when present, so a clean
-  // sync reads as one quiet line.
+  // version + app count; itemizes unknown fields/permissions/sources/
+  // entities only when present, so a clean sync reads as one quiet line.
+  //
+  // DROPPED entries are deliberately NOT surfaced in the modal: an app the
+  // catalogue lists but this platform can't run (e.g. a non-switch-compatible
+  // entry) is an EXPECTED, routine filter, not drift the user needs to see.
+  // It's logged to the console for diagnostics only — the modal stays silent
+  // about it (per the "dropped apps happen silently" requirement).
   function renderParseReport(catalogue) {
     var el = document.getElementById('updates-modal-report');
     if (!el || !catalogue || !catalogue.report) return;
@@ -487,12 +492,15 @@
       + ' — ' + escapeHtml(String(r.appCount)) + ' apps';
     var details = [];
     if (r.dropped && r.dropped.length) {
-      var droppedBits = [];
+      // Diagnostics only — not shown in the modal.
+      var droppedLog = [];
       for (var i = 0; i < r.dropped.length; i++) {
         var d = r.dropped[i];
-        droppedBits.push(escapeHtml((d.id || ('#' + d.index)) + ': ' + d.reason));
+        droppedLog.push((d.id || ('#' + d.index)) + ': ' + d.reason);
       }
-      details.push('dropped ' + r.dropped.length + ' (' + droppedBits.join('; ') + ')');
+      console.debug('[updates-modal] dropped ' + r.dropped.length
+        + ' catalogue entr' + (r.dropped.length === 1 ? 'y' : 'ies')
+        + ' (' + droppedLog.join('; ') + ')');
     }
     if (r.unknownEntryFields && r.unknownEntryFields.length) {
       details.push('unknown fields: ' + escapeHtml(r.unknownEntryFields.join(', ')));
