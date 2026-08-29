@@ -1540,7 +1540,7 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 			: 'Not rated yet';
 		const ratingHtml = `<span class="app-card__rating"><img class="app-card__ricon" src="brewser://assets/star_full.png" alt="">${rating}</span>`;
 		const dlWord = e.downloads === 1 ? 'download' : 'downloads';
-		const downloadsHtml = `<span class="app-card__downloads"><img class="app-card__dicon" src="brewser://assets/download.png" alt="">${formatCardCount(e.downloads)} ${dlWord}</span>`;
+		const downloadsHtml = `<span class="app-card__downloads"><img class="app-card__dicon" src="brewser://assets/download_icon.png" alt="">${formatCardCount(e.downloads)} ${dlWord}</span>`;
 		const footer = `<div class="app-card__footer">${ratingHtml}${downloadsHtml}</div>`;
 		// Banner fallback: not-installed apps point `banner` at the remote
 		// catalogue URL, which loads the real image on hardware but fails

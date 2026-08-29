@@ -819,6 +819,9 @@ ul.settings-list li:active {
   overflow-y: auto;
   line-height: 1.45;
   padding: 12px 14px;
+  /* Half-tone darker than the card (#0d0b1a) so the description reads as
+     a recessed panel. Mirror in the light-mode block below. */
+  background: #0a0914;
   border: 1px solid #3a2a5c;
   border-radius: 8px;
 }
@@ -1918,7 +1921,7 @@ fieldset.ach-group legend {
   }
   .app-modal-title { color: #d800ff; }
   .app-modal-identifier { color: #6a6a7a; }
-  .app-modal-description { color: #4a4a5a; }
+  .app-modal-description { color: #4a4a5a; background: #f3eef7; }
   .app-modal-row { border-top-color: #e6e6f0; }
   .app-modal-row-label { color: #6a6a7a; }
   .app-modal-row-value { color: #15151c; }

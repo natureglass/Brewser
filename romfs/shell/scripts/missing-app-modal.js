@@ -251,7 +251,7 @@
       + '</span>'
       + '<span class="app-modal-headstats-sep" style="opacity:0.4;padding:0 2px;">|</span>'
       + '<span class="app-modal-headstats-dl" style="display:inline-flex;align-items:center;gap:6px;">'
-      + '<img src="brewser://assets/download.png" alt="Downloads" style="width:15px;height:15px;">'
+      + '<img src="brewser://assets/download_icon.png" alt="Downloads" style="width:15px;height:15px;">'
       + '<span id="app-modal-downloads">' + formatCount(0) + '</span>'
       + '</span>';
   }

@@ -4,6 +4,9 @@
   <title>About Brewser</title>
   <link rel="stylesheet" href="brewser://assets/main.css">
   <style>
+    h2 {
+      width: 100%;
+    }
     .about-row {
       display: flex;
       flex-direction: row;
@@ -26,6 +29,12 @@
     }
     .about-row > .support-card a {
       color: #0066cc;
+    }
+    .app-card {
+      display: flex;
+      flex-direction: column;
+      padding: 14px 16px;
+      gap: 8px;
     }
     .donations-wrap {
       display: flex;
@@ -61,19 +70,18 @@
       </header>
     </section>
 
-    <p class="lead">Learn more about Brewser and its features.</p>
+    <p class="lead">Build once. Run on PC, mobile, and Switch.</p>
 
     <section class="about-hero about-card">
       <p>
-        Brewser is a Nintendo Switch homebrew application that lets users
-        discover, download, and run web-powered apps built with familiar
-        technologies such as HTML, CSS, JavaScript, WebGL, and WASM.
+        Brewser is an online platform for creators, tinkerers, and
+        developers — a curiosity-driven playground for sharing your ideas
+        and projects with the world.
       </p>
 
       <p>
-        The goal of Brewser is to make homebrew experimentation more
-        approachable by giving developers a lighter way to build apps,
-        tools, demos, and games using web technologies.
+        If you've ever built something clever and then watched it vanish
+        into the void, you're exactly who we made this for.
       </p>
 
       <div class="about-badge-row" aria-label="Brewser technology highlights">
@@ -89,35 +97,42 @@
     <section class="about-section">
       <div class="app-grid">
         <article class="app-card">
-          <strong>What Brewser does</strong>
+          <strong>One codebase, three screens</strong>
           <span>
-            Brewser acts as a browser-style runtime and app hub for
-            web-powered homebrew experiences on Nintendo Switch.
+            Build modern web applications with contemporary Web APIs that
+            are cross-compatible with the Brewser runtime for Nintendo
+            Switch. Write once, and your work runs across PC, mobile, and
+            modded Switch consoles, no native toolchain.
           </span>
         </article>
 
         <article class="app-card">
-          <strong>For users</strong>
+          <strong>Bringing hidden work into the light</strong>
           <span>
-            Users can explore Featured, Community, and Experimental apps
-            from inside Brewser, with permission prompts shown when needed.
+            Too often a great project's final destination is a GitHub
+            repository, buried among thousands. Brewser connects tinkerers
+            with the people who actually want to see their work,
+            your project deserves better than page 12 of a search result.
           </span>
         </article>
 
         <article class="app-card">
-          <strong>For developers</strong>
+          <strong>A home for the demoscene</strong>
           <span>
-            Developers can build apps using web technologies, test them
-            locally, and submit them for possible inclusion in the Brewser
-            app catalog.
+            Brewser doubles as a demoscene environment. Publish a polished
+            WebGL experience, a shader experiment, a procedural visual, or a
+            little interactive demo, and share it with a community
+            that appreciates the craft.
           </span>
         </article>
 
         <article class="app-card">
-          <strong>App permissions</strong>
+          <strong>From the browser to the console</strong>
           <span>
-            Apps that request special access, such as storage or network
-            usage, may ask the user to opt in before the app starts.
+            Whatever you're building — a hardware experiment, a graphical
+            demo, or a full-blown web app — Brewser gives your work a place
+            to live, an audience to reach, and a runtime that follows it
+            from the browser to the console.
           </span>
         </article>
       </div>
@@ -125,52 +140,49 @@
 
     <div class="about-row">
       <section class="about-section about-card libraries-card">
-        <h2>Libraries and frameworks</h2>
+        <h2>Built for the physical and the interactive</h2>
 
         <p>
-          Brewser is built using homebrew and web runtime technologies.
-          The project may use or integrate libraries and frameworks such as:
+          Brewser is designed around how you create, connect, and interact
+          with the world beyond the screen. Using established browser
+          technologies, you can talk directly to smart devices and sensors
+          from your PC, phone, or Switch — all from a standard web
+          application, with no native build and no platform lock-in.
         </p>
 
         <ul class="settings-list">
           <li>
-            <strong>libnx</strong>
+            <strong>Sensors in real time</strong>
             <span class="desc">
-              Nintendo Switch homebrew development library.
+              Read an accelerometer or gyroscope as it moves.
             </span>
           </li>
 
           <li>
-            <strong>SDL2</strong>
+            <strong>Drive hardware</strong>
             <span class="desc">
-              Cross-platform media/input layer used by many homebrew projects.
+              Talk to a microcontroller or your own custom build.
             </span>
           </li>
 
           <li>
-            <strong>nx.js</strong>
+            <strong>Live audio</strong>
             <span class="desc">
-              JavaScript/runtime integration for Switch-focused web app behavior.
+              Capture, process, and play sound on the fly.
             </span>
           </li>
 
-          <li>
-            <strong>HTML, CSS, JavaScript, WebGL, and WASM</strong>
-            <span class="desc">
-              Web technologies used by Brewser apps and experiments.
-            </span>
-          </li>
+
         </ul>
       </section>
 
       <section class="about-section about-card support-card">
-        <h2>Support Brewser</h2>
+        <h2>Keep the brew going</h2>
         <div class="donations-wrap">
           <donations></donations>
         </div>
         <p>
-          If you enjoy using Brewser or want to support future development,
-          donations are appreciated.
+          Brewser runs on passion. Donations are voluntary gifts toward development costs, coffee and keeping the journey going!
         </p>
       </section>
     </div>
@@ -193,7 +205,7 @@
 
       <p>
         Users should review permission prompts carefully, especially for apps
-        that request network access, storage access, WebGL, WASM, or other
+        that request network access, storage access, WASM, or other
         special capabilities.
       </p>
     </section>
@@ -212,16 +224,6 @@
         or tools/instructions for bypassing technological protection measures.
       </p>
     </section>
-
-    <footer class="about-footer-note">
-      <p>
-        Thanks for using Brewser.
-      </p>
-
-      <p>
-        Created by Alex Daskalakis, also known as Natureglass.
-      </p>
-    </footer>
   </main>
 </body>
 </html>
