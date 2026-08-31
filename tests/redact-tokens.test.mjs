@@ -1,3 +1,6 @@
+// NOTE: all tokens, JWTs, and refresh tokens in this file are synthetic test
+// fixtures — nothing here is or ever was a real credential.
+
 // Regression test for the auth-log token redaction (Phase 0 / D9).
 //
 // Extracts the redaction block VERBATIM from each shipped romfs script and
