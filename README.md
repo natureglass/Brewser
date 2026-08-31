@@ -8,7 +8,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-docs.brewser.io-4c1)](https://docs.brewser.io/docs)
 
-<img src="https://raw.githubusercontent.com/natureglass/Brewser-press/main/screenshots/brewser_shell.png" alt="The Brewser shell running on a Nintendo Switch" width="720">
+<img src="https://raw.githubusercontent.com/natureglass/Brewser-press/refs/heads/main/screenshots/brewser_on_switch.png" alt="The Brewser shell running on a Nintendo Switch" width="820">
 
 </div>
 
