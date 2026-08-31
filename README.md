@@ -65,7 +65,7 @@ More screenshots, GIFs, and the showreel live in the [press kit](https://github.
 
 ## In the catalogue at launch
 
-The catalogue opens with more than 30 apps, including **DUSK Sky Atlas** (a Three.js planetarium with 132 Messier deep-sky objects, steered by the gyro), **Matrix Studio** (design and drive WS2812B LED panels over an ESP32, straight from the console), **MIDI Surface** (turn the Switch into a touchscreen MIDI controller), a **Home Assistant** dashboard, and on-device **WebNN** handwriting recognition. Alongside those sit a whole shelf of **Three.js WebGL2 demos** showcasing what the GPU can do — and a **Unity 2D platformer** export running unmodified on the console. Explore it all at [brewser.io](https://brewser.io).
+The catalogue opens with more than 30 apps, including **DUSK Sky Atlas** (a Three.js planetarium with 132 Messier deep-sky objects, steered by the gyro), **Matrix Studio** (design and drive WS2812B LED panels over an ESP32, straight from the console), **MIDI Surface** (turn the Switch into a touchscreen MIDI controller), a **Home Assistant** dashboard, and on-device **WebNN** handwriting recognition. Alongside those sit a whole shelf of **Three.js WebGL2 demos** showcasing what the GPU can do — and a **Unity 2D platformer** running straight from Unity's WebGL export ([export guide](https://docs.brewser.io/docs/tips/unity)). Explore it all at [brewser.io](https://brewser.io).
 
 ---
 
