@@ -57,9 +57,9 @@ Brewser also doubles as a demoscene environment. Whether it's a polished WebGL e
 
 Brewser ships with everything an app needs to feel at home on a console: an on-screen keyboard, a proper toolbar, save-data support, leaderboards, the app catalogue right on the console, and sign-in that carries over from your PC. The shell is fully themeable — wallpapers (including animated GLSL shader wallpapers), styles, toolbars, cursors, and keyboards, all plain files on the SD card.
 
-| ![MIDI Surface driving an AKAI LPD8 from the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_midi-controller_web.gif) | ![Driving a WS2812B LED matrix from the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/screenshots/brewser_led-matrix.jpg) | ![The sensors playground app](https://raw.githubusercontent.com/natureglass/Brewser-press/main/screenshots/brewser_sensors-playground.png) |
+| ![MIDI Surface driving an AKAI LPD8 from the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_midi-controller_web.gif) | ![Driving a WS2812B LED matrix from the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_led_matrix_web.gif) | ![Three.js GLTF loader running at 60fps on the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_threejs-gltf-loader_web.gif) |
 |:--:|:--:|:--:|
-| Web MIDI on real hardware | Driving an LED matrix over Web Bluetooth | The sensors playground |
+| Web MIDI on real hardware | Driving an LED matrix | Three.js GLTF loader at 60fps |
 
 More screenshots, GIFs, and the showreel live in the [press kit](https://github.com/natureglass/Brewser-press).
 
