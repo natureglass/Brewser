@@ -8,7 +8,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "WebGL 1",

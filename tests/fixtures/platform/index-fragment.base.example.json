@@ -9,7 +9,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "id": "com.natureglass.fluiddynamics",
       "license": "MIT",
@@ -33,7 +33,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "WebGL 2"
@@ -62,7 +62,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "Motion Sensors"
@@ -89,7 +89,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "WebUSB"
@@ -120,7 +120,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "WebNN"
@@ -144,7 +144,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "id": "com.natureglass.savedemo",
       "license": "MIT",
@@ -172,7 +172,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "Motion Sensors"
@@ -198,7 +198,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "WebAudio"
@@ -227,7 +227,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "id": "com.natureglass.speedtest",
       "license": "MIT",
@@ -248,7 +248,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "id": "com.natureglass.streamcast",
       "license": "MIT",
@@ -274,7 +274,7 @@
         "switch",
         "web"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "features": [
         "WebGL 2"

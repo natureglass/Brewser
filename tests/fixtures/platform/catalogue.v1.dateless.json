@@ -19,7 +19,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -44,7 +44,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -74,7 +74,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -104,7 +104,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -134,7 +134,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -161,7 +161,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -190,7 +190,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -217,7 +217,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -245,7 +245,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -272,7 +272,7 @@
         "https://usher.ttvnw.net",
         "https://gql.twitch.tv"
       ],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,
@@ -291,7 +291,7 @@
         "web"
       ],
       "description": "<p><b>Unity Demos</b> is a measurement tool for Brewser, not a game. It loads a curated matrix of <b>real Unity WebGL debug builds</b> (spanning Unity 2021 LTS through Unity 6) one at a time and records exactly how far each one gets before it stalls, crashes, or completes.</p>\r\n<p>Pick a build from the table and press <b>A</b> to launch it. The harness watches the whole load and writes a per-run <b>NDJSON log</b> to <code>sdmc:/switch/brewser/logs/unity-demos/</code> capturing:</p>\r\n<ul>\r\n<li><b>Loader &amp; framework output</b> — every console line the Unity build emits.</li>\r\n<li><b>Uncaught errors</b> with the top stack frames.</li>\r\n<li><b>Missing-API hits</b> — flagged as <b>KNOWN-GAP</b> (already stubbed) or <b>NEW-GAP</b> (undiscovered).</li>\r\n<li><b>Load milestones</b>, capacity failures, and 5-second heartbeats.</li>\r\n<li>A running <b>verdict</b> — e.g. <i>COMPLETED</i>, <i>WASM-UNAVAILABLE</i>, <i>CAPACITY</i>, <i>CRASHED</i>, <i>STALLED</i>.</li>\r\n</ul>\r\n<p>Each row shows its Unity version, renderer (BiRP or URP), GL level, and whether debug symbols are <b>full</b> or <b>stripped</b>, plus the most recent verdict badge so you can see at a glance which builds already ran.</p>\r\n<p><b>How it works:</b> before the Unity loader runs, the harness installs a small, fully-disclosed set of monkey-patches (a WebAssembly-streaming polyfill, a <code>crossOriginIsolated</code> getter, and stubs for <code>SharedArrayBuffer</code>/<code>Atomics</code>/<code>Worker</code>). Every patched call still records a gap, so the log never over-claims that a missing browser API was truly filled in. On jitless runtimes such as Citron every build stops at <b>WASM-UNAVAILABLE</b> after the loader-stage gaps are harvested; on real Tegra hardware with JIT the full path runs and gives genuine first-frame timings.</p>",
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "entry": "index.html",
       "exitGame": "PLUS",
       "features": [
@@ -326,7 +326,7 @@
         "web"
       ],
       "allowed_origins": [],
-      "developer": "Alex Daskalakis",
+      "developer": "natureglass",
       "license": "MIT",
       "exitGame": "PLUS",
       "fullscreen": true,

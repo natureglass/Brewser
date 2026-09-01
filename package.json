@@ -14,7 +14,7 @@
   "license": "MIT",
   "author": {
     "name": "Natureglass",
-    "email": "alexdaskalakis@hotmail.com"
+    "email": "info@brewser.io"
   },
   "dependencies": {
     "@switch-web/runtime": "link:./runtime",
