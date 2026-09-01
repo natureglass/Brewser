@@ -4,7 +4,7 @@ contact_links:
     url: https://brewser.io/brewser-ideas/
     about: Feature requests live on the Brewser Ideas Board, where you can vote on what gets built next.
   - name: 💬 Questions & general discussion
-    url: https://gbatemp.net/
+    url: https://gbatemp.net/threads/brewser-web-runtime-app-platform-webgl2-web-midi-webserial-v8-jit-skia.684141/
     about: For questions, setup help, or general discussion, the GBAtemp release thread is the place.
   - name: 🔒 Security issues
     url: mailto:security@brewser.io
