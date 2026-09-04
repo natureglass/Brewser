@@ -49,6 +49,48 @@
     cursor: pointer;
   }
   .updates-modal-brewser-btn:active { background: #e6c700; }
+  /* Boot-time "new version available" toast — a small clickable pill that
+     shows bottom-center on launch when a newer Brewser is published
+     (boot-update-check.js). Hidden by default; the script adds
+     `boot-update-toast--show` to reveal it (a CLASS flip, so the live-DOM paint
+     cache actually erases it on auto-hide — a `style.display` write leaves stale
+     pixels, the same reason the sibling modals gate on classes). Green accent
+     via the theme primary token so it reads as a positive prompt (matching the
+     Check-for-Updates button's `--update-available` green), not an error. */
+  .boot-update-toast {
+    display: none;
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    align-items: center;
+    gap: 16px;
+    padding: 12px 22px;
+    border-radius: 999px;
+    background: #0f2417;
+    border: 1px solid var(--brewser-primary, var(--hybridmag-color-primary, #65bc7b));
+    color: #eafff0;
+    font-size: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+    z-index: 1100;
+    max-width: 92vw;
+    cursor: pointer;
+  }
+  .boot-update-toast--show { display: flex; }
+  /* Keep both spans at their natural single-line width so the flex row never
+     shrinks the message enough to wrap (at 30px it wrapped + clipped off the
+     screen bottom). white-space:nowrap on the parent inherits to both — making
+     each span's min-content its FULL line width — and flex-shrink:0 stops the
+     row compressing them under any container-sizing quirk. */
+  .boot-update-toast-text,
+  .boot-update-toast-cta { flex-shrink: 0; }
+  .boot-update-toast-cta {
+    font-weight: 700;
+    color: var(--brewser-primary, var(--hybridmag-color-primary, #65bc7b));
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body data-telemetry-url="<browser-config-telemetry/>" data-warnings="<browser-config-warnings/>" data-max-per-page="<browser-config-maxperpage/>" data-lazy-banners="paged">
@@ -543,6 +585,17 @@
   </div>
 </browser-modal>
 
+<!-- Boot-time "new version available" toast. Hidden until boot-update-check.js
+     (loaded below) finds a newer published Brewser than the one installed; then
+     it slides up bottom-center for 3 s and a tap fires the SAME action as the
+     "Check for Updates" button (globalThis.__brewserOpenUpdatesModal). A plain
+     page-layer fixed pill — not a <browser-modal> — since it's a non-blocking
+     banner, not a full-screen overlay. -->
+<div id="boot-update-toast" class="boot-update-toast" role="button" aria-live="polite">
+  <span id="boot-update-toast-text" class="boot-update-toast-text">There is a new version available</span>
+  <span class="boot-update-toast-cta">Update &#8250;</span>
+</div>
+
 <!-- Script load order matters: download-modal.js installs
      `globalThis.__brewserOpenDownloadModal` synchronously at load;
      warnings-modal.js installs `__brewserOpenWarningsModal` +
@@ -563,6 +616,10 @@
 <script src="brewser://scripts/missing-app-modal.js"></script>
 <script src="brewser://scripts/self-update-modal.js"></script>
 <script src="brewser://scripts/updates-modal.js"></script>
+<!-- Boot version poll + "new version available" toast. MUST load after
+     updates-modal.js so its `__brewserOpenUpdatesModal` global exists for the
+     toast's tap handler. -->
+<script src="brewser://scripts/boot-update-check.js"></script>
 <!-- Pagination + lazy banners. banner-loader.js installs
      `globalThis.__brewserPromoteBanners` and MUST load before
      apps-pagination.js, which drives the Prev/Next pager and promotes only

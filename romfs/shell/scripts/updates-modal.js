@@ -1115,6 +1115,15 @@
     if (e && e.stopPropagation) e.stopPropagation();
   });
 
+  // Expose the modal's open() so other page scripts can fire the EXACT same
+  // action the "Check for Updates" toolbar button does. Consumed by the
+  // boot-time "new version available" toast (boot-update-check.js): tapping
+  // the toast runs the full check here — which then surfaces the yellow
+  // "Update Brewser vX.X.X" button — rather than duplicating the flow. Guarded
+  // in the consumer (`typeof … === 'function'`), so a page without this script
+  // just no-ops.
+  globalThis.__brewserOpenUpdatesModal = function () { open(); };
+
   // Cancel (during the loading phase) and Close (after the check
   // completes) both fire `close()`. Two separate listeners keep each
   // button's intent self-documenting at the call site. Cancel aborts the
