@@ -108,7 +108,7 @@ import {
 	requestPaintTick,
 	tickAnimationFrames,
 } from '@switch-web/runtime';
-import { clearCssAnimations, clearGifAnimations, dispatchPageKeyEvent, dispatchPageResizeEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setCssViewport, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
+import { clearCssAnimations, clearCssTransitions, clearGifAnimations, dispatchPageKeyEvent, dispatchPageResizeEvent, getLiveRoot, getLiveTreeVersion, LiveElement, pageHasListenerFor, setCssViewport, setInputFocusHandler, setSwbImgDebugEnabled } from '@switch-web/runtime';
 import { setMediaColorScheme } from '@switch-web/runtime';
 import { isWebGLBackedCanvas } from '@switch-web/runtime';
 import { permissionSlug } from '@switch-web/runtime';
@@ -867,6 +867,9 @@ export class BrowserShell {
 				// Same lifecycle for CSS-keyframes tickers — they're per-
 				// element setTimeout loops that should die with the page.
 				clearCssAnimations();
+				// Likewise the CSS-transition ticker (per-element interpolation
+				// tickers holding closures over now-detached elements).
+				clearCssTransitions();
 				// Wipe the shared screen GL bridge FBO so the next
 				// page's first paint (which may copyBridgeToScreen
 				// before any new rAF tick has fired) doesn't carry
@@ -2110,8 +2113,16 @@ export class BrowserShell {
 						// the current page's URL, same page-relative architecture
 						// as `<img>` srcs. Absolute URLs pass through unchanged.
 						const navUrl = this.resolveNavUrl(input.url);
-						_shellInputDiag('navigateTo about to be called for ' + navUrl);
-						await this.navigateTo(navUrl);
+						// `<form method=post>` submits carry a request body +
+						// Content-Type on the navigate input; forward them so the
+						// load fetches with the body. `<a href>` / GET submits
+						// have none (undefined → a plain GET load).
+						const navInit = input.method === 'POST'
+							? { method: 'POST' as const, body: input.body, contentType: input.contentType }
+							: undefined;
+						_shellInputDiag('navigateTo about to be called for ' + navUrl
+							+ (navInit ? ' [POST body=' + (input.body?.length ?? 0) + 'b]' : ''));
+						await this.navigateTo(navUrl, false, navInit);
 						_shellInputDiag('navigateTo returned for ' + navUrl);
 						break;
 					}
@@ -2181,7 +2192,11 @@ export class BrowserShell {
 		return resolveNavUrl(url, this.session.currentPageUrl);
 	}
 
-	private async navigateTo(url: string, skipBrowsingWarning = false): Promise<void> {
+	private async navigateTo(
+		url: string,
+		skipBrowsingWarning = false,
+		navInit?: { method?: 'GET' | 'POST'; body?: string; contentType?: string },
+	): Promise<void> {
 		// Internet-browsing warning gate. With the "Internet browsing
 		// warning" setting on (config.browsingWarning), the first attempt to
 		// open an http(s) URL pops a confirm modal instead of loading —
@@ -2195,7 +2210,7 @@ export class BrowserShell {
 		if (!skipBrowsingWarning && (url.startsWith('http://') || url.startsWith('https://'))) {
 			try {
 				if (loadConfig(this.profile.appRoot).browsingWarning) {
-					this.openBrowsingWarningModal(url);
+					this.openBrowsingWarningModal(url, navInit);
 					return;
 				}
 			} catch (_) { /* config unreadable — fall through and navigate */ }
@@ -2225,7 +2240,7 @@ export class BrowserShell {
 			await new Promise<void>((resolve) => setTimeout(resolve, 48));
 		}
 		try {
-			await this.navigation.navigate(url);
+			await this.navigation.navigate(url, navInit);
 			this.renderChrome(url);
 		} finally {
 			setNavigating(false);
@@ -2416,7 +2431,10 @@ export class BrowserShell {
 	 * tears down before the load begins); "Cancel" (or B / back via the
 	 * standard modal-mode close gate) drops the request and leaves the
 	 * current page in place. Guarded by id so a repeat trigger can't stack. */
-	private openBrowsingWarningModal(url: string): void {
+	private openBrowsingWarningModal(
+		url: string,
+		navInit?: { method?: 'GET' | 'POST'; body?: string; contentType?: string },
+	): void {
 		if (document.getElementById('__swb_browsing_warning')) return;
 		const dialog = document.createElement('dialog') as unknown as HTMLDialogElement;
 		dialog.id = '__swb_browsing_warning';
@@ -2454,7 +2472,7 @@ export class BrowserShell {
 			try { dialog.close(); } catch (_) { /* swallow */ }
 			// Defer so this click dispatch unwinds and the modal node is torn
 			// down before `navigation.navigate` blocks on the load.
-			setTimeout(() => { void this.navigateTo(url, true); }, 0);
+			setTimeout(() => { void this.navigateTo(url, true, navInit); }, 0);
 		});
 		const cancel = document.getElementById('__swb_browsing_cancel');
 		if (cancel) cancel.addEventListener('click', () => {

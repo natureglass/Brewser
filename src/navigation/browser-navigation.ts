@@ -7,6 +7,15 @@ const HOME_URL = 'brewser://home/';
 /** URLs that should never be persisted to the visit history. */
 const EXCLUDED_FROM_HISTORY = new Set<string>([HOME_URL, ERROR_URL]);
 
+/** Options for a body-carrying navigation (a `<form method=post>` submit).
+ * Only the initial `navigate()` honours these — back/forward/reload replay
+ * as plain GET loads so a POST is never silently re-submitted. */
+export interface NavigateOptions {
+	method?: 'GET' | 'POST';
+	body?: string;
+	contentType?: string;
+}
+
 /**
  * Ties navigation requests to a `WebView` and the runtime's
  * `NavigationController`. The controller records the *requested* URL even
@@ -45,9 +54,9 @@ export class BrowserNavigation {
 		this.currentTitleValue = title;
 	}
 
-	async navigate(url: string): Promise<void> {
+	async navigate(url: string, opts?: NavigateOptions): Promise<void> {
 		this.controller.navigate(url);
-		await this.loadOrError(url, { record: true });
+		await this.loadOrError(url, { record: true }, opts);
 	}
 
 	async reload(): Promise<void> {
@@ -71,9 +80,21 @@ export class BrowserNavigation {
 		}
 	}
 
-	private async loadOrError(url: string, opts: { record: boolean }): Promise<void> {
+	private async loadOrError(
+		url: string,
+		opts: { record: boolean },
+		nav?: NavigateOptions,
+	): Promise<void> {
 		try {
-			await this.webView.load({ url });
+			const request = nav?.method === 'POST'
+				? {
+					url,
+					method: 'POST' as const,
+					body: nav.body,
+					headers: nav.contentType ? { 'Content-Type': nav.contentType } : undefined,
+				}
+				: { url };
+			await this.webView.load(request);
 			if (opts.record) {
 				this.recordVisit(url);
 			}
