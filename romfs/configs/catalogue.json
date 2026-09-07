@@ -140,9 +140,9 @@
         "storage"
       ],
       "publishedAt": "2026-09-03T13:26:26Z",
-      "sizeBytes": 22136783,
+      "sizeBytes": 22174443,
       "summary": "A suite of self-contained fixtures that exercise the Brewser HTML, CSS, canvas, WebGL and Web API re",
-      "version": "1.0.4"
+      "version": "1.0.3"
     },
     {
       "categories": [
@@ -306,6 +306,32 @@
       "sizeBytes": 942566,
       "summary": "A live Home Assistant dashboard that auto-discovers your entities by area and controls lights, switc",
       "version": "1.0.1"
+    },
+    {
+      "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "mobile",
+        "switch",
+        "web"
+      ],
+      "description": "<p><strong>Jellyfin Client</strong> connects to your own Jellyfin media server and streams your movies, shows and music. Sign in, browse your libraries with cover art, and pick up right where you left off — the same app runs on the Nintendo Switch and in an ordinary web browser.</p>\r\n<p><strong>How it works.</strong> Point it at your server's address and sign in with a password or Quick Connect (enter the on-screen code in your phone or web Jellyfin). The app talks to Jellyfin's own web API to list your libraries and folders, fetch each title's artwork, details and stream info, and negotiate playback: when a file already fits the device it plays directly, and when it doesn't the server transcodes a compatible stream on the fly. An <em>Auto</em> quality mode sizes the stream to your screen and connection, or you can force a specific resolution and run a quick bandwidth test. As you watch, your position is reported back to the server so titles resume and appear in <em>Continue Watching</em>. On the Switch the video is decoded and drawn by the Brewser engine with subtitles burned in by the server; in a browser it uses the native video element (with hls.js for transcoded streams) and native WebVTT subtitle tracks.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Connect &amp; sign in</strong> — enter a LAN address like 192.168.1.100:8096 or a full https:// URL, then use your password or Quick Connect.</li>\r\n<li><strong>Browse</strong> — move through your libraries and folders and open a title for its artwork, details and streams.</li>\r\n<li><strong>Player controls</strong> — play and pause, drag the progress bar to seek, and mute, with a gear button for playback settings.</li>\r\n<li><strong>Playback settings</strong> — switch audio track, subtitles and chapters, change the aspect ratio, zoom and crop, or jump back and forward ten seconds.</li>\r\n<li><strong>Quality</strong> — choose <em>Auto</em>, <em>Source</em>, 1080p, 720p or 480p, and measure your bandwidth to size the stream to your connection.</li>\r\n<li><strong>Resume</strong> — stop any time and the title reappears in <em>Continue Watching</em> at the right spot.</li>\r\n</ul>\r\n<p>Requires your own Jellyfin server (version 10.9 or newer) reachable on the local network.</p>",
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "id": "com.natureglass.jellyfinclient",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "minBrewserVersion": "0.1.119",
+      "name": "Jellyfin Client",
+      "permissions": [
+        "local_network",
+        "storage"
+      ],
+      "publishedAt": "2026-09-07T12:53:12Z",
+      "sizeBytes": 558990,
+      "summary": "Stream your own Jellyfin media server's movies, shows and music, on Switch or in a browser.",
+      "version": "1.0.7"
     },
     {
       "categories": [
@@ -901,7 +927,7 @@
     }
   ],
   "defaultSource": "base",
-  "generated": "2026-09-06T14:07:24Z",
+  "generated": "2026-09-07T13:08:44Z",
   "revoked": [],
   "sources": {
     "base": "https://play.brewser.io",

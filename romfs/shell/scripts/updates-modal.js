@@ -92,6 +92,14 @@
   }
   console.debug('[updates-modal] wired');
 
+  // Offline Mode: the entire Check-for-Updates flow is network-bound, so
+  // disable the trigger button. This IIFE re-runs on every home navigation
+  // (no once-guard), so returning from Settings after a toggle reflects the
+  // new state without a reboot. `open()` is also guarded below as a backstop.
+  if (globalThis.__brewserOfflineMode === true) {
+    triggerBtn.setAttribute('disabled', '');
+  }
+
   // Where the fetched bytes are written. Matches the on-disk path
   // `loadCatalogGroup` reads via
   // `Switch.readFileSync(`${appRoot}configs/catalogue.json`)`
@@ -1033,6 +1041,9 @@
 
   function open() {
     if (modalOpen) return;
+    // Offline Mode backstop — refuse to open (and thus fetch) even if some
+    // path fires open() while the trigger is disabled.
+    if (globalThis.__brewserOfflineMode === true) return;
     // Reset the per-run My Apps flag so a prior run's reload can't fire.
     myCatalogueRefreshed = false;
     // Reset the catalogue/stats change flag too (same reason).
@@ -1145,6 +1156,9 @@
   // belt-and-braces gate so a stale click can't fire before this run settles.
   brewserBtn.addEventListener('click', function (e) {
     if (!brewserUpdateOffered) return;
+    // Offline Mode: the self-update download is a network action. Unreachable
+    // in practice (the modal can't open), but guard for defense in depth.
+    if (globalThis.__brewserOfflineMode === true) return;
     if (typeof globalThis.__brewserOpenSelfUpdateModal === 'function') {
       globalThis.__brewserOpenSelfUpdateModal();
       if (e && e.stopPropagation) e.stopPropagation();

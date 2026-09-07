@@ -26,6 +26,7 @@
   "swbImgDebug": false,
   "showSplash": true,
   "showToolbar": true,
+  "offlineMode": false,
   "showFps": false,
   "splashFadeMs": 250,
   "local": "dd/mm/yyyy",

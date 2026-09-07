@@ -826,6 +826,12 @@ export class BrowserShell {
 		// avoids the double read and makes the splash's "no
 		// pre-paint await" contract explicit at the class boundary).
 		const startupConfig = this.startupConfig = loadConfig(this.profile.appRoot);
+		// Offline Mode (user setting) → one live source on globalThis, read by
+		// both the engine (probe gate + `readInternetReachable`) and the page
+		// scripts (boot toast, Check-for-Updates / Download disable, ratings
+		// offline gate). `saveSettings` rewrites it in place so a toggle takes
+		// effect without a reboot.
+		(globalThis as { __brewserOfflineMode?: boolean }).__brewserOfflineMode = startupConfig.offlineMode;
 		// Wire the user-editable joycon button mapping. Empty values in
 		// `config.json buttonMapping` fall through to engine defaults
 		// (A=leftClick, B=rightClick, X=forward, Y=reload,
@@ -1278,6 +1284,15 @@ export class BrowserShell {
 			.__swbReload = async () => {
 			if (this.mode !== 'normal') await this.exitFullscreen();
 			await this.runNavigation(() => this.navigation.reload());
+		};
+		// Page-script-callable jump to the Settings page. Used by the Offline
+		// Mode boot toast's "Settings" CTA (boot-update-check.js) to mirror the
+		// toolbar settings button's data-action="settings" navigation. Exits any
+		// fullscreen first (same guard as the back / reload variants).
+		(globalThis as { __brewserOpenSettings?: () => Promise<void> })
+			.__brewserOpenSettings = async () => {
+			if (this.mode !== 'normal' && this.mode !== 'fullscreen-app') await this.exitFullscreen();
+			await this.navigateTo('brewser://settings/');
 		};
 		// Page-script-callable hard repaint — forces the next shell
 		// loop iteration to rebuild the static body cache from scratch
@@ -1733,8 +1748,15 @@ export class BrowserShell {
 		// connect / disconnect / dock-change events instead of being
 		// frozen at boot-time state. 60 s is well above the per-probe
 		// timeout budget (≤15 s) so probes never overlap.
-		void probeNetwork().then(stashNetworkStatus);
-		setInterval(() => { void probeNetwork().then(stashNetworkStatus); }, 60_000);
+		//
+		// Offline Mode gates BOTH the one-shot and the interval body (read
+		// live, so toggling the setting off resumes probing within one tick
+		// without a reboot) — in Offline Mode the shell initiates no network
+		// of its own and `readInternetReachable` reports "down" anyway.
+		if (!isOfflineModeEnabled()) void probeNetwork().then(stashNetworkStatus);
+		setInterval(() => {
+			if (!isOfflineModeEnabled()) void probeNetwork().then(stashNetworkStatus);
+		}, 60_000);
 
 		// Home navigation + fade gating.
 		//
@@ -4516,6 +4538,15 @@ export class BrowserShell {
 		if ('swbImgDebug' in staged) {
 			setSwbImgDebugEnabled(fresh.swbImgDebug);
 		}
+		if ('offlineMode' in staged) {
+			// Update the live global so the toolbar dot, the probe interval, and
+			// the next page navigation's button-disable logic all see the new
+			// value without a reboot.
+			(globalThis as { __brewserOfflineMode?: boolean }).__brewserOfflineMode = fresh.offlineMode;
+			// Turning Offline Mode OFF: kick one immediate probe so the dot
+			// reflects real connectivity now instead of after the next 60 s tick.
+			if (!fresh.offlineMode) void probeNetwork().then(stashNetworkStatus);
+		}
 		// `maxHistory` is fixed at HistoryStore construction; `autoRotate`
 		// has no live consumer today; `buttonMapping` is out of scope for
 		// this form. All three round-trip into config.json above and
@@ -6358,6 +6389,15 @@ function stashNetworkStatus(probe: NetworkProbeResult): void {
 	(globalThis as { __browserNetworkStatus?: NetworkProbeResult }).__browserNetworkStatus = probe;
 }
 
+/** User-set Offline Mode. When on, the shell initiates no network of its
+ * own (boot probe, boot version poll, telemetry) and the toolbar indicator
+ * shows the "offline" state regardless of real reachability. Read live from
+ * the `__brewserOfflineMode` global (set at boot from config, rewritten by
+ * `saveSettings` so the toggle applies without a reboot). */
+function isOfflineModeEnabled(): boolean {
+	return (globalThis as { __brewserOfflineMode?: boolean }).__brewserOfflineMode === true;
+}
+
 /** Read libnx's cached operation mode (0 = handheld, 1 = console /
  * docked) via the nx.js `Switch.operationMode()` shim. The value is
  * kept up-to-date asynchronously by libnx's own applet hook on the
@@ -6389,6 +6429,10 @@ function isBookmarkable(url: string | null | undefined): boolean {
  * Returns `undefined` while the probe is still running so the chrome
  * indicator can be hidden rather than wrong. */
 function readInternetReachable(): boolean | undefined {
+	// Offline Mode → deliberately not using the network; report "down" so the
+	// toolbar dot shows the orange offline state regardless of the (skipped)
+	// probe, distinct from the boot "unknown" (hidden) state.
+	if (isOfflineModeEnabled()) return false;
 	const probe = (globalThis as { __browserNetworkStatus?: NetworkProbeResult }).__browserNetworkStatus;
 	if (!probe) return undefined;
 	return probe.attempts.some((a) => /^https?:\/\//i.test(a.url) && a.reachable);

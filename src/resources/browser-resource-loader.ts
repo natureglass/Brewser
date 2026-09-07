@@ -1269,6 +1269,7 @@ export class BrowserResourceLoader implements ResourceLoader {
 			+ toggleRow('momentumScrolling', 'Momentum scrolling', config.momentumScrolling, 'scroll content coasts to a stop with friction after right-stick release / finger lift')
 			+ toggleRow('showFps', 'Show FPS', config.showFps, 'small semi-transparent FPS counter at the top-left; stays on across the shell and every app')
 			+ toggleRow('browsingWarning', 'Internet browsing warning', config.browsingWarning, 'warn before opening any http(s) website — internet browsing is experimental and may crash the app')
+			+ toggleRow('offlineMode', 'Offline Mode', config.offlineMode, 'never use the network on its own — skip the boot update check, run the catalogue from cache, and disable Check for Updates / Download')
 			+ '</fieldset>'
 			+ '</div>'
 			+ '</div>'

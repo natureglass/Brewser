@@ -354,10 +354,33 @@
   // surface as "online"; the fetch-throw catch downstream catches
   // that case and shows the same toast.
   function readEngineReachability() {
+    // Offline Mode (user setting): treat as offline so network-bound actions
+    // (rating telemetry) hit the existing pre-flight short-circuit instead of
+    // firing a request the shell is meant to suppress.
+    if (globalThis.__brewserOfflineMode === true) return false;
     var probe = globalThis.__browserNetworkStatus;
     if (!probe) return null;
     if (typeof probe.overallReachable === 'boolean') return probe.overallReachable;
     return null;
+  }
+
+  // Offline Mode disable helper for the modal's network actions (Download /
+  // Update). Reuses the existing `.app-modal-btn--disabled` styling (JS sets
+  // both the `disabled` attribute and the class, per that rule's contract).
+  // Reflects the live setting on each open, so returning from Settings after a
+  // toggle shows the new state without a reboot.
+  function isOfflineMode() {
+    return globalThis.__brewserOfflineMode === true;
+  }
+  function applyOfflineDisable(btn) {
+    if (!btn) return;
+    if (isOfflineMode()) {
+      btn.setAttribute('disabled', '');
+      btn.classList.add('app-modal-btn--disabled');
+    } else {
+      btn.removeAttribute('disabled');
+      btn.classList.remove('app-modal-btn--disabled');
+    }
   }
 
   // Offline toast. Lives in a persistent host appended to the modal
@@ -672,12 +695,15 @@
     var installed = installedBrewserVersion();
     if (installed === '') return '';                    // nothing to compare against
     if (!semverGreater(required, installed)) return ''; // installed is equal/newer → fine
-    return '<div class="app-modal-compat-notice-inner" style="'
-      + 'margin-top:8px;padding:8px 12px;border-radius:8px;'
-      + 'background:rgba(255,176,32,0.12);border:1px solid rgba(255,176,32,0.55);'
-      + 'color:#ffcf7a;font-size:13px;line-height:1.4;text-align:left;'
-      + '">Built for Brewser v' + esc(required) + ' or newer — you have v'
-      + esc(installed) + '. It may not work correctly until you update Brewser.</div>';
+    // Box look AND spacing live in the theme CSS (.app-modal-compat-notice /
+    // .app-modal-compat-notice-inner) — NOT inline. This live-DOM engine renders
+    // padding/border/background on a script-injected node but does not reliably
+    // honor margin on it, so the earlier inline margin never moved the box. The
+    // wrapper's CSS padding-top gives the gap ABOVE; the .app-modal-card--compat
+    // class (toggled in show()) tightens the header's margin for the gap BELOW.
+    return '<div class="app-modal-compat-notice-inner">Built for Brewser v'
+      + esc(required) + ' or newer — you have v' + esc(installed)
+      + '. It may not work correctly until you update Brewser.</div>';
   }
 
   function show(detail) {
@@ -780,8 +806,17 @@
     // Brewser-version compatibility notice (advisory, non-blocking). Rendered
     // when the app pins a minBrewserVersion newer than the installed runtime;
     // set to '' otherwise so a reused element never shows a stale note when the
-    // user swaps between apps.
-    if (compatNoticeEl) compatNoticeEl.innerHTML = compatNoticeHtml(currentDetail);
+    // user swaps between apps. The .app-modal-card--compat class tightens the
+    // header→description gap (theme CSS) so the notice sits with an even ~12px
+    // above and below; toggled via classList so the modal paint cache repaints.
+    if (compatNoticeEl) {
+      var compatHtml = compatNoticeHtml(currentDetail);
+      compatNoticeEl.innerHTML = compatHtml;
+      if (cardEl) {
+        if (compatHtml) cardEl.classList.add('app-modal-card--compat');
+        else cardEl.classList.remove('app-modal-card--compat');
+      }
+    }
 
     var rows = [];
     if (currentDetail.category) rows.push(row('Category', currentDetail.category));
@@ -913,6 +948,12 @@
       if (forwarderBtn) forwarderBtn.classList.remove('app-modal-btn--hidden');
     }
 
+    // Offline Mode: the two network actions are disabled (the rest of the
+    // modal stays usable for viewing). Applied after the visibility branch
+    // above so it reflects whichever of Download / Update is showing.
+    applyOfflineDisable(downloadBtn);
+    applyOfflineDisable(updateBtn);
+
     // Always open in the collapsed view — the expanded reading state is a
     // transient per-read toggle, not a sticky preference across opens.
     setExpanded(false);
@@ -1030,6 +1071,9 @@
   // modal resolves everything from the cached normalized catalogue via
   // the platform bridge.
   function openDownload(mode) {
+    // Offline Mode: the button is disabled visually, but guard the handler too
+    // so a stray programmatic call can't start a network download.
+    if (isOfflineMode()) return;
     var detail = currentDetail;
     var opener = globalThis.__brewserOpenDownloadModal;
     if (typeof opener !== 'function') {

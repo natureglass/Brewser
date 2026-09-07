@@ -231,6 +231,9 @@ input[name="apps-tab"] { display: none; }
 }
 .apps-toolbar .tab-bar { margin-bottom: 0; }
 .apps-check-updates { cursor: pointer; font: inherit; }
+/* Offline Mode: greyed + tap-inert (mirrors the pager's disabled treatment;
+   the JS also guards open() as a backstop). */
+.apps-check-updates[disabled] { opacity: 0.45; cursor: default; pointer-events: none; }
 
 .tab-label {
   position: relative;
@@ -806,6 +809,26 @@ ul.settings-list li:active {
   margin-bottom: 16px;
   text-align: left;
 }
+/* Brewser-version compatibility notice — box look + an even ~12px gap above and
+   below. The gap ABOVE uses PADDING on the wrapper (this live-DOM engine does
+   not reliably honor margin on the script-injected node — padding/border/bg DO
+   render); `:empty` collapses the wrapper when there is no notice. The gap BELOW
+   is the header's own margin, tightened from 16px to 12px only while the notice
+   shows (card-modifier class toggled by missing-app-modal.js, same mechanism as
+   .app-modal-card--expanded). */
+.app-modal-compat-notice { padding-top: 12px; }
+.app-modal-compat-notice:empty { display: none; padding-top: 0; }
+.app-modal-compat-notice-inner {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.12);
+  border: 1px solid rgba(255, 176, 32, 0.55);
+  color: #ffcf7a;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+.app-modal-card--compat .app-modal-header { margin-bottom: 12px; }
 .app-modal-header-text {
   flex: 1;
   min-width: 0;

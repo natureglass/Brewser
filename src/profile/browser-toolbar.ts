@@ -166,6 +166,16 @@ export interface BrowserConfig {
 	 * Back/Forward history replay are never gated. Read fresh per
 	 * navigation by `BrowserShell.navigateTo`. Default true. */
 	browsingWarning: boolean;
+	/** Offline Mode. When true the shell never initiates network of its
+	 * own — the boot reachability probe, the boot version poll, and
+	 * telemetry are all skipped, the catalogue is read from cache, and the
+	 * connectivity indicator shows the "offline" (orange) state regardless
+	 * of real reachability. The network-bound UI controls (Check for
+	 * Updates, Download / Update) are disabled. Read live via the
+	 * `__brewserOfflineMode` global (set at boot, updated by
+	 * `saveSettings` so the toggle takes effect without a reboot).
+	 * Default false. */
+	offlineMode: boolean;
 	/** Title of the active search engine (matched against an entry's
 	 * `title` in `search_engines.json`). Drives the welcome page's
 	 * search-bar logo + where the query is sent. */
@@ -474,6 +484,7 @@ export const DEFAULT_CONFIG: BrowserConfig = {
 	backDarkTheme: '#444444',
 	videoNVTEGRA: true,
 	browsingWarning: true,
+	offlineMode: false,
 	searchEngine: 'DuckDuckGo',
 	wwwRenderChunkMs: 12,
 	scrollChunkMs: 4,
@@ -571,6 +582,7 @@ export function loadConfig(appRoot: string): BrowserConfig {
 				: DEFAULT_CONFIG.backDarkTheme,
 			videoNVTEGRA: typeof parsed?.videoNVTEGRA === 'boolean' ? parsed.videoNVTEGRA : DEFAULT_CONFIG.videoNVTEGRA,
 			browsingWarning: typeof parsed?.browsingWarning === 'boolean' ? parsed.browsingWarning : DEFAULT_CONFIG.browsingWarning,
+			offlineMode: typeof parsed?.offlineMode === 'boolean' ? parsed.offlineMode : DEFAULT_CONFIG.offlineMode,
 			searchEngine: typeof parsed?.searchEngine === 'string' ? parsed.searchEngine : DEFAULT_CONFIG.searchEngine,
 			wwwRenderChunkMs: typeof parsed?.wwwRenderChunkMs === 'number' && Number.isFinite(parsed.wwwRenderChunkMs)
 				? Math.max(1, Math.min(1000, parsed.wwwRenderChunkMs))
@@ -1099,10 +1111,15 @@ function libraryAppToCard(app: LibraryApp, appRoot: string, stats: ParsedStats |
 		downloads: st ? st.downloads : 0,
 		url: `brewser://apps/${dirName}/${entryRel}`,
 		version: listing?.version ?? inst?.version ?? '',
-		// Prefer the catalogue's value (authoritative for availability), fall
-		// back to the on-disk manifest for an installed-but-unlisted app; '' when
-		// neither carries it → the modal shows no compatibility notice.
-		minBrewserVersion: listing?.minBrewserVersion ?? inst?.minBrewserVersion ?? '',
+		// minBrewserVersion for the compat notice: prefer the INSTALLED manifest
+		// (ground truth for the build actually on the device — what the notice is
+		// about), then fall back to the catalogue listing for a not-installed
+		// (available) app. `||` not `??`, because the normalizer/enumerator emit
+		// '' (never null) when the field is absent, and an empty string must fall
+		// THROUGH to the other source rather than mask it — otherwise a catalogue
+		// that predates the field (rollout) would suppress the installed value.
+		// '' when neither carries it → the modal shows no compatibility notice.
+		minBrewserVersion: inst?.minBrewserVersion || listing?.minBrewserVersion || '',
 		license: listing?.license ?? inst?.license ?? '',
 		category: (inst?.categories.length ? inst.categories : listing?.categories ?? []).join(', '),
 		developer: listing?.developer ?? inst?.developer ?? '',

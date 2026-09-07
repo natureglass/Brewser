@@ -156,10 +156,15 @@
 
   // --- Toast ---------------------------------------------------------------
   var toastTimer = null;
+  // Which message the pill is currently showing. 'update' → tapping fires the
+  // Check-for-Updates action; 'offline' → tapping only dismisses (the updates
+  // flow is disabled in Offline Mode). At most one shows per boot.
+  var toastMode = 'update';
   function els() {
     return {
       toast: document.getElementById('boot-update-toast'),
       text: document.getElementById('boot-update-toast-text'),
+      cta: document.getElementById('boot-update-toast-cta'),
     };
   }
 
@@ -184,7 +189,10 @@
     repaint();
   }
 
-  function showToast(version) {
+  // Show the pill with an arbitrary message. Shared by the update-available
+  // toast and the Offline Mode toast so both reuse the exact same component,
+  // styling, duration, and auto-/tap-dismissal.
+  function showToastText(msg) {
     var e = els();
     if (!e.toast || !e.text) {
       console.debug('[boot-update-check] toast markup missing; skipping toast');
@@ -192,7 +200,11 @@
     }
     // Fresh text stamp (cache-safe new node) then class-reveal + forced
     // offscreen rebuild so the pill actually paints this frame.
-    e.text.textContent = 'There is a new version available v' + version;
+    e.text.textContent = msg;
+    // CTA label tracks the toast's purpose: the update toast keeps "Update",
+    // the Offline Mode toast reads "Settings" (its tap opens the Settings page
+    // so the user can turn Offline Mode off). '›' is the markup's &#8250;.
+    if (e.cta) e.cta.textContent = (toastMode === 'offline') ? 'Settings ›' : 'Update ›';
     e.toast.classList.add('boot-update-toast--show');
     repaint();
     if (toastTimer !== null) clearTimeout(toastTimer);
@@ -200,6 +212,11 @@
       toastTimer = null;
       hideToast();
     }, TOAST_MS);
+  }
+
+  function showToast(version) {
+    toastMode = 'update';
+    showToastText('There is a new version available v' + version);
   }
 
   // Wire the tap → same action as the "Check for Updates" button. Done once at
@@ -211,7 +228,14 @@
     if (!toast) return;
     toast.addEventListener('click', function (e) {
       hideToast();
-      if (typeof globalThis.__brewserOpenUpdatesModal === 'function') {
+      if (toastMode === 'offline') {
+        // Offline Mode toast → open Settings so the user can toggle it off.
+        // (The Check-for-Updates flow the update toast opens is itself
+        // disabled in Offline Mode, so it's never the target here.)
+        if (typeof globalThis.__brewserOpenSettings === 'function') {
+          globalThis.__brewserOpenSettings();
+        }
+      } else if (typeof globalThis.__brewserOpenUpdatesModal === 'function') {
         globalThis.__brewserOpenUpdatesModal();
       }
       if (e && e.preventDefault) e.preventDefault();
@@ -221,6 +245,16 @@
 
   // --- Check ---------------------------------------------------------------
   async function run() {
+    // Offline Mode (user setting): the shell must not touch the network on its
+    // own at boot. Show the offline pill (same toast mechanic as the update
+    // notification) once for this boot and skip the version poll entirely.
+    if (globalThis.__brewserOfflineMode === true) {
+      console.debug('[boot-update-check] offline mode enabled; skipping version poll');
+      toastMode = 'offline';
+      showToastText('You are running Brewser in offline mode');
+      return;
+    }
+
     // Gate on real internet. Definitively offline → skip entirely (no wasted
     // fetch, no toast). Online or inconclusive → proceed (the fetch's timeout
     // is the backstop for the inconclusive case).
