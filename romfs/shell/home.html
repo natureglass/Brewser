@@ -257,6 +257,12 @@
              message ("Sign in to rate" / "Rating failed"). -->
         <div id="app-modal-headstats" class="app-modal-headstats" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:8px;"></div>
         <div id="app-modal-rating-msg-host"></div>
+        <!-- Brewser-version compatibility notice. Filled by missing-app-modal.js
+             (compatNoticeHtml) with a non-blocking amber note ONLY when the app
+             declares a `minBrewserVersion` newer than the installed runtime;
+             empty otherwise. Inside the header column so the Expand view hides
+             it along with the rest of the header. -->
+        <div id="app-modal-compat-notice" class="app-modal-compat-notice"></div>
       </div>
     </div>
     <!-- Full-width scrollable description block. Deliberately a SIBLING of

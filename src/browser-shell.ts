@@ -91,6 +91,84 @@ function _bootProbe(label: string): void {
 	} catch { /* swallow */ }
 }
 
+// --- Video-perf diagnostic (DIAGNOSTIC — safe to remove; flip flag to false) ---
+// Decode-bound vs paint-bound discriminator for the Jellyfin video-perf work.
+// Per ~1s window of active video playback, appends the achieved video frame
+// rate, the main-loop tick cadence, and the per-frame composite cost
+// (`this.lastCpuPresentMs`, the time spent in the video-only fast paint) to a
+// file. `console.debug` is no-op'd on shipping builds (safe-console), so a FILE
+// is the only reliable channel — same rationale as the boot probe above.
+//
+// Pairs with the C-side [md-diag:enq]/[md-diag:prs] lines in
+// `sdmc:/switch/nxjs-debug.log` (MEDIA_DIAG_112=1). Interpretation:
+//   • paintMs_avg ≈ frame interval (fps × paintMs_avg ≈ 1000), tickHz ≈ fps
+//       → PAINT-BOUND: the composite eats the whole second. NVDEC won't help;
+//         reduce repaint scope or transcode resolution.
+//   • paintMs_avg ≪ frame interval, tickHz ≫ fps, fps < source fps
+//       → DECODE-BOUND: the loop is idle waiting for frames the decoder can't
+//         produce (cross-check: [md-diag:prs] ring depth draining, no_frame>0,
+//         or a low [md-diag:enq] line rate). NVDEC / lower res is the lever.
+const VIDEO_PERF_DIAG = false;
+// 2026-09-06 — the 30 Hz swap-interval video lock is DISABLED. It gave a clean
+// cadence in principle, but HW diag proved it starves audio: at 30 Hz the
+// present is too slow to drain the video ring, so the single decode thread
+// stays blocked in enqueue_video and never produces audio → the audio ring
+// underruns → the video-follows-audio clock stalls/jumps → worse jitter than
+// the 40 fps beat it was meant to cure (60 Hz shows aur_underruns=0). The clean
+// fix is a stable 60 Hz loop (render < 16.7 ms via persistent GPU textures),
+// not a slower present. Left in place, flag-gated, in case a future A/V-decode
+// decouple makes a non-starving 30 Hz viable.
+const ENABLE_VIDEO_30HZ_LOCK = true;
+const _VPD_PATH = 'sdmc:/switch/brewser/logs/video-perf-diag.log';
+let _vpdWinStart = 0;
+let _vpdOnTicks = 0;
+let _vpdVideoPaints = 0;
+let _vpdPaintMsSum = 0;
+let _vpdPaintMsMax = 0;
+// Counts EVERY main-loop onTick (incl. idle/non-fired ticks) so tickHz reflects
+// the loop's true max cadence, not just the paint rate. Called at onTick entry.
+function _videoPerfDiagCountTick(): void {
+	if (VIDEO_PERF_DIAG) _vpdOnTicks++;
+}
+// Called after each `fired` repaint with whether a video frame was presented
+// this tick and the paint cost it produced. Time-gated 1s flush.
+function _videoPerfDiagPaint(videoFired: boolean, paintMs: number): void {
+	if (!VIDEO_PERF_DIAG) return;
+	const now = performance.now();
+	if (_vpdWinStart === 0) _vpdWinStart = now;
+	// Discard an idle span: the first video paint after a >1.5s gap (paused /
+	// off a video page) starts a fresh window so the pause isn't averaged in.
+	if (_vpdVideoPaints === 0 && now - _vpdWinStart > 1500) {
+		_vpdWinStart = now;
+		_vpdOnTicks = 0;
+		_vpdPaintMsSum = 0;
+		_vpdPaintMsMax = 0;
+	}
+	if (videoFired) {
+		_vpdVideoPaints++;
+		_vpdPaintMsSum += paintMs;
+		if (paintMs > _vpdPaintMsMax) _vpdPaintMsMax = paintMs;
+	}
+	const elapsed = now - _vpdWinStart;
+	if (elapsed >= 1000 && _vpdVideoPaints > 0) {
+		const fps = (_vpdVideoPaints * 1000) / elapsed;
+		const tickHz = (_vpdOnTicks * 1000) / elapsed;
+		const avgMs = _vpdPaintMsSum / _vpdVideoPaints;
+		try {
+			const sw = (globalThis as { Switch?: { appendFileSync?: (p: string, d: string) => void } }).Switch;
+			sw?.appendFileSync?.(
+				_VPD_PATH,
+				`winMs=${Math.round(elapsed)} vFrames=${_vpdVideoPaints} fps=${fps.toFixed(1)} tickHz=${tickHz.toFixed(1)} paintMs_avg=${avgMs.toFixed(1)} paintMs_max=${_vpdPaintMsMax.toFixed(1)}\n`,
+			);
+		} catch { /* swallow */ }
+		_vpdWinStart = now;
+		_vpdOnTicks = 0;
+		_vpdVideoPaints = 0;
+		_vpdPaintMsSum = 0;
+		_vpdPaintMsMax = 0;
+	}
+}
+
 import {
 	BROWSER_INTERNAL_ORIGIN,
 	DEFAULT_CANVAS_HEIGHT,
@@ -117,8 +195,10 @@ import { ColorPickerOverlay, DatePickerOverlay, FilePickerOverlay, NumberPickerO
 import {
 	VIDEO_CONTROLS_BAR_H,
 	clearAllVideos,
+	getActiveVideoContentFps,
 	pageHasActiveVideo,
 	pageHasAnyPoster,
+	paintPausedPlayIcon,
 	paintVideoControls,
 	paintVideoFrameAt,
 	setVideoTryHwAccel,
@@ -423,6 +503,12 @@ export class BrowserShell {
 		}
 	}
 	private mode: BrowserMode = 'normal';
+	/** The mode the shell was in when it entered `video-fullscreen`, so exiting
+	 * video-fullscreen restores it (e.g. a `manifest.fullscreen:true` app that
+	 * was in `fullscreen-app` must NOT drop to `normal` — that would wrongly
+	 * bring the toolbar back). Video-fullscreen is an overlay and doesn't touch
+	 * the CSS viewport, so restoring the mode is all that's needed. */
+	private videoFullscreenReturnMode: BrowserMode | null = null;
 	/** Active chrome strip height (px). Cached from `config.json
 	 * toolbarHeight` at boot and refreshed on settings save. Read by
 	 * layoutTopInset, the paint sequence, and `publishChromeRegion` —
@@ -489,6 +575,22 @@ export class BrowserShell {
 	private lastCpuPresentMs = 0;
 	/** Count of content presents since boot. */
 	private cpuPresentCallCount = 0;
+	/** Frame-pacing (2026-09-06): current EGL swap interval we've requested
+	 * (1 = 60 Hz, 2 = 30 Hz). While a fullscreen video is the sole content on
+	 * screen we pin the present to 30 Hz so 30 fps content gets a clean 1:1
+	 * cadence instead of the juddery ~40 fps a free-running loop yields (the
+	 * per-frame GPU cost straddles the 16.7 ms vsync boundary). Reverts to
+	 * 60 Hz the instant anything else needs it (scroll, animation, nav). */
+	private videoSwapInterval = 1;
+	/** Consecutive ticks the video has been the dominant on-screen content;
+	 * we only drop to 30 Hz after a short streak so a brief clip doesn't flip
+	 * the whole shell's cadence. */
+	private videoDominantStreak = 0;
+	/** `performance.now()` of the last tick that presented a new video frame.
+	 * A short trailing window keeps `videoActive` true across the between-frame
+	 * ticks (at 60 Hz, a 30 fps video only advances every other tick), so the
+	 * streak doesn't reset mid-playback. */
+	private lastVideoFrameAtMs = 0;
 	/** Remembered attribute-declared size of the canvas we resized for
 	 * fullscreen-canvas mode, so we can put it back on exit. `null` when
 	 * not currently fullscreening any canvas. */
@@ -1210,6 +1312,77 @@ export class BrowserShell {
 			resetLiveOverlayCache();
 			requestFullRepaint();
 		};
+		// Standard DOM page-scroll API: `window.scrollTo` / `window.scroll`
+		// / `window.scrollBy`. The live-window Proxy (getLiveWindowProxy)
+		// has no entry for these, so `window.scrollTo(...)` fell through
+		// to `globalThis.scrollTo`, which nx.js never defines — the page
+		// threw "window.scrollTo is not a function". Single-page apps hit
+		// this on every view change: the Jellyfin client calls
+		// `window.scrollTo(0, 0)` after swapping the visible screen, and
+		// the throw aborted the rest of that view-change handler. These
+		// drive the SAME `currentScrollY` the touch / D-pad / momentum path
+		// uses, so a programmatic scroll and a finger scroll converge on one
+		// offset. Horizontal (x / left) is accepted but ignored — the shell
+		// has no horizontal page scroll. Both call forms are honored:
+		// `scrollTo(x, y)` and `scrollTo({ top, left, behavior })`.
+		// `behavior: 'smooth'` lands instantly (same final position; no
+		// animator) — pages still see the offset updated synchronously.
+		const readScrollTarget = (
+			args: unknown[],
+			base: { x: number; y: number },
+		): { x: number; y: number } => {
+			const first = args[0];
+			if (first && typeof first === 'object') {
+				const o = first as { top?: unknown; left?: unknown };
+				return {
+					x: typeof o.left === 'number' ? o.left : base.x,
+					y: typeof o.top === 'number' ? o.top : base.y,
+				};
+			}
+			return {
+				x: typeof first === 'number' ? first : base.x,
+				y: typeof args[1] === 'number' ? (args[1] as number) : base.y,
+			};
+		};
+		const scrollPageToY = (y: number): void => {
+			const target = Number.isFinite(y) ? Math.round(y) : 0;
+			const next = Math.max(0, Math.min(this.maxScroll(), target));
+			this.momentumVelocityPxPerTick = 0;
+			if (next === this.currentScrollY) return;
+			this.currentScrollY = next;
+			if (isKeyboardOpen()) this.repaintContent({ behindKeyboard: true });
+			else this.repaintContent();
+		};
+		const scrollToImpl = (...args: unknown[]): void => {
+			const { y } = readScrollTarget(args, { x: 0, y: this.currentScrollY });
+			scrollPageToY(y);
+		};
+		const scrollByImpl = (...args: unknown[]): void => {
+			const { y } = readScrollTarget(args, { x: 0, y: 0 });
+			scrollPageToY(this.currentScrollY + (Number.isFinite(y) ? y : 0));
+		};
+		const scrollGlobals = globalThis as Record<string, unknown>;
+		scrollGlobals.scrollTo = scrollToImpl;
+		scrollGlobals.scroll = scrollToImpl;
+		scrollGlobals.scrollBy = scrollByImpl;
+		// Companion read-only scroll-position props. A page that calls
+		// scrollTo often reads these back (`window.pageYOffset`,
+		// `window.scrollY`); without them the proxy returns undefined and
+		// arithmetic like `scrollY + delta` becomes NaN. Vertical reflects
+		// the live offset; horizontal is always 0. defineProperty + a live
+		// getter so reads track the current scroll. try/catch: harmless if
+		// a future nx.js build predefines them.
+		for (const [name, get] of [
+			['scrollY', () => this.currentScrollY],
+			['pageYOffset', () => this.currentScrollY],
+			['scrollX', () => 0],
+			['pageXOffset', () => 0],
+		] as [string, () => number][]) {
+			try {
+				Object.defineProperty(globalThis, name, { configurable: true, get });
+			} catch (_) { /* predefined / non-configurable — leave as-is */ }
+		}
+
 		// Page-script-callable chrome (toolbar strip) visibility toggle.
 		// self-update-modal.js and download-modal.js call this to hide the
 		// toolbar for the ENTIRE download/update process (download → verify →
@@ -1698,6 +1871,10 @@ export class BrowserShell {
 					// the chrome strip gets clobbered by the bridge's
 					// clearColor outside the cube viewport.
 					onTick: (info) => {
+						// Video-perf diagnostic: count every onTick (incl. idle)
+						// so tickHz reflects the loop's true cadence. No-op when
+						// VIDEO_PERF_DIAG is false.
+						_videoPerfDiagCountTick();
 						// Software-cursor driver. `tickMouseInput` ran in
 						// `waitForControllerInput` before the shell's
 						// rising-edge checks so B/ZR could be claimed by
@@ -1731,6 +1908,36 @@ export class BrowserShell {
 						// `fired` flag drives the chrome-redraw decision.
 						const animFired = tickAnimationFrames();
 						const videoFired = tickVideo();
+						// Frame pacing: pin the present to 30 Hz while a video is
+						// actively playing (30 fps → clean 1:1 cadence, no beat
+						// judder). `videoActive` uses a short trailing window
+						// because at 60 Hz a 30 fps video only advances every
+						// other tick, so keying on `videoFired` alone would
+						// flip-flop and never lock.
+						//   • Modes: `fullscreen-app`/`fullscreen-page` are where
+						//     a live-DOM video player (e.g. the Jellyfin app,
+						//     manifest.fullscreen:true → `fullscreen-app`) actually
+						//     runs, plus `normal` (inline) and native
+						//     `video-fullscreen`. WebGL games run in
+						//     `fullscreen-canvas` and are deliberately excluded
+						//     (they want 60 Hz).
+						//   • NOT gated on `!animFired`: a video player legitimately
+						//     runs a rAF loop for its controls/progress, so
+						//     excluding animation ticks blocked the lock forever.
+						//     The `videoActive` gate already ensures we only pace
+						//     to 30 Hz when a video is genuinely playing.
+						// Reverts to 60 Hz the instant the video stops or the user
+						// scrolls, so UI stays crisp.
+						if (videoFired) this.lastVideoFrameAtMs = performance.now();
+						this.applyVideoSwapInterval(
+							performance.now() - this.lastVideoFrameAtMs < 200
+							&& !info.scrolledThisTick
+							&& (this.mode === 'normal'
+								|| this.mode === 'fullscreen-app'
+								|| this.mode === 'fullscreen-page'
+								|| this.mode === 'video-fullscreen'),
+							getActiveVideoContentFps(),
+						);
 						if (this.forwarderLoading) {
 							// Forwarder boot: drive the app's live-DOM build to
 							// completion (repaintContent advances the chunked build +
@@ -1798,6 +2005,10 @@ export class BrowserShell {
 								&& !info.scrolledThisTick
 								&& this.mode === 'normal';
 							this.repaintContent({ videoOnlyFast });
+							// Video-perf diagnostic: record this frame's composite
+							// cost (lastCpuPresentMs, just set by repaintContent) and
+							// whether a video frame drove it. Flushes ~1×/s.
+							_videoPerfDiagPaint(videoFired, this.lastCpuPresentMs);
 							if (this.mode === 'normal' && (animFired || reachableChanged || modeChanged)) {
 								this.renderChrome();
 							}
@@ -3167,6 +3378,53 @@ export class BrowserShell {
 		paintCursorOverlay(ctx, canvas);
 		this.lastCpuPresentMs = performance.now() - t0;
 		this.cpuPresentCallCount++;
+	}
+
+	/** Push a new EGL swap interval to the native present loop (1 = 60 Hz,
+	 * 2 = 30 Hz), deduped so we only cross the JS→native boundary on a real
+	 * change. No-op if the runtime is too old to expose `gfxSetSwapInterval`
+	 * (falls back to the free-running 60 Hz loop — the pre-2026-09-06 behavior). */
+	private setGfxSwapInterval(interval: number): void {
+		if (this.videoSwapInterval === interval) return;
+		this.videoSwapInterval = interval;
+		try {
+			const sw = (globalThis as { Switch?: { gfxSetSwapInterval?: (n: number) => void } }).Switch;
+			sw?.gfxSetSwapInterval?.(interval);
+		} catch { /* swallow — pacing is best-effort */ }
+	}
+
+	/** Frame-pacing driver, called once per input-loop tick. When a fullscreen
+	 * video has been the sole on-screen content for a short streak, pin the
+	 * present to 30 Hz (swap interval 2) so 30 fps playback gets a clean 1:1
+	 * cadence — killing the ~40 fps beat judder. Any other demand (scroll,
+	 * page animation, leaving `normal` mode, video paused/stopped) reverts to
+	 * 60 Hz on the very next tick so scrolling and UI stay crisp. */
+	private applyVideoSwapInterval(videoDominant: boolean, contentFps: number): void {
+		// Disabled: swapInterval(2) starves audio (see ENABLE_VIDEO_30HZ_LOCK).
+		// Keep the present pinned at 60 Hz so the decode thread drains promptly
+		// and audio stays fed (aur_underruns=0).
+		if (!ENABLE_VIDEO_30HZ_LOCK) {
+			this.setGfxSwapInterval(1);
+			return;
+		}
+		// Only engage the 30 Hz lock for <=~32fps content (24/25/30fps), where
+		// a free-running 60 Hz loop lands on a ~40 fps beat (each frame held an
+		// uneven number of refreshes) — the lock gives a clean 30 Hz 1:1 cadence.
+		// HIGH-fps content (50/60fps) instead wants the native 60 Hz present:
+		// locking it would halve it to 30 shown fps (the "60→30" drop). Content
+		// fps comes from the decoder's avg_frame_rate; 0 (unknown / still
+		// opening) defaults to locking, the safe smooth default for the common
+		// 30fps case. 480p60 HW-validated: decode outruns 60fps + render <16.7ms,
+		// so 60 Hz holds; heavier 60fps (e.g. 4K60) is decode-bound regardless.
+		const wantLock = videoDominant && contentFps <= 32;
+		if (wantLock) {
+			this.videoDominantStreak++;
+			// ~0.25 s of sustained fullscreen video at 60 Hz before locking.
+			if (this.videoDominantStreak >= 15) this.setGfxSwapInterval(2);
+		} else {
+			this.videoDominantStreak = 0;
+			this.setGfxSwapInterval(1);
+		}
 	}
 
 	private repaintContentInner(
@@ -5132,6 +5390,7 @@ export class BrowserShell {
 				ctx.fillRect(0, canvas.height - barH, canvas.width, barH);
 			}
 			paintVideoControls(ctx, video, 0, 0, canvas.width, canvas.height);
+			paintPausedPlayIcon(ctx, video, 0, 0, canvas.width, canvas.height);
 			return;
 		}
 		const box = getLayoutBox(video);
@@ -5164,6 +5423,7 @@ export class BrowserShell {
 				);
 			}
 			paintVideoControls(ctx, video, screenX, screenY, box.w, box.h);
+			paintPausedPlayIcon(ctx, video, screenX, screenY, box.w, box.h);
 		} finally { ctx.restore(); }
 	}
 
@@ -5176,6 +5436,9 @@ export class BrowserShell {
 			void this.restoreCanvasSize();
 		}
 		this.fullscreenVideo = video;
+		// Remember the mode to return to on exit (fullscreen-app / fullscreen-page
+		// for chromeless apps/pages) so exitFullscreen doesn't drop to 'normal'.
+		this.videoFullscreenReturnMode = this.mode;
 		this.setMode('video-fullscreen');
 		setFullscreenVideo(video);
 		this.repaintAll();
@@ -5278,6 +5541,11 @@ export class BrowserShell {
 		const wasFullscreenCanvas = this.mode === 'fullscreen-canvas';
 		const wasFullscreenPage = this.mode === 'fullscreen-page';
 		const wasFullscreenApp = this.mode === 'fullscreen-app';
+		// Exiting video-fullscreen returns to the mode it was launched over
+		// (fullscreen-app / fullscreen-page for chromeless apps), not 'normal'.
+		const videoReturnMode = this.mode === 'video-fullscreen'
+			? this.videoFullscreenReturnMode : null;
+		this.videoFullscreenReturnMode = null;
 		const wasLive = this.fullscreenCanvasLive;
 		this.fullscreenCanvasLive = false;
 		(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
@@ -5307,8 +5575,12 @@ export class BrowserShell {
 		}
 		// Flip mode (and the global) BEFORE restoreCanvasSize's rerun so
 		// the re-executed page scripts see 'normal' and revert to their
-		// layout-box sizing.
-		this.setMode('normal');
+		// layout-box sizing. When exiting a video-fullscreen overlay that sat
+		// on top of a chromeless app/page, restore THAT mode (not 'normal') so
+		// the app's declared fullscreen (no toolbar) is honoured.
+		this.setMode(
+			videoReturnMode && videoReturnMode !== 'normal' ? videoReturnMode : 'normal',
+		);
 		// A live fullscreen never resized the backing store via rerun, so
 		// there's nothing to restore — the page's own loop reverts to its
 		// layout-box size once the mode global flips. Only the rerun path

@@ -62,6 +62,11 @@
   var cardEl = document.getElementById('app-modal-card');
   var expandBtn = document.getElementById('app-modal-expand');
   var expandRow = document.getElementById('app-modal-expand-row');
+  // Brewser-version compatibility notice slot in the modal header — populated
+  // in show() with a non-blocking note when the app declares a
+  // `minBrewserVersion` newer than the installed runtime. Optional element:
+  // markup predating this feature simply won't surface the notice.
+  var compatNoticeEl = document.getElementById('app-modal-compat-notice');
   if (!overlay || !titleEl || !bodyEl || !cancelBtn || !downloadBtn || !playBtn || !updateBtn) return;
 
   var modalOpen = false;
@@ -608,6 +613,73 @@
     });
   }
 
+  // --- Brewser-version compatibility notice --------------------------------
+  // The installed Brewser runtime version, read once (lazily) from the on-disk
+  // baseline the self-updater keeps current. Mirrors readInstalledBrewserVersion
+  // in boot-update-check.js: Switch.readFileSync returns null (not throw) on a
+  // missing file, so a missing/corrupt baseline yields '' and the caller skips
+  // the comparison — better than asserting a mismatch we can't verify. Cached
+  // for the session: the baseline only changes on a self-update apply (which
+  // restarts the runtime), so a single read is safe.
+  var INSTALLED_BREWSER_PATH = 'sdmc:/switch/brewser/configs/current.json';
+  var installedBrewserCache; // undefined until first read; '' once resolved-unknown
+  function installedBrewserVersion() {
+    if (installedBrewserCache !== undefined) return installedBrewserCache;
+    installedBrewserCache = '';
+    if (typeof Switch === 'undefined' || !Switch || typeof Switch.readFileSync !== 'function') {
+      return installedBrewserCache;
+    }
+    var data = null;
+    try { data = Switch.readFileSync(INSTALLED_BREWSER_PATH); }
+    catch (_) { data = null; }
+    if (!data) return installedBrewserCache;
+    try {
+      var parsed = JSON.parse(new TextDecoder().decode(data));
+      if (parsed && typeof parsed.brewser === 'string') installedBrewserCache = parsed.brewser;
+    } catch (_) { /* leave '' */ }
+    return installedBrewserCache;
+  }
+
+  // Dotted-numeric "a is strictly greater than b" — a plain-JS mirror of
+  // semverGreater in boot-update-check.js / updates-modal.js. Pre-release
+  // (-beta) / build (+meta) suffixes are stripped (release versions are clean
+  // x.y.z); any unparseable segment fails closed to false so a garbled version
+  // never asserts a spurious "your Brewser is too old".
+  function semverGreater(a, b) {
+    var core = function (s) { return String(s).split('+')[0].split('-')[0]; };
+    var pa = core(a).split('.');
+    var pb = core(b).split('.');
+    var n = Math.max(pa.length, pb.length);
+    for (var i = 0; i < n; i++) {
+      var x = parseInt(pa[i] != null ? pa[i] : '0', 10);
+      var y = parseInt(pb[i] != null ? pb[i] : '0', 10);
+      if (isNaN(x) || isNaN(y)) return false;
+      if (x !== y) return x > y;
+    }
+    return false;
+  }
+
+  // Inner HTML for the compatibility notice, or '' to render nothing. Shown
+  // ONLY when the app declares a `minBrewserVersion` AND the installed Brewser
+  // is strictly OLDER than it — the meaningful "this app expects a newer
+  // runtime" case. Equal-or-newer installed versions, an absent
+  // minBrewserVersion, and an unreadable installed baseline all yield '' (no
+  // notice). Advisory only: this never blocks Download / Launch.
+  function compatNoticeHtml(detail) {
+    var required = (detail && typeof detail.minBrewserVersion === 'string')
+      ? detail.minBrewserVersion.replace(/^\s+|\s+$/g, '') : '';
+    if (required === '') return '';
+    var installed = installedBrewserVersion();
+    if (installed === '') return '';                    // nothing to compare against
+    if (!semverGreater(required, installed)) return ''; // installed is equal/newer → fine
+    return '<div class="app-modal-compat-notice-inner" style="'
+      + 'margin-top:8px;padding:8px 12px;border-radius:8px;'
+      + 'background:rgba(255,176,32,0.12);border:1px solid rgba(255,176,32,0.55);'
+      + 'color:#ffcf7a;font-size:13px;line-height:1.4;text-align:left;'
+      + '">Built for Brewser v' + esc(required) + ' or newer — you have v'
+      + esc(installed) + '. It may not work correctly until you update Brewser.</div>';
+  }
+
   function show(detail) {
     currentDetail = detail || {};
     // Logo. The catalog renderer passes a brewser:// URL — for missing
@@ -704,6 +776,12 @@
     // host is a static header element now, not re-stamped each show()).
     if (headStatsEl) headStatsEl.innerHTML = headStatsHtml();
     setRatingMessage('');
+
+    // Brewser-version compatibility notice (advisory, non-blocking). Rendered
+    // when the app pins a minBrewserVersion newer than the installed runtime;
+    // set to '' otherwise so a reused element never shows a stale note when the
+    // user swaps between apps.
+    if (compatNoticeEl) compatNoticeEl.innerHTML = compatNoticeHtml(currentDetail);
 
     var rows = [];
     if (currentDetail.category) rows.push(row('Category', currentDetail.category));

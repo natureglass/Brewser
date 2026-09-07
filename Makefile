@@ -9,8 +9,9 @@
 #
 #   make            # full chain: sync-runtime + current-json + build + nro + sdmc
 #   make build      # esbuild bundle only (depends on sync-runtime)
-#   make nro        # package brewser.nro (depends on build + current-json),
-#                   #   detects EBUSY (Citron lock) and surfaces a friendly error
+#   make nro        # package brewser.nro (build + current-json + seed-catalogue
+#                   #   + seed-fingerprint); detects EBUSY (Citron lock) and
+#                   #   surfaces a friendly error
 #   make sdmc       # mirror romfs/ to the Citron SDMC profile (depends on nro)
 #   make mirror-only# mirror romfs/ to SDMC WITHOUT rebuilding (romfs-only edits)
 #   make current-json
@@ -57,6 +58,13 @@ BREWSER_RUNTIME_PKG ?= ../brewser-runtime/package.json
 NXJS_PKG          ?= ../nxjs-extended/packages/runtime/package.json
 COLLECT_CURRENT   := scripts/collect_current.py
 
+# Bundled catalogue SEED + its source of truth. The seed is the offline
+# first-boot apps grid; the live catalogue is rebuilt every 15 min by CI in
+# ../brewser-apps and published to play.brewser.io. `?=` so a diverging
+# worktree layout can point at a different brewser-apps checkout.
+SEED_CATALOGUE    := romfs/configs/catalogue.json
+APPS_CATALOGUE    ?= ../brewser-apps/catalogue.json
+
 NRO               := brewser.nro
 NRO_LOG           := .nro-build.log
 # Release output dir. `dist/` maps to the `dist/` folder at the root of the
@@ -99,7 +107,7 @@ NXJS_SOURCE_DIR   ?= ../nxjs-extended
 NXJS_SOURCE_NRO   := $(NXJS_SOURCE_DIR)/nxjs.nro
 NXJS_OVERLAY      := node_modules/@nx.js/nro/dist/nxjs.nro
 
-.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json seed-fingerprint build nro sdmc mirror-only clean help nxjs-runtime release bump checksums
+.PHONY: all runtime-build sync-runtime check-endpoints typecheck current-json seed-catalogue seed-fingerprint build nro sdmc mirror-only clean help nxjs-runtime release bump checksums
 
 # Default target is now a full self-update RELEASE (bump + sign → dist/), since
 # the primary workflow is producing installable/updatable builds. For the
@@ -159,6 +167,21 @@ $(CURRENT_JSON): $(BREWSER_PKG) $(BREWSER_RUNTIME_PKG) $(NXJS_PKG) $(COLLECT_CUR
 
 current-json: $(CURRENT_JSON)
 
+# File target: refresh the bundled catalogue SEED from the brewser-apps
+# source of truth whenever that repo's catalogue.json changes. The seed is
+# the offline first-boot grid — seedRomfs copies it to sdmc (missing-only),
+# and Check-for-Updates later overwrites the sdmc copy from the live remote
+# (play.brewser.io/catalogue.json). Nothing else regenerates this file, so
+# without this step the seed silently drifts behind the 15-min CI rebuild in
+# brewser-apps. Straight copy: the runtime normalizer parses the v2 envelope
+# directly, and per-app runtime fields (exitGame/fullscreen/…) are read from
+# each app's installed manifest.json, not from the catalogue.
+$(SEED_CATALOGUE): $(APPS_CATALOGUE)
+	@cp $(APPS_CATALOGUE) $(SEED_CATALOGUE)
+	@echo "Seeded $(SEED_CATALOGUE) from $(APPS_CATALOGUE)"
+
+seed-catalogue: $(SEED_CATALOGUE)
+
 # Content fingerprint of the app-owned romfs (shell/ + themes/) → romfs/seed-
 # fingerprint, embedded in the NRO. browser-profile.ts re-seeds those trees on
 # an EXISTING profile when the fingerprint changes (seedRomfs is otherwise
@@ -188,7 +211,7 @@ nxjs-runtime:
 # capture all output, replay it, and on a non-zero exit specifically
 # match EBUSY to surface a clear "close Citron" message. Non-EBUSY
 # failures fall through with the original npm output preserved.
-nro: build current-json seed-fingerprint
+nro: build current-json seed-catalogue seed-fingerprint
 	@npm run nro > $(NRO_LOG) 2>&1; \
 	status=$$?; \
 	cat $(NRO_LOG); \
@@ -231,8 +254,9 @@ bump:
 # Full self-update RELEASE (the default target). In one go:
 #   1. bump  package.json version + build-info counter
 #   2. nro   build the bundle (bakes the new version/counter/keyring via
-#            scripts/build-main.mjs) + regen current.json + seed-fingerprint +
-#            package the fat NRO (reusing the prebuilt nxjs.nro base — see
+#            scripts/build-main.mjs) + regen current.json + seed-catalogue +
+#            seed-fingerprint + package the fat NRO (reusing the prebuilt
+#            nxjs.nro base — see
 #            Makefile_nxjs for the runtime build)
 #   3. mirror current.json → the served versions.json (this repo's root)
 #   4. move the NRO into dist/, sign the manifest, and verify the console would
@@ -284,10 +308,11 @@ help:
 	@echo "  make bump        Bump version + counter only (scripts/bump-version.mjs)"
 	@echo "  make sdmc        Citron dev loop: build + mirror romfs/ to SDMC (NO bump/sign)"
 	@echo "  make mirror-only Mirror romfs/ to SDMC without rebuilding"
-	@echo "  make nro         Package $(NRO) at repo root (build + current-json + seed-fingerprint)"
+	@echo "  make nro         Package $(NRO) at repo root (build + current-json + seed-catalogue + seed-fingerprint)"
 	@echo "  make checksums   (Re)write $(CHECKSUMS) with SHA256 of the dist/ binaries"
 	@echo "  make build       esbuild bundle with baked defines (depends on sync-runtime)"
 	@echo "  make current-json  Refresh $(CURRENT_JSON) from upstream package.json files"
+	@echo "  make seed-catalogue  Refresh $(SEED_CATALOGUE) seed from $(APPS_CATALOGUE)"
 	@echo "  make clean       Remove build/, runtime/, $(NRO)"
 	@echo ""
 	@echo "  nx.js runtime (needs devkitPro; separate — updater is zero-engine-delta):"

@@ -6,6 +6,12 @@
             "description": "Connects to the internet.",
             "warning": "Allows this app to connect to the internet and send or receive data, which could transmit your information to remote servers or download untrusted content."
         },
+        "local_network": {
+            "show": true,
+            "risk": "medium",
+            "description": "Connects to devices on your local network.",
+            "warning": "Allows this app to connect to servers and devices on your local network, such as a media server, NAS, or printer. It cannot reach the public internet. A malicious app could probe or send data to other devices on your network."
+        },
         "storage": {
             "show": false,
             "risk": "low",

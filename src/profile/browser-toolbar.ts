@@ -764,6 +764,12 @@ export interface AppEntry {
 	 * renderer suppresses the version chip in that case rather than
 	 * showing a blank pill. */
 	version: string;
+	/** Optional minimum Brewser runtime version this app targets (SemVer),
+	 * from the catalogue entry (preferred) or the on-disk manifest. Empty
+	 * when neither side carries it. The missing-app modal compares it to the
+	 * installed Brewser version and shows a non-blocking notice when the
+	 * device is older; empty suppresses the notice entirely. */
+	minBrewserVersion: string;
 	/** SPDX-ish license identifier from `catalogue.json`'s `license`
 	 * field (e.g. `"MIT"`, `"Apache-2.0"`). Empty string when absent;
 	 * the renderer treats empty the same as a missing version. */
@@ -1093,6 +1099,10 @@ function libraryAppToCard(app: LibraryApp, appRoot: string, stats: ParsedStats |
 		downloads: st ? st.downloads : 0,
 		url: `brewser://apps/${dirName}/${entryRel}`,
 		version: listing?.version ?? inst?.version ?? '',
+		// Prefer the catalogue's value (authoritative for availability), fall
+		// back to the on-disk manifest for an installed-but-unlisted app; '' when
+		// neither carries it → the modal shows no compatibility notice.
+		minBrewserVersion: listing?.minBrewserVersion ?? inst?.minBrewserVersion ?? '',
 		license: listing?.license ?? inst?.license ?? '',
 		category: (inst?.categories.length ? inst.categories : listing?.categories ?? []).join(', '),
 		developer: listing?.developer ?? inst?.developer ?? '',

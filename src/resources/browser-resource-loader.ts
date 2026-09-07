@@ -1444,6 +1444,12 @@ function renderAppCards(entries: ReadonlyArray<AppEntry>): string {
 			url: appUrlToBrowserHref(e.url),
 			missing: isMissing,
 			version: e.version,
+			// Optional minimum Brewser runtime this app targets (SemVer, from the
+			// manifest via the catalogue/installed manifest). The modal script
+			// compares it to the installed Brewser version and shows a
+			// non-blocking notice when the device is older. Empty string when the
+			// app declares none → the modal renders no notice.
+			minBrewserVersion: e.minBrewserVersion,
 			// On-disk manifest version when it differs from `version`
 			// above. Empty in every "no upgrade signal" case. The
 			// modal script keys the yellow chip ("v1.0.0 -> v1.0.7")
