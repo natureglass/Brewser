@@ -128,6 +128,37 @@
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_cb=' + Date.now();
   }
 
+  // Banner sync cache shared with updates-modal.js (`configs/banner-cache.json`,
+  // `{ "<app id>": {rel, version, size, etag} }`). Owned by the
+  // Check-for-Updates banner pass; this module only stamps the record for a
+  // banner it just downloaded, so that pass can skip the app entirely instead
+  // of re-fetching bytes the install already has.
+  //
+  // Read-modify-write of a small JSON file, entirely best-effort: a failure at
+  // any step just leaves the next Check-for-Updates to re-validate the banner
+  // (one extra request), so it must never disturb an otherwise-successful
+  // install. Deliberately NOT a shared module — one write of four fields does
+  // not justify a new global, and the reader validates every record anyway.
+  var BANNER_CACHE_PATH = APP_ROOT + 'configs/banner-cache.json';
+  function recordBannerCache(appId, record) {
+    if (!appId || !record || !record.rel || record.size < 0) return;
+    var cache = {};
+    try {
+      var raw = Switch.readFileSync(BANNER_CACHE_PATH);
+      if (raw) {
+        var parsed = JSON.parse(new TextDecoder().decode(raw));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cache = parsed;
+      }
+    } catch (_) { cache = {}; }
+    cache[appId] = record;
+    try {
+      Switch.writeFileSync(BANNER_CACHE_PATH, JSON.stringify(cache));
+    } catch (err) {
+      console.debug('[download-modal] banner cache stamp failed for ' + appId + ': '
+        + (err && err.message ? err.message : String(err)));
+    }
+  }
+
   // Hide/restore the shell toolbar strip for the whole download. The toolbar
   // overlay paints on top of the modal, so without this it stays visible over
   // the download backdrop (same issue the self-update modal solved). Guarded:
@@ -275,7 +306,7 @@
       parsed.installedVersion = '';
       // Refresh the in-detail logo URL to point at the freshly-
       // downloaded asset (same scheme rewrite updates-modal.js does
-      // post-logo-seed).
+      // post-banner-sync).
       if (detail.logo) {
         var logoRel = stripLeadingSlashes(detail.logo);
         // detail.logo may already be a brewser:// URL (from the card
@@ -441,6 +472,26 @@
       } catch (err) {
         setError('Write failed for ' + rel + ': ' + (err && err.message ? err.message : String(err)));
         return false;
+      }
+      // Banner just landed? Stamp the Check-for-Updates banner cache with what
+      // we wrote. Without this the next Check-for-Updates sees a banner on
+      // disk with no cache record, treats it as stale, and re-downloads bytes
+      // this install already fetched — one wasted request per installed app.
+      // We know it is current (we cache-busted it moments ago, per
+      // isFreshFile), so recording it lets the next check skip the app with no
+      // network at all. `etag` is taken from the response when the fetcher
+      // exposes headers; '' is fine — the version+size match alone satisfies
+      // the cache's no-network tier.
+      if (app && app.logoRel && rel === stripLeadingSlashes(app.logoRel)) {
+        var respEtag = '';
+        try { respEtag = resp.headers && resp.headers.get ? (resp.headers.get('etag') || '') : ''; }
+        catch (_) { respEtag = ''; }
+        recordBannerCache(detail.id, {
+          rel: rel,
+          version: (app && typeof app.version === 'string') ? app.version : '',
+          size: (buf && typeof buf.byteLength === 'number') ? buf.byteLength : -1,
+          etag: respEtag,
+        });
       }
       // Add the actual bytes we just downloaded to the running total
       // BEFORE the per-tick UI update so the MB readout reflects the

@@ -1,5 +1,6 @@
 {
     "nx.js": "1.0.0-beta.5",
     "runtime": "0.0.1",
-    "brewser": "0.1.121"
+    "brewser": "0.1.122",
+    "notes": "General Brewser improvements"
 }

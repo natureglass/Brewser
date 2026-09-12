@@ -49,6 +49,20 @@
     cursor: pointer;
   }
   .updates-modal-brewser-btn:active { background: #e6c700; }
+  /* Release-notes blurb for the offered build — the published versions.json
+     `notes` string, rendered UNDER the Update button so the user reads what
+     the new version changes before committing to the download. Hidden (by
+     `--hidden`, a class flip so the live-DOM paint cache actually erases it —
+     a `style.display` write leaves stale pixels) when the release shipped no
+     notes. Muted + slightly smaller than the label so the yellow button stays
+     the callout's focal point. */
+  .updates-modal-brewser-notes {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.45;
+    opacity: 0.85;
+  }
+  .updates-modal-brewser-notes--hidden { display: none; }
   /* Boot-time "new version available" toast — a small clickable pill that
      shows bottom-center on launch when a newer Brewser is published
      (boot-update-check.js). Hidden by default; the script adds
@@ -372,6 +386,11 @@
       <div id="updates-modal-brewser" class="updates-modal-brewser">
         <div class="updates-modal-brewser-label">New Brewser version available</div>
         <button id="updates-modal-brewser-btn" class="updates-modal-brewser-btn" type="button">Update Brewser</button>
+        <!-- Release notes for the offered build. Filled by updates-modal.js
+             from the published versions.json `notes` field (textContent, so a
+             hostile/odd notes string can't inject markup); stays hidden when
+             the release published none. -->
+        <div id="updates-modal-brewser-notes" class="updates-modal-brewser-notes updates-modal-brewser-notes--hidden"></div>
       </div>
       <!-- Parse-report line — the drift-visibility payload: catalogue
            version + app count on every successful sync, plus itemized

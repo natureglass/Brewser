@@ -18,7 +18,7 @@
 //         See `diffCatalog` (its installed-state walk ALSO drives logo
 //         seeding + the in-place upgrade-chip repaint, so it stays).
 //     While the modal is OPEN the page is not reloaded — the user sees the
-//     diff right there, and in-place patches (logo seeding, upgrade chips)
+//     diff right there, and in-place patches (banner sync, upgrade chips)
 //     keep the visible cards consistent (no full repaint mid-modal). But if
 //     the sync actually CHANGED the render inputs — catalogue.json (Featured
 //     membership, new/removed apps, version bumps) and/or stats.json (the
@@ -70,6 +70,9 @@
   var newCountEl = document.getElementById('updates-modal-new-count');
   var brewserCallout = document.getElementById('updates-modal-brewser');
   var brewserBtn = document.getElementById('updates-modal-brewser-btn');
+  // Release-notes line under the Update button. Filled from the published
+  // versions.json `notes` field; hidden when the release shipped none.
+  var brewserNotesEl = document.getElementById('updates-modal-brewser-notes');
   var statusEl = document.getElementById('updates-modal-status');
   var errorEl = document.getElementById('updates-modal-error');
   // Two action buttons share the right slot — CSS gates which one is
@@ -128,8 +131,46 @@
   // overwriting it would make the next check always read equal and
   // never surface an upgrade. `versions.json` is downloaded on every
   // Check-for-Updates press, so a stale copy can't hide a new release.
+  // `versions.json` also carries a non-version `notes` key (the release-notes
+  // blurb stamped by scripts/collect_current.py). It is METADATA, never a
+  // component version, so the semver diff below skips it explicitly — see
+  // NON_VERSION_KEYS.
   var VERSIONS_PATH = APP_ROOT + 'configs/versions.json';
   var CURRENT_PATH = APP_ROOT + 'configs/current.json';
+  // Keys present in versions.json / current.json that are NOT component
+  // versions and must never take part in the semver diff. Currently just the
+  // release-notes blurb; kept as a list so a future metadata key is one entry,
+  // not another special case scattered through the compare loop.
+  var NON_VERSION_KEYS = ['notes'];
+  // Banner (`appbanner.*`, the catalogue `logo`) sync cache. One record per
+  // app id: `{rel, version, size, etag}` for the banner bytes currently on
+  // disk. This is what makes the Check-for-Updates banner pass CHEAP:
+  //   * Tier 0 (no network) — a banner whose recorded `version` still matches
+  //     the catalogue AND whose on-disk `size` still matches the record is
+  //     already correct, so it is skipped outright. In the steady state this
+  //     takes the whole pass to ZERO requests.
+  //   * Tier 1 (one conditional round-trip) — anything that fails Tier 0 is
+  //     re-fetched with `If-None-Match: <etag>`, so an unchanged banner costs
+  //     a 304 with no payload and no write.
+  // Before this cache the pass re-downloaded every not-installed app's banner
+  // on EVERY press (the `missing` bucket was keyed on the ENTRY file, so an
+  // app the user never installs stayed in it forever), which scaled linearly
+  // with the catalogue and serialized one TLS handshake per app.
+  var BANNER_CACHE_PATH = APP_ROOT + 'configs/banner-cache.json';
+  // Bounded concurrency for the banner pass. nx.js `fetch` opens a NEW socket
+  // per request and sends `connection: close` for a bodyless GET (see
+  // fetchHttp in packages/runtime/src/fetch/fetch.ts) — there is no connection
+  // pool, so every banner costs a full TCP+TLS handshake. Latency, not
+  // bandwidth, is the cost driver; overlapping a few requests hides it. Kept
+  // deliberately small: the Switch's TLS stack is software crypto, and a wide
+  // fan-out starves the catalogue/telemetry fetches running alongside it.
+  var BANNER_CONCURRENCY = 4;
+  // Hard ceiling on banner fetches per check. A first run against a large
+  // catalogue would otherwise try to pull every banner at once; the cap bounds
+  // the worst case and the remainder is picked up by the next press (each run
+  // skips whatever the last one already cached, so successive presses make
+  // strict progress rather than redoing work).
+  var BANNER_FETCH_CAP = 24;
   // C2 operational counters (downloads/ratingAvg/ratingCount), fetched
   // alongside the catalogue from `data-stats-url`. Persisted only when
   // the platform client parses it; a bad/missing stats.json is NOT a
@@ -148,7 +189,7 @@
   var fetchInFlight = false;
   // AbortController for the in-flight `runCheck` (null when idle). `close()`
   // aborts it on Cancel so the orphaned run stops touching the page; its
-  // `signal` is threaded into every fetch + the logo-seed loop so an aborted
+  // `signal` is threaded into every fetch + the banner pass so an aborted
   // run releases its sockets (best-effort) and bails before mutating more
   // cards. Captured per run so a later re-run can't clear an older run's lock.
   var activeAbort = null;
@@ -163,14 +204,30 @@
   // to the underlying request for best-effort cancellation; the timer is the
   // real guarantee. Rejects with a timeout Error when the deadline wins — the
   // caller's existing try/catch treats it like any other network failure.
-  function fetchWithTimeout(url, signal) {
+  //
+  // `init` (optional) merges extra RequestInit fields — currently only the
+  // banner pass uses it, to send `if-none-match` for a conditional GET. It is
+  // spread FIRST so `signal` always wins: a caller can add headers but can
+  // never accidentally detach the abort wiring.
+  function fetchWithTimeout(url, signal, init) {
     var timer = null;
     var timeout = new Promise(function (_, reject) {
       timer = setTimeout(function () {
         reject(new Error('Request timed out after ' + FETCH_TIMEOUT_MS + 'ms: ' + url));
       }, FETCH_TIMEOUT_MS);
     });
-    var fetchP = globalThis.fetch(url, signal ? { signal: signal } : undefined);
+    var opts = null;
+    if (init) {
+      opts = {};
+      for (var k in init) {
+        if (Object.prototype.hasOwnProperty.call(init, k)) opts[k] = init[k];
+      }
+    }
+    if (signal) {
+      if (!opts) opts = {};
+      opts.signal = signal;
+    }
+    var fetchP = globalThis.fetch(url, opts || undefined);
     return Promise.race([fetchP, timeout]).finally(function () {
       if (timer !== null) clearTimeout(timer);
     });
@@ -243,6 +300,73 @@
     return idx >= 0 ? path.slice(0, idx) : '';
   }
 
+  // On-disk size of `path`, or -1 when it doesn't exist. `Switch.statSync`
+  // returns `{size, mtime, …}` or null for a missing file — it never reads the
+  // bytes, so this is the CHEAP existence+size probe. The rest of this script
+  // historically used `readFileSync(...) !== null` for existence, which pulls
+  // the WHOLE file into memory just to answer a yes/no question (a catalogue
+  // app's index.html runs to ~100KB, a banner to ~57KB). Errors read as absent
+  // so a permissions/FS hiccup degrades to "fetch it" rather than throwing.
+  function fileSize(path) {
+    try {
+      var st = Switch.statSync(path);
+      return st && typeof st.size === 'number' ? st.size : -1;
+    } catch (_) { return -1; }
+  }
+
+  // Cheap existence check — see fileSize. Prefer this over readFileSync for
+  // any "is it there?" question.
+  function fileExists(path) {
+    return fileSize(path) >= 0;
+  }
+
+  // Load the banner sync cache (`configs/banner-cache.json`). Shape:
+  //   { "<app id>": { rel, version, size, etag } }
+  // Missing / unreadable / malformed all degrade to `{}` — an empty cache just
+  // means the next pass re-validates every banner conditionally, which is
+  // correct-but-slower, never wrong. Entries are validated individually so one
+  // corrupt record can't discard the whole cache.
+  function loadBannerCache() {
+    var data = null;
+    try { data = Switch.readFileSync(BANNER_CACHE_PATH); }
+    catch (_) { data = null; }
+    if (!data) return {};
+    var parsed;
+    try { parsed = JSON.parse(new TextDecoder().decode(data)); }
+    catch (err) {
+      console.debug('[updates-modal] banner cache unparseable; starting empty: '
+        + (err && err.message ? err.message : String(err)));
+      return {};
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    var out = {};
+    for (var id in parsed) {
+      if (!Object.prototype.hasOwnProperty.call(parsed, id)) continue;
+      var rec = parsed[id];
+      if (!rec || typeof rec !== 'object') continue;
+      out[id] = {
+        rel: typeof rec.rel === 'string' ? rec.rel : '',
+        version: typeof rec.version === 'string' ? rec.version : '',
+        size: typeof rec.size === 'number' ? rec.size : -1,
+        etag: typeof rec.etag === 'string' ? rec.etag : '',
+      };
+    }
+    return out;
+  }
+
+  // Persist the banner cache. Best-effort: a write failure costs the NEXT
+  // run some redundant conditional requests (it re-validates instead of
+  // skipping), which is a performance regression, never a correctness one —
+  // so it is logged and swallowed rather than surfaced as a check failure.
+  function saveBannerCache(cache) {
+    try {
+      Switch.writeFileSync(BANNER_CACHE_PATH, JSON.stringify(cache));
+    } catch (err) {
+      console.debug('[updates-modal] banner cache write failed: '
+        + (err && err.message ? err.message : String(err)));
+    }
+  }
+
   // Recursive descendant-by-class lookup. LiveElement doesn't ship a
   // `querySelector` (only the document shim does) and the cards' meta
   // strip is nested two levels deep (`<a> > <div.app-card__meta> >
@@ -261,32 +385,58 @@
     return null;
   }
 
-  // Walk the grid cards on the page, find the one whose detail
-  // matches `(group, id)`, and rewrite its `<img class="app-logo">`
-  // `src` (plus the `logo` field inside its `data-app-detail` JSON
-  // so the missing-app modal picks up the real glyph too) to the
-  // brewser:// URL pointing at the just-downloaded logo. Triggers
-  // a live-DOM image load + repaint so the user sees the real
-  // logo without navigating away. Silent no-op when no card on the
-  // current page matches — covers `home.html`'s featured grid not
-  // sharing the same Apps cards.
-  function refreshCardLogo(detail) {
-    var logoRel = detail.logo ? stripLeadingSlashes(detail.logo) : '';
-    if (!logoRel) return;
-    var brewserUrl = 'brewser://apps/' + detail.id + '/' + logoRel;
+  // Rewrite the `<img>` src of every card whose banner was just downloaded,
+  // in ONE pass over the grid.
+  //
+  // The previous shape took a single app and walked the whole card list per
+  // call, from inside the download loop — O(banners x cards) `getAttribute` +
+  // `JSON.parse` on top of the network work, and a live-tree mutation between
+  // every fetch (which re-dirties the tree mid-check and costs the overlay its
+  // cheap cache-blit scroll path). Batching means one walk, one parse per
+  // card, and all the mutations land together.
+  //
+  // Each card's src moves to the `brewser://apps/<id>/<logo>` local URL and
+  // the `logo` field inside `data-app-detail` is updated too, so the
+  // missing-app modal (which reads that JSON at open time for its header
+  // image) picks up the real art as well. The card stays flagged `missing`
+  // when the entry file is still absent — only the visuals change.
+  //
+  // Returns the number of cards actually repainted; 0 is normal (home.html's
+  // featured grid doesn't share the Apps cards, and an off-page card isn't in
+  // the DOM at all).
+  function refreshCardLogos(items) {
+    if (!items || items.length === 0) return 0;
+    // id -> brewser:// URL for this batch. Built first so the card walk is a
+    // single hash lookup per card instead of a scan of the batch.
+    var wanted = {};
+    var pending = 0;
+    for (var n = 0; n < items.length; n++) {
+      var it = items[n];
+      var logoRel = it.logo ? stripLeadingSlashes(it.logo) : '';
+      if (!logoRel) continue;
+      wanted[it.id] = 'brewser://apps/' + it.id + '/' + logoRel;
+      pending++;
+    }
+    if (pending === 0) return 0;
+    var painted = 0;
     var cards = document.querySelectorAll('[data-app-detail]');
-    for (var i = 0; i < cards.length; i++) {
+    for (var i = 0; i < cards.length && pending > 0; i++) {
       var cardEl = cards[i];
       var raw = cardEl.getAttribute('data-app-detail');
       if (!raw) continue;
       var parsed;
       try { parsed = JSON.parse(raw); } catch (_) { continue; }
-      if (!parsed || parsed.id !== detail.id) continue;
-      // First IMG child = the `.app-logo` element (only `<img>` in
-      // the card markup; no need to filter by class). setAttribute
-      // routes through LiveElement.setAttr which kicks off
-      // loadImage(value) — the new bytes load async and the live
-      // tree dirties so the next paint shows them.
+      if (!parsed || !parsed.id) continue;
+      if (!Object.prototype.hasOwnProperty.call(wanted, parsed.id)) continue;
+      var brewserUrl = wanted[parsed.id];
+      // Each id appears once in the grid; drop it so a duplicate card can't
+      // double-count and so `pending` can end the walk early.
+      delete wanted[parsed.id];
+      pending--;
+      // First IMG child = the banner element (only `<img>` in the card
+      // markup; no need to filter by class). setAttribute routes through
+      // LiveElement.setAttr which kicks off loadImage(value) — the new bytes
+      // load async and the live tree dirties so the next paint shows them.
       for (var c = 0; c < cardEl.children.length; c++) {
         var child = cardEl.children[c];
         if (child.tagName === 'IMG') {
@@ -294,15 +444,11 @@
           break;
         }
       }
-      // Update the embedded detail JSON so the missing-app modal —
-      // which reads `detail.logo` at open time to set its header
-      // image — also picks up the real glyph. The card stays flagged
-      // as `missing` (entry file is still absent) but the visuals are
-      // now accurate.
       parsed.logo = brewserUrl;
       cardEl.setAttribute('data-app-detail', JSON.stringify(parsed));
-      return;
+      painted++;
     }
+    return painted;
   }
 
   // In-place card refresh for an installed app whose on-disk manifest
@@ -355,55 +501,176 @@
     }
   }
 
-  // Best-effort download of every missing app's catalogue logo so the
-  // grid card paints the real glyph on next render instead of the
-  // generic `download.png`. Each failure is logged + swallowed —
-  // failing a single logo doesn't fail the catalogue refresh.
+  // Banner (`appbanner.*`) sync for the Check-for-Updates pass. Takes the
+  // CANDIDATE list from diffCatalog plus the persisted cache, and does the
+  // least work that can still be correct. Three tiers:
   //
-  // The remote URL is the platform client's `logoUrl` (built from the
-  // catalogue's `sources` table — never assembled here); the local
-  // path matches the flat on-disk layout `<appRoot>apps/<id>/<logo>`.
-  // mkdirSync handles intermediate folders, so the app dir + any logo
-  // subfolder (`assets/` etc.) are created in one call. After a
-  // successful write the card on the visible Apps page gets its
-  // `<img src>` rewritten in-place so the user sees the real glyph
-  // without a reload.
-  async function seedMissingLogos(missing, signal) {
-    if (!missing || missing.length === 0) return;
-    for (var i = 0; i < missing.length; i++) {
-      // Stop mid-loop the moment this run is aborted (user hit Cancel). Each
-      // iteration rewrites a grid card's <img src> in place, which dirties the
-      // host live tree — continuing after Cancel would re-trigger the very
-      // scroll-rebuild flashing that cancelling is supposed to end.
-      if (signal && signal.aborted) return;
-      var detail = missing[i];
-      var logoRel = detail.logo ? stripLeadingSlashes(detail.logo) : '';
-      if (!logoRel || !detail.logoUrl) continue;
-      var remoteUrl = detail.logoUrl;
-      var localPath = APP_ROOT + 'apps/' + detail.id + '/' + logoRel;
-      try {
-        var dir = parentDir(localPath);
-        if (dir) Switch.mkdirSync(dir);
-      } catch (err) {
-        console.debug('[updates-modal] mkdir failed for ' + detail.id + ': ' + (err && err.message ? err.message : String(err)));
-        continue;
-      }
-      try {
-        var resp = await fetchWithTimeout(remoteUrl, signal);
-        if (!resp.ok) {
-          console.debug('[updates-modal] logo HTTP ' + resp.status + ' for ' + remoteUrl);
+  //   Tier 0 — no network. diffCatalog already dropped every app whose banner
+  //     is on disk at the cached size AND cached at the current catalogue
+  //     version, so the steady state (nothing changed since the last press)
+  //     arrives here with an EMPTY candidate list and issues zero requests.
+  //     This is the whole point of the rewrite: the old pass re-downloaded
+  //     every not-installed app's banner on every press, serially.
+  //
+  //   Tier 1 — one conditional round-trip. A candidate that still has a usable
+  //     ETag (file present, same size, same rel) is re-fetched with
+  //     `If-None-Match`. This is the version-bumped case: the app moved but
+  //     its art usually did NOT, so the server answers 304 with no payload and
+  //     no write, and we re-stamp the record at the new catalogue version so
+  //     the NEXT press skips it at Tier 0 entirely.
+  //
+  //   Tier 2 — full GET. Only for a banner that is genuinely absent, size-
+  //     mismatched, or has no stored ETag.
+  //
+  // KNOWN LIMIT (deliberate): a banner re-uploaded with NO version bump AND
+  // the same byte size is not detected here — Tier 0 skips it without asking.
+  // Detecting it would mean a conditional request per app per press, which is
+  // exactly the per-press cost this pass exists to remove. The case is already
+  // covered where it matters: download-modal.js cache-busts `appbanner.*` on
+  // every (re)download, so installing or updating the app always pulls the
+  // current art. A version bump also re-validates via Tier 1. If catalogue
+  // entries ever start carrying `updatedAt` (allow-listed by the normalizer
+  // but not emitted by the generator today), folding it into the Tier 0 key
+  // alongside `version` would close this with no extra requests.
+  //
+  // Requests run through a small bounded worker pool (BANNER_CONCURRENCY) and
+  // are capped per run (BANNER_FETCH_CAP) — nx.js opens a fresh socket per
+  // fetch with `connection: close`, so each banner costs a full TCP+TLS
+  // handshake and LATENCY dominates. Overlapping a few hides it without
+  // starving the catalogue/telemetry fetches running alongside.
+  //
+  // `cache` is mutated in place; the caller persists it once at the end. Every
+  // failure is logged and swallowed — a banner miss must never fail the
+  // catalogue refresh.
+  //
+  // Returns `{painted, downloaded}`. `downloaded > 0` means banner BYTES on
+  // disk changed, which is a render input: an installed app's card already
+  // points at `brewser://apps/<id>/<logo>`, so re-setting the same src won't
+  // reload it and the fresh art only appears on the next render. The caller
+  // folds that into `libraryDataChanged` so close() reloads once. A run that
+  // downloaded nothing (the steady state, and any all-304 run) leaves it 0, so
+  // a quiet check still never reloads.
+  async function syncBanners(candidates, cache, signal) {
+    if (!candidates || candidates.length === 0) {
+      console.debug('[updates-modal] banners: nothing stale; 0 requests');
+      return { painted: 0, downloaded: 0 };
+    }
+    // Cap the per-run work. Successive presses make strict progress: whatever
+    // this run caches is skipped at Tier 0 next time, so the remainder is
+    // picked up rather than redone.
+    var queue = candidates.length > BANNER_FETCH_CAP
+      ? candidates.slice(0, BANNER_FETCH_CAP)
+      : candidates;
+    if (queue.length < candidates.length) {
+      console.debug('[updates-modal] banners: ' + candidates.length + ' stale, capped to '
+        + queue.length + ' this run (rest follow on the next check)');
+    }
+    // Cards to repaint. Collected here and applied in ONE pass after the
+    // network work: the old per-app refreshCardLogo walked the whole card list,
+    // so calling it per banner inside the loop was O(banners x cards) DOM work
+    // on top of the fetches — and each in-loop mutation re-dirtied the live
+    // tree mid-check.
+    var repaints = [];
+    var next = 0;
+    var fetched = 0;
+    var notModified = 0;
+    var failed = 0;
+
+    async function worker() {
+      while (true) {
+        if (signal && signal.aborted) return;
+        var i = next++;
+        if (i >= queue.length) return;
+        var item = queue[i];
+        try {
+          var dir = parentDir(item.path);
+          if (dir) Switch.mkdirSync(dir);
+        } catch (err) {
+          failed++;
+          console.debug('[updates-modal] banner mkdir failed for ' + item.id + ': '
+            + (err && err.message ? err.message : String(err)));
           continue;
         }
-        var buf = await resp.arrayBuffer();
-        Switch.writeFileSync(localPath, buf);
-      } catch (err) {
-        console.debug('[updates-modal] logo fetch/write failed for ' + remoteUrl + ': ' + (err && err.message ? err.message : String(err)));
-        continue;
+        var resp;
+        try {
+          // Tier 1 vs Tier 2: send the conditional header only when we have an
+          // ETag that still describes the bytes on disk.
+          var init = item.etag ? { headers: { 'if-none-match': item.etag } } : null;
+          resp = await fetchWithTimeout(item.logoUrl, signal, init);
+        } catch (err) {
+          failed++;
+          console.debug('[updates-modal] banner fetch failed for ' + item.logoUrl + ': '
+            + (err && err.message ? err.message : String(err)));
+          continue;
+        }
+        // 304 — bytes on disk are already current. No body, no write. Re-stamp
+        // the record at the CURRENT catalogue version so the next press skips
+        // this app at Tier 0 instead of re-asking.
+        if (resp.status === 304) {
+          notModified++;
+          cache[item.id] = {
+            rel: item.logo,
+            version: item.version,
+            size: item.onDiskSize >= 0 ? item.onDiskSize : fileSize(item.path),
+            etag: item.etag,
+          };
+          continue;
+        }
+        if (!resp.ok) {
+          failed++;
+          console.debug('[updates-modal] banner HTTP ' + resp.status + ' for ' + item.logoUrl);
+          continue;
+        }
+        var buf;
+        try {
+          buf = await resp.arrayBuffer();
+          Switch.writeFileSync(item.path, buf);
+        } catch (err) {
+          failed++;
+          console.debug('[updates-modal] banner write failed for ' + item.id + ': '
+            + (err && err.message ? err.message : String(err)));
+          continue;
+        }
+        fetched++;
+        // Record what we just wrote. `size` comes from the buffer we actually
+        // persisted (not a re-stat) so the record matches the write exactly;
+        // a missing/absent ETag stores '' and simply costs an unconditional
+        // GET next time the version moves.
+        var etag = '';
+        try { etag = resp.headers && resp.headers.get ? (resp.headers.get('etag') || '') : ''; }
+        catch (_) { etag = ''; }
+        cache[item.id] = {
+          rel: item.logo,
+          version: item.version,
+          size: buf && typeof buf.byteLength === 'number' ? buf.byteLength : fileSize(item.path),
+          etag: etag,
+        };
+        if (item.repaint) repaints.push(item);
       }
-      // Successful write → repaint the matching grid card in place.
-      try { refreshCardLogo(detail); }
-      catch (err) { console.debug('[updates-modal] refreshCardLogo failed: ' + (err && err.message ? err.message : String(err))); }
     }
+
+    var pool = [];
+    var width = Math.min(BANNER_CONCURRENCY, queue.length);
+    for (var w = 0; w < width; w++) pool.push(worker());
+    await Promise.all(pool);
+
+    // Cancelled mid-pass: skip the DOM work entirely. close() already reset
+    // the overlay; re-dirtying the live tree here would restart the
+    // scroll-rebuild flashing that cancelling exists to stop.
+    if (signal && signal.aborted) return { painted: 0, downloaded: fetched };
+
+    var painted = 0;
+    if (repaints.length > 0) {
+      try { painted = refreshCardLogos(repaints); }
+      catch (err) {
+        console.debug('[updates-modal] banner repaint failed: '
+          + (err && err.message ? err.message : String(err)));
+      }
+    }
+    console.debug('[updates-modal] banners: ' + queue.length + ' checked, '
+      + fetched + ' downloaded, ' + notModified + ' unchanged (304), '
+      + failed + ' failed, ' + painted + ' cards repainted');
+    return { painted: painted, downloaded: fetched };
   }
 
   // Best-effort refresh of a sibling JSON config (downloads / ratings)
@@ -648,6 +915,12 @@
     for (var key in fetchedParsed) {
       if (!Object.prototype.hasOwnProperty.call(fetchedParsed, key)) continue;
       if (!Object.prototype.hasOwnProperty.call(currentParsed, key)) continue;
+      // Skip release METADATA. `notes` is prose, not a version — feeding it to
+      // semverGreater is meaningless and, for a blurb that happens to start
+      // with digits ("2.0 rewrite of the decoder"), could parse into a bogus
+      // comparison. Fail it out of the diff explicitly rather than relying on
+      // parseInt returning NaN.
+      if (NON_VERSION_KEYS.indexOf(key) !== -1) continue;
       if (semverGreater(String(fetchedParsed[key]), String(currentParsed[key]))) {
         console.debug('[updates-modal] newer version for "' + key + '": current='
           + String(currentParsed[key]) + ' published=' + String(fetchedParsed[key]));
@@ -662,52 +935,110 @@
     // `brewser`; a missing/non-string value falls back to '' → the button just
     // reads "Update Brewser".
     var brewserVer = typeof fetchedParsed.brewser === 'string' ? fetchedParsed.brewser : '';
-    return { available: true, version: brewserVer };
+    // Release-notes blurb for the offered build, straight from the PUBLISHED
+    // versions.json (never the installed current.json — the point is to
+    // describe the build being offered, not the one already on disk). Trimmed;
+    // a missing / non-string / blank value yields '' and the caller hides the
+    // notes line entirely rather than rendering an empty row.
+    var notes = typeof fetchedParsed.notes === 'string' ? fetchedParsed.notes.trim() : '';
+    return { available: true, version: brewserVer, notes: notes };
   }
 
   // Walk the NORMALIZED catalogue (platform-client output — this
   // script never reads raw catalogue fields) and bucket each app by its
   // INSTALLED state on disk:
-  //   * missing — launcher not on disk under the flat `apps/<id>/<entry>`.
-  //     Drives `seedMissingLogos` (fetch the art for apps you don't have).
   //   * updates — installed manifest `version` differs from the
   //     catalogue's. Drives BOTH the in-place upgrade-chip repaint
   //     (`refreshUpgradeChips`) and the modal's "Updates" list.
+  //   * banners — apps whose on-disk `appbanner.*` may be out of date. This
+  //     is the CANDIDATE set, not the fetch set; see below.
   // This is the ACTION diff (catalogue-vs-disk). It is NOT the source of
   // the "New apps" list — that comes from the store delta computed by
   // `diffNewInCatalogue` (old-vs-new catalogue). Mirrors the engine-side
   // library join so the installed-state view matches the grid after the
   // next reload.
-  function diffCatalog(normalized) {
+  //
+  // BANNER BUCKETING (rewritten — the old rule was both wasteful and wrong).
+  // Previously the banner pass ran over `missing`, i.e. it keyed on the ENTRY
+  // file. That had two defects pulling in opposite directions:
+  //   * An app the user never installs stays in `missing` FOREVER, so its
+  //     banner was re-downloaded in full on every single press even though the
+  //     bytes on disk were already identical.
+  //   * An INSTALLED app whose version just bumped was never in `missing`, so
+  //     its banner was never refreshed at all — the one case where the art
+  //     genuinely is likely to have changed.
+  // The candidate rule is now about the BANNER, not the launcher: an app is a
+  // candidate when its banner file is absent, or when the catalogue version
+  // (or the on-disk size) differs from what the banner was cached at.
+  // `syncBanners` then applies the cache / conditional-GET tiers on top, so a
+  // candidate does not necessarily cost a request.
+  function diffCatalog(normalized, bannerCache) {
     var decoder = new TextDecoder();
-    var missing = [];
     var updates = [];
+    var banners = [];
+    var cache = bannerCache || {};
     var apps = normalized && Array.isArray(normalized.apps) ? normalized.apps : [];
     for (var ei = 0; ei < apps.length; ei++) {
       var e = apps[ei];
       var entryRel = stripLeadingSlashes(e.entryRel || 'index.html');
       var entryPath = APP_ROOT + 'apps/' + e.id + '/' + entryRel;
-      var entryData = null;
-      try { entryData = Switch.readFileSync(entryPath); } catch (_) { entryData = null; }
-      if (!entryData) {
-        missing.push({
-          id: e.id,
-          name: e.name || e.id,
-          version: e.version || '',
-          // Relative logo path + the platform-client-built remote URL
-          // (`logoUrl` — source-aware, so ext-repo apps fetch from
-          // their own root). The post-diff logo pass stashes the bytes
-          // under the flat `apps/<id>/<logoRel>` so the engine's next
-          // render paints the real glyph on the missing card.
-          logo: e.logoRel || '',
-          logoUrl: e.logoUrl || '',
-        });
-        continue;
+      // statSync, NOT readFileSync: this is a pure existence question and the
+      // entry file is a full HTML document (~100KB for the bigger apps).
+      // Reading every catalogue app's index.html into memory just to ask "is
+      // it installed?" was a per-press cost that grew with the catalogue.
+      var installed = fileExists(entryPath);
+      var logoRel = stripLeadingSlashes(e.logoRel || '');
+      var catVersion = e.version || '';
+      // Banner candidate? Absent on disk, cached against a different catalogue
+      // version, or the file changed size behind our back (manual copy, a
+      // partial write from an interrupted run). Cheap: statSync only.
+      if (logoRel && e.logoUrl) {
+        var rec = Object.prototype.hasOwnProperty.call(cache, e.id) ? cache[e.id] : null;
+        var bannerPath = APP_ROOT + 'apps/' + e.id + '/' + logoRel;
+        var onDisk = fileSize(bannerPath);
+        var stale = onDisk < 0
+          || !rec
+          || rec.rel !== logoRel
+          || rec.version !== catVersion
+          || rec.size !== onDisk;
+        if (stale) {
+          banners.push({
+            id: e.id,
+            name: e.name || e.id,
+            version: catVersion,
+            // Relative logo path + the platform-client-built remote URL
+            // (`logoUrl` — source-aware, so ext-repo apps fetch from their
+            // own root). The banner pass stashes the bytes under the flat
+            // `apps/<id>/<logoRel>` so the engine's next render paints the
+            // real art instead of the generic download.png.
+            logo: logoRel,
+            logoUrl: e.logoUrl,
+            path: bannerPath,
+            // Size already stat'd above — carried through so the 304 path can
+            // re-stamp the record without a second stat of the same file.
+            onDiskSize: onDisk,
+            // Stored ETag for the conditional request, '' when we have no
+            // usable record (absent file, changed size, different version of
+            // the rel path) — those must be fetched unconditionally.
+            etag: (rec && onDisk >= 0 && rec.rel === logoRel && rec.size === onDisk) ? rec.etag : '',
+            // Only a not-installed app's card needs its <img src> rewritten in
+            // place after a successful write — an installed app's card already
+            // points at `brewser://apps/<id>/<logo>`, so the same path just
+            // reloads. Recorded here so the pass doesn't re-derive it.
+            repaint: !installed,
+          });
+        }
       }
+      // Not installed — nothing further to diff. There is no separate
+      // `missing` list any more: it existed only to drive the old banner pass,
+      // and the banner candidate set above now covers installed and
+      // not-installed apps alike. The modal reports counts (New apps /
+      // Updates), never a per-app "missing" row, so nothing else read it.
+      if (!installed) continue;
       // Installed — compare manifest.json's version against the
       // catalogue's. Skip when either side is empty (no signal to
       // surface) or the strings match (no upgrade available).
-      if (!e.version) continue;
+      if (!catVersion) continue;
       var manifestPath = APP_ROOT + 'apps/' + e.id + '/manifest.json';
       var manifestData = null;
       try { manifestData = Switch.readFileSync(manifestPath); } catch (_) { manifestData = null; }
@@ -717,15 +1048,15 @@
         var manifest = JSON.parse(decoder.decode(manifestData));
         installedVersion = typeof manifest.version === 'string' ? manifest.version : '';
       } catch (_) { continue; }
-      if (!installedVersion || installedVersion === e.version) continue;
+      if (!installedVersion || installedVersion === catVersion) continue;
       updates.push({
         id: e.id,
         name: e.name || e.id,
-        version: e.version,
+        version: catVersion,
         installedVersion: installedVersion,
       });
     }
-    return { missing: missing, updates: updates };
+    return { updates: updates, banners: banners };
   }
 
   // Store DELTA for the "New apps" list — apps whose id is in the
@@ -805,7 +1136,7 @@
   async function runCheck() {
     if (fetchInFlight) return;
     // Own an AbortController for this run so Cancel (`close()`) can orphan it.
-    // `signal` is threaded into every fetch + the logo-seed loop; the `finally`
+    // `signal` is threaded into every fetch + the banner pass; the `finally`
     // only releases the lock when THIS run still owns it (a cancelled run's
     // lock was already cleared by close(); a superseded run must not clobber a
     // newer run's). Constructed defensively — if the runtime lacks
@@ -907,13 +1238,18 @@
         setError('Write failed: ' + (e && e.message ? e.message : String(e)));
         return;
       }
+      // Banner sync cache (configs/banner-cache.json) — read BEFORE the diff,
+      // because diffCatalog uses it to decide which banners are even
+      // candidates. A missing/corrupt cache degrades to `{}`: every banner is
+      // then re-validated conditionally, which is slower but never wrong.
+      var bannerCache = loadBannerCache();
       // Success — compute both diffs. The installed-state diff (buckets)
-      // drives logo seeding + the upgrade chips + the "Updates" list; the
+      // drives the banner pass + the upgrade chips + the "Updates" list; the
       // store delta (newApps) drives the "New apps" list against the old
       // catalogue captured above.
       var buckets;
       try {
-        buckets = diffCatalog(outcome.catalogue);
+        buckets = diffCatalog(outcome.catalogue, bannerCache);
       } catch (e) {
         setError('Diff failed: ' + (e && e.message ? e.message : String(e)));
         return;
@@ -928,7 +1264,7 @@
         newApps = [];
       }
       // Refresh the sibling telemetry files (downloads + ratings)
-      // alongside the catalogue. Run in parallel with the logo seed
+      // alongside the catalogue. Run in parallel with the banner pass
       // since they hit different hosts/repos and don't depend on each
       // other. Each call is best-effort and swallows its own errors,
       // so Promise.all here can't reject — we just await the whole
@@ -946,7 +1282,7 @@
       // batch — close() already aborted this run and reset the overlay cache.
       if (signal && signal.aborted) return;
       var results = await Promise.all([
-        seedMissingLogos(buckets.missing, signal),
+        syncBanners(buckets.banners, bannerCache, signal),
         refreshConfigFile(downloadsUrl, DOWNLOADS_PATH, 'downloads.json', signal),
         refreshConfigFile(ratingsUrl, RATINGS_PATH, 'ratings.json', signal),
         checkVersionsForUpdate(versionsUrl, signal),
@@ -964,19 +1300,31 @@
       // flashing) or fight the repaint close() already did. The catalogue write
       // above stands — it's the point of the check; only the UI reveal is skipped.
       if (signal && signal.aborted) return;
+      // Persist the banner cache once, after the whole pass — `syncBanners`
+      // mutated it in place. Written even when nothing was fetched: a run that
+      // only produced 304s still re-stamped records at the new catalogue
+      // version, which is exactly what lets the NEXT press skip them with no
+      // network at all. Skipped when the pass had no candidates (the object is
+      // then untouched, so the write would be a no-op).
+      if (buckets.banners.length > 0) saveBannerCache(bannerCache);
       // `checkVersionsForUpdate` returns {available, version} on a real update,
       // or falsy on any skip/no-update — coerce so both shapes read cleanly.
       var versionInfo = results[3] || {};
       var newBrewserVersionAvailable = !!versionInfo.available;
       var newBrewserVersion = typeof versionInfo.version === 'string' ? versionInfo.version : '';
+      // Release-notes blurb for the offered build ('' when the release
+      // published none — the line then stays hidden).
+      var newBrewserNotes = typeof versionInfo.notes === 'string' ? versionInfo.notes : '';
       // Record whether the per-user My Apps document was refreshed this run —
       // close() reloads once so its server-rendered tab surfaces.
       myCatalogueRefreshed = !!results[5];
       // Reload on close when the render inputs actually changed: the catalogue
-      // (Featured / app set / versions) or stats.json (Popular / Top Rated
-      // ordering). `results[4]` is refreshStatsFile's changed-flag. A no-op
-      // check leaves both false, so it still won't reload.
-      libraryDataChanged = catalogueChanged || !!results[4];
+      // (Featured / app set / versions), stats.json (Popular / Top Rated
+      // ordering), or freshly-downloaded banner bytes. `results[4]` is
+      // refreshStatsFile's changed-flag; `results[0].downloaded` is the banner
+      // pass's. A no-op check leaves all three false, so it still won't reload.
+      var bannerResult = results[0] || {};
+      libraryDataChanged = catalogueChanged || !!results[4] || bannerResult.downloaded > 0;
       // Repaint upgrade chips on already-installed cards whose
       // manifest version trails the new catalog. Synchronous DOM
       // mutation — runs after the logo downloads so all card-side
@@ -1021,9 +1369,11 @@
       // persists after the modal closes. All cleared on an up-to-date run.
       if (newBrewserVersionAvailable) {
         brewserBtn.textContent = newBrewserVersion ? ('Update Brewser v' + newBrewserVersion) : 'Update Brewser';
+        setBrewserNotes(newBrewserNotes);
         brewserCallout.classList.add('updates-modal-brewser--show');
         triggerBtn.classList.add('apps-check-updates--update-available');
       } else {
+        setBrewserNotes('');
         brewserCallout.classList.remove('updates-modal-brewser--show');
         triggerBtn.classList.remove('apps-check-updates--update-available');
       }
@@ -1036,6 +1386,21 @@
         fetchInFlight = false;
         activeAbort = null;
       }
+    }
+  }
+
+  // Paint the release-notes line under the Update button. `textContent` (not
+  // innerHTML) — the blurb is remote-authored text, and the modal must render
+  // it as prose, never as markup. A blank/absent blurb hides the row so the
+  // callout collapses back to label + button instead of leaving a gap.
+  function setBrewserNotes(notes) {
+    if (!brewserNotesEl) return;
+    var text = typeof notes === 'string' ? notes.trim() : '';
+    brewserNotesEl.textContent = text;
+    if (text) {
+      brewserNotesEl.classList.remove('updates-modal-brewser-notes--hidden');
+    } else {
+      brewserNotesEl.classList.add('updates-modal-brewser-notes--hidden');
     }
   }
 
@@ -1064,6 +1429,7 @@
     newCountEl.textContent = '';
     newCountEl.classList.add('updates-modal-count--hidden');
     brewserCallout.classList.remove('updates-modal-brewser--show');
+    setBrewserNotes('');
     resultsEl.classList.add('updates-modal-results--empty');
     overlay.classList.add('app-modal-overlay--open');
     modalOpen = true;
@@ -1090,7 +1456,7 @@
     // chunked rebuild each scroll, which reads as all cards "flashing/reloading".
     //   (a) abort the run's fetches (best-effort — a stuck connect is really
     //       killed by fetchWithTimeout's deadline; the abort also makes
-    //       seedMissingLogos bail before mutating more cards),
+    //       syncBanners bail before mutating more cards),
     //   (b) release the in-flight lock so the next "Check for Updates" tap isn't
     //       swallowed by the `if (fetchInFlight) return` guard, and
     //   (c) reconcile the overlay cache NOW (__swbRepaint → resetLiveOverlayCache)

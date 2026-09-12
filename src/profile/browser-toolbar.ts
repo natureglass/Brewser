@@ -1167,13 +1167,19 @@ function stripLeadingSlashes(p: string): string {
  * issue) also counts as "doesn't exist" for our purposes: the engine
  * would render nothing either way. */
 function appFileExists(path: string): boolean {
-	let data: ArrayBuffer | null;
+	// `Switch.statSync` returns `{size, mtime, …}` or null for a missing file
+	// and never reads the bytes. The previous `readFileSync(...) !== null`
+	// shape pulled the WHOLE file into memory to answer a yes/no question —
+	// and this is called once per catalogue app per grid render, on the app's
+	// BANNER (~24KB mean, 57KB max), so a 34-app catalogue was reading ~760KB
+	// off disk on every render just to decide which cards had local art. Cost
+	// grew linearly with the catalogue. Same idiom as `fileExists` in
+	// src/forwarder/generate.ts.
 	try {
-		data = Switch.readFileSync(path);
+		return Switch.statSync(path) !== null;
 	} catch (_) {
 		return false;
 	}
-	return data !== null;
 }
 
 /** Read + validate `<profile>/search_engines.json`. Returns the

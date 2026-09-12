@@ -415,12 +415,17 @@ function isAppOwnedRel(rel: string): boolean {
 
 function fileExists(path: string): boolean {
 	try {
-		// `Switch.readFileSync` returns `ArrayBuffer | null` — it does NOT
-		// throw on a missing file, it returns `null`. Check the return value
-		// so a missing target isn't mistaken for "already seeded" (which
-		// would silently skip every fetch for an empty profile dir).
-		const data = Switch.readFileSync(path);
-		return data !== null;
+		// `Switch.statSync` returns the stat record or `null` for a missing
+		// file — it does NOT throw, and it never reads the bytes. Check the
+		// return value so a missing target isn't mistaken for "already seeded"
+		// (which would silently skip every fetch for an empty profile dir).
+		//
+		// statSync, not readFileSync: `seedRomfs` calls this once per seeded
+		// file on EVERY boot (the walker is missing-only, so the check is the
+		// hot path), and the romfs corpus includes 64KB theme stylesheets and
+		// the wallpaper set. Reading each one in full just to skip it was
+		// pure boot-time waste.
+		return Switch.statSync(path) !== null;
 	} catch (_) {
 		return false;
 	}

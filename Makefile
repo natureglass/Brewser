@@ -58,6 +58,17 @@ BREWSER_RUNTIME_PKG ?= ../brewser-runtime/package.json
 NXJS_PKG          ?= ../nxjs-extended/packages/runtime/package.json
 COLLECT_CURRENT   := scripts/collect_current.py
 
+# Human-readable release-notes blurb stamped into current.json (and therefore
+# the published versions.json) as the `notes` key. The Check-for-Updates modal
+# renders it under the "Update Brewser vX.Y.Z" button, so an install learns
+# WHAT the new build changes before downloading it. Default is deliberately
+# generic — it is what ships when a release doesn't describe itself. Override
+# per-release:
+#     make release RELEASE_NOTES="Fixes the video decoder A/V drift"
+# Forwarded to the collector as BREWSER_RELEASE_NOTES rather than a CLI flag so
+# the `?=`/env override path and the make-variable path share one mechanism.
+RELEASE_NOTES     ?= General Brewser improvements
+
 # Bundled catalogue SEED + its source of truth. The seed is the offline
 # first-boot apps grid; the live catalogue is rebuilt every 15 min by CI in
 # ../brewser-apps and published to play.brewser.io. `?=` so a diverging
@@ -159,11 +170,13 @@ check-endpoints: sync-runtime
 typecheck: sync-runtime
 	@npm run typecheck
 
-# File target: re-runs only when an upstream package.json (or the
-# collector script itself) changes. The phony `current-json` alias lets
-# callers spell the intent without remembering the output path.
+# File target: re-runs only when an upstream package.json (or the collector
+# script itself) changes. NOTE this means a bare `RELEASE_NOTES=...` change does
+# NOT by itself re-stamp the file — but `release` always runs `bump` first,
+# which rewrites package.json, so every real release picks the notes up. To
+# re-stamp notes alone, force it:  make -B current-json RELEASE_NOTES="..."
 $(CURRENT_JSON): $(BREWSER_PKG) $(BREWSER_RUNTIME_PKG) $(NXJS_PKG) $(COLLECT_CURRENT)
-	@$(PYTHON) $(COLLECT_CURRENT)
+	@BREWSER_RELEASE_NOTES="$(RELEASE_NOTES)" $(PYTHON) $(COLLECT_CURRENT)
 
 current-json: $(CURRENT_JSON)
 
@@ -312,6 +325,7 @@ help:
 	@echo "  make checksums   (Re)write $(CHECKSUMS) with SHA256 of the dist/ binaries"
 	@echo "  make build       esbuild bundle with baked defines (depends on sync-runtime)"
 	@echo "  make current-json  Refresh $(CURRENT_JSON) from upstream package.json files"
+	@echo "                     (also stamps the 'notes' release blurb — see RELEASE_NOTES)"
 	@echo "  make seed-catalogue  Refresh $(SEED_CATALOGUE) seed from $(APPS_CATALOGUE)"
 	@echo "  make clean       Remove build/, runtime/, $(NRO)"
 	@echo ""
@@ -324,6 +338,8 @@ help:
 	@echo ""
 	@echo "Overrides:"
 	@echo "  PYTHON=py                Use the Windows 'py' launcher instead of 'python'"
+	@echo "  RELEASE_NOTES=\"...\"      Release-notes blurb shown under the modal's Update button"
+	@echo "                           (default: $(RELEASE_NOTES))"
 	@echo "  SDMC_DEST=...            Point the sdmc mirror at a different Citron profile"
 	@echo "  BREWSER_RUNTIME_DIR=...  Override the brewser-runtime sibling path"
 	@echo "  NXJS_SOURCE_DIR=...      Override the nxjs-source sibling path"

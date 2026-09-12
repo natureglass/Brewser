@@ -3046,7 +3046,18 @@ export class BrowserShell {
 					.map(permissionSlug)
 				: [];
 			const sandboxRoot = `${this.profile.appRoot}${appDir}`;
-			this.policy.setManifestPermissions(appId, perms, sandboxRoot);
+			// `allowed_origins` is the app's declared egress allowlist. Until
+			// now it was parsed and displayed (app modal / toolbar) but never
+			// enforced; the policy now holds the app to it whenever the list is
+			// non-empty, so an app that passed the submission scan can't later
+			// pull a payload from an origin nobody reviewed. An empty list
+			// stays unrestricted — apps aimed at a user-supplied server can't
+			// enumerate destinations — and the scanner flags that shape instead.
+			const manifestOrigins = manifest?.allowed_origins;
+			const allowedOrigins = Array.isArray(manifestOrigins)
+				? manifestOrigins.filter((o): o is string => typeof o === 'string')
+				: null;
+			this.policy.setManifestPermissions(appId, perms, sandboxRoot, allowedOrigins);
 			// Capture the manifest's launch-fullscreen intent. Only takes
 			// effect when the toolbar is enabled globally — with
 			// `showToolbar: false` in `config.json` there's no chrome to
