@@ -665,7 +665,7 @@
         "network"
       ],
       "publishedAt": "2026-08-06T10:33:57Z",
-      "sizeBytes": 4413385,
+      "sizeBytes": 4396940,
       "summary": "Watch live Twitch streams on Switch.",
       "tags": [
         "Twitch",
@@ -935,7 +935,7 @@
     }
   ],
   "defaultSource": "base",
-  "generated": "2026-09-11T07:31:47Z",
+  "generated": "2026-09-12T10:12:38Z",
   "revoked": [],
   "sources": {
     "base": "https://play.brewser.io",
