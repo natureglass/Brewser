@@ -2721,6 +2721,14 @@ export class BrowserShell {
 
 		const typed = await this.keyboard.open(current, {
 			onScroll: (delta) => this.handleScroll(delta),
+			// Address-bar semantics: the current URL is shown but counts as
+			// selected, so the first character typed replaces it. Without
+			// this, typing a fresh URL appends to the current one
+			// (`brewser://home/https://play.brewser.io/apps/…`) and the
+			// navigation 404s on a URL the user never sees — the visible
+			// head of the field is the old URL, and the part they typed has
+			// already scrolled past the right edge.
+			replaceOnFirstInput: true,
 		});
 		if (typed === null) {
 			// Cancel. If a touch already queued the next input (e.g. tap on a
