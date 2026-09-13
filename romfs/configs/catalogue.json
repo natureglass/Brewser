@@ -64,6 +64,30 @@
     },
     {
       "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "switch",
+        "web"
+      ],
+      "description": "<p><strong>Multi Paint</strong> is a collaborative drawing board. Everyone in the same room paints on one shared canvas at the same time - you see each person's cursor move and their strokes appear as they draw them, not after they finish.</p>\r\n<p><strong>How it works.</strong> The app opens a WebSocket to the Brewser relay and joins a room (the default is <em>paint</em>, or pass <em>?room=</em> in the URL to start your own). While you draw, your stroke is streamed out as small batches of points every 40 ms, so remote clients follow your line live rather than waiting for you to lift the pen. Every client keeps the same ordered log of strokes and repaints the canvas from it, which is what keeps the picture identical on every screen and makes undo reliable: undo simply marks a stroke hidden and replays the log, so it lands in the right order even when someone else has drawn over the top. You only ever undo your own strokes. The canvas itself is a fixed 1280x720 surface that scales to the screen, with a second overlay canvas on top for cursors and for strokes still in flight.</p>\r\n<p>There are three tools. The <strong>pen</strong> and <strong>eraser</strong> are hard-edged single passes - the eraser just paints in the paper colour. The <strong>brush</strong> is feathered: it is built from five translucent passes, widest and faintest first, with their alphas solved so the composite edge follows a smooth ramp instead of ending on a hard rim. Because a soft stroke has to be laid down as one whole polyline (drawing it segment by segment would re-blend every joint into a dark blob), an in-progress brush stroke lives on the overlay and is committed to the canvas once, when the stroke ends. The nib preview in the header feathers the same way, so what you see is what you get.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> - press and drag on the board with the touchscreen or the pointer.</li>\r\n<li><strong>Pen, Brush, Eraser</strong> - pick a tool in the header; picking a colour while erasing switches you back to the pen.</li>\r\n<li><strong>Pen size</strong> - 2 to 64 px; the brush lays down twice that width.</li>\r\n<li><strong>Brush hardness</strong> - 0% feathers across the whole width, 100% collapses to a hard edge.</li>\r\n<li><strong>Colours</strong> - a 16 swatch palette, from ink and paper through to the full spectrum.</li>\r\n<li><strong>Undo / Redo</strong> - steps back and forward through your own strokes, for everyone.</li>\r\n<li><strong>Clear canvas</strong> - wipes the board and the history for the whole room.</li>\r\n</ul>\r\n<p>The status light in the sidebar shows the connection: amber while connecting, green once you are in the room, red if the link drops - in which case it reconnects on its own and you carry on drawing. A remote stroke that goes quiet, because that person dropped mid-line, is committed after a couple of seconds rather than left hovering. An internet connection is required.</p>",
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "id": "com.natureglass.artistemultiplayerpaint",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "minBrewserVersion": "0.1.125",
+      "name": "ARTISTE - Multiplayer Paint",
+      "permissions": [
+        "network"
+      ],
+      "publishedAt": "2026-09-13T07:33:22Z",
+      "sizeBytes": 65000,
+      "summary": "A shared canvas you paint on together in real time, with live cursors, three tools and synced undo.",
+      "version": "1.0.3"
+    },
+    {
+      "categories": [
         "Apps",
         "Demos"
       ],
@@ -935,7 +959,7 @@
     }
   ],
   "defaultSource": "base",
-  "generated": "2026-09-12T10:12:38Z",
+  "generated": "2026-09-13T09:03:45Z",
   "revoked": [],
   "sources": {
     "base": "https://play.brewser.io",
