@@ -23,74 +23,6 @@ function _shellInputDiag(label: string): void {
 	} catch { /* swallow */ }
 }
 
-// --- Boot-timing probe (DIAGNOSTIC — safe to remove) -----------------------
-// Writes a per-phase boot timeline to `sdmc:/switch/brewser/logs/boot-timing.log`
-// so a hardware boot can be measured precisely. A FILE is the only reliable
-// channel: the production safe-console redirect no-ops `console.debug`
-// (brewser-runtime/src/polyfills/safe-console.ts), so the pre-existing `[boot]`
-// console lines never surface on a shipping build.
-//
-// Columns: `+Nms` = ms since js-t0 (`globalThis.__bootT0`, stamped at the top of
-// main.ts, i.e. the start of bundle top-level eval); `ΔNms` = gap since the
-// previous mark — that Δ column is the cost of each boot phase. The file is
-// reset at run() entry so it always holds exactly the most recent boot; each
-// mark is appended live so a mid-boot hang still leaves a partial trail.
-//
-// Pairs with the C-side `[skia] GPU screen surface … ready (+Nms since t0)` line
-// in `sdmc:/switch/nxjs-debug.log` (t0 = C `main()` start). The
-// compile+instantiate cost (t0 → js-t0, i.e. cold-compiling runtime.js +
-// main.js) ≈ that skia delta MINUS this probe's `splash armed` mark, because
-// both are measured at the same first `getContext`. The pre-`main()` NRO load
-// (~70 MB from SD) is before t0 and needs an external stopwatch.
-const _BOOT_PROBE_PATH = 'sdmc:/switch/brewser/logs/boot-timing.log';
-let _bootProbeLast = 0;
-// True only during the boot sequence (run() entry → main loop entry). Gates the
-// per-navigation sub-marks (delegate `html parsed`, runtime `populateLiveRoot` /
-// `runPageScripts`) so ONLY the boot navigation writes to the log — later
-// navigations call the same hook but it no-ops. The runtime reaches the hook via
-// `globalThis.__bootProbeMark` (installed in `_bootProbeReset`) since it can't
-// import this shell-private helper.
-let _bootPhaseActive = false;
-function _bootProbeSwitch(): {
-	appendFileSync?: (p: string, d: string) => void;
-	writeFileSync?: (p: string, d: Uint8Array) => void;
-} | undefined {
-	return (globalThis as {
-		Switch?: {
-			appendFileSync?: (p: string, d: string) => void;
-			writeFileSync?: (p: string, d: Uint8Array) => void;
-		};
-	}).Switch;
-}
-function _bootProbeReset(): void {
-	try {
-		const t0 = (globalThis as { __bootT0?: number }).__bootT0 ?? Date.now();
-		_bootProbeLast = t0;
-		_bootPhaseActive = true;
-		// Expose a boot-only mark hook the runtime (web-page-session, browser-
-		// profile) can call without importing this module. Inert once boot ends.
-		(globalThis as { __bootProbeMark?: (label: string) => void }).__bootProbeMark = (label) => {
-			if (_bootPhaseActive) _bootProbe(label);
-		};
-		_bootProbeSwitch()?.writeFileSync?.(
-			_BOOT_PROBE_PATH,
-			new TextEncoder().encode('# brewser boot-timing — "+ms" = since js-t0, "Δ" = since previous mark\n'),
-		);
-	} catch { /* swallow — must never block boot */ }
-}
-function _bootProbe(label: string): void {
-	try {
-		const now = Date.now();
-		const t0 = (globalThis as { __bootT0?: number }).__bootT0 ?? now;
-		const delta = now - _bootProbeLast;
-		_bootProbeLast = now;
-		_bootProbeSwitch()?.appendFileSync?.(
-			_BOOT_PROBE_PATH,
-			`+${now - t0}ms\tΔ${delta}ms\t${label}\n`,
-		);
-	} catch { /* swallow */ }
-}
-
 // --- Video-perf diagnostic (DIAGNOSTIC — safe to remove; flip flag to false) ---
 // Decode-bound vs paint-bound discriminator for the Jellyfin video-perf work.
 // Per ~1s window of active video playback, appends the achieved video frame
@@ -211,7 +143,7 @@ import {
 } from '@switch-web/runtime';
 import {
 	flushPendingScreenBlitsToScreen, forceBridgeReadbackNextPaint, getLiveContentBottom, hasAnyScrollOverlay, hasPendingScreenBlits, isAnyModalOpen, isLiveCacheBuilding, isLiveCacheReady, liveCacheCoversViewportOpaque,
-	overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveAboveCanvasOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
+	glBandEdge, glBandLog, glBandSamplePx, glBandScan, overlayLiveAnimatedCanvases, paintColorPickerOverlay, paintDatePickerOverlay, paintFilePickerOverlay, paintKeyboardOverlay, paintLiveAboveCanvasOverlay, paintLiveOverlay, paintNumberPickerOverlay, paintScrollOverlaysToScreen, paintSelectModalOverlay, paintTimePickerOverlay,
 	paintModalOverlay,
 	paintToolbarOverlay,
 	patchLiveDirtyRegions, resetLiveOverlayCache, resetToolbarOverlayCache,
@@ -986,10 +918,8 @@ export class BrowserShell {
 			},
 			onHtmlResponse: async (url, html) => {
 				const tree = parseHtml(html);
-				if (_bootPhaseActive) _bootProbe('  · html fetched+expanded+parsed');
 				this.navigation.setCurrentTitle(extractTitle(tree));
 				await this.handleHtmlResponseLive(url, tree);
-				if (_bootPhaseActive) _bootProbe('  · handleHtmlResponseLive done');
 			},
 		};
 		this.webView = new WebView(
@@ -1503,8 +1433,6 @@ export class BrowserShell {
 	}
 
 	async run(): Promise<void> {
-		_bootProbeReset();
-		_bootProbe('run() entry');
 		// Forwarder mode detection (argv) — done HERE, before the splash, so a
 		// forwarder launch shows the app launch splash ("Loading <app>") instead of
 		// Brewser's own boot splash. `--fwd=1` = forwarder mode; `--app=<id>`
@@ -1566,7 +1494,6 @@ export class BrowserShell {
 				}).catch(() => { /* stay on the text treatment */ });
 			}
 		}
-		_bootProbe('splash armed');
 		this.webView.initialize();
 		// Touch listener must be installed after the WebView has touched up
 		// the canvas; it stays installed for the whole shell lifetime. It
@@ -1625,9 +1552,7 @@ export class BrowserShell {
 		// from romfs into the profile dir. Cheap on every launch
 		// (existence check + skip for files that already exist) so the
 		// user's edits survive but a deleted file is restored next run.
-		_bootProbe('webview+input installed');
 		await this.profile.seedRomfs();
-		_bootProbe('seedRomfs done');
 		// HTML-driven keyboard: parse `keyboard.html` once into a second
 		// live-DOM root. Painted below `KEYBOARD_LAYOUT.topY` when
 		// `KeyboardOverlay.open()` flips the overlay-visible flag on.
@@ -1657,7 +1582,6 @@ export class BrowserShell {
 		// 2026-06-18 number picker — same shape.
 		await this.loadHtmlNumberPicker();
 		setNumberPickerRepaintDriver(() => this.repaintContent());
-		_bootProbe('overlays parsed (7x loadHtml)');
 		// Apply shell-level preferences from config.json. Done before
 		// scanForAutoplayVideos runs (it reads videoTryHwAccel via
 		// openDecoder) and before the toolbar live root is built so the
@@ -1722,7 +1646,6 @@ export class BrowserShell {
 			this.profile.stylePath('themes/cursors.json'),
 			(rel) => this.profile.stylePath(rel),
 		);
-		_bootProbe('config+toolbar+bg+cursor (loadHtmlToolbar awaited)');
 		// Detect launch mode. Applet-mode launches (typically
 		// `LibraryApplet = 2`, the default hbmenu-via-Album hop) have
 		// restricted memory that the live-DOM content cache's
@@ -1738,7 +1661,6 @@ export class BrowserShell {
 		if (!isApplication) {
 			await this.showLibraryAppletWarning(appletType);
 		}
-		_bootProbe('applet check (incl. any warning wait)');
 		// Kick off the network probe in the background — don't block boot
 		// on its ~1–15 s round-trip. The toolbar reachability indicator
 		// (green/red dot) reads `__browserNetworkStatus` per render and
@@ -1820,7 +1742,6 @@ export class BrowserShell {
 			this.autoranApp = autoUrl !== null; // D4: remember a plain-autorun boot
 			bootUrl = autoUrl ?? DEFAULT_HOME_URL;
 		}
-		_bootProbe(`navigate start → ${bootUrl}`);
 		if (this.forwarderMode) {
 			// Forwarder mode boots straight into the app. The app's page scripts
 			// (especially WebGL ones) await requestAnimationFrame / frames during
@@ -1841,21 +1762,16 @@ export class BrowserShell {
 			});
 		} else if (splashHandle) {
 			await this.navigateTo(bootUrl);
-			_bootProbe('navigate(home) done — home built');
 			splashHandle.beginFade();
 			await splashHandle.finishedFading;
-			_bootProbe('splash faded');
 			// Warm-cache repaint. Should be ~10 ms (cache blit only).
 			this.repaintAll();
-			_bootProbe('first home paint done');
 		} else {
 			await this.navigateTo(bootUrl);
-			_bootProbe('navigate(home) done — home built (no splash)');
 			// No splash → no repaintAll above; force one 2D paint before the
 			// deferred GL arm below so the bridge composites over an
 			// established surface (see the boot wallpaper note above).
 			this.repaintAll();
-			_bootProbe('first home paint done');
 		}
 		// Deferred animated-wallpaper arm. Now that the home page has been
 		// navigated AND painted (repaintAll above), acquiring the shared GL
@@ -1870,8 +1786,6 @@ export class BrowserShell {
 			const bootBg = this.resolveSelectedBackground(shellConfig);
 			if (bootBg.dynamic && !this.forwarderMode) this.loadStyleDynamic(bootBg.dynamic);
 		}
-		_bootProbe('main loop entry (boot complete)');
-		_bootPhaseActive = false;
 		try {
 			while (true) {
 				const input = await waitForControllerInput({
@@ -3316,7 +3230,21 @@ export class BrowserShell {
 		// `cursor.visible` and early-returns if the native binding ever
 		// ships (so #4 re-port would resume the fast path without
 		// rewiring here).
+		// 2026-09-12 band probe: the cursor is stamped AFTER every pass the
+		// live-overlay samples, so `postAbove` could not see it. Sample either
+		// side of the stamp and log the sprite rect - a cursor rect the size of
+		// the band would explain it outright.
+		glBandSamplePx(ctx, 'preCursor');
 		paintCursorOverlay(ctx, canvas);
+		try {
+			const _cr = getLastCursorDrawRect();
+			glBandLog('[gl] cursor rect=' + (_cr
+				? _cr.w + 'x' + _cr.h + '@(' + Math.round(_cr.x) + ',' + Math.round(_cr.y) + ')'
+				: 'NONE'));
+		} catch (_) { /* diagnostics must never break a frame */ }
+		glBandSamplePx(ctx, 'postCursor');
+		glBandScan(ctx);
+		glBandEdge(ctx);
 	}
 
 	/** Cursor dirty-rect fast path. When a cursor move is the ONLY change

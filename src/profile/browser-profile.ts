@@ -281,9 +281,6 @@ export class BrowserProfile implements StorageProfileLike {
 		// in the constructor covers it); a bundle change (which flips the
 		// fingerprint) still re-seeds everything.
 		if (embedded !== '' && embedded === stored) {
-			(globalThis as { __bootProbeMark?: (l: string) => void }).__bootProbeMark?.(
-				`  · seed: SKIPPED — fingerprint match (${embedded.slice(0, 8)})`,
-			);
 			return;
 		}
 		// Re-seed app-owned files (shell/ + themes/) when the bundle changed;
@@ -294,11 +291,6 @@ export class BrowserProfile implements StorageProfileLike {
 		if (forceApp) {
 			console.debug(`[brewser] seed: bundle changed (${stored || 'none'} → ${embedded}) — re-seeding shell/ + themes/`);
 		}
-		// Boot-timing probe: this branch means a real walk ran (fresh profile or
-		// changed bundle) — records why, so boot-timing.log explains a slow seed.
-		(globalThis as { __bootProbeMark?: (l: string) => void }).__bootProbeMark?.(
-			`  · seed: WALK forceApp=${forceApp} (embedded=${embedded ? embedded.slice(0, 8) : '-'} stored=${stored ? stored.slice(0, 8) : '-'})`,
-		);
 		await this.seedRomfsDir('', forceApp);
 		// Record the applied fingerprint so the NEXT boot takes the fast path
 		// above. Written whenever we actually walked with a real fingerprint (not

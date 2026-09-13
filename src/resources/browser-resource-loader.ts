@@ -156,6 +156,22 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	// an "unknown brewser:// page". Binary application/octet-stream MIME
 	// (no standardised registered MIME for EXR).
 	exr: { mime: 'application/octet-stream', binary: true },
+	// Spine (esotericsoftware) skeletal-animation payloads, as used by
+	// `@esotericsoftware/spine-pixi-v8`. A Spine export is a PNG atlas page
+	// plus these two siblings, so without both entries the whole
+	// `Assets.load()` batch rejects and the app renders nothing but its
+	// clear colour. The `binary` flag matters here — it picks between
+	// returning the raw bytes and `decoder.decode(...)`-ing them to a
+	// string — and the two formats differ:
+	//   .skel  — BINARY skeleton; `spineSkeletonLoader` does
+	//            `new Uint8Array(await response.arrayBuffer())`. Decoding it
+	//            as text would corrupt it. (A Spine skeleton exported as
+	//            JSON instead is already covered by the `json` entry.)
+	//   .atlas — plain TEXT region index (`page.png` + `bounds:` lines);
+	//            `spineTextureAtlasLoader` does `await response.text()`.
+	// Neither has a registered IANA MIME type.
+	skel: { mime: 'application/octet-stream', binary: true },
+	atlas: { mime: 'text/plain; charset=utf-8', binary: false },
 };
 
 /** Inline right-pointing arrow painted between the installed + catalog
