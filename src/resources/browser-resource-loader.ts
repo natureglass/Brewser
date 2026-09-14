@@ -74,7 +74,12 @@ const FILE_SEGMENT = /^[a-z0-9_][a-z0-9.@_-]*$/i;
 const PATH_PATTERN = /^[a-z0-9_][a-z0-9._-]*(?:\/[a-z0-9_][a-z0-9._-]*)*$/i;
 
 /** Recognised static-asset MIME types keyed by extension (lowercase). */
-const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
+// Null-prototype: `ext` comes straight off a page-supplied URL, so a plain
+// object literal would resolve `foo.constructor` / `foo.toString` to an
+// inherited Object.prototype member and serve garbage for it. Same defect
+// class as the `window` proxy's IDL table.
+const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = Object.assign(
+	Object.create(null) as Record<string, { mime: string; binary: boolean }>, {
 	js: { mime: 'text/javascript; charset=utf-8', binary: false },
 	mjs: { mime: 'text/javascript; charset=utf-8', binary: false },
 	css: { mime: 'text/css; charset=utf-8', binary: false },
@@ -126,6 +131,14 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	data: { mime: 'application/octet-stream', binary: true },
 	mp3: { mime: 'audio/mpeg', binary: true },
 	ogg: { mime: 'audio/ogg', binary: true },
+	// `oga` / `opus` / `aac` / `weba` round out the set @pixi/sound (and any
+	// canPlayType-driven format map) reports as playable: a page that picks
+	// `.opus` off its own support list would otherwise 404 on an extension
+	// the allowlist simply never listed, with nothing to say why.
+	oga: { mime: 'audio/ogg', binary: true },
+	opus: { mime: 'audio/ogg', binary: true },
+	aac: { mime: 'audio/aac', binary: true },
+	weba: { mime: 'audio/webm', binary: true },
 	wav: { mime: 'audio/wav', binary: true },
 	m4a: { mime: 'audio/mp4', binary: true },
 	flac: { mime: 'audio/flac', binary: true },
@@ -172,7 +185,21 @@ const MIME_BY_EXT: Record<string, { mime: string; binary: boolean }> = {
 	// Neither has a registered IANA MIME type.
 	skel: { mime: 'application/octet-stream', binary: true },
 	atlas: { mime: 'text/plain; charset=utf-8', binary: false },
-};
+	// BMFont bitmap-font descriptors. Phaser's `load.bitmapFont(key, png, xml)`
+	// fetches the PNG page and its glyph table as a sibling pair; the table is
+	// XML (BMFont's default export) or the older plain-text `.fnt`. Without
+	// these entries the PNG loaded 200 and the descriptor 404'd even though the
+	// file was right there on disk — `classifyUrl` rejects any extension it
+	// doesn't recognise — so every BitmapText object rendered nothing
+	// (phasercompatibilitydemos 02-text, 2026-09-13).
+	xml: { mime: 'application/xml; charset=utf-8', binary: false },
+	fnt: { mime: 'text/plain; charset=utf-8', binary: false },
+	// Phaser's CSV tilemap format (`load.tilemapCSV`), and Tiled's own XML
+	// map/tileset exports — the same sibling-pair shape as the fonts above.
+	csv: { mime: 'text/csv; charset=utf-8', binary: false },
+	tmx: { mime: 'application/xml; charset=utf-8', binary: false },
+	tsx: { mime: 'application/xml; charset=utf-8', binary: false },
+});
 
 /** Inline right-pointing arrow painted between the installed + catalog
  * versions in the upgrade chip. Drawn as a single polygon (shaft +
@@ -1346,7 +1373,17 @@ function classifyUrl(canonical: string): UrlClassification | null {
 		}
 		const ext = last.slice(dotIdx + 1).toLowerCase();
 		const entry = MIME_BY_EXT[ext];
-		if (!entry) return null;
+		if (!entry) {
+			// An unrecognised extension 404s even when the file is sitting
+			// right there on disk, and the 404 says nothing about why — that
+			// silent shape cost a full debugging round on
+			// phasercompatibilitydemos 02-text (`.xml` bitmap-font
+			// descriptors). Name the actual reason so the next one is a
+			// one-line diagnosis rather than an investigation.
+			console.debug('[brewser:404] extension "' + ext + '" is not in MIME_BY_EXT'
+				+ ' — refusing ' + canonical + ' (add it to the allowlist if the file is legitimate)');
+			return null;
+		}
 		return { kind: 'static', relPath: stripped, mime: entry.mime, binary: entry.binary };
 	}
 
