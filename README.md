@@ -49,6 +49,22 @@ Brewser is designed around how you create, connect, and interact with the world 
 
 All from a standard web application — no native build needed.
 
+### Multiplayer, across devices
+
+Brewser runs a hosted WebSocket relay, so an app can open a socket, join a room, and see who else is there without you standing up a server. Rooms, presence, and message ordering come with it.
+
+The part that matters: **a console and a browser are peers in the same room.** Someone on a modded Switch and someone on their phone can play the same game, draw on the same canvas, or drive the same visual — the app is told which platform each peer is on, so it can adapt without caring where anyone is sitting. That's the "write once, runs everywhere" promise above, made literal.
+
+See the [multiplayer guide](https://docs.brewser.io/docs/multiplayer/websockets) for the protocol and limits.
+
+### You decide what an app can reach
+
+Every app declares what it needs — the internet, your local network, storage, a USB device — and you see that list, in plain language, before it launches. Nothing is granted quietly.
+
+Those declarations are enforced, not just displayed. An app that lists the sites it talks to is **held to that list** at runtime, so it can't quietly pull code or data from somewhere nobody reviewed. An app built to point at *your* server — a Jellyfin box, a NAS, a Home Assistant dashboard — asks you to approve each address the first time it's used, and remembers your answer. Hardware access works the same way: a device chooser you control, never a silent connection.
+
+There's also an **Offline Mode** if you'd rather the console talk to nothing at all.
+
 ### A home for the demoscene
 
 Brewser also doubles as a demoscene environment. Whether it's a polished WebGL experience, a shader experiment, a procedural visual, or a scrappy little interactive demo, you can publish it here and share it with a community that actually appreciates the craft.
@@ -88,9 +104,10 @@ Guides, Web API references, and everything about building for Brewser live at:
 Brewser Runtime is built on a fork of [nx.js](https://github.com/TooTallNate/nx.js) by [TooTallNate](https://github.com/TooTallNate), extending its V8/Skia foundation into a full web runtime for the Switch's Tegra X1. The extended engine source is public at [nx.js_extended](https://github.com/natureglass/nx.js_extended/tree/nxjs-extended) (branch `nxjs-extended`):
 
 - **V8** with JIT and WebAssembly, **Skia** rendering, and **WebGL 1/2** on Mesa (Nouveau)
-- Runs modern Three.js and WebGL2 apps at speed on the Tegra X1, handheld or docked
-- Hardware APIs: **WebUSB**, **Web Serial** (CH340 & CP2102 adapters), **Web Bluetooth**, **Web MIDI**, **WebNN**
-- Plus Web Audio, the Sensor APIs, and WASM
+- Runs modern Three.js, PixiJS, and Phaser apps at speed on the Tegra X1, handheld or docked
+- Hardware-accelerated **`<video>`**, including HLS streaming — 720p60 holds a steady 60fps on device
+- Hardware APIs: **WebUSB**, **WebHID**, **Web Serial** (CH340 & CP2102 adapters), **Web Bluetooth**, **Web MIDI**, **Web NFC**, **WebNN**
+- Plus **WebSockets**, Web Audio, the Sensor APIs, and WASM
 
 ## What's in this repository
 
