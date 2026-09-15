@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/natureglass/Brewser-press/main/logo/brewser-logo.svg" alt="Brewser" width="260">
 
-**A web runtime and app platform for devices your browser can't reach — starting with the Nintendo Switch.**
+**A web runtime and app platform for devices your browser can't reach - starting with the Nintendo Switch.**
 
 [![Latest release](https://img.shields.io/github/v/release/natureglass/Brewser)](https://github.com/natureglass/Brewser/releases/latest)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
@@ -12,56 +12,56 @@
 
 </div>
 
-Brewser is a platform for creators, tinkerers, and developers — a curiosity-driven playground for sharing your ideas and projects with the world. If you've ever built something clever and then watched it vanish into the void, you're exactly who we made this for.
+Brewser is a platform for creators, tinkerers, and developers - a curiosity-driven playground for sharing your ideas and projects with the world. If you've ever built something clever and then watched it vanish into the void, you're exactly who we made this for.
 
-At its core, Brewser lets you build modern web applications using contemporary Web APIs that are cross-compatible with the **Brewser Runtime for Nintendo Switch**. Write once with standard web technologies, and your work runs across PC, mobile, and modded Switch consoles — no rewrites, no native toolchain, no fuss.
+At its core, Brewser lets you build modern web applications using contemporary Web APIs that are cross-compatible with the **Brewser Runtime for Nintendo Switch**. Write once with standard web technologies, and your work runs across PC, mobile, and modded Switch consoles - no rewrites, no native toolchain, no fuss.
 
 ## Get it on your Switch
 
-**You need:** a Switch running [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere) custom firmware — tested on **1.10+** (older versions may work, but are untested) — with a working hbmenu setup. An internet connection is needed for the catalogue, sign-in, and cloud features; local apps work offline.
+**You need:** a Switch running [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere) custom firmware - tested on **1.10+** (older versions may work, but are untested) - with a working hbmenu setup. An internet connection is needed for the catalogue, sign-in, and cloud features; local apps work offline.
 
 1. Download `brewser.nro` from the [latest release](https://github.com/natureglass/Brewser/releases/latest).
 2. Copy it to your SD card at exactly `sd:/switch/brewser.nro`.
-3. Launch it from the Homebrew Menu — for best performance, start hbmenu in full-memory application mode (hold **R** while launching a game) rather than applet mode.
+3. Launch it from the Homebrew Menu - for best performance, start hbmenu in full-memory application mode (hold **R** while launching a game) rather than applet mode.
 
-**Prefer a home-menu icon?** Each release also ships `brewser-forwarder.nsp`, a forwarder that launches Brewser directly in full application mode (requires sigpatches — see the release notes for details).
+**Prefer a home-menu icon?** Each release also ships `brewser-forwarder.nsp`, a forwarder that launches Brewser directly in full application mode (requires sigpatches - see the release notes for details).
 
 **Updating** is built in: *Apps → Check for Updates*. Every update is cryptographically verified against the signing keyring baked into your build before it's applied, and rollbacks are refused. Bleeding-edge nightlies land in [`dist/`](dist/) on `main`; [releases](https://github.com/natureglass/Brewser/releases) are the tested builds you should run.
 
-**No modded Switch?** The same apps run in any modern desktop or mobile browser — browse the catalogue at [brewser.io](https://brewser.io).
+**No modded Switch?** The same apps run in any modern desktop or mobile browser - browse the catalogue at [brewser.io](https://brewser.io).
 
-> Brewser runs web content. It does not run — or help run — commercial Switch games, ROMs, or backups. See the [Piracy, Legality & Safety FAQ](https://brewser.io/faq/).
+> Brewser runs web content. It does not run - or help run - commercial Switch games, ROMs, or backups. See the [Piracy, Legality & Safety FAQ](https://brewser.io/faq/).
 
 ### Bringing hidden work into the light
 
-Too often, a great project's final destination is a GitHub repository — buried among thousands of others, good and bad, waiting for an audience that rarely arrives. Brewser exists to close that gap. We connect tinkerers who struggle to get their work in front of people with the people who actually want to see it, giving independent projects a home where they can be found, run, and appreciated.
+Too often, a great project's final destination is a GitHub repository - buried among thousands of others, good and bad, waiting for an audience that rarely arrives. Brewser exists to close that gap. We connect tinkerers who struggle to get their work in front of people with the people who actually want to see it, giving independent projects a home where they can be found, run, and appreciated.
 
 > Your project deserves better than page 12 of a search result.
 
 ### Built for the physical and the interactive
 
-Brewser is designed around how you create, connect, and interact with the world beyond the screen. Using established browser technologies — **WebUSB**, **Web Bluetooth**, **Web Audio**, the **Sensor APIs**, and more — you can talk directly to smart devices and sensors from your PC, phone, or Switch.
+Brewser is designed around how you create, connect, and interact with the world beyond the screen. Using established browser technologies - **WebUSB**, **Web Bluetooth**, **Web Audio**, the **Sensor APIs**, and more - you can talk directly to smart devices and sensors from your PC, phone, or Switch.
 
 - Read an accelerometer or gyroscope in real time
 - Drive a microcontroller or custom hardware
 - Capture and process live audio
 - Pair with Bluetooth peripherals
 
-All from a standard web application — no native build needed.
+All from a standard web application - no native build needed.
 
 ### Multiplayer, across devices
 
 Brewser runs a hosted WebSocket relay, so an app can open a socket, join a room, and see who else is there without you standing up a server. Rooms, presence, and message ordering come with it.
 
-The part that matters: **a console and a browser are peers in the same room.** Someone on a modded Switch and someone on their phone can play the same game, draw on the same canvas, or drive the same visual — the app is told which platform each peer is on, so it can adapt without caring where anyone is sitting. That's the "write once, runs everywhere" promise above, made literal.
+The part that matters: **a console and a browser are peers in the same room.** Someone on a modded Switch and someone on their phone can play the same game, draw on the same canvas, or drive the same visual - the app is told which platform each peer is on, so it can adapt without caring where anyone is sitting. That's the "write once, runs everywhere" promise above, made literal.
 
 See the [multiplayer guide](https://docs.brewser.io/docs/multiplayer/websockets) for the protocol and limits.
 
 ### You decide what an app can reach
 
-Every app declares what it needs — the internet, your local network, storage, a USB device — and you see that list, in plain language, before it launches. Nothing is granted quietly.
+Every app declares what it needs - the internet, your local network, storage, a USB device - and you see that list, in plain language, before it launches. Nothing is granted quietly.
 
-Those declarations are enforced, not just displayed. An app that lists the sites it talks to is **held to that list** at runtime, so it can't quietly pull code or data from somewhere nobody reviewed. An app built to point at *your* server — a Jellyfin box, a NAS, a Home Assistant dashboard — asks you to approve each address the first time it's used, and remembers your answer. Hardware access works the same way: a device chooser you control, never a silent connection.
+Those declarations are enforced, not just displayed. An app that lists the sites it talks to is **held to that list** at runtime, so it can't quietly pull code or data from somewhere nobody reviewed. An app built to point at *your* server - a Jellyfin box, a NAS, a Home Assistant dashboard - asks you to approve each address the first time it's used, and remembers your answer. Hardware access works the same way: a device chooser you control, never a silent connection.
 
 There's also an **Offline Mode** if you'd rather the console talk to nothing at all.
 
@@ -71,7 +71,7 @@ Brewser also doubles as a demoscene environment. Whether it's a polished WebGL e
 
 ### A real platform, not just a browser
 
-Brewser ships with everything an app needs to feel at home on a console: an on-screen keyboard, a proper toolbar, save-data support, leaderboards, the app catalogue right on the console, and sign-in that carries over from your PC. The shell is fully themeable — wallpapers (including animated GLSL shader wallpapers), styles, toolbars, cursors, and keyboards, all plain files on the SD card.
+Brewser ships with everything an app needs to feel at home on a console: an on-screen keyboard, a proper toolbar, save-data support, leaderboards, the app catalogue right on the console, and sign-in that carries over from your PC. The shell is fully themeable - wallpapers (including animated GLSL shader wallpapers), styles, toolbars, cursors, and keyboards, all plain files on the SD card.
 
 | ![MIDI Surface driving an AKAI LPD8 from the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_midi-controller_web.gif) | ![Driving a WS2812B LED matrix from the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_led_matrix_web.gif) | ![Three.js GLTF loader running at 60fps on the Switch](https://raw.githubusercontent.com/natureglass/Brewser-press/main/gif/web/brewser_threejs-gltf-loader_web.gif) |
 |:--:|:--:|:--:|
@@ -81,7 +81,7 @@ More screenshots, GIFs, and the showreel live in the [press kit](https://github.
 
 ## In the catalogue at launch
 
-The catalogue opens with more than 30 apps, including **DUSK Sky Atlas** (a Three.js planetarium with 132 Messier deep-sky objects, steered by the gyro), **Matrix Studio** (design and drive WS2812B LED panels over an ESP32, straight from the console), **MIDI Surface** (turn the Switch into a touchscreen MIDI controller), and on-device **WebNN** handwriting recognition. Alongside those sit a whole shelf of **Three.js WebGL2 demos** showcasing what the GPU can do — and a **Unity 2D platformer** running straight from Unity's WebGL export ([export guide](https://docs.brewser.io/docs/tips/unity)). Explore it all at [brewser.io](https://brewser.io).
+The catalogue opens with more than 30 apps, including **DUSK Sky Atlas** (a Three.js planetarium with 132 Messier deep-sky objects, steered by the gyro), **Matrix Studio** (design and drive WS2812B LED panels over an ESP32, straight from the console), **MIDI Surface** (turn the Switch into a touchscreen MIDI controller), and on-device **WebNN** handwriting recognition. Alongside those sit a whole shelf of **Three.js WebGL2 demos** showcasing what the GPU can do - and a **Unity 2D platformer** running straight from Unity's WebGL export ([export guide](https://docs.brewser.io/docs/tips/unity)). Explore it all at [brewser.io](https://brewser.io).
 
 ---
 
@@ -89,7 +89,7 @@ The catalogue opens with more than 30 apps, including **DUSK Sky Atlas** (a Thre
 
 Publishing and managing your apps happens on the **[brewser.io](https://brewser.io)** website. Sign in, submit your app, try it out in staging on a real Switch, and publish when it's ready. Once it's live, anyone running Brewser Runtime can find and launch it. Every submission passes automated security scanning (static analysis and taint tracking) plus review before it can reach the public catalogue.
 
-Published apps and publisher profiles earn [achievements](https://brewser.io/achievements/) along the way — badges derived from verifiable pipeline evidence, never applied for: from touching real hardware over WebUSB, to sustaining 60fps on the Tegra X1, down to sizecoder badges for apps under 4 KB.
+Published apps and publisher profiles earn [achievements](https://brewser.io/achievements/) along the way - badges derived from verifiable pipeline evidence, never applied for: from touching real hardware over WebUSB, to sustaining 60fps on the Tegra X1, down to sizecoder badges for apps under 4 KB.
 
 ## Documentation
 
@@ -105,21 +105,21 @@ Brewser Runtime is built on a fork of [nx.js](https://github.com/TooTallNate/nx.
 
 - **V8** with JIT and WebAssembly, **Skia** rendering, and **WebGL 1/2** on Mesa (Nouveau)
 - Runs modern Three.js, PixiJS, and Phaser apps at speed on the Tegra X1, handheld or docked
-- Hardware-accelerated **`<video>`**, including HLS streaming — 720p60 holds a steady 60fps on device
+- Hardware-accelerated **`<video>`**, including HLS streaming - 720p60 holds a steady 60fps on device
 - Hardware APIs: **WebUSB**, **WebHID**, **Web Serial** (CH340 & CP2102 adapters), **Web Bluetooth**, **Web MIDI**, **Web NFC**, **WebNN**
 - Plus **WebSockets**, Web Audio, the Sensor APIs, and WASM
 
 ## What's in this repository
 
-This repo contains the Brewser shell — the app you actually launch on your Switch — and its release tooling. The engine itself lives in the [nx.js_extended](https://github.com/natureglass/nx.js_extended/tree/nxjs-extended) repository.
+This repo contains the Brewser shell - the app you actually launch on your Switch - and its release tooling. The engine itself lives in the [nx.js_extended](https://github.com/natureglass/nx.js_extended/tree/nxjs-extended) repository.
 
 | Path | What it is |
 |---|---|
 | `src/` | The Brewser shell (TypeScript) |
 | `romfs/` | Bundled assets and configuration |
 | `scripts/` | Build, packaging, and signed self-update tooling |
-| `dist/` | Nightly signed builds — `brewser.nro` + `update.json`, served to the self-updater (tagged [releases](https://github.com/natureglass/Brewser/releases) are the tested builds) |
-| `keys/` | Brewser's **public** release-signing keys (key IDs and public halves only — see [`keys/README.md`](keys/README.md)) |
+| `dist/` | Nightly signed builds - `brewser.nro` + `update.json`, served to the self-updater (tagged [releases](https://github.com/natureglass/Brewser/releases) are the tested builds) |
+| `keys/` | Brewser's **public** release-signing keys (key IDs and public halves only - see [`keys/README.md`](keys/README.md)) |
 | `tests/`, `docs/` | Tests and internal documentation |
 
 ## Building from source
@@ -128,7 +128,7 @@ This repo contains the Brewser shell — the app you actually launch on your Swi
 make            # bump + build + package + sign + verify → dist/brewser.nro
 ```
 
-The default build is pure Node — it needs `node`, `npm`, and `python` on your PATH, and **no devkitPro toolchain**, because it reuses the prebuilt engine NRO. Rebuilding the engine itself (`make -f Makefile_nxjs`) requires devkitPro and is only needed when engine source changes. There's also a no-release dev loop against the Citron emulator (`make sdmc`), so you can iterate on the shell without hardware.
+The default build is pure Node - it needs `node`, `npm`, and `python` on your PATH, and **no devkitPro toolchain**, because it reuses the prebuilt engine NRO. Rebuilding the engine itself (`make -f Makefile_nxjs`) requires devkitPro and is only needed when engine source changes. There's also a no-release dev loop against the Citron emulator (`make sdmc`), so you can iterate on the shell without hardware.
 
 Full details, targets, and the release/signing flow: **[Makefile.md](Makefile.md)**.
 
@@ -136,10 +136,10 @@ Full details, targets, and the release/signing flow: **[Makefile.md](Makefile.md
 
 | Repository | Purpose |
 |---|---|
-| [nx.js_extended](https://github.com/natureglass/nx.js_extended/tree/nxjs-extended) | Brewser's extended nx.js engine fork — full WebGL stack, Skia rendering, and platform APIs (branch `nxjs-extended`) |
+| [nx.js_extended](https://github.com/natureglass/nx.js_extended/tree/nxjs-extended) | Brewser's extended nx.js engine fork - full WebGL stack, Skia rendering, and platform APIs (branch `nxjs-extended`) |
 | [Brewser-apps](https://github.com/natureglass/Brewser-apps) | The published app catalogue |
-| [Brewser-apps-staging](https://github.com/natureglass/Brewser-apps-staging) | Staging — where submissions are tested on real hardware before going public |
-| [Brewser-press](https://github.com/natureglass/Brewser-press) | Press kit — logos, screenshots, GIFs, showreel, factsheet |
+| [Brewser-apps-staging](https://github.com/natureglass/Brewser-apps-staging) | Staging - where submissions are tested on real hardware before going public |
+| [Brewser-press](https://github.com/natureglass/Brewser-press) | Press kit - logos, screenshots, GIFs, showreel, factsheet |
 
 ## Press
 
@@ -151,11 +151,11 @@ The runtime, the catalogue, and the publishing pipeline are free to use, and the
 
 ## Acknowledgements
 
-Brewser stands on the shoulders of the homebrew and open-source communities — above all [nx.js](https://github.com/TooTallNate/nx.js) by TooTallNate, whose work made a JavaScript runtime on the Switch possible in the first place, along with V8, Skia, Mesa, libuv, the devkitPro toolchain, and the [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere) / switchbrew ecosystem.
+Brewser stands on the shoulders of the homebrew and open-source communities - above all [nx.js](https://github.com/TooTallNate/nx.js) by TooTallNate, whose work made a JavaScript runtime on the Switch possible in the first place, along with V8, Skia, Mesa, libuv, the devkitPro toolchain, and the [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere) / switchbrew ecosystem.
 
 ---
 
-Whatever you're building — a hardware experiment, a graphical demo, or a full-blown web app — Brewser gives your work a place to live, an audience to reach, and a runtime that follows it from the browser to the console.
+Whatever you're building - a hardware experiment, a graphical demo, or a full-blown web app - Brewser gives your work a place to live, an audience to reach, and a runtime that follows it from the browser to the console.
 
 ---
 
