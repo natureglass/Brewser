@@ -351,16 +351,17 @@
       "id": "com.natureglass.jellyfinclient",
       "license": "MIT",
       "logo": "assets/appbanner.jpg",
-      "minBrewserVersion": "0.1.120",
+      "minBrewserVersion": "0.1.127",
       "name": "Jellyfin Client",
       "permissions": [
         "local_network",
+        "network",
         "storage"
       ],
       "publishedAt": "2026-09-07T12:53:12Z",
-      "sizeBytes": 561114,
+      "sizeBytes": 561165,
       "summary": "Stream your own Jellyfin media server's movies, shows and music, on Switch or in a browser.",
-      "version": "1.0.8"
+      "version": "1.0.9"
     },
     {
       "categories": [
@@ -684,18 +685,19 @@
       "id": "com.natureglass.streamcast",
       "license": "MIT",
       "logo": "assets/appbanner.jpg",
+      "minBrewserVersion": "0.1.127",
       "name": "Stream Cast",
       "permissions": [
         "network"
       ],
       "publishedAt": "2026-08-06T10:33:57Z",
-      "sizeBytes": 4396940,
+      "sizeBytes": 4398319,
       "summary": "Watch live Twitch streams on Switch.",
       "tags": [
         "Twitch",
         "Streaming"
       ],
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     {
       "categories": [
@@ -959,7 +961,7 @@
     }
   ],
   "defaultSource": "base",
-  "generated": "2026-09-13T09:03:45Z",
+  "generated": "2026-09-15T10:13:23Z",
   "revoked": [],
   "sources": {
     "base": "https://play.brewser.io",

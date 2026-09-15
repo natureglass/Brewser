@@ -252,7 +252,11 @@ import { BookmarksStore } from './navigation/bookmarks-store.js';
 import { BrowserNavigation } from './navigation/browser-navigation.js';
 import { HistoryStore } from './navigation/history-store.js';
 import { probeNetwork, type NetworkProbeResult } from '@switch-web/runtime';
-import { BrowserPermissionPolicy, setLiveInputPermissionPolicy } from '@switch-web/runtime';
+import {
+	BrowserPermissionPolicy,
+	setLiveInputPermissionPolicy,
+	setOriginPromptHandler,
+} from '@switch-web/runtime';
 import { BrowserProfile } from './profile/browser-profile.js';
 import { type BrowserConfig, DEFAULT_CONFIG, isRevokedInCachedCatalogue, loadBackgroundRegistry, loadConfig, loadStyleRegistry, loadToolbarRegistry, resolveSearchEngine, type ToolbarPosition } from './profile/browser-toolbar.js';
 import { parseArtifacts, parseCatalogue, parseStats } from '@switch-web/runtime';
@@ -434,6 +438,67 @@ export class BrowserShell {
 			default: return false;
 		}
 	}
+	/**
+	 * Persisted user-granted origins, `appId -> ["https://host:port", …]`.
+	 *
+	 * Backs manifest `"user_origins": true`. Lives in the SHELL's profile
+	 * directory, deliberately outside every app sandbox, so an app cannot
+	 * write itself a grant with ordinary `storage` permission — only the
+	 * broad `filesystem_write`/`system` perms reach it, and those are
+	 * surfaced to the user as high-risk at launch anyway.
+	 *
+	 * Loaded lazily and cached; `null` means "not read yet".
+	 */
+	private originGrants: Record<string, string[]> | null = null;
+
+	/** Absolute path of the grants file. */
+	private originGrantsPath(): string {
+		return `${this.profile.storageRoot}origin-grants.json`;
+	}
+
+	/** Read + cache the grants file. A missing or corrupt file is simply no
+	 *  grants — this must never block an app launch. */
+	private loadOriginGrants(): Record<string, string[]> {
+		if (this.originGrants) return this.originGrants;
+		let parsed: unknown = null;
+		try {
+			const raw = Switch.readFileSync(this.originGrantsPath());
+			if (raw) parsed = JSON.parse(new TextDecoder().decode(raw));
+		} catch (error) {
+			console.debug(`[brewser] origin grants read failed: ${error}`);
+		}
+		const out: Record<string, string[]> = {};
+		if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+			for (const [app, list] of Object.entries(parsed as Record<string, unknown>)) {
+				if (!Array.isArray(list)) continue;
+				out[app] = list.filter((o): o is string => typeof o === 'string');
+			}
+		}
+		this.originGrants = out;
+		return out;
+	}
+
+	/** Origins this user already approved for `appId` on a previous run. */
+	private readPersistedOriginGrants(appId: string): string[] {
+		return this.loadOriginGrants()[appId] ?? [];
+	}
+
+	/** Persist one approved origin for `appId` (the "Allow" answer only —
+	 *  "Just once" is session state and never reaches disk). */
+	private persistOriginGrant(appId: string, origin: string): void {
+		const grants = this.loadOriginGrants();
+		const list = grants[appId] ?? (grants[appId] = []);
+		if (list.includes(origin)) return;
+		list.push(origin);
+		try {
+			Switch.writeFileSync(this.originGrantsPath(), JSON.stringify(grants, null, '	'));
+		} catch (error) {
+			// A failed write costs persistence, not correctness — the grant is
+			// already live in the policy for this session.
+			console.debug(`[brewser] origin grants write failed: ${error}`);
+		}
+	}
+
 	private mode: BrowserMode = 'normal';
 	/** The mode the shell was in when it entered `video-fullscreen`, so exiting
 	 * video-fullscreen restores it (e.g. a `manifest.fullscreen:true` app that
@@ -1095,6 +1160,44 @@ export class BrowserShell {
 					return result && result.kind === 'single' ? result.value : null;
 				});
 			}
+		// ── User-granted origins ─────────────────────────────────────
+		// Manifest `"user_origins": true`: the app's destinations are typed
+		// by the USER at runtime (a Jellyfin server, a Home Assistant box),
+		// so an undeclared origin is a question rather than a refusal.
+		//
+		// Rendered through `selectModal`, which lives on its OWN live root —
+		// not in the page's document. That matters: a dialog injected into
+		// the app's DOM would be reachable by `getElementById` and clickable
+		// by app script, so the app could approve itself, which is worse than
+		// having no prompt at all. Same surface the hardware device chooser
+		// already uses for "Allow device access?".
+		//
+		// Never reached by media/image loads (exempt from the allowlist
+		// before this point), by `*.brewser.io`, by redirect hops, or by apps
+		// that did not opt in.
+		setOriginPromptHandler(async (req) => {
+			const result = await this.selectModal.open({
+				title: `Allow this app to connect to ${req.origin}?`,
+				multiple: false,
+				selected: new Set<string>(),
+				groups: [{
+					label: null,
+					options: [
+						{ value: 'allow', label: 'Allow — remember for this app' },
+						{ value: 'once', label: 'Just once — until the app exits' },
+						{ value: 'deny', label: 'Deny' },
+					],
+				}],
+			});
+			// Backing out of the picker (B / dismiss) is a refusal, not a
+			// grant — the gate must fail closed on an unanswered question.
+			const choice = result && result.kind === 'single' ? result.value : 'deny';
+			if (choice === 'allow' && req.appId) {
+				this.persistOriginGrant(req.appId, req.origin);
+			}
+			return choice === 'allow' ? 'allow' : choice === 'once' ? 'once' : 'deny';
+		});
+
 		// Wire `<input>.focus()` calls from page scripts (Cocos Creator's
 		// EditBox does `document.createElement('input')` + appendChild +
 		// focus()) into the same KeyboardOverlay path that live-DOM form
@@ -2979,7 +3082,25 @@ export class BrowserShell {
 			const allowedOrigins = Array.isArray(manifestOrigins)
 				? manifestOrigins.filter((o): o is string => typeof o === 'string')
 				: null;
-			this.policy.setManifestPermissions(appId, perms, sandboxRoot, allowedOrigins);
+			// Manifest `"user_origins": true` — the app's destinations are
+			// chosen by the USER at runtime (a Jellyfin server address, a Home
+			// Assistant box) so they cannot be declared at publish time. Opting
+			// in means an undeclared origin raises a one-time approval prompt
+			// instead of being denied, AND that an empty `allowed_origins`
+			// stops meaning "unrestricted" for this app — it trades a blanket
+			// pass for per-origin consent. Media loads never prompt.
+			const userOrigins = manifest?.user_origins === true;
+			this.policy.setManifestPermissions(
+				appId, perms, sandboxRoot, allowedOrigins, userOrigins,
+			);
+			// Re-seed the origins this user already approved for this app on a
+			// previous run. Must follow setManifestPermissions, which clears
+			// the grant set as part of re-scoping.
+			if (userOrigins && appId) {
+				for (const origin of this.readPersistedOriginGrants(appId)) {
+					this.policy.addGrantedOrigin(origin);
+				}
+			}
 			// Capture the manifest's launch-fullscreen intent. Only takes
 			// effect when the toolbar is enabled globally — with
 			// `showToolbar: false` in `config.json` there's no chrome to

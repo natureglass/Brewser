@@ -169,6 +169,17 @@ export interface AppManifest {
 	permissions?: string[];
 	compatibility?: string[];
 	allowed_origins?: string[];
+	/** Opt-in for apps whose network destinations the USER supplies at
+	 * runtime (a Jellyfin server address, a Home Assistant box), which
+	 * therefore cannot be listed in `allowed_origins` at publish time.
+	 *
+	 * With it set, an undeclared origin raises a one-time on-screen approval
+	 * instead of being denied, and an EMPTY `allowed_origins` stops meaning
+	 * "unrestricted" for this app — so opting in makes an app strictly more
+	 * restricted than the empty-list shape it replaces. Media and image
+	 * element loads never prompt (they are exempt from the allowlist), and
+	 * neither does Brewser's own `*.brewser.io` infrastructure. */
+	user_origins?: boolean;
 	developer?: string;
 	source?: string;
 	license?: string;
