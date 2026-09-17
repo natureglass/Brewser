@@ -119,7 +119,7 @@ This repo contains the Brewser shell - the app you actually launch on your Switc
 | `romfs/` | Bundled assets and configuration |
 | `scripts/` | Build, packaging, and signed self-update tooling |
 | `dist/` | Nightly signed builds - `brewser.nro` + `update.json`, served to the self-updater (tagged [releases](https://github.com/natureglass/Brewser/releases) are the tested builds) |
-| `keys/` | Brewser's **public** release-signing keys (key IDs and public halves only - see [`keys/README.md`](keys/README.md)) |
+| `keys/` | Brewser's **public** release-signing keys (key IDs and public halves only |
 | `tests/`, `docs/` | Tests and internal documentation |
 
 ## Building from source

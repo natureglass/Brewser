@@ -228,6 +228,16 @@ export interface AppManifest {
 	 * that memory across launches until it OOM-crashes. Costs a ~2-3 s brewser
 	 * restart on exit; opt-in per app. */
 	freshProcessOnExit?: boolean;
+	/** Forced screen orientation on ANDROID devices — the submit form's "Force
+	 * orientation on Android devices" radio, absent when the developer picked
+	 * "None". THE SWITCH SHELL IGNORES THIS: the console's display orientation is
+	 * fixed, so there is nothing to lock. It is declared here only so the manifest
+	 * type matches what the WordPress builder actually writes — the field's two
+	 * real consumers are both web-side (the [brewser_app] mobile fullscreen player
+	 * calls screen.orientation.lock with it, and the per-app PWA web-app manifest
+	 * emits it as its own `orientation` member). Do not wire it into shell
+	 * behaviour without a display-rotation capability to back it. */
+	orientation?: 'portrait' | 'landscape';
 }
 
 /**

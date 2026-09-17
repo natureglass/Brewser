@@ -73,18 +73,19 @@
       "description": "<p><strong>Multi Paint</strong> is a collaborative drawing board. Everyone in the same room paints on one shared canvas at the same time - you see each person's cursor move and their strokes appear as they draw them, not after they finish.</p>\r\n<p><strong>How it works.</strong> The app opens a WebSocket to the Brewser relay and joins a room (the default is <em>paint</em>, or pass <em>?room=</em> in the URL to start your own). While you draw, your stroke is streamed out as small batches of points every 40 ms, so remote clients follow your line live rather than waiting for you to lift the pen. Every client keeps the same ordered log of strokes and repaints the canvas from it, which is what keeps the picture identical on every screen and makes undo reliable: undo simply marks a stroke hidden and replays the log, so it lands in the right order even when someone else has drawn over the top. You only ever undo your own strokes. The canvas itself is a fixed 1280x720 surface that scales to the screen, with a second overlay canvas on top for cursors and for strokes still in flight.</p>\r\n<p>There are three tools. The <strong>pen</strong> and <strong>eraser</strong> are hard-edged single passes - the eraser just paints in the paper colour. The <strong>brush</strong> is feathered: it is built from five translucent passes, widest and faintest first, with their alphas solved so the composite edge follows a smooth ramp instead of ending on a hard rim. Because a soft stroke has to be laid down as one whole polyline (drawing it segment by segment would re-blend every joint into a dark blob), an in-progress brush stroke lives on the overlay and is committed to the canvas once, when the stroke ends. The nib preview in the header feathers the same way, so what you see is what you get.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Draw</strong> - press and drag on the board with the touchscreen or the pointer.</li>\r\n<li><strong>Pen, Brush, Eraser</strong> - pick a tool in the header; picking a colour while erasing switches you back to the pen.</li>\r\n<li><strong>Pen size</strong> - 2 to 64 px; the brush lays down twice that width.</li>\r\n<li><strong>Brush hardness</strong> - 0% feathers across the whole width, 100% collapses to a hard edge.</li>\r\n<li><strong>Colours</strong> - a 16 swatch palette, from ink and paper through to the full spectrum.</li>\r\n<li><strong>Undo / Redo</strong> - steps back and forward through your own strokes, for everyone.</li>\r\n<li><strong>Clear canvas</strong> - wipes the board and the history for the whole room.</li>\r\n</ul>\r\n<p>The status light in the sidebar shows the connection: amber while connecting, green once you are in the room, red if the link drops - in which case it reconnects on its own and you carry on drawing. A remote stroke that goes quiet, because that person dropped mid-line, is committed after a couple of seconds rather than left hovering. An internet connection is required.</p>",
       "developer": "Alex Daskalakis",
       "entry": "index.html",
+      "featured": true,
       "id": "com.natureglass.artistemultiplayerpaint",
       "license": "MIT",
       "logo": "assets/appbanner.jpg",
-      "minBrewserVersion": "0.1.125",
+      "minBrewserVersion": "0.1.130",
       "name": "ARTISTE - Multiplayer Paint",
       "permissions": [
         "network"
       ],
       "publishedAt": "2026-09-13T07:33:22Z",
-      "sizeBytes": 65000,
+      "sizeBytes": 71893,
       "summary": "A shared canvas you paint on together in real time, with live cursors, three tools and synced undo.",
-      "version": "1.0.3"
+      "version": "1.0.8"
     },
     {
       "categories": [
@@ -183,6 +184,7 @@
       "description": "<p><strong>Dusk</strong> is a pocket planetarium that draws the real night sky in WebGL. For any moment and place it renders the stars, constellations, Milky Way, deep-sky objects and planets exactly where they sit in the sky above you - wrapped in a warm dusk glow that fades from the horizon up to the zenith.</p>\r\n<p><strong>How it works.</strong> Everything you see is placed by genuine astronomy rather than a static picture. The whole celestial sphere is rotated for your latitude, longitude and the current clock using sidereal time, so the sky turns through the night just as the real one does. Thousands of stars are coloured from true blue–white to orange–red using each star's colour index and sized by brightness, and they twinkle gently. The seven naked-eye planets are computed live from Keplerian orbital elements, and the Sun and Moon from their own series, so their positions - and the glow the Sun casts along the horizon - match reality. Constellation figures, the softly-painted band of the Milky Way, and a catalogue of galaxies, nebulae and star clusters complete the scene, all fading away as they sink below a horizon ring marked N, E, S and W.</p>\r\n<p><strong>How you interact:</strong></p>\r\n<ul>\r\n<li><strong>Look around</strong> - drag to pan across the sky, and pinch or scroll to zoom the field of view in and out.</li>\r\n<li><strong>Identify anything</strong> - tap a star, planet or deep-sky object and an engraved plate names it, with its designation, constellation and magnitude.</li>\r\n<li><strong>Point at the sky</strong> - switch on motion mode to steer the view by physically aiming your device at the real sky; drag sideways to line up the compass heading.</li>\r\n<li><strong>Tour the highlights</strong> - the focus button glides you from one notable sight to the next among everything currently above your horizon: the Moon, the planets, famous nebulae and the brightest named stars.</li>\r\n<li><strong>Choose your layers</strong> - toggle stars, constellation lines, the Milky Way and deep-sky objects on or off.</li>\r\n<li><strong>Set your place</strong> - tap the location chip to chart the sky for where you actually are, or pin coordinates in the URL; your layers and location are remembered for next time.</li>\r\n</ul>\r\n<p>Dusk bundles its star catalogues so it runs completely offline, charting the live sky for your location and clock.</p>",
       "developer": "Alex Daskalakis",
       "entry": "index.html",
+      "featured": true,
       "id": "com.natureglass.dusk",
       "license": "MIT",
       "logo": "assets/appbanner.jpg",
@@ -252,6 +254,38 @@
         "Visualizer"
       ],
       "version": "1.0.6"
+    },
+    {
+      "categories": [
+        "Apps"
+      ],
+      "compatibility": [
+        "mobile",
+        "switch",
+        "web"
+      ],
+      "description": "<p>Free TV plays the live channels that broadcasters and free ad-supported streaming services publish openly. Pick a source, pick a country, pick a channel. Nothing to sign up for, no account, no key.</p>\r\n<p>Sources</p>\r\n<ul>\r\n<li><b>Broadcasters</b> - channels the broadcasters stream themselves, from over 200 countries and territories.</li>\r\n<li><b>Pluto</b>, <b>Samsung TV Plus</b>, <b>Rakuten TV</b>, <b>Plex</b> - the free ad-supported line-ups, per country.</li>\r\n<li><b>Favorites</b> - everything you starred, gathered from every source.</li>\r\n</ul>\r\n<p>Channel lists come from the community-maintained <code>iptv-org/iptv</code> index, are fetched on demand and cached on the device for 24 hours; <b>Refresh</b> pulls them again. The streams themselves are served by the broadcasters and providers, so which channels work varies by region and by hour - Free TV hosts nothing and proxies nothing.</p>\r\n<p>In the channel list</p>\r\n<ul>\r\n<li>Type to filter by name; chips narrow a list to a single country of origin when one list mixes several.</li>\r\n<li><b>Favorites only</b>, <b>720p or lower</b> (kinder to the console decoder) and <b>Hide unavailable</b> toggles.</li>\r\n<li>A channel that fails to start is remembered as unavailable and hidden until it plays again.</li>\r\n</ul>\r\n<p>Playback is HLS. The console's built-in player handles it natively; in a desktop browser hls.js is loaded from a CDN as a fallback.</p>\r\n<p>Controls: D-pad or stick to move, <b>A</b> select, <b>B</b> back, <b>Y</b> favourite, <b>X</b> fullscreen. Keyboard and mouse work throughout - arrows, Enter, Esc, <code>F</code> to favourite, <code>X</code> for fullscreen.</p>\r\n<p>Favourites and the unavailable list are kept on the device. Nothing is sent anywhere.</p>",
+      "developer": "Alex Daskalakis",
+      "entry": "index.html",
+      "features": [
+        "Gamepad"
+      ],
+      "id": "com.natureglass.freetv",
+      "license": "MIT",
+      "logo": "assets/appbanner.jpg",
+      "minBrewserVersion": "0.1.130",
+      "name": "Free TV",
+      "permissions": [
+        "network"
+      ],
+      "publishedAt": "2026-09-17T12:52:14Z",
+      "sizeBytes": 96437,
+      "summary": "Live public TV from iptv-org: broadcaster feeds plus Pluto, Samsung, Rakuten and Plex",
+      "tags": [
+        "Streaming",
+        "TV"
+      ],
+      "version": "1.0.4"
     },
     {
       "categories": [
@@ -961,7 +995,7 @@
     }
   ],
   "defaultSource": "base",
-  "generated": "2026-09-15T10:13:23Z",
+  "generated": "2026-09-17T12:59:48Z",
   "revoked": [],
   "sources": {
     "base": "https://play.brewser.io",
