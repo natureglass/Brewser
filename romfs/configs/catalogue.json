@@ -279,13 +279,13 @@
         "network"
       ],
       "publishedAt": "2026-09-17T12:52:14Z",
-      "sizeBytes": 96437,
+      "sizeBytes": 96496,
       "summary": "Live public TV from iptv-org: broadcaster feeds plus Pluto, Samsung, Rakuten and Plex",
       "tags": [
         "Streaming",
         "TV"
       ],
-      "version": "1.0.4"
+      "version": "1.0.8"
     },
     {
       "categories": [
@@ -995,7 +995,7 @@
     }
   ],
   "defaultSource": "base",
-  "generated": "2026-09-17T12:59:48Z",
+  "generated": "2026-09-17T14:39:55Z",
   "revoked": [],
   "sources": {
     "base": "https://play.brewser.io",

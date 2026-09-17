@@ -52,6 +52,12 @@ const VIDEO_PERF_DIAG = false;
 // decouple makes a non-starving 30 Hz viable.
 const ENABLE_VIDEO_30HZ_LOCK = true;
 const _VPD_PATH = 'sdmc:/switch/brewser/logs/video-perf-diag.log';
+
+/** Dim applied to the page behind the on-screen keyboard, so a modal
+ * keyboard also LOOKS modal. 20% was tried first and read as barely there
+ * against the dark theme. Purely cosmetic — outside-panel taps still
+ * dismiss, exactly as before. */
+const KEYBOARD_SCRIM_FILL = 'rgba(0, 0, 0, 0.45)';
 let _vpdWinStart = 0;
 let _vpdOnTicks = 0;
 let _vpdVideoPaints = 0;
@@ -506,6 +512,14 @@ export class BrowserShell {
 	 * bring the toolbar back). Video-fullscreen is an overlay and doesn't touch
 	 * the CSS viewport, so restoring the mode is all that's needed. */
 	private videoFullscreenReturnMode: BrowserMode | null = null;
+	/** The mode `fullscreen-page` was entered from, when that was
+	 * `fullscreen-app`. Same idea as `videoFullscreenReturnMode` but for the
+	 * page-level fullscreen an app enters via `requestFullscreen()`: exiting
+	 * it must return the app to its manifest-declared chromeless state, not
+	 * drop it to `normal` and paint the toolbar back over it. Null whenever
+	 * fullscreen-page was entered from `normal`, which exits to `normal` as
+	 * before. */
+	private fullscreenReturnMode: BrowserMode | null = null;
 	/** Active chrome strip height (px). Cached from `config.json
 	 * toolbarHeight` at boot and refreshed on settings save. Read by
 	 * layoutTopInset, the paint sequence, and `publishChromeRegion` —
@@ -942,6 +956,10 @@ export class BrowserShell {
 				this.momentumVelocityPxPerTick = 0;
 				this.fullscreenCanvasOriginalSize = null;
 				this.fullscreenCanvasLive = false;
+				// Per-nav, like the canvas state above: a return-mode captured
+				// on the previous page must not decide the next page's exit.
+				this.fullscreenReturnMode = null;
+				this.videoFullscreenReturnMode = null;
 				(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
 					.__swbFullscreenCanvasSize = null;
 				this.navigation.setCurrentTitle(null);
@@ -1070,9 +1088,43 @@ export class BrowserShell {
 		// the page behind the keyboard can be scrolled while it's modal
 		// (right-stick Y, swipe above the panel) — same behavior as the
 		// URL bar / search paths.
+		//
+		// The `finally` is load-bearing. The keyboard paints straight to the
+		// screen canvas without mutating the live DOM, so closing it leaves
+		// its pixels on screen until something repaints over them. The URL-bar
+		// path (see `promptForUrl`) has always flagged a repaint on close for
+		// exactly this reason; this opener never did, and got away with it
+		// only while the page behind happened to be animating. On an idle page
+		// — an app whose video is stopped, say — dismissing the keyboard left
+		// the whole panel stranded on screen over the live page.
+		//
+		// The live-overlay cache is still valid (the keyboard never touched
+		// the live DOM), so this is just a blit-back, not a rebuild.
 		setKeyboardOpener((initial, options) => this.keyboard.open(initial, {
 			onScroll: (delta) => this.handleScroll(delta),
 			validate: options?.validate,
+		}).finally(() => {
+			// `repaintAll`, NOT `repaintContent`. Two earlier attempts at this
+			// failed for the same reason:
+			//
+			//  - `requestFullRepaint()` only sets a consume-once flag that the
+			//    next `onTick` reads, and an idle page produces no tick, so
+			//    nothing happened until the user pressed something.
+			//  - `repaintContent()` (which is also what the keyboard's own
+			//    close already calls, via the repaint driver) takes the
+			//    dirty-rect fast path. The keyboard paints straight to the
+			//    screen and never touches the live DOM, so there ARE no dirty
+			//    rects — it had nothing to repaint and left the panel on
+			//    screen.
+			//
+			// `repaintAll` wipes the canvas to the page background first,
+			// which is what actually destroys the stale keyboard pixels, then
+			// blits the page back over it (and re-renders chrome when the mode
+			// has any). Safe to paint the panel's own area: `finish()` cleared
+			// the overlay-visible flag before resolving, so the keyboard
+			// painter no-ops.
+			requestFullRepaint();
+			this.repaintAll();
 		}));
 		// 2026-06-17 file picker overlay — opener + start-dir resolver.
 		// The opener wraps `FilePickerOverlay.open` so live-form stays
@@ -3326,7 +3378,7 @@ export class BrowserShell {
 	 * covers the "no transparent edges" property that this backstop
 	 * was originally defending.
 	 */
-	private repaintContent(opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean } = {}): void {
+	private repaintContent(opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean; forceFull?: boolean } = {}): void {
 		// Old canvas-keyboard era: this returned early on
 		// `isKeyboardOpen()` because the keyboard owned the screen and
 		// any host repaint would clobber its pixels. The HTML keyboard
@@ -3520,7 +3572,7 @@ export class BrowserShell {
 	private repaintContentInner(
 		ctx: CanvasRenderingContext2D,
 		canvas: ReturnType<typeof nxScreen>,
-		opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean },
+		opts: { videoOnlyFast?: boolean; behindKeyboard?: boolean; forceFull?: boolean },
 	): void {
 		if (opts.behindKeyboard) {
 			this.repaintBehindKeyboard(ctx, canvas.width, canvas.height);
@@ -3633,6 +3685,14 @@ export class BrowserShell {
 		// path — the fast path is equally safe for any of them.
 		const canCanvasFastPath = (this.mode === 'normal' || this.mode === 'fullscreen-page' || this.mode === 'fullscreen-app')
 			&& !opts.videoOnlyFast
+			// `forceFull` = the caller already wiped the screen (repaintAll),
+			// so the cache blit this path skips is exactly what has to run.
+			// Without this the fast path's preconditions all still hold — the
+			// live tree version is unchanged, because whatever painted over
+			// the page (the on-screen keyboard) never touched the live DOM —
+			// and it repaints only the canvas + scroll overlays, leaving the
+			// rest of the page as bare wipe colour.
+			&& !opts.forceFull
 			&& (pageHasAnimationActivity() || hasPageCanvas2dActivity())
 			&& effectiveScrollY === this.lastRepaintedScrollY
 			&& viewport.width === this.lastRepaintedViewportW
@@ -3873,6 +3933,22 @@ export class BrowserShell {
 		const kbRoot = getKeyboardLiveRoot();
 		if (!kbRoot) return;
 		const topY = getKeyboardTopY();
+		// Scrim over the page ABOVE the panel (2026-09-17). The keyboard has
+		// always been modal — the host hit-test is gated off while it's open
+		// (`isKeyboardOpen() ? null` in controller-shortcuts) — but it never
+		// LOOKED modal, so the page behind read as still-interactive. This
+		// only changes appearance: tapping above the panel still dismisses,
+		// exactly as before.
+		//
+		// Painted here rather than into the kb cache so it covers the live
+		// page every frame: the panel's own cache is keyed on the keyboard's
+		// tree version and would not repaint as the page animates underneath.
+		if (topY > 0) {
+			ctx.save();
+			ctx.fillStyle = KEYBOARD_SCRIM_FILL;
+			ctx.fillRect(0, 0, canvasW, topY);
+			ctx.restore();
+		}
 		paintKeyboardOverlay(ctx, kbRoot, {
 			x: 0,
 			y: topY,
@@ -4218,6 +4294,13 @@ export class BrowserShell {
 			paintLiveOverlay(ctx, getLiveRoot(), viewport, effectiveScrollY, {
 				paintBehindKeyboard: true,
 			});
+			// Re-apply the keyboard scrim over the slice we just repainted.
+			// This path deliberately never reaches `paintHtmlKeyboardIfVisible`
+			// (it exists to avoid repainting the panel during a scroll-under-
+			// keyboard gesture), so without this the dim would blink off for
+			// every scrolled frame while the keyboard is up.
+			ctx.fillStyle = KEYBOARD_SCRIM_FILL;
+			ctx.fillRect(viewport.x, viewport.y, viewport.width, clipBottom - viewport.y);
 		} finally {
 			ctx.restore();
 		}
@@ -5535,6 +5618,15 @@ export class BrowserShell {
 			void this.restoreCanvasSize();
 		}
 		this.fullscreenVideo = video;
+		// Tell the PAGE it is fullscreen. This gesture is engine-initiated —
+		// the page never called `requestFullscreen()` — so without this
+		// `document.fullscreenElement` stays null and the page has no way to
+		// know. An app that maps B to "go back" then navigates itself away
+		// while the shell is busy exiting fullscreen, tearing down whatever
+		// was playing: the user sees a black screen. (Free TV: double-tap a
+		// channel to fullscreen, press B.)
+		(globalThis as { __swbFullscreenElement?: LiveElement | null })
+			.__swbFullscreenElement = video;
 		// Remember the mode to return to on exit (fullscreen-app / fullscreen-page
 		// for chromeless apps/pages) so exitFullscreen doesn't drop to 'normal'.
 		this.videoFullscreenReturnMode = this.mode;
@@ -5552,6 +5644,21 @@ export class BrowserShell {
 		// the layout's snapshot of that canvas reverts to its attribute
 		// size before we re-enter normal layout flow.
 		if (this.mode === 'fullscreen-canvas') await this.restoreCanvasSize();
+		// Remember what we are entering fullscreen-page ON TOP OF, the same
+		// way video-fullscreen does (see videoFullscreenReturnMode). A
+		// `manifest.fullscreen:true` app sits in `fullscreen-app`; when it
+		// calls `requestFullscreen()` and later `exitFullscreen()`, it is
+		// leaving the page-fullscreen it just entered — NOT revoking its
+		// manifest. Without this the exit dropped to 'normal' and the
+		// toolbar reappeared over an app that had declared itself
+		// chromeless, with no way to get back short of relaunching.
+		//
+		// This does NOT undo the 2026-07-12 rule that `manifest.fullscreen`
+		// is an initial hint an app may deliberately leave: an app sitting
+		// in `fullscreen-app` that calls `exitFullscreen()` without having
+		// entered another fullscreen mode still lands in 'normal', because
+		// nothing was captured here.
+		if (this.mode === 'fullscreen-app') this.fullscreenReturnMode = this.mode;
 		// Widen the CSS viewport to the full screen so `100vh` / `100vw`
 		// resolve against 720 (not 720 − chromeHeight). The page was
 		// originally laid out with cssVpH = screen.height − chromeHeight
@@ -5645,6 +5752,9 @@ export class BrowserShell {
 		const videoReturnMode = this.mode === 'video-fullscreen'
 			? this.videoFullscreenReturnMode : null;
 		this.videoFullscreenReturnMode = null;
+		// Same restore for a page-fullscreen entered over `fullscreen-app`.
+		const pageReturnMode = wasFullscreenPage ? this.fullscreenReturnMode : null;
+		this.fullscreenReturnMode = null;
 		const wasLive = this.fullscreenCanvasLive;
 		this.fullscreenCanvasLive = false;
 		(globalThis as { __swbFullscreenCanvasSize?: { width: number; height: number } | null })
@@ -5678,7 +5788,12 @@ export class BrowserShell {
 		// on top of a chromeless app/page, restore THAT mode (not 'normal') so
 		// the app's declared fullscreen (no toolbar) is honoured.
 		this.setMode(
-			videoReturnMode && videoReturnMode !== 'normal' ? videoReturnMode : 'normal',
+			// Restore whichever chromeless mode this fullscreen was entered
+			// over (video or page); only fall to 'normal' when there was
+			// none to return to.
+			videoReturnMode && videoReturnMode !== 'normal' ? videoReturnMode
+				: pageReturnMode && pageReturnMode !== 'normal' ? pageReturnMode
+				: 'normal',
 		);
 		// A live fullscreen never resized the backing store via rerun, so
 		// there's nothing to restore — the page's own loop reverts to its
@@ -5724,12 +5839,26 @@ export class BrowserShell {
 		// Flush both caches so the next paint rebuilds them at the
 		// current viewport, and force a full repaint so the rebuild
 		// isn't skipped by the per-tick idle-fast-path.
-		if (wasFullscreenPage || wasFullscreenApp) {
-			resetLiveOverlayCache();
-			resetToolbarOverlayCache();
-			this.renderChrome();
-			requestFullRepaint();
-		}
+		//
+		// Flushed for EVERY exit, not just page/app fullscreen. The old
+		// `wasFullscreenPage || wasFullscreenApp` gate missed the case where
+		// a video-fullscreen overlay sat on top of a chromeless app: the mode
+		// at entry to this function is `video-fullscreen`, so both flags read
+		// false and the stale caches survived — producing exactly the "ghost
+		// toolbar" this block exists to prevent, plus a page painted from a
+		// cache baked at the fullscreen viewport. Reached by double-tapping a
+		// video inside a `manifest.fullscreen:true` app and double-tapping
+		// back out. Exiting fullscreen is a rare, user-initiated transition,
+		// so an unconditional rebuild costs one frame and removes the whole
+		// class of "which mode did we come from" cache-staleness bugs.
+		resetLiveOverlayCache();
+		resetToolbarOverlayCache();
+		// `this.mode` is already the RESTORED mode here (setMode ran above).
+		// Only paint chrome when we actually returned to a mode that has it —
+		// rendering it while returning to `fullscreen-app` would stamp a
+		// toolbar onto an app that declared itself chromeless.
+		if (this.mode === 'normal') this.renderChrome();
+		requestFullRepaint();
 		this.repaintAll();
 	}
 
@@ -5756,7 +5885,16 @@ export class BrowserShell {
 		(globalThis as { __swbBrowserMode?: string }).__swbBrowserMode = mode;
 		// Leaving video-fullscreen clears the focused element so the
 		// overlay walker stops painting it full-canvas.
-		if (mode !== 'video-fullscreen') this.fullscreenVideo = null;
+		if (mode !== 'video-fullscreen') {
+			this.fullscreenVideo = null;
+			// Keep the page-visible `document.fullscreenElement` in step with
+			// the engine-initiated video fullscreen set in
+			// `enterVideoFullscreen`. Cleared here rather than in
+			// `exitFullscreen` so every route out of the mode (B, L+R,
+			// double-tap, navigation) clears it exactly once.
+			const g = globalThis as { __swbFullscreenElement?: LiveElement | null };
+			if (g.__swbFullscreenElement) g.__swbFullscreenElement = null;
+		}
 		setFullscreenVideo(this.fullscreenVideo);
 	}
 
@@ -5795,7 +5933,9 @@ export class BrowserShell {
 		// (or layout slice) doesn't bleed into the new mode.
 		ctx.fillStyle = this.effectivePageBackground();
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		this.repaintContent();
+		// The wipe above invalidates every incremental paint path, so this
+		// repaint must be the full one.
+		this.repaintContent({ forceFull: true });
 		if (this.mode === 'normal') this.renderChrome();
 	}
 
